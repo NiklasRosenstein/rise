@@ -3,6 +3,91 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use crate::config::Config;
 
+#[derive(Debug, Deserialize)]
+struct MeResponse {
+    id: String,
+    email: String,
+}
+
+#[derive(Debug, Serialize)]
+struct UsersLookupRequest {
+    emails: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UsersLookupResponse {
+    users: Vec<UserInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct UserInfo {
+    id: String,
+    email: String,
+}
+
+// Helper function to lookup user IDs from emails
+async fn lookup_users(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    emails: Vec<String>,
+) -> Result<Vec<String>> {
+    if emails.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let url = format!("{}/users/lookup", backend_url);
+    let request = UsersLookupRequest { emails: emails.clone() };
+
+    let response = http_client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&request)
+        .send()
+        .await
+        .context("Failed to lookup users")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!("Failed to lookup users (status {}): {}", status, error_text);
+    }
+
+    let lookup_response: UsersLookupResponse = response.json().await
+        .context("Failed to parse lookup response")?;
+
+    Ok(lookup_response.users.into_iter().map(|u| u.id).collect())
+}
+
+// Helper function to get current user info
+async fn get_current_user(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+) -> Result<MeResponse> {
+    let url = format!("{}/me", backend_url);
+
+    let response = http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .context("Failed to get current user")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!("Failed to get current user (status {}): {}", status, error_text);
+    }
+
+    let me_response: MeResponse = response.json().await
+        .context("Failed to parse me response")?;
+
+    Ok(me_response)
+}
+
 #[derive(Debug, Deserialize, Serialize)]
 struct Team {
     id: String,
@@ -27,11 +112,23 @@ pub async fn create_team(
     backend_url: &str,
     config: &Config,
     name: &str,
-    owners: Vec<String>,
+    owners: Option<Vec<String>>,
     members: Vec<String>,
 ) -> Result<()> {
     let token = config.get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
+
+    // If no owners specified, use current user
+    let owner_emails = if let Some(emails) = owners {
+        emails
+    } else {
+        let current_user = get_current_user(http_client, backend_url, token).await?;
+        vec![current_user.email]
+    };
+
+    // Convert email addresses to user IDs
+    let owner_ids = lookup_users(http_client, backend_url, token, owner_emails).await?;
+    let member_ids = lookup_users(http_client, backend_url, token, members).await?;
 
     #[derive(Serialize)]
     struct CreateRequest {
@@ -42,8 +139,8 @@ pub async fn create_team(
 
     let request = CreateRequest {
         name: name.to_string(),
-        owners,
-        members,
+        owners: owner_ids,
+        members: member_ids,
     };
 
     let url = format!("{}/teams", backend_url);
@@ -176,6 +273,12 @@ pub async fn update_team(
     let token = config.get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
+    // Convert email addresses to user IDs
+    let add_owner_ids = lookup_users(http_client, backend_url, token, add_owners).await?;
+    let remove_owner_ids = lookup_users(http_client, backend_url, token, remove_owners).await?;
+    let add_member_ids = lookup_users(http_client, backend_url, token, add_members).await?;
+    let remove_member_ids = lookup_users(http_client, backend_url, token, remove_members).await?;
+
     // First, get the current team state
     let get_url = format!("{}/teams/{}", backend_url, team_id);
     let get_response = http_client
@@ -193,20 +296,20 @@ pub async fn update_team(
         .context("Failed to parse team response")?;
 
     // Apply changes
-    for owner in add_owners {
+    for owner in add_owner_ids {
         if !team.owners.contains(&owner) {
             team.owners.push(owner);
         }
     }
-    for owner in remove_owners {
+    for owner in remove_owner_ids {
         team.owners.retain(|o| o != &owner);
     }
-    for member in add_members {
+    for member in add_member_ids {
         if !team.members.contains(&member) {
             team.members.push(member);
         }
     }
-    for member in remove_members {
+    for member in remove_member_ids {
         team.members.retain(|m| m != &member);
     }
 

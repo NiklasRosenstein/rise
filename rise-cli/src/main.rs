@@ -47,10 +47,10 @@ enum TeamCommands {
     Create {
         /// Team name
         name: String,
-        /// Owner user IDs (comma-separated)
+        /// Owner emails (comma-separated, defaults to current user)
         #[arg(long)]
-        owners: String,
-        /// Member user IDs (comma-separated, optional)
+        owners: Option<String>,
+        /// Member emails (comma-separated, optional)
         #[arg(long, default_value = "")]
         members: String,
     },
@@ -126,10 +126,12 @@ async fn main() -> Result<()> {
         Commands::Team(team_cmd) => {
             match team_cmd {
                 TeamCommands::Create { name, owners, members } => {
-                    let owners_vec: Vec<String> = owners.split(',')
-                        .map(|s| s.trim().to_string())
-                        .filter(|s| !s.is_empty())
-                        .collect();
+                    let owners_vec: Option<Vec<String>> = owners.as_ref().map(|o| {
+                        o.split(',')
+                            .map(|s| s.trim().to_string())
+                            .filter(|s| !s.is_empty())
+                            .collect()
+                    });
                     let members_vec: Vec<String> = members.split(',')
                         .map(|s| s.trim().to_string())
                         .filter(|s| !s.is_empty())

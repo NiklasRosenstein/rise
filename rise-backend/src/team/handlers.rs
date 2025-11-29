@@ -27,19 +27,40 @@ pub async fn create_team(
         "owners": payload.owners,
     });
 
-    let collection_name = "teams";
+    tracing::info!("Creating team with data: {:?}", team_data);
 
-    let created_record_meta = authenticated_client
-        .records(collection_name)
-        .create(&team_data)
-        .call()
+    // Use HTTP client to create since SDK's CreateResponse is incomplete
+    let token = authenticated_client.auth_token
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No auth token".to_string()))?;
+
+    let create_url = format!("{}/api/collections/teams/records",
+        state.settings.pocketbase.url);
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(&create_url)
+        .header("Authorization", token)
+        .json(&team_data)
+        .send()
+        .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create team: {}", e)))?;
 
-    let created_team: Team = authenticated_client
-        .records(collection_name)
-        .view(&created_record_meta.id)
-        .call()
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to fetch team: {}", e)))?;
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err((StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                   format!("Failed to create team: {}", error_text)));
+    }
+
+    // Log the response body before trying to parse it
+    let response_text = response.text().await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to read response: {}", e)))?;
+
+    tracing::info!("PocketBase response: {}", response_text);
+
+    let created_team: Team = serde_json::from_str(&response_text)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to parse created team: {} - Response was: {}", e, response_text)))?;
 
     Ok(Json(CreateTeamResponse { team: created_team }))
 }

@@ -21,7 +21,12 @@
       "Bash(cargo test:*)",
       "Bash(docker-compose build:*)",
       "Bash(cargo check:*)",
-      "Bash(rustc:*)"
+      "Bash(rustc:*)",
+      "Bash(./target/release/rise-cli team create:*)",
+      "Bash(../target/release/rise-cli team create:*)",
+      "Bash(docker-compose restart:*)",
+      "Bash(../target/release/rise-cli login:*)",
+      "Bash(../target/release/rise-cli team list:*)"
     ],
     "deny": [],
     "ask": []

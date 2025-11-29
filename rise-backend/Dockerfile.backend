@@ -16,11 +16,18 @@ RUN mkdir src && echo "fn main() {}" > src/main.rs
 
 # Copy the Cargo.toml and generate Cargo.lock
 COPY Cargo.toml ./
-RUN cargo check
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/src/rise-backend/target \
+    cargo check
 
 # Copy the actual source code and build the application
 COPY src ./src
-RUN cargo build --release
+RUN --mount=type=cache,target=/usr/local/cargo/registry \
+    --mount=type=cache,target=/usr/local/cargo/git \
+    --mount=type=cache,target=/usr/src/rise-backend/target \
+    cargo build --release && \
+    cp target/release/rise-backend /usr/local/bin/rise-backend-binary
 
 # Stage 2: Create the final, smaller image (match builder's Debian version)
 FROM debian:trixie-slim
@@ -32,7 +39,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the compiled binary from the builder stage
-COPY --from=builder /usr/src/rise-backend/target/release/rise-backend /usr/local/bin/rise-backend
+COPY --from=builder /usr/local/bin/rise-backend-binary /usr/local/bin/rise-backend
 
 # Copy the configuration files
 COPY config /config
