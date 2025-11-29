@@ -13,6 +13,7 @@ pub struct Settings {
 pub struct ServerSettings {
     pub host: String,
     pub port: u16,
+    pub public_url: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]

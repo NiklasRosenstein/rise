@@ -12,6 +12,7 @@ mod tests {
             server: ServerSettings {
                 host: "127.0.0.1".to_string(),
                 port: 0, // Use port 0 for testing
+                public_url: "http://localhost:3001".to_string(),
             },
             auth: AuthSettings {
                 secret: "test-secret-key".to_string(),

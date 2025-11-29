@@ -95,7 +95,7 @@ pub async fn device_init(
     Ok(Json(DeviceInitResponse {
         device_code: device_code.clone(),
         user_code: user_code.clone(),
-        verification_uri: format!("{}/device-auth", state.settings.server.host),
+        verification_uri: format!("{}/device-auth", state.settings.server.public_url),
         expires_in: 600, // 10 minutes
         interval: 5, // Poll every 5 seconds
     }))
