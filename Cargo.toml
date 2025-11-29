@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "rise-backend",
+    "rise-cli",
+]
+resolver = "2"
