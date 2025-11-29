@@ -4,3 +4,6 @@ port = 3000
 
 [auth]
 secret = "super-secret-key-for-development"
+
+[pocketbase]
+url = "http://127.0.0.1:8090"

@@ -6,6 +6,7 @@ use std::env;
 pub struct Settings {
     pub server: ServerSettings,
     pub auth: AuthSettings,
+    pub pocketbase: PocketbaseSettings,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -17,6 +18,11 @@ pub struct ServerSettings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct AuthSettings {
     pub secret: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PocketbaseSettings {
+    pub url: String,
 }
 
 impl Settings {

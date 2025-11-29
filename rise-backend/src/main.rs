@@ -1,10 +1,5 @@
-mod settings;
-
-use axum::{
-    routing::get,
-    Router,
-};
-use settings::Settings;
+use rise_backend::settings::Settings;
+use rise_backend::run;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]
@@ -12,7 +7,7 @@ async fn main() {
     // Initialize tracing
     tracing_subscriber::registry()
         .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info,tower_http=debug".into()),
         ))
         .with(tracing_subscriber::fmt::layer())
         .init();
@@ -26,13 +21,5 @@ async fn main() {
         }
     };
 
-    tracing::info!("Starting server on {}:{}", settings.server.host, settings.server.port);
-
-    // build our application with a single route
-    let app = Router::new().route("/", get(|| async { "Hello, Rise!" }));
-
-    // run it with hyper on localhost:3000
-    let addr = format!("{}:{}", settings.server.host, settings.server.port);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    run(settings).await;
 }
