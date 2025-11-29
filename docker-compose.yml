@@ -14,3 +14,17 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  rise-backend:
+    build:
+      context: ./rise-backend
+      dockerfile: Dockerfile.backend
+    container_name: rise-backend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - RUN_MODE=production
+    depends_on:
+      pocketbase:
+        condition: service_healthy

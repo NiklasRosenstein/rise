@@ -1,0 +1,28 @@
+# Stage 1: Build the application
+FROM rust:1.78 as builder
+
+WORKDIR /usr/src/rise-backend
+
+# Install dependencies
+RUN apt-get update && apt-get install -y libssl-dev pkg-config
+
+# Copy the source code
+COPY . .
+
+# Build the application in release mode
+RUN cargo build --release
+
+# Stage 2: Create the final, smaller image
+FROM debian:bullseye-slim
+
+# Copy the compiled binary from the builder stage
+COPY --from=builder /usr/src/rise-backend/target/release/rise-backend /usr/local/bin/rise-backend
+
+# Copy the configuration files
+COPY config /config
+
+# Expose the application port
+EXPOSE 3000
+
+# Set the entrypoint
+ENTRYPOINT ["/usr/local/bin/rise-backend"]
