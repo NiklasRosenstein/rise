@@ -2,6 +2,7 @@ use clap::{Parser, Subcommand};
 use anyhow::Result;
 use reqwest::Client;
 
+mod config;
 mod login;
 
 #[derive(Parser, Debug)]
@@ -14,7 +15,12 @@ pub struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Authenticate with the Rise backend
-    Login {},
+    Login {
+        #[arg(long)]
+        username: String,
+        #[arg(long)]
+        password: String,
+    },
     /// Create a new project
     Create {
         name: String,
@@ -33,12 +39,12 @@ enum Commands {
 async fn main() -> Result<()> {
     let cli = Cli::parse();
     let http_client = Client::new();
-    // TODO: Load backend_url from configuration
-    let backend_url = "http://127.0.0.1:3000";
+    let mut config = config::Config::load()?;
+    let backend_url = config.get_backend_url();
 
     match &cli.command {
-        Commands::Login {} => {
-            login::handle_login(&http_client, backend_url).await?;
+        Commands::Login { username, password } => {
+            login::handle_login(&http_client, &backend_url, username, password, &mut config).await?;
         }
         Commands::Create { name, visibility, owner } => {
             println!("Create command not yet implemented.");

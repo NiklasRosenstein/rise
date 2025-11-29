@@ -1,23 +1,15 @@
-use anyhow::Result;
+use anyhow::{Result, Context};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use std::io::{self, Write};
+use crate::config::Config;
 
-pub async fn handle_login(http_client: &Client, backend_url: &str) -> Result<()> {
-    println!("Please enter your login credentials.");
-
-    print!("Username: ");
-    io::stdout().flush()?;
-    let mut username = String::new();
-    io::stdin().read_line(&mut username)?;
-    let username = username.trim().to_string();
-
-    print!("Password: ");
-    io::stdout().flush()?;
-    let mut password = String::new();
-    io::stdin().read_line(&mut password)?;
-    let password = password.trim().to_string();
-
+pub async fn handle_login(
+    http_client: &Client,
+    backend_url: &str,
+    username: &str,
+    password: &str,
+    config: &mut Config,
+) -> Result<()> {
     #[derive(Debug, Serialize)]
     struct LoginRequest {
         identity: String,
@@ -30,25 +22,34 @@ pub async fn handle_login(http_client: &Client, backend_url: &str) -> Result<()>
     }
 
     let login_request = LoginRequest {
-        identity: username,
-        password,
+        identity: username.to_string(),
+        password: password.to_string(),
     };
 
-    let url = format!("{}/auth/login", backend_url);
+    let url = format!("{}/login", backend_url);
+
+    println!("Authenticating with {}...", backend_url);
 
     let response = http_client
         .post(&url)
         .json(&login_request)
         .send()
-        .await?;
+        .await
+        .context("Failed to send login request")?;
 
     if response.status().is_success() {
-        let login_response: LoginResponse = response.json().await?;
-        println!("Login successful! Token: {}", login_response.token);
-        // TODO: Store the token securely
+        let login_response: LoginResponse = response.json().await.context("Failed to decode login response")?;
+
+        // Store the token
+        config.set_token(login_response.token)
+            .context("Failed to save authentication token")?;
+
+        println!("✓ Login successful! Welcome back, {}!", username);
+        println!("  Token saved to: {}", Config::config_path()?.display());
     } else {
+        let status = response.status();
         let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        eprintln!("Login failed: {}", error_text);
+        anyhow::bail!("Login failed (status {}): {}", status, error_text);
     }
 
     Ok(())
