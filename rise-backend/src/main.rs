@@ -21,5 +21,5 @@ async fn main() {
         }
     };
 
-    run(settings).await;
+    let _ = run(settings).await;
 }
