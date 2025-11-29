@@ -101,12 +101,38 @@ pub async fn update_team(
 }
 
 pub async fn delete_team(
-    State(_state): State<AppState>,
-    Path(_team_id): Path<String>,
+    State(state): State<AppState>,
+    Path(team_id): Path<String>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // TODO: Implement delete team once we figure out the correct pocketbase SDK method
-    // The SDK version 0.1.1 doesn't seem to have a delete/remove method
-    Err((StatusCode::NOT_IMPLEMENTED, "Delete team not yet implemented".to_string()))
+    let pb_client = state.pb_client.as_ref();
+    let authenticated_client = pb_client
+        .auth_with_password("users", "test@example.com", "test1234")
+        .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Authentication failed: {}", e)))?;
+
+    // Use HTTP client to delete since SDK doesn't expose delete method
+    let token = authenticated_client.auth_token
+        .ok_or((StatusCode::INTERNAL_SERVER_ERROR, "No auth token".to_string()))?;
+
+    let delete_url = format!("{}/api/collections/teams/records/{}",
+        state.settings.pocketbase.url, team_id);
+
+    let client = reqwest::Client::new();
+    let response = client
+        .delete(&delete_url)
+        .header("Authorization", token)
+        .send()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to delete team: {}", e)))?;
+
+    if response.status().is_success() {
+        Ok(StatusCode::NO_CONTENT)
+    } else {
+        let status = response.status();
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        Err((StatusCode::from_u16(status.as_u16()).unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+             format!("Failed to delete team: {}", error_text)))
+    }
 }
 
 pub async fn list_teams(

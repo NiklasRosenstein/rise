@@ -4,6 +4,7 @@ use reqwest::Client;
 
 mod config;
 mod login;
+mod team;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -35,6 +36,56 @@ enum Commands {
     Ls {},
     /// Deploy a project
     Deploy {},
+    /// Team management commands
+    #[command(subcommand)]
+    Team(TeamCommands),
+}
+
+#[derive(Subcommand, Debug)]
+enum TeamCommands {
+    /// Create a new team
+    Create {
+        /// Team name
+        name: String,
+        /// Owner user IDs (comma-separated)
+        #[arg(long)]
+        owners: String,
+        /// Member user IDs (comma-separated, optional)
+        #[arg(long, default_value = "")]
+        members: String,
+    },
+    /// List all teams
+    List {},
+    /// Show team details
+    Show {
+        /// Team ID
+        team_id: String,
+    },
+    /// Update team
+    Update {
+        /// Team ID
+        team_id: String,
+        /// New team name
+        #[arg(long)]
+        name: Option<String>,
+        /// Add owners (comma-separated user IDs)
+        #[arg(long)]
+        add_owners: Option<String>,
+        /// Remove owners (comma-separated user IDs)
+        #[arg(long)]
+        remove_owners: Option<String>,
+        /// Add members (comma-separated user IDs)
+        #[arg(long)]
+        add_members: Option<String>,
+        /// Remove members (comma-separated user IDs)
+        #[arg(long)]
+        remove_members: Option<String>,
+    },
+    /// Delete a team
+    Delete {
+        /// Team ID
+        team_id: String,
+    },
 }
 
 #[tokio::main]
@@ -71,6 +122,57 @@ async fn main() -> Result<()> {
         }
         Commands::Deploy {} => {
             println!("Deploy command not yet implemented.");
+        }
+        Commands::Team(team_cmd) => {
+            match team_cmd {
+                TeamCommands::Create { name, owners, members } => {
+                    let owners_vec: Vec<String> = owners.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+                    let members_vec: Vec<String> = members.split(',')
+                        .map(|s| s.trim().to_string())
+                        .filter(|s| !s.is_empty())
+                        .collect();
+
+                    team::create_team(&http_client, &backend_url, &config, name, owners_vec, members_vec).await?;
+                }
+                TeamCommands::List {} => {
+                    team::list_teams(&http_client, &backend_url, &config).await?;
+                }
+                TeamCommands::Show { team_id } => {
+                    team::show_team(&http_client, &backend_url, &config, team_id).await?;
+                }
+                TeamCommands::Update { team_id, name, add_owners, remove_owners, add_members, remove_members } => {
+                    let add_owners_vec: Vec<String> = add_owners.as_ref()
+                        .map(|s| s.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                        .unwrap_or_default();
+                    let remove_owners_vec: Vec<String> = remove_owners.as_ref()
+                        .map(|s| s.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                        .unwrap_or_default();
+                    let add_members_vec: Vec<String> = add_members.as_ref()
+                        .map(|s| s.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                        .unwrap_or_default();
+                    let remove_members_vec: Vec<String> = remove_members.as_ref()
+                        .map(|s| s.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
+                        .unwrap_or_default();
+
+                    team::update_team(
+                        &http_client,
+                        &backend_url,
+                        &config,
+                        team_id,
+                        name.clone(),
+                        add_owners_vec,
+                        remove_owners_vec,
+                        add_members_vec,
+                        remove_members_vec,
+                    ).await?;
+                }
+                TeamCommands::Delete { team_id } => {
+                    team::delete_team(&http_client, &backend_url, &config, team_id).await?;
+                }
+            }
         }
     }
 
