@@ -4,7 +4,7 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 use crate::state::AppState;
-// use anyhow::Result; // Removed
+use tracing::instrument;
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
@@ -17,6 +17,7 @@ pub struct LoginResponse {
     pub token: String,
 }
 
+#[instrument(skip(state))]
 pub async fn login(
     State(state): State<AppState>,
     Json(payload): Json<LoginRequest>,
@@ -32,6 +33,9 @@ pub async fn login(
         .map_err(|e| format!("PocketBase authentication failed: {}", e.to_string()))?;
 
     let token = authenticated_client.auth_token.ok_or("Failed to get token from authenticated client".to_string())?;
+    let response = LoginResponse { token };
 
-    Ok(Json(LoginResponse { token }))
+    tracing::info!(?response, "Login successful");
+
+    Ok(Json(response))
 }

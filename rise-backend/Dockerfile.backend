@@ -1,27 +1,31 @@
 # Stage 1: Build the application
-FROM rust:1.79 as builder
+FROM rust:1.91-alpine as builder
 
 WORKDIR /usr/src/rise-backend
 
-# Install dependencies
-RUN apt-get update && apt-get install -y libssl-dev pkg-config
+# Install build dependencies (Alpine uses apk)
+RUN apk add --no-cache build-base openssl-dev pkgconfig perl
 
 # Create a dummy main.rs to build only dependencies
 RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Copy the Cargo files and build the dependencies
-COPY Cargo.toml Cargo.lock ./
-RUN cargo build --release
+# Copy the Cargo.toml and generate Cargo.lock
+COPY Cargo.toml ./
+RUN cargo check
 
 # Copy the actual source code and build the application
 COPY src ./src
-RUN cargo build --release
+# Use --target for static linking and explicitly enable vendored openssl
+RUN cargo build --release --target x86_64-unknown-linux-musl --features openssl/vendored
 
 # Stage 2: Create the final, smaller image
-FROM debian:bullseye-slim
+FROM alpine:latest
+
+# Install runtime dependencies needed for musl-linked binaries
+RUN apk add --no-cache libgcc
 
 # Copy the compiled binary from the builder stage
-COPY --from=builder /usr/src/rise-backend/target/release/rise-backend /usr/local/bin/rise-backend
+COPY --from=builder /usr/src/rise-backend/target/x86_64-unknown-linux-musl/release/rise-backend /usr/local/bin/rise-backend
 
 # Copy the configuration files
 COPY config /config
