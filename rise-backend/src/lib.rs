@@ -4,6 +4,9 @@ pub mod state;
 pub mod project;
 pub mod team;
 
+#[cfg(test)]
+mod lib_tests;
+
 use axum::Router;
 use state::AppState;
 use tower::ServiceBuilder;
