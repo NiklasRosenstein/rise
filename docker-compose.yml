@@ -1,7 +1,7 @@
 services:
   pocketbase:
     build:
-      context: ./rise-backend
+      context: ./dev/pocketbase
       dockerfile: Dockerfile
     container_name: rise-pocketbase
     restart: unless-stopped
@@ -22,9 +22,14 @@ services:
     container_name: rise-backend
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      - "3001:3000"
+    volumes:
+      - ./rise-backend/target:/usr/src/rise-backend/target
     environment:
       - RUN_MODE=production
+      - RISE_SERVER__HOST=0.0.0.0
+      - RISE_SERVER__PORT=3000
+      - RUST_LOG=debug,tower_http=debug
     depends_on:
       pocketbase:
         condition: service_healthy
