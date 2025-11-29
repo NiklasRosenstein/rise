@@ -54,17 +54,18 @@ Let's outline the architecture and components needed for this Rust-based project
 ## Architecture Overview
 
 1. **Backend Service**:
-   - **Authentication Module**: Handles local authentication and OIDC.
-   - **Project Management Module**: Manages project creation, listing, and ownership.
+   - **Authentication Module**: Integrates with **Pocketbase** for user management and authentication. Handles local authentication and OIDC via Pocketbase's capabilities.
+   - **Project Management Module**: Manages project creation, listing, and ownership using **Pocketbase** as the data store.
    - **Container Registry Module**: Generates temporary credentials for pushing images to a container registry that
       the CLI can use. The container registry itself is out of scope, but access to a container registry with
       permissions to manage credentials will be supplied to the backend.
    - **Deployment Module**: Interfaces with Kubernetes (and future runtimes) to deploy applications.
    - **API Layer**: Exposes RESTful endpoints for the CLI to interact with.
    - **Configuration Module**: Handles deserialization and validation of the backend server configuration.
+   - **Database**: **Pocketbase** is used as the primary database and authentication provider. We utilize Pocketbase's automatic migrations and the `pocketbase-rs` library for interaction.
 
 2. **CLI Tool**:
-    - **Authentication Commands**: Implements the `login` command to authenticate users.
+    - **Authentication Commands**: Implements the `login` command to authenticate users against the backend (which proxies/delegates to Pocketbase).
     - **Project Commands**: Implements `create`, `ls`, and other project management commands.
     - **Build Module**: Supports building container images using buildpacks, nixpacks, and Dockerfiles.
     - **Deployment Commands**: Implements the `deploy` command to build, push, and deploy applications.
@@ -74,8 +75,10 @@ Let's outline the architecture and components needed for this Rust-based project
 
 1. **Set Up the Backend**:
    - Initialize a new Rust project for the backend using `cargo new rise-backend`.
-   - Implement the authentication module with support for local and OIDC authentication.
-   - Create the project management module to handle project creation and listing.
+   - **Infrastructure**: Create a `docker-compose.yml` to run a local Pocketbase instance.
+   - **Database & Auth**: Integrate `pocketbase-rs` to communicate with the Pocketbase instance.
+   - Implement the authentication module wrapping Pocketbase auth.
+   - Create the project management module using Pocketbase collections.
    - Integrate with a container registry to generate temporary credentials.
    - Implement the deployment module to interface with Kubernetes.
    - Set up the API layer using a web framework like Actix-web or Rocket.
