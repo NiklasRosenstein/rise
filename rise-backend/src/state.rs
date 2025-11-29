@@ -15,8 +15,8 @@ impl AppState {
         // For now, we'll just create the client
 
         Self {
-            settings: Arc<new(settings.clone()),
-            pb: Arc<new(pb_client),
+            settings: Arc::new(settings.clone()),
+            pb: Arc::new(pb_client),
         }
     }
 }
