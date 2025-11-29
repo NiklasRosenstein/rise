@@ -8,8 +8,8 @@ ADMIN_PASSWORD="${POCKETBASE_ADMIN_PASSWORD:-admin123}"
 TEST_USER_EMAIL="${POCKETBASE_TEST_USER_EMAIL:-test@example.com}"
 TEST_USER_PASSWORD="${POCKETBASE_TEST_USER_PASSWORD:-test1234}"
 
-# Start PocketBase in the background
-${PB_EXEC} serve --http=0.0.0.0:8090 &
+# Start PocketBase in the background with migrations
+${PB_EXEC} serve --http=0.0.0.0:8090 --migrationsDir=/pb_migrations --automigrate &
 PB_PID=$!
 
 # Wait for the server to be ready
