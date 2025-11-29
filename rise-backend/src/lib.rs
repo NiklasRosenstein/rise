@@ -7,19 +7,22 @@ use state::AppState;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::info;
+use anyhow::Result;
 
-pub async fn run(settings: settings::Settings) {
+pub async fn run(settings: settings::Settings) -> Result<()> {
     let state = AppState::new(&settings).await;
 
     let app = Router::new()
         .route("/health", axum::routing::get(health_check))
+        .merge(auth::routes::routes())
         .with_state(state.clone())
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
     info!("listening on {}", addr);
-    let listener = tokio::net::TcpListener::bind(&addr).await.unwrap();
-    axum::serve(listener, app).await.unwrap();
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
 async fn health_check() -> &'static str {
