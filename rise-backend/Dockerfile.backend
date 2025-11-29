@@ -1,15 +1,20 @@
 # Stage 1: Build the application
-FROM rust:1.78 as builder
+FROM rust:1.79 as builder
 
 WORKDIR /usr/src/rise-backend
 
 # Install dependencies
 RUN apt-get update && apt-get install -y libssl-dev pkg-config
 
-# Copy the source code
-COPY . .
+# Create a dummy main.rs to build only dependencies
+RUN mkdir src && echo "fn main() {}" > src/main.rs
 
-# Build the application in release mode
+# Copy the Cargo files and build the dependencies
+COPY Cargo.toml Cargo.lock ./
+RUN cargo build --release
+
+# Copy the actual source code and build the application
+COPY src ./src
 RUN cargo build --release
 
 # Stage 2: Create the final, smaller image

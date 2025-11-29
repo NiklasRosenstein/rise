@@ -74,23 +74,23 @@ Let's outline the architecture and components needed for this Rust-based project
 ## Implementation Steps
 
 1. **Set Up the Backend**:
-   - Initialize a new Rust project for the backend using `cargo new rise-backend`.
-   - **Infrastructure**: Create a `docker-compose.yml` to run a local Pocketbase instance.
-   - **Database & Auth**: Integrate `pocketbase-rs` to communicate with the Pocketbase instance.
-   - Implement the authentication module wrapping Pocketbase auth.
-   - Create the project management module using Pocketbase collections.
-   - Integrate with a container registry to generate temporary credentials.
-   - Implement the deployment module to interface with Kubernetes.
-   - Set up the API layer using a web framework like Actix-web or Rocket.
-   - Implement configuration handling for the backend server.
+   - [x] Initialize a new Rust project for the backend using `cargo new rise-backend`.
+   - [x] **Infrastructure**: Create a `docker-compose.yml` to run a local Pocketbase instance.
+   - [x] **Database & Auth**: Integrate `pocketbase-rs` to communicate with the Pocketbase instance.
+   - [x] Implement the authentication module wrapping Pocketbase auth.
+   - [x] Create the project management module using Pocketbase collections.
+   - [ ] Integrate with a container registry to generate temporary credentials.
+   - [ ] Implement the deployment module to interface with Kubernetes.
+   - [x] Set up the API layer using a web framework like Actix-web or Rocket (using Axum).
+   - [ ] Implement configuration handling for the backend server.
 
 2. **Set Up the CLI**:
-    - Initialize a new Rust project for the CLI using `cargo new rise-cli`.
-    - Implement authentication commands to interact with the backend.
-    - Create project management commands for creating and listing projects.
-    - Develop the build module to support different build methods.
-    - Implement deployment commands to handle the build, push, and deploy process.
-    - Set up configuration handling for the CLI tool.
+    - [x] Initialize a new Rust project for the CLI using `cargo new rise-cli`.
+    - [ ] Implement authentication commands to interact with the backend.
+    - [ ] Create project management commands for creating and listing projects.
+    - [ ] Develop the build module to support different build methods.
+    - [ ] Implement deployment commands to handle the build, push, and deploy process.
+    - [ ] Set up configuration handling for the CLI tool.
 
 3. **Testing and Documentation**:
     - Write unit and integration tests for both the backend and CLI.

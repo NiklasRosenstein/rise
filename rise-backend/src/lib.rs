@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod settings;
 pub mod state;
+pub mod project;
 
 use axum::Router;
 use state::AppState;
@@ -15,6 +16,7 @@ pub async fn run(settings: settings::Settings) -> Result<()> {
     let app = Router::new()
         .route("/health", axum::routing::get(health_check))
         .merge(auth::routes::routes())
+        .merge(project::routes::routes())
         .with_state(state.clone())
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
