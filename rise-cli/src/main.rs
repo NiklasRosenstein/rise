@@ -16,10 +16,12 @@ pub struct Cli {
 enum Commands {
     /// Authenticate with the Rise backend
     Login {
+        /// Username/email for password authentication
         #[arg(long)]
-        username: String,
+        username: Option<String>,
+        /// Password for authentication (only used with --username)
         #[arg(long)]
-        password: String,
+        password: Option<String>,
     },
     /// Create a new project
     Create {
@@ -44,7 +46,21 @@ async fn main() -> Result<()> {
 
     match &cli.command {
         Commands::Login { username, password } => {
-            login::handle_login(&http_client, &backend_url, username, password, &mut config).await?;
+            match (username, password) {
+                (Some(user), Some(pass)) => {
+                    // Password flow: both username and password provided
+                    login::handle_password_login(&http_client, &backend_url, user, pass, &mut config).await?;
+                }
+                (Some(user), None) => {
+                    // Password flow: prompt for password
+                    let pass = rpassword::prompt_password("Password: ")?;
+                    login::handle_password_login(&http_client, &backend_url, user, &pass, &mut config).await?;
+                }
+                (None, _) => {
+                    // Browser flow: no username provided
+                    login::handle_device_login(&http_client, &backend_url, &mut config).await?;
+                }
+            }
         }
         Commands::Create { name, visibility, owner } => {
             println!("Create command not yet implemented.");

@@ -3,10 +3,12 @@ FROM rust:1.91-slim as builder
 
 WORKDIR /usr/src/rise-backend
 
-# Install build dependencies for Debian
+# Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
+    perl \
+    make \
     && rm -rf /var/lib/apt/lists/*
 
 # Create a dummy main.rs to build only dependencies
@@ -20,8 +22,8 @@ RUN cargo check
 COPY src ./src
 RUN cargo build --release
 
-# Stage 2: Create the final, smaller image
-FROM debian:bookworm-slim
+# Stage 2: Create the final, smaller image (match builder's Debian version)
+FROM debian:trixie-slim
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \

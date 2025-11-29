@@ -19,7 +19,9 @@
       "WebFetch(domain:pocketbase.io)",
       "Bash(cargo doc:*)",
       "Bash(cargo test:*)",
-      "Bash(docker-compose build:*)"
+      "Bash(docker-compose build:*)",
+      "Bash(cargo check:*)",
+      "Bash(rustc:*)"
     ],
     "deny": [],
     "ask": []
