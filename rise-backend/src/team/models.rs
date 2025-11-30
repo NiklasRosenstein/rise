@@ -1,4 +1,5 @@
 use serde::{Deserialize, Deserializer, Serialize};
+use std::collections::HashSet;
 
 // Custom deserializer that handles empty strings as empty arrays
 fn deserialize_string_or_vec<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
@@ -87,4 +88,55 @@ pub struct UpdateTeamRequest {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct UpdateTeamResponse {
     pub team: Team,
+}
+
+// User information for expanded team responses
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UserInfo {
+    pub id: String,
+    pub email: String,
+}
+
+// Team with expanded user information (emails instead of just IDs)
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TeamWithEmails {
+    pub id: String,
+    pub name: String,
+    pub members: Vec<UserInfo>,
+    pub owners: Vec<UserInfo>,
+    pub created: String,
+    pub updated: String,
+    #[serde(rename = "collectionId")]
+    pub collection_id: String,
+    #[serde(rename = "collectionName")]
+    pub collection_name: String,
+}
+
+// Error response with optional fuzzy match suggestions
+#[derive(Debug, Serialize, Clone)]
+pub struct TeamErrorResponse {
+    pub error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestions: Option<Vec<String>>,
+}
+
+// Query parameters for team lookup
+#[derive(Debug, Deserialize, Clone)]
+pub struct GetTeamParams {
+    #[serde(default)]
+    pub by_id: bool,
+    #[serde(default)]
+    pub expand: String,  // Comma-separated list like "members,owners"
+}
+
+impl GetTeamParams {
+    /// Check if a field should be expanded
+    pub fn should_expand(&self, field: &str) -> bool {
+        if self.expand.is_empty() {
+            return false;
+        }
+
+        let fields: HashSet<&str> = self.expand.split(',').map(|s| s.trim()).collect();
+        fields.contains(field)
+    }
 }

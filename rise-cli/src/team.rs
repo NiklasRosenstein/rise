@@ -14,15 +14,15 @@ struct UsersLookupRequest {
     emails: Vec<String>,
 }
 
-#[derive(Debug, Deserialize)]
-struct UsersLookupResponse {
-    users: Vec<UserInfo>,
-}
-
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize, Clone)]
 struct UserInfo {
     id: String,
     email: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct UsersLookupResponse {
+    users: Vec<UserInfo>,
 }
 
 // Helper function to lookup user IDs from emails
@@ -94,6 +94,20 @@ struct Team {
     name: String,
     members: Vec<String>,
     owners: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TeamWithEmails {
+    id: String,
+    name: String,
+    members: Vec<UserInfo>,
+    owners: Vec<UserInfo>,
+}
+
+#[derive(Debug, Deserialize)]
+struct TeamErrorResponse {
+    error: String,
+    suggestions: Option<Vec<String>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -221,12 +235,17 @@ pub async fn show_team(
     http_client: &Client,
     backend_url: &str,
     config: &Config,
-    team_id: &str,
+    team_identifier: &str,
+    by_id: bool,
 ) -> Result<()> {
     let token = config.get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    let url = format!("{}/teams/{}", backend_url, team_id);
+    // Always request expanded data with user emails
+    let url = format!(
+        "{}/teams/{}?expand=members,owners&by_id={}",
+        backend_url, team_identifier, by_id
+    );
     let response = http_client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -235,19 +254,40 @@ pub async fn show_team(
         .context("Failed to send get team request")?;
 
     if response.status().is_success() {
-        let team: Team = response.json().await
+        let team: TeamWithEmails = response.json().await
             .context("Failed to parse get team response")?;
 
         println!("Team: {}", team.name);
         println!("ID: {}", team.id);
         println!("\nOwners:");
-        for owner in &team.owners {
-            println!("  - {}", owner);
+        if team.owners.is_empty() {
+            println!("  (none)");
+        } else {
+            for owner in &team.owners {
+                println!("  - {}", owner.email);
+            }
         }
         println!("\nMembers:");
-        for member in &team.members {
-            println!("  - {}", member);
+        if team.members.is_empty() {
+            println!("  (none)");
+        } else {
+            for member in &team.members {
+                println!("  - {}", member.email);
+            }
         }
+    } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+        // Handle 404 with potential fuzzy match suggestions
+        let error: TeamErrorResponse = response.json().await
+            .context("Failed to parse error response")?;
+
+        eprintln!("{}", error.error);
+        if let Some(suggestions) = error.suggestions {
+            eprintln!("\nDid you mean one of these?");
+            for suggestion in suggestions {
+                eprintln!("  - {}", suggestion);
+            }
+        }
+        std::process::exit(1);
     } else {
         let status = response.status();
         let error_text = response.text().await
@@ -263,7 +303,8 @@ pub async fn update_team(
     http_client: &Client,
     backend_url: &str,
     config: &Config,
-    team_id: &str,
+    team_identifier: &str,
+    by_id: bool,
     name: Option<String>,
     add_owners: Vec<String>,
     remove_owners: Vec<String>,
@@ -279,8 +320,8 @@ pub async fn update_team(
     let add_member_ids = lookup_users(http_client, backend_url, token, add_members).await?;
     let remove_member_ids = lookup_users(http_client, backend_url, token, remove_members).await?;
 
-    // First, get the current team state
-    let get_url = format!("{}/teams/{}", backend_url, team_id);
+    // First, get the current team state (without expand for now)
+    let get_url = format!("{}/teams/{}?by_id={}", backend_url, team_identifier, by_id);
     let get_response = http_client
         .get(&get_url)
         .header("Authorization", format!("Bearer {}", token))
@@ -289,6 +330,19 @@ pub async fn update_team(
         .context("Failed to get current team state")?;
 
     if !get_response.status().is_success() {
+        if get_response.status() == reqwest::StatusCode::NOT_FOUND {
+            let error: TeamErrorResponse = get_response.json().await
+                .context("Failed to parse error response")?;
+
+            eprintln!("{}", error.error);
+            if let Some(suggestions) = error.suggestions {
+                eprintln!("\nDid you mean one of these?");
+                for suggestion in suggestions {
+                    eprintln!("  - {}", suggestion);
+                }
+            }
+            std::process::exit(1);
+        }
         anyhow::bail!("Team not found");
     }
 
@@ -331,7 +385,7 @@ pub async fn update_team(
         members: Some(team.members.clone()),
     };
 
-    let url = format!("{}/teams/{}", backend_url, team_id);
+    let url = format!("{}/teams/{}?by_id={}", backend_url, team.id, by_id);
     let response = http_client
         .put(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -362,12 +416,13 @@ pub async fn delete_team(
     http_client: &Client,
     backend_url: &str,
     config: &Config,
-    team_id: &str,
+    team_identifier: &str,
+    by_id: bool,
 ) -> Result<()> {
     let token = config.get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    let url = format!("{}/teams/{}", backend_url, team_id);
+    let url = format!("{}/teams/{}?by_id={}", backend_url, team_identifier, by_id);
     let response = http_client
         .delete(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -377,6 +432,18 @@ pub async fn delete_team(
 
     if response.status().is_success() {
         println!("✓ Team deleted successfully!");
+    } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+        let error: TeamErrorResponse = response.json().await
+            .context("Failed to parse error response")?;
+
+        eprintln!("{}", error.error);
+        if let Some(suggestions) = error.suggestions {
+            eprintln!("\nDid you mean one of these?");
+            for suggestion in suggestions {
+                eprintln!("  - {}", suggestion);
+            }
+        }
+        std::process::exit(1);
     } else {
         let status = response.status();
         let error_text = response.text().await

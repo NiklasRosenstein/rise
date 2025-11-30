@@ -58,33 +58,42 @@ enum TeamCommands {
     List {},
     /// Show team details
     Show {
-        /// Team ID
-        team_id: String,
+        /// Team name or ID
+        team: String,
+        /// Force lookup by ID instead of name
+        #[arg(long)]
+        by_id: bool,
     },
     /// Update team
     Update {
-        /// Team ID
-        team_id: String,
+        /// Team name or ID
+        team: String,
+        /// Force lookup by ID instead of name
+        #[arg(long)]
+        by_id: bool,
         /// New team name
         #[arg(long)]
         name: Option<String>,
-        /// Add owners (comma-separated user IDs)
+        /// Add owners (comma-separated email addresses)
         #[arg(long)]
         add_owners: Option<String>,
-        /// Remove owners (comma-separated user IDs)
+        /// Remove owners (comma-separated email addresses)
         #[arg(long)]
         remove_owners: Option<String>,
-        /// Add members (comma-separated user IDs)
+        /// Add members (comma-separated email addresses)
         #[arg(long)]
         add_members: Option<String>,
-        /// Remove members (comma-separated user IDs)
+        /// Remove members (comma-separated email addresses)
         #[arg(long)]
         remove_members: Option<String>,
     },
     /// Delete a team
     Delete {
-        /// Team ID
-        team_id: String,
+        /// Team name or ID
+        team: String,
+        /// Force lookup by ID instead of name
+        #[arg(long)]
+        by_id: bool,
     },
 }
 
@@ -142,10 +151,10 @@ async fn main() -> Result<()> {
                 TeamCommands::List {} => {
                     team::list_teams(&http_client, &backend_url, &config).await?;
                 }
-                TeamCommands::Show { team_id } => {
-                    team::show_team(&http_client, &backend_url, &config, team_id).await?;
+                TeamCommands::Show { team, by_id } => {
+                    team::show_team(&http_client, &backend_url, &config, team, *by_id).await?;
                 }
-                TeamCommands::Update { team_id, name, add_owners, remove_owners, add_members, remove_members } => {
+                TeamCommands::Update { team, by_id, name, add_owners, remove_owners, add_members, remove_members } => {
                     let add_owners_vec: Vec<String> = add_owners.as_ref()
                         .map(|s| s.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect())
                         .unwrap_or_default();
@@ -163,7 +172,8 @@ async fn main() -> Result<()> {
                         &http_client,
                         &backend_url,
                         &config,
-                        team_id,
+                        team,
+                        *by_id,
                         name.clone(),
                         add_owners_vec,
                         remove_owners_vec,
@@ -171,8 +181,8 @@ async fn main() -> Result<()> {
                         remove_members_vec,
                     ).await?;
                 }
-                TeamCommands::Delete { team_id } => {
-                    team::delete_team(&http_client, &backend_url, &config, team_id).await?;
+                TeamCommands::Delete { team, by_id } => {
+                    team::delete_team(&http_client, &backend_url, &config, team, *by_id).await?;
                 }
             }
         }
