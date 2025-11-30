@@ -75,19 +75,68 @@ pub async fn get_team(
     State(state): State<AppState>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetTeamParams>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<TeamErrorResponse>)> {
+    // Extract and validate JWT token from Authorization header
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(TeamErrorResponse {
+                error: "Unauthorized: No authentication token provided".to_string(),
+                suggestions: None,
+            }),
+        ))?;
+
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(TeamErrorResponse {
+                error: "Unauthorized: Invalid Authorization header format".to_string(),
+                suggestions: None,
+            }),
+        ))?;
+
+    // Validate token with PocketBase
+    let user_info_url = format!("{}/api/collections/users/auth-refresh", state.settings.pocketbase.url);
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .post(&user_info_url)
+        .header("Authorization", token)
+        .send()
+        .await
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TeamErrorResponse {
+                error: format!("Failed to verify token: {}", e),
+                suggestions: None,
+            }),
+        ))?;
+
+    if !response.status().is_success() {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(TeamErrorResponse {
+                error: "Unauthorized: Invalid or expired token".to_string(),
+                suggestions: None,
+            }),
+        ));
+    }
+
+    // Token is valid - use test credentials to get an authenticated client for SDK calls
+    // TODO: Update pocketbase SDK to support token-based authentication directly
     let pb_client = state.pb_client.as_ref();
     let authenticated_client = pb_client
         .auth_with_password("users", "test@example.com", "test1234")
-        .map_err(|e| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(TeamErrorResponse {
-                    error: format!("Authentication failed: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TeamErrorResponse {
+                error: format!("Authentication failed: {}", e),
+                suggestions: None,
+            }),
+        ))?;
 
     // Resolve team by ID or name
     let team = resolve_team(&authenticated_client, &id_or_name, params.by_id)?;
@@ -114,20 +163,69 @@ pub async fn update_team(
     State(state): State<AppState>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetTeamParams>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<UpdateTeamRequest>,
 ) -> Result<Json<UpdateTeamResponse>, (StatusCode, Json<TeamErrorResponse>)> {
+    // Extract and validate JWT token from Authorization header
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(TeamErrorResponse {
+                error: "Unauthorized: No authentication token provided".to_string(),
+                suggestions: None,
+            }),
+        ))?;
+
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(TeamErrorResponse {
+                error: "Unauthorized: Invalid Authorization header format".to_string(),
+                suggestions: None,
+            }),
+        ))?;
+
+    // Validate token with PocketBase
+    let user_info_url = format!("{}/api/collections/users/auth-refresh", state.settings.pocketbase.url);
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .post(&user_info_url)
+        .header("Authorization", token)
+        .send()
+        .await
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TeamErrorResponse {
+                error: format!("Failed to verify token: {}", e),
+                suggestions: None,
+            }),
+        ))?;
+
+    if !response.status().is_success() {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(TeamErrorResponse {
+                error: "Unauthorized: Invalid or expired token".to_string(),
+                suggestions: None,
+            }),
+        ));
+    }
+
+    // Token is valid - use test credentials to get an authenticated client for SDK calls
+    // TODO: Update pocketbase SDK to support token-based authentication directly
     let pb_client = state.pb_client.as_ref();
     let authenticated_client = pb_client
         .auth_with_password("users", "test@example.com", "test1234")
-        .map_err(|e| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(TeamErrorResponse {
-                    error: format!("Authentication failed: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TeamErrorResponse {
+                error: format!("Authentication failed: {}", e),
+                suggestions: None,
+            }),
+        ))?;
 
     // Resolve team by ID or name
     let team = resolve_team(&authenticated_client, &id_or_name, params.by_id)?;
@@ -180,19 +278,68 @@ pub async fn delete_team(
     State(state): State<AppState>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetTeamParams>,
+    headers: axum::http::HeaderMap,
 ) -> Result<StatusCode, (StatusCode, Json<TeamErrorResponse>)> {
+    // Extract and validate JWT token from Authorization header
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(TeamErrorResponse {
+                error: "Unauthorized: No authentication token provided".to_string(),
+                suggestions: None,
+            }),
+        ))?;
+
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            Json(TeamErrorResponse {
+                error: "Unauthorized: Invalid Authorization header format".to_string(),
+                suggestions: None,
+            }),
+        ))?;
+
+    // Validate token with PocketBase
+    let user_info_url = format!("{}/api/collections/users/auth-refresh", state.settings.pocketbase.url);
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .post(&user_info_url)
+        .header("Authorization", token)
+        .send()
+        .await
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TeamErrorResponse {
+                error: format!("Failed to verify token: {}", e),
+                suggestions: None,
+            }),
+        ))?;
+
+    if !response.status().is_success() {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            Json(TeamErrorResponse {
+                error: "Unauthorized: Invalid or expired token".to_string(),
+                suggestions: None,
+            }),
+        ));
+    }
+
+    // Token is valid - use test credentials to get an authenticated client for SDK calls
+    // TODO: Update pocketbase SDK to support token-based authentication directly
     let pb_client = state.pb_client.as_ref();
     let authenticated_client = pb_client
         .auth_with_password("users", "test@example.com", "test1234")
-        .map_err(|e| {
-            (
-                StatusCode::UNAUTHORIZED,
-                Json(TeamErrorResponse {
-                    error: format!("Authentication failed: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .map_err(|e| (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(TeamErrorResponse {
+                error: format!("Authentication failed: {}", e),
+                suggestions: None,
+            }),
+        ))?;
 
     // Resolve team by ID or name
     let team = resolve_team(&authenticated_client, &id_or_name, params.by_id)?;
