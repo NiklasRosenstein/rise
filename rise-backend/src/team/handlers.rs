@@ -15,14 +15,39 @@ use std::collections::HashMap;
 
 pub async fn create_team(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(payload): Json<CreateTeamRequest>,
 ) -> Result<Json<CreateTeamResponse>, (StatusCode, String)> {
-    // TODO: Extract JWT token from Authorization header and authenticate with PocketBase
-    // For now, we'll use dummy authentication but this needs to be fixed
+    // Extract and validate JWT token from Authorization header
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or((StatusCode::UNAUTHORIZED, "Unauthorized: No authentication token provided".to_string()))?;
+
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or((StatusCode::UNAUTHORIZED, "Unauthorized: Invalid Authorization header format".to_string()))?;
+
+    // Validate token with PocketBase
+    let user_info_url = format!("{}/api/collections/users/auth-refresh", state.settings.pocketbase.url);
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .post(&user_info_url)
+        .header("Authorization", token)
+        .send()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to verify token: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err((StatusCode::UNAUTHORIZED, "Unauthorized: Invalid or expired token".to_string()));
+    }
+
+    // Token is valid - use test credentials to get an authenticated client for SDK calls
+    // TODO: Update pocketbase SDK to support token-based authentication directly
     let pb_client = state.pb_client.as_ref();
     let authenticated_client = pb_client
         .auth_with_password("users", "test@example.com", "test1234")
-        .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Authentication failed: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Authentication failed: {}", e)))?;
 
     // TODO: Validate that the authenticated user is in the owners list
     // This should be enforced by PocketBase rules, but we can add backend validation too
@@ -396,11 +421,38 @@ pub async fn delete_team(
 
 pub async fn list_teams(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
 ) -> Result<Json<Vec<Team>>, (StatusCode, String)> {
+    // Extract and validate JWT token from Authorization header
+    let auth_header = headers
+        .get("authorization")
+        .and_then(|h| h.to_str().ok())
+        .ok_or((StatusCode::UNAUTHORIZED, "Unauthorized: No authentication token provided".to_string()))?;
+
+    let token = auth_header
+        .strip_prefix("Bearer ")
+        .ok_or((StatusCode::UNAUTHORIZED, "Unauthorized: Invalid Authorization header format".to_string()))?;
+
+    // Validate token with PocketBase
+    let user_info_url = format!("{}/api/collections/users/auth-refresh", state.settings.pocketbase.url);
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .post(&user_info_url)
+        .header("Authorization", token)
+        .send()
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to verify token: {}", e)))?;
+
+    if !response.status().is_success() {
+        return Err((StatusCode::UNAUTHORIZED, "Unauthorized: Invalid or expired token".to_string()));
+    }
+
+    // Token is valid - use test credentials to get an authenticated client for SDK calls
+    // TODO: Update pocketbase SDK to support token-based authentication directly
     let pb_client = state.pb_client.as_ref();
     let authenticated_client = pb_client
         .auth_with_password("users", "test@example.com", "test1234")
-        .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Authentication failed: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Authentication failed: {}", e)))?;
 
     let teams: Vec<Team> = authenticated_client
         .records("teams")
