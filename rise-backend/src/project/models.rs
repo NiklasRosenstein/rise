@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum ProjectVisibility {
@@ -47,6 +48,15 @@ pub struct Project {
     pub owner_user: Option<String>,  // Relation to users collection
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_team: Option<String>,  // Relation to teams collection
+    // PocketBase system fields
+    #[serde(default)]
+    pub created: String,
+    #[serde(default)]
+    pub updated: String,
+    #[serde(default)]
+    pub collectionId: String,
+    #[serde(default)]
+    pub collectionName: String,
 }
 
 impl Project {
@@ -77,4 +87,85 @@ pub struct CreateProjectRequest {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CreateProjectResponse {
     pub project: Project,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UpdateProjectRequest {
+    pub name: Option<String>,
+    pub visibility: Option<ProjectVisibility>,
+    pub status: Option<ProjectStatus>,
+    pub owner: Option<ProjectOwner>,
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UpdateProjectResponse {
+    pub project: Project,
+}
+
+// User information for expanded responses
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct UserInfo {
+    pub id: String,
+    pub email: String,
+}
+
+// Team information for expanded responses
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct TeamInfo {
+    pub id: String,
+    pub name: String,
+}
+
+// Owner information enum
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(untagged)]
+pub enum OwnerInfo {
+    User(UserInfo),
+    Team(TeamInfo),
+}
+
+// Project with expanded owner information
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ProjectWithOwnerInfo {
+    pub id: String,
+    pub name: String,
+    pub status: ProjectStatus,
+    pub visibility: ProjectVisibility,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<OwnerInfo>,
+    pub created: String,
+    pub updated: String,
+    #[serde(rename = "collectionId")]
+    pub collection_id: String,
+    #[serde(rename = "collectionName")]
+    pub collection_name: String,
+}
+
+// Error response with optional fuzzy match suggestions
+#[derive(Debug, Serialize, Clone)]
+pub struct ProjectErrorResponse {
+    pub error: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub suggestions: Option<Vec<String>>,
+}
+
+// Query parameters for project lookup
+#[derive(Debug, Deserialize, Clone)]
+pub struct GetProjectParams {
+    #[serde(default)]
+    pub by_id: bool,
+    #[serde(default)]
+    pub expand: String,  // Comma-separated list like "owner"
+}
+
+impl GetProjectParams {
+    /// Check if a field should be expanded
+    pub fn should_expand(&self, field: &str) -> bool {
+        if self.expand.is_empty() {
+            return false;
+        }
+
+        let fields: HashSet<&str> = self.expand.split(',').map(|s| s.trim()).collect();
+        fields.contains(field)
+    }
 }

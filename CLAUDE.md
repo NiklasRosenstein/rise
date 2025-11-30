@@ -111,3 +111,4 @@ apps to container runtimes using a user-friendly CLI.
 - You must prioritize user experience in the CLI, providing clear feedback and error messages.
 - You must embrace modern design practices, such as modular controller design, dependency injection, and separation of concerns.
 - Don't commit the .claude directory
+- Axum capture groups are formatted as `{capture}`

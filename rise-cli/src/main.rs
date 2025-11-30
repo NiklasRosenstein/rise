@@ -5,6 +5,7 @@ use reqwest::Client;
 mod config;
 mod login;
 mod team;
+mod project;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -24,21 +25,64 @@ enum Commands {
         #[arg(long)]
         password: Option<String>,
     },
-    /// Create a new project
-    Create {
-        name: String,
-        #[arg(long)]
-        visibility: Option<String>,
-        #[arg(long)]
-        owner: Option<String>,
-    },
-    /// List projects
-    Ls {},
+    /// Project management commands
+    #[command(subcommand)]
+    Project(ProjectCommands),
     /// Deploy a project
     Deploy {},
     /// Team management commands
     #[command(subcommand)]
     Team(TeamCommands),
+}
+
+#[derive(Subcommand, Debug)]
+enum ProjectCommands {
+    /// Create a new project
+    Create {
+        /// Project name
+        name: String,
+        /// Visibility (public or private)
+        #[arg(long, default_value = "private")]
+        visibility: String,
+        /// Owner (format: "user:email" or "team:name", defaults to current user)
+        #[arg(long)]
+        owner: Option<String>,
+    },
+    /// List all projects
+    List {},
+    /// Show project details
+    Show {
+        /// Project name or ID
+        project: String,
+        /// Force lookup by ID instead of name
+        #[arg(long)]
+        by_id: bool,
+    },
+    /// Update project
+    Update {
+        /// Project name or ID
+        project: String,
+        /// Force lookup by ID instead of name
+        #[arg(long)]
+        by_id: bool,
+        /// New project name
+        #[arg(long)]
+        name: Option<String>,
+        /// New visibility (public or private)
+        #[arg(long)]
+        visibility: Option<String>,
+        /// Transfer ownership (format: "user:email" or "team:name")
+        #[arg(long)]
+        owner: Option<String>,
+    },
+    /// Delete a project
+    Delete {
+        /// Project name or ID
+        project: String,
+        /// Force lookup by ID instead of name
+        #[arg(long)]
+        by_id: bool,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -122,15 +166,51 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Create { name, visibility, owner } => {
-            println!("Create command not yet implemented.");
-            println!("Name: {}, Visibility: {:?}, Owner: {:?}", name, visibility, owner);
-        }
-        Commands::Ls {} => {
-            println!("List command not yet implemented.");
-        }
         Commands::Deploy {} => {
             println!("Deploy command not yet implemented.");
+        }
+        Commands::Project(project_cmd) => {
+            match project_cmd {
+                ProjectCommands::Create { name, visibility, owner } => {
+                    let visibility_enum: project::ProjectVisibility = visibility.parse()
+                        .unwrap_or_else(|e| {
+                            eprintln!("Error: {}", e);
+                            std::process::exit(1);
+                        });
+
+                    project::create_project(&http_client, &backend_url, &config, name, visibility_enum, owner.clone()).await?;
+                }
+                ProjectCommands::List {} => {
+                    project::list_projects(&http_client, &backend_url, &config).await?;
+                }
+                ProjectCommands::Show { project, by_id } => {
+                    project::show_project(&http_client, &backend_url, &config, project, *by_id).await?;
+                }
+                ProjectCommands::Update { project, by_id, name, visibility, owner } => {
+                    let visibility_enum = if let Some(v) = visibility {
+                        Some(v.parse().unwrap_or_else(|e: anyhow::Error| {
+                            eprintln!("Error: {}", e);
+                            std::process::exit(1);
+                        }))
+                    } else {
+                        None
+                    };
+
+                    project::update_project(
+                        &http_client,
+                        &backend_url,
+                        &config,
+                        project,
+                        *by_id,
+                        name.clone(),
+                        visibility_enum,
+                        owner.clone(),
+                    ).await?;
+                }
+                ProjectCommands::Delete { project, by_id } => {
+                    project::delete_project(&http_client, &backend_url, &config, project, *by_id).await?;
+                }
+            }
         }
         Commands::Team(team_cmd) => {
             match team_cmd {
