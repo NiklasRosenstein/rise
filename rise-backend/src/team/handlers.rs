@@ -303,12 +303,16 @@ fn query_team_by_name(
     let escaped_name = team_name.replace("'", "\\'");
     let filter = format!("name='{}'", escaped_name);
 
+    tracing::info!("Querying team by name with filter: {}", filter);
+
     let result = authenticated_client
         .records("teams")
         .list()
         .filter(&filter)
         .call::<Team>()
         .map_err(|e| format!("Failed to query team by name: {}", e))?;
+
+    tracing::info!("Query returned {} teams", result.items.len());
 
     result
         .items
@@ -405,8 +409,11 @@ fn resolve_team(
     id_or_name: &str,
     by_id: bool,
 ) -> Result<Team, (StatusCode, Json<TeamErrorResponse>)> {
+    tracing::info!("Resolving team '{}', by_id={}", id_or_name, by_id);
+
     let team = if by_id {
         // Explicit ID lookup
+        tracing::info!("Using explicit ID lookup");
         query_team_by_id(authenticated_client, id_or_name)
             .map_err(|e| {
                 (
@@ -419,9 +426,14 @@ fn resolve_team(
             })?
     } else {
         // Try name first, fallback to ID
+        tracing::info!("Trying name lookup first, will fallback to ID");
         query_team_by_name(authenticated_client, id_or_name)
-            .or_else(|_| query_team_by_id(authenticated_client, id_or_name))
-            .map_err(|_| {
+            .or_else(|e| {
+                tracing::info!("Name lookup failed: {}, trying ID fallback", e);
+                query_team_by_id(authenticated_client, id_or_name)
+            })
+            .map_err(|e| {
+                tracing::info!("Both lookups failed, generating fuzzy suggestions");
                 // Both failed - provide fuzzy suggestions
                 let all_teams_result = authenticated_client.records("teams").list().call::<Team>();
 

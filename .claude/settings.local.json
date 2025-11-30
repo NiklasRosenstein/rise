@@ -27,7 +27,8 @@
       "Bash(docker-compose restart:*)",
       "Bash(../target/release/rise-cli login:*)",
       "Bash(../target/release/rise-cli team list:*)",
-      "Bash(docker compose:*)"
+      "Bash(docker compose:*)",
+      "Bash(docker build:*)"
     ],
     "deny": [],
     "ask": []
