@@ -65,7 +65,7 @@ cargo build --bin rise-cli
 ./target/debug/rise-cli login
 
 # Login with password (for testing)
-./target/debug/rise-cli login --username test@example.com --password test1234
+./target/debug/rise-cli login --email test@example.com --password test1234
 ```
 
 ### Team Management

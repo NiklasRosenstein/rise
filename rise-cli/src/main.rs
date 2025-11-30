@@ -17,10 +17,10 @@ pub struct Cli {
 enum Commands {
     /// Authenticate with the Rise backend
     Login {
-        /// Username/email for password authentication
+        /// Email for password authentication
         #[arg(long)]
-        username: Option<String>,
-        /// Password for authentication (only used with --username)
+        email: Option<String>,
+        /// Password for authentication (only used with --email)
         #[arg(long)]
         password: Option<String>,
     },
@@ -105,19 +105,19 @@ async fn main() -> Result<()> {
     let backend_url = config.get_backend_url();
 
     match &cli.command {
-        Commands::Login { username, password } => {
-            match (username, password) {
-                (Some(user), Some(pass)) => {
-                    // Password flow: both username and password provided
-                    login::handle_password_login(&http_client, &backend_url, user, pass, &mut config).await?;
+        Commands::Login { email, password } => {
+            match (email, password) {
+                (Some(email), Some(pass)) => {
+                    // Password flow: both email and password provided
+                    login::handle_password_login(&http_client, &backend_url, email, pass, &mut config).await?;
                 }
-                (Some(user), None) => {
+                (Some(email), None) => {
                     // Password flow: prompt for password
                     let pass = rpassword::prompt_password("Password: ")?;
-                    login::handle_password_login(&http_client, &backend_url, user, &pass, &mut config).await?;
+                    login::handle_password_login(&http_client, &backend_url, email, &pass, &mut config).await?;
                 }
                 (None, _) => {
-                    // Browser flow: no username provided
+                    // Browser flow: no email provided, use device flow
                     login::handle_device_login(&http_client, &backend_url, &mut config).await?;
                 }
             }
