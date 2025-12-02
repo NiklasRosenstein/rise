@@ -1,7 +1,16 @@
 [tools]
 overmind = "2.5.1"
 
-[tasks.rise-backend]
+[tasks.backend]
 description = "Run the Rise backend server"
-run = "cd rise-backend && cargo run --bin rise-backend"
-env = { CONFIG_DIR = "config", RUN_MODE = "development", RISE_SERVER__HOST = "0.0.0.0", RISE_SERVER__PORT = "3000", RUST_LOG = "debug,tower_http=debug" }
+run = "cargo run --bin rise-backend"
+
+[tasks.backend.env]
+CONFIG_DIR = "rise-backend/config"
+RUN_MODE = "development"
+RISE_SERVER__HOST = "0.0.0.0"
+RISE_SERVER__PORT = "3000"
+RUST_LOG = "debug,tower_http=debug"
+
+[tasks.start]
+run = "overmind start -f Procfile.dev"
