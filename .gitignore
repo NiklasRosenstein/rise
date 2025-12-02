@@ -7,3 +7,6 @@ pb_data
 
 # Local config overrides
 **/config/local.toml
+
+# Example app dependencies
+example/**/node_modules
