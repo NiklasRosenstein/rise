@@ -86,8 +86,8 @@ Let's outline the architecture and components needed for this Rust-based project
 
 2. **Set Up the CLI**:
     - [x] Initialize a new Rust project for the CLI using `cargo new rise-cli`.
-    - [ ] Implement authentication commands to interact with the backend.
-    - [ ] Create project management commands for creating and listing projects.
+    - [x] Implement authentication commands to interact with the backend.
+    - [x] Create project management commands for creating and listing projects.
     - [ ] Develop the build module to support different build methods.
     - [ ] Implement deployment commands to handle the build, push, and deploy process.
     - [ ] Set up configuration handling for the CLI tool.
