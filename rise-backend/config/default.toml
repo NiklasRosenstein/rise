@@ -21,17 +21,14 @@ url = "http://pocketbase:8090"
 # # access_key_id = "AKIAIOSFODNN7EXAMPLE"
 # # secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 
-# JFrog Artifactory Example (with static credentials):
+# Generic Docker Registry Example (assumes user is authenticated via 'docker login'):
 # [registry]
-# type = "artifactory"
-# base_url = "https://mycompany.jfrog.io"
-# repository = "docker-local"
-# username = "myusername"
-# password = "mypassword"
+# type = "docker"
+# registry_url = "localhost:5000"
+# namespace = "rise-apps"
 
-# JFrog Artifactory Example (using Docker credential helper):
+# Docker Hub Example:
 # [registry]
-# type = "artifactory"
-# base_url = "https://mycompany.jfrog.io"
-# repository = "docker-local"
-# use_credential_helper = true
+# type = "docker"
+# registry_url = "docker.io"
+# namespace = "myorg"

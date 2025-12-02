@@ -40,15 +40,10 @@ pub enum RegistrySettings {
         #[serde(default)]
         secret_access_key: Option<String>,
     },
-    Artifactory {
-        base_url: String,
-        repository: String,
+    Docker {
+        registry_url: String,
         #[serde(default)]
-        username: Option<String>,
-        #[serde(default)]
-        password: Option<String>,
-        #[serde(default)]
-        use_credential_helper: bool,
+        namespace: String,
     },
 }
 

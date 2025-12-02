@@ -24,30 +24,68 @@ secret_access_key = "..."
 2. Returns base64-encoded credentials valid for 12 hours
 3. CLI uses credentials to `docker login` and push images
 
-### JFrog Artifactory
+### Generic Docker Registry
 
-Enterprise registry with static or helper-based auth.
+Works with any Docker-compatible registry (Docker Hub, Harbor, Quay, local registries). Assumes user has authenticated via `docker login`.
 
-**Static credentials:**
+**Configuration:**
 ```toml
 [registry]
-type = "artifactory"
-base_url = "https://company.jfrog.io"
-repository = "docker-local"
-username = "user"
-password = "pass"
+type = "docker"
+registry_url = "localhost:5000"
+namespace = "rise-apps"
 ```
 
-**Docker credential helper:**
-```toml
-[registry]
-type = "artifactory"
-base_url = "https://company.jfrog.io"
-repository = "docker-local"
-use_credential_helper = true
+**How it works:**
+1. Backend returns registry URL to CLI
+2. CLI uses existing Docker credentials (from `~/.docker/config.json`)
+3. No credential generation - relies on pre-authentication
+
+**Common use cases:**
+- **Local development**: Use docker-compose registry (see below)
+- **Docker Hub**: `registry_url = "docker.io"`, `namespace = "myorg"`
+- **Harbor**: `registry_url = "harbor.company.com"`, `namespace = "project"`
+
+## Local Development with Docker Registry
+
+The project includes a local Docker registry for development testing.
+
+**1. Start services:**
+```bash
+docker-compose up -d
 ```
 
-Requires `docker login` to have been run previously.
+This starts:
+- PocketBase (port 8090)
+- Rise backend (port 3001)
+- Docker registry (port 5000)
+
+**2. Configure backend (already configured in docker-compose.yml):**
+```bash
+RISE_REGISTRY__TYPE=docker
+RISE_REGISTRY__REGISTRY_URL=registry:5000
+RISE_REGISTRY__NAMESPACE=rise-apps
+```
+
+**3. Test pushing to local registry:**
+```bash
+# Tag an image
+docker tag myapp:latest localhost:5000/rise-apps/myapp:latest
+
+# Push to local registry
+docker push localhost:5000/rise-apps/myapp:latest
+
+# Verify
+curl http://localhost:5000/v2/_catalog
+```
+
+**4. CLI workflow (future):**
+```bash
+rise login
+rise deploy  # Fetches registry URL from backend, pushes to localhost:5000
+```
+
+The local registry persists data in a Docker volume (`registry_data`), so images survive restarts.
 
 ## API Endpoint
 
@@ -81,19 +119,19 @@ The current implementation does **not** scope credentials to specific projects. 
 
 **Mitigation (future):**
 - ECR: Use resource tags and IAM policies to scope tokens per-project
-- Artifactory: Use project-specific access tokens
+- Docker: Use registry-specific access controls and namespacing
 
 **2. Credential Lifespan**
 
 - **ECR**: 12-hour tokens (AWS enforced)
-- **Artifactory**: Credentials don't expire (unless using temporary tokens)
+- **Docker**: No credential generation - uses existing Docker auth
 
 **Risk:** Stolen credentials remain valid for their full lifespan.
 
 **Mitigation:**
-- Rotate Artifactory credentials regularly
+- For ECR: Monitor for unusual push activity within 12-hour window
+- For Docker: Rotate registry credentials regularly
 - Monitor registry push logs for unauthorized activity
-- Consider implementing token refresh before expiry
 
 **3. Credential Storage in Transit**
 
@@ -107,18 +145,18 @@ Credentials are returned over HTTPS (in production). In development (localhost),
 
 **4. Backend Permissions**
 
-The backend needs full registry access to generate credentials.
+The backend needs access to generate or provide credentials.
 
 - **ECR**: Backend's IAM role needs `ecr:GetAuthorizationToken`
-- **Artifactory**: Backend needs admin credentials or token generation permissions
+- **Docker**: Backend only provides registry URL (no credentials)
 
-**Risk:** Backend compromise exposes full registry access.
+**Risk:** Backend compromise exposes registry access (ECR only).
 
 **Mitigation:**
-- Rotate backend credentials regularly
-- Use least-privilege IAM policies
+- For ECR: Use least-privilege IAM policies, rotate credentials regularly
+- For Docker: Users must authenticate separately via `docker login`
 - Audit backend access logs
-- Consider credential vaulting (HashiCorp Vault, AWS Secrets Manager)
+- Consider credential vaulting for ECR credentials (HashiCorp Vault, AWS Secrets Manager)
 
 ### 🔒 Recommended Production Setup
 
@@ -140,20 +178,20 @@ Backend runs with IAM role having:
 }
 ```
 
-**Artifactory:**
+**Docker Registry:**
 ```toml
 [registry]
-type = "artifactory"
-base_url = "https://company.jfrog.io"
-repository = "docker-local"
-# Credentials via environment variables, not config file
+type = "docker"
+registry_url = "registry.company.com"
+namespace = "production"
 ```
 
-Set via:
+Users authenticate via:
 ```bash
-export RISE_REGISTRY__USERNAME="service-account"
-export RISE_REGISTRY__PASSWORD="from-vault"
+docker login registry.company.com
 ```
+
+Backend provides registry URL; users bring their own credentials.
 
 ### 🚀 Future Improvements
 

@@ -1,5 +1,5 @@
 use crate::settings::{Settings, RegistrySettings};
-use crate::registry::{RegistryProvider, providers::{EcrProvider, ArtifactoryProvider}, models::{EcrConfig, ArtifactoryConfig}};
+use crate::registry::{RegistryProvider, providers::{EcrProvider, DockerProvider}, models::{EcrConfig, DockerConfig}};
 use std::sync::Arc;
 use pocketbase_sdk::client::Client as PocketbaseClient;
 
@@ -38,21 +38,18 @@ impl AppState {
                         }
                     }
                 }
-                RegistrySettings::Artifactory { base_url, repository, username, password, use_credential_helper } => {
-                    let artifactory_config = ArtifactoryConfig {
-                        base_url: base_url.clone(),
-                        repository: repository.clone(),
-                        username: username.clone(),
-                        password: password.clone(),
-                        use_credential_helper: *use_credential_helper,
+                RegistrySettings::Docker { registry_url, namespace } => {
+                    let docker_config = DockerConfig {
+                        registry_url: registry_url.clone(),
+                        namespace: namespace.clone(),
                     };
-                    match ArtifactoryProvider::new(artifactory_config) {
+                    match DockerProvider::new(docker_config) {
                         Ok(provider) => {
-                            tracing::info!("Initialized Artifactory registry provider");
+                            tracing::info!("Initialized Docker registry provider at {}", registry_url);
                             Some(Arc::new(provider))
                         }
                         Err(e) => {
-                            tracing::error!("Failed to initialize Artifactory provider: {}", e);
+                            tracing::error!("Failed to initialize Docker provider: {}", e);
                             None
                         }
                     }

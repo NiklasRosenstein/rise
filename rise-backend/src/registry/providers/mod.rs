@@ -1,5 +1,5 @@
 pub mod ecr;
-pub mod artifactory;
+pub mod docker;
 
 pub use ecr::EcrProvider;
-pub use artifactory::ArtifactoryProvider;
+pub use docker::DockerProvider;

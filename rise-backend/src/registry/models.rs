@@ -41,20 +41,21 @@ pub struct EcrConfig {
     pub secret_access_key: Option<String>,
 }
 
-/// Configuration for JFrog Artifactory registry
+/// Configuration for generic Docker registry
+///
+/// Assumes user has already authenticated via `docker login`.
+/// Backend only provides registry URL to CLI.
 #[derive(Debug, Clone, Deserialize)]
-pub struct ArtifactoryConfig {
-    /// Artifactory base URL (e.g., "https://mycompany.jfrog.io")
-    pub base_url: String,
-    /// Docker repository path (e.g., "docker-local")
-    pub repository: String,
-    /// Optional: Username for authentication
-    pub username: Option<String>,
-    /// Optional: Password or API token for authentication
-    pub password: Option<String>,
-    /// Whether to use Docker credential helper instead of static credentials
-    #[serde(default)]
-    pub use_credential_helper: bool,
+pub struct DockerConfig {
+    /// Registry URL (e.g., "localhost:5000", "registry.example.com")
+    pub registry_url: String,
+    /// Namespace/path within registry (e.g., "rise-apps", "myorg")
+    #[serde(default = "default_namespace")]
+    pub namespace: String,
+}
+
+fn default_namespace() -> String {
+    String::new()
 }
 
 /// Registry provider configuration
@@ -62,5 +63,5 @@ pub struct ArtifactoryConfig {
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum RegistryConfig {
     Ecr(EcrConfig),
-    Artifactory(ArtifactoryConfig),
+    Docker(DockerConfig),
 }
