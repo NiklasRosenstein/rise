@@ -22,10 +22,10 @@ url = "http://pocketbase:8090"
 # # secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 
 # Generic Docker Registry Example (assumes user is authenticated via 'docker login'):
-# [registry]
-# type = "docker"
-# registry_url = "localhost:5000"
-# namespace = "rise-apps"
+[registry]
+type = "docker"
+registry_url = "localhost:5000"
+namespace = "rise-apps"
 
 # Docker Hub Example:
 # [registry]

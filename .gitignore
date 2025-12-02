@@ -4,3 +4,6 @@ pb_data
 
 # mdbook output
 /book
+
+# Local config overrides
+**/config/local.toml
