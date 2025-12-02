@@ -6,6 +6,7 @@ mod config;
 mod login;
 mod team;
 mod project;
+mod deploy;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -29,7 +30,14 @@ enum Commands {
     #[command(subcommand)]
     Project(ProjectCommands),
     /// Deploy a project
-    Deploy {},
+    Deploy {
+        /// Project name to deploy to
+        #[arg(long, short)]
+        project: String,
+        /// Path to the directory containing the application (defaults to current directory)
+        #[arg(default_value = ".")]
+        path: String,
+    },
     /// Team management commands
     #[command(subcommand)]
     Team(TeamCommands),
@@ -166,8 +174,8 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Deploy {} => {
-            println!("Deploy command not yet implemented.");
+        Commands::Deploy { project, path } => {
+            deploy::handle_deploy(&http_client, &backend_url, &config, project, path).await?;
         }
         Commands::Project(project_cmd) => {
             match project_cmd {
