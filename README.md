@@ -87,6 +87,101 @@ cargo build --bin rise-cli
 ./target/debug/rise-cli team delete my-team
 ```
 
+### Project Management
+
+```bash
+# Create a project
+./target/debug/rise-cli project create my-app --visibility public
+
+# List projects
+./target/debug/rise-cli project list
+
+# Show project details
+./target/debug/rise-cli project show my-app
+
+# Update project (rename, change visibility, transfer ownership)
+./target/debug/rise-cli project update my-app --visibility private
+./target/debug/rise-cli project update my-app --owner team:devops
+
+# Delete project
+./target/debug/rise-cli project delete my-app
+```
+
+### Container Registry Integration
+
+Rise supports multiple container registry providers for storing and deploying container images.
+
+#### Supported Registries
+
+**AWS ECR** - Amazon Elastic Container Registry with automatic temporary credential generation (12-hour tokens)
+**JFrog Artifactory** - Enterprise registry with support for static credentials or Docker credential helper
+
+#### Configuration
+
+Registry configuration is optional and defined in `rise-backend/config/default.toml`:
+
+##### AWS ECR Example
+
+```toml
+[registry]
+type = "ecr"
+region = "us-east-1"
+account_id = "123456789012"
+# Optional: Provide AWS credentials (if not using IAM role)
+# access_key_id = "AKIAIOSFODNN7EXAMPLE"
+# secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+```
+
+When AWS credentials are not provided, the backend will use the default AWS credential chain (environment variables, IAM role, etc.).
+
+##### JFrog Artifactory Example (Static Credentials)
+
+```toml
+[registry]
+type = "artifactory"
+base_url = "https://mycompany.jfrog.io"
+repository = "docker-local"
+username = "myusername"
+password = "mypassword"
+```
+
+##### JFrog Artifactory Example (Docker Credential Helper)
+
+```toml
+[registry]
+type = "artifactory"
+base_url = "https://mycompany.jfrog.io"
+repository = "docker-local"
+use_credential_helper = true
+```
+
+This uses Docker's credential helper to retrieve credentials (requires `docker login` to be run first).
+
+#### API Endpoint
+
+Once configured, the registry credentials endpoint will be available:
+
+```bash
+# Get registry credentials for a project
+curl http://localhost:3001/registry/credentials?project=my-app \
+  -H "Authorization: Bearer YOUR_TOKEN_HERE"
+```
+
+Response:
+```json
+{
+  "credentials": {
+    "registry_url": "123456789.dkr.ecr.us-east-1.amazonaws.com",
+    "username": "AWS",
+    "password": "eyJwYXl...truncated...",
+    "expires_in": 43200
+  },
+  "repository": "my-app"
+}
+```
+
+The CLI will automatically use this endpoint when building and pushing container images.
+
 ## Development
 
 ### Project Structure

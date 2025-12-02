@@ -3,6 +3,7 @@ pub mod settings;
 pub mod state;
 pub mod project;
 pub mod team;
+pub mod registry;
 
 #[cfg(test)]
 mod lib_tests;
@@ -22,6 +23,7 @@ pub async fn run(settings: settings::Settings) -> Result<()> {
         .merge(auth::routes::routes())
         .merge(project::routes::routes())
         .merge(team::routes::team_routes())
+        .merge(registry::routes::routes())
         .with_state(state.clone())
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 

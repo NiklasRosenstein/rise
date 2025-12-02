@@ -7,6 +7,8 @@ pub struct Settings {
     pub server: ServerSettings,
     pub auth: AuthSettings,
     pub pocketbase: PocketbaseSettings,
+    #[serde(default)]
+    pub registry: Option<RegistrySettings>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -24,6 +26,30 @@ pub struct AuthSettings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct PocketbaseSettings {
     pub url: String,
+}
+
+/// Registry provider configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "lowercase")]
+pub enum RegistrySettings {
+    Ecr {
+        region: String,
+        account_id: String,
+        #[serde(default)]
+        access_key_id: Option<String>,
+        #[serde(default)]
+        secret_access_key: Option<String>,
+    },
+    Artifactory {
+        base_url: String,
+        repository: String,
+        #[serde(default)]
+        username: Option<String>,
+        #[serde(default)]
+        password: Option<String>,
+        #[serde(default)]
+        use_credential_helper: bool,
+    },
 }
 
 impl Settings {

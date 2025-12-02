@@ -8,3 +8,30 @@ secret = "super-secret-key-for-development"
 
 [pocketbase]
 url = "http://pocketbase:8090"
+
+# Container registry configuration (optional)
+# Uncomment and configure ONE of the following registry providers:
+
+# AWS ECR Example:
+# [registry]
+# type = "ecr"
+# region = "us-east-1"
+# account_id = "123456789012"
+# # Optional: Provide AWS credentials (if not using IAM role)
+# # access_key_id = "AKIAIOSFODNN7EXAMPLE"
+# # secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+# JFrog Artifactory Example (with static credentials):
+# [registry]
+# type = "artifactory"
+# base_url = "https://mycompany.jfrog.io"
+# repository = "docker-local"
+# username = "myusername"
+# password = "mypassword"
+
+# JFrog Artifactory Example (using Docker credential helper):
+# [registry]
+# type = "artifactory"
+# base_url = "https://mycompany.jfrog.io"
+# repository = "docker-local"
+# use_credential_helper = true
