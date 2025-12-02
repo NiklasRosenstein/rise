@@ -1,2 +1,8 @@
 [pocketbase]
 url = "http://pocketbase:8090"
+
+# Docker registry for local development
+[registry]
+type = "docker"
+registry_url = "registry:5000"
+namespace = "rise-apps"
