@@ -15,24 +15,35 @@ Rise consists of:
 
 - Docker and Docker Compose
 - Rust 1.91+ (for local development)
+- [mise](https://mise.jdx.dev/) (for task management)
 
 ### Start Development Environment
 
+**Option 1: Using Procfile (Recommended for Development)**
+
 ```bash
-# Start all services (PocketBase + Backend)
+# Start all services with overmind (pocketbase, registry, backend)
+overmind start
+
+# Or start individual services
+mise run rise-backend
+```
+
+**Option 2: Using Docker Compose Only**
+
+```bash
+# Start supporting services (PocketBase + Registry)
 docker compose up -d
 
-# Check service status
-docker compose ps
-
-# View logs
-docker compose logs -f
+# Backend runs locally via mise
+mise run rise-backend
 ```
 
 Services will be available at:
-- **Backend API**: http://localhost:3001
+- **Backend API**: http://localhost:3000
 - **PocketBase Admin UI**: http://localhost:8090/_/
 - **PocketBase API**: http://localhost:8090/api/
+- **Docker Registry**: http://localhost:5000
 
 ### Default Credentials
 
@@ -209,21 +220,24 @@ rise/
 ### Working with the Backend
 
 ```bash
-# Build backend
+# Run backend locally with mise (recommended)
+mise run rise-backend
+
+# Or build and run manually
 cd rise-backend
 cargo build
+cargo run
 
 # Run tests
 cargo test
-
-# Run locally (requires PocketBase running)
-RUST_LOG=debug cargo run
 ```
 
 The backend uses PocketBase for:
 - User authentication (JWT tokens)
 - Database (teams, projects collections)
 - Admin UI for data management
+
+**Configuration**: The backend uses `config/local.toml` for local development overrides (gitignored). This file is auto-created when you first run via mise and points to localhost services instead of Docker service names.
 
 ### Working with PocketBase
 
