@@ -112,3 +112,4 @@ apps to container runtimes using a user-friendly CLI.
 - You must embrace modern design practices, such as modular controller design, dependency injection, and separation of concerns.
 - Don't commit the .claude directory
 - Axum capture groups are formatted as `{capture}`
+- Keep the documentation updated. Don't be overly verbose when documenting the project. People can read the code, but things that are not obvious or help getting started and context are usually helpful in documentation, as well as well-placed and lean examples.

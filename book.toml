@@ -1,0 +1,12 @@
+[book]
+authors = ["Rise Contributors"]
+language = "en"
+src = "docs"
+title = "Rise Documentation"
+
+[build]
+build-dir = "book"
+
+[output.html]
+default-theme = "rust"
+git-repository-url = "https://github.com/your-org/rise"
