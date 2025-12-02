@@ -46,6 +46,22 @@ namespace = "rise-apps"
 - **Docker Hub**: `registry_url = "docker.io"`, `namespace = "myorg"`
 - **Harbor**: `registry_url = "harbor.company.com"`, `namespace = "project"`
 
+## Configuration
+
+Registry configuration is set in TOML files under `rise-backend/config/`:
+
+- **`default.toml`**: Default settings (includes commented examples)
+- **`production.toml`**: Production overrides (loaded when `RUN_MODE=production`)
+- **`local.toml`**: Local overrides (optional, gitignored)
+
+Configuration precedence (highest to lowest):
+1. Environment variables (`RISE_REGISTRY__TYPE=docker`)
+2. Local config file (`local.toml`)
+3. Environment-specific config (`production.toml`, `development.toml`)
+4. Default config (`default.toml`)
+
+For docker-compose development, registry is configured in `production.toml`.
+
 ## Local Development with Docker Registry
 
 The project includes a local Docker registry for development testing.
@@ -60,11 +76,12 @@ This starts:
 - Rise backend (port 3001)
 - Docker registry (port 5000)
 
-**2. Configure backend (already configured in docker-compose.yml):**
-```bash
-RISE_REGISTRY__TYPE=docker
-RISE_REGISTRY__REGISTRY_URL=registry:5000
-RISE_REGISTRY__NAMESPACE=rise-apps
+**2. Backend is configured via `rise-backend/config/production.toml`:**
+```toml
+[registry]
+type = "docker"
+registry_url = "registry:5000"
+namespace = "rise-apps"
 ```
 
 **3. Test pushing to local registry:**

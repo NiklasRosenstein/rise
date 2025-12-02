@@ -45,9 +45,6 @@ services:
       - RISE_SERVER__HOST=0.0.0.0
       - RISE_SERVER__PORT=3000
       - RUST_LOG=debug,tower_http=debug
-      - RISE_REGISTRY__TYPE=docker
-      - RISE_REGISTRY__REGISTRY_URL=registry:5000
-      - RISE_REGISTRY__NAMESPACE=rise-apps
     depends_on:
       pocketbase:
         condition: service_healthy

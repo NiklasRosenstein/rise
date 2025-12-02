@@ -10,6 +10,7 @@ use crate::registry::{RegistryProvider, models::{RegistryCredentials, EcrConfig}
 pub struct EcrProvider {
     config: EcrConfig,
     client: EcrClient,
+    registry_url: String,
 }
 
 impl EcrProvider {
@@ -41,12 +42,9 @@ impl EcrProvider {
 
         let client = EcrClient::new(&aws_config);
 
-        Ok(Self { config, client })
-    }
+        let registry_url = format!("{}.dkr.ecr.{}.amazonaws.com", config.account_id, config.region);
 
-    /// Get the ECR registry URL
-    fn get_registry_url(&self) -> String {
-        format!("{}.dkr.ecr.{}.amazonaws.com", self.config.account_id, self.config.region)
+        Ok(Self { config, client, registry_url })
     }
 }
 
@@ -91,7 +89,7 @@ impl RegistryProvider for EcrProvider {
         let expires_in = Some(12 * 60 * 60); // 12 hours in seconds
 
         Ok(RegistryCredentials {
-            registry_url: self.get_registry_url(),
+            registry_url: self.registry_url.clone(),
             username,
             password,
             expires_in,
@@ -103,8 +101,6 @@ impl RegistryProvider for EcrProvider {
     }
 
     fn registry_url(&self) -> &str {
-        // Note: We can't return a reference to a temporary string, so we'll need to change this
-        // For now, returning a static string that will be replaced
-        "ecr"
+        &self.registry_url
     }
 }

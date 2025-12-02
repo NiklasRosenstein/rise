@@ -9,17 +9,14 @@ use crate::registry::{RegistryProvider, models::{RegistryCredentials, DockerConf
 /// This provider simply returns the registry URL - no credential generation.
 pub struct DockerProvider {
     config: DockerConfig,
+    registry_url: String,
 }
 
 impl DockerProvider {
     /// Create a new Docker registry provider
     pub fn new(config: DockerConfig) -> Result<Self> {
-        Ok(Self { config })
-    }
-
-    /// Get the registry URL
-    fn get_registry_url(&self) -> String {
-        format!("{}/{}", self.config.registry_url.trim_end_matches('/'), self.config.namespace)
+        let registry_url = format!("{}/{}", config.registry_url.trim_end_matches('/'), config.namespace);
+        Ok(Self { config, registry_url })
     }
 }
 
@@ -30,7 +27,7 @@ impl RegistryProvider for DockerProvider {
 
         // Return registry URL - credentials assumed to be configured via docker login
         Ok(RegistryCredentials {
-            registry_url: self.get_registry_url(),
+            registry_url: self.registry_url.clone(),
             username: String::new(),  // Empty - docker CLI uses stored credentials
             password: String::new(),  // Empty - docker CLI uses stored credentials
             expires_in: None,
@@ -42,6 +39,6 @@ impl RegistryProvider for DockerProvider {
     }
 
     fn registry_url(&self) -> &str {
-        "docker"
+        &self.registry_url
     }
 }
