@@ -4,12 +4,12 @@ port = 3000
 public_url = "http://localhost:3000"
 
 [auth]
-secret = "super-secret-key-for-development"
+issuer = "http://localhost:5556/dex"
+client_id = "rise-backend"
+client_secret = "rise-backend-secret"
 
-[pocketbase]
-url = "http://pocketbase:8090"
-service_email = "rise@rise-backend.svc.local"
-service_password = "change-me-in-production"
+[database]
+url = "postgres://rise:rise123@localhost:5432/rise"
 
 # Container registry configuration (optional)
 # Uncomment and configure ONE of the following registry providers:
@@ -23,7 +23,7 @@ service_password = "change-me-in-production"
 # # access_key_id = "AKIAIOSFODNN7EXAMPLE"
 # # secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 
-# Generic Docker Registry Example (assumes user is authenticated via 'docker login'):
+# Docker registry for local development
 [registry]
 type = "docker"
 registry_url = "localhost:5000"

@@ -1,7 +1,10 @@
-[pocketbase]
-url = "http://pocketbase:8090"
+[auth]
+issuer = "http://dex:5556/dex"
 
-# Docker registry for local development
+[database]
+url = "postgres://rise:rise123@postgres:5432/rise"
+
+# Docker registry for containerized deployment
 [registry]
 type = "docker"
 registry_url = "registry:5000"
