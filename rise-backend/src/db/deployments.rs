@@ -1,7 +1,6 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 use anyhow::{Result, Context};
-use chrono::{DateTime, Utc};
 
 use crate::db::models::{Deployment, DeploymentStatus};
 
