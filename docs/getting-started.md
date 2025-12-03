@@ -13,7 +13,8 @@ docker compose up -d
 
 This starts:
 - **Backend API**: http://localhost:3000
-- **PocketBase**: http://localhost:8090
+- **PostgreSQL**: localhost:5432
+- **Dex Auth**: http://localhost:5556/dex
 
 ## Build CLI
 
@@ -51,12 +52,13 @@ Default credentials: `test@example.com` / `test1234`
 
 ## Development Database
 
-Database stored in `pb_data/` (gitignored). To reset:
+Database stored in PostgreSQL Docker volume. To reset:
 
 ```bash
-docker compose down
-rm -rf pb_data/
+docker compose down -v  # -v removes volumes
 docker compose up -d
+cd rise-backend
+sqlx migrate run
 ```
 
-PocketBase will recreate from migrations in `pb_migrations/`.
+SQLX will apply all migrations from `rise-backend/migrations/`.

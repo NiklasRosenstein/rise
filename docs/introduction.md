@@ -20,9 +20,9 @@ Rise is a Rust-based platform for deploying containerized applications with mini
 │  rise-backend   │  ← Axum REST API
 └──────┬──────────┘
        │
-┌──────▼──────────┐
-│   PocketBase    │  ← Database & Auth
-└─────────────────┘
+┌──────▼──────────┬──────────────┐
+│   PostgreSQL    │     Dex      │  ← Database & Auth
+└─────────────────┴──────────────┘
 ```
 
 ## Current Status

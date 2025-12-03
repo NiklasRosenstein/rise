@@ -72,7 +72,8 @@ docker-compose up -d
 ```
 
 This starts:
-- PocketBase (port 8090)
+- PostgreSQL (port 5432)
+- Dex (port 5556)
 - Rise backend (port 3000)
 - Docker registry (port 5000)
 

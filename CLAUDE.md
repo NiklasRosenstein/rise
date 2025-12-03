@@ -54,18 +54,18 @@ Let's outline the architecture and components needed for this Rust-based project
 ## Architecture Overview
 
 1. **Backend Service**:
-   - **Authentication Module**: Integrates with **Pocketbase** for user management and authentication. Handles local authentication and OIDC via Pocketbase's capabilities.
-   - **Project Management Module**: Manages project creation, listing, and ownership using **Pocketbase** as the data store.
+   - **Authentication Module**: Uses **PostgreSQL** database with **Dex OAuth2/OIDC** for user management and authentication. Handles JWT validation from Dex.
+   - **Project Management Module**: Manages project creation, listing, and ownership using **PostgreSQL** as the data store.
    - **Container Registry Module**: Generates temporary credentials for pushing images to a container registry that
       the CLI can use. The container registry itself is out of scope, but access to a container registry with
       permissions to manage credentials will be supplied to the backend.
    - **Deployment Module**: Interfaces with Kubernetes (and future runtimes) to deploy applications.
    - **API Layer**: Exposes RESTful endpoints for the CLI to interact with.
    - **Configuration Module**: Handles deserialization and validation of the backend server configuration.
-   - **Database**: **Pocketbase** is used as the primary database and authentication provider. We utilize Pocketbase's automatic migrations and the `pocketbase-rs` library for interaction.
+   - **Database**: **PostgreSQL** is used as the primary database with **SQLX** for compile-time verified queries and migrations. **Dex** handles OAuth2/OIDC authentication.
 
 2. **CLI Tool**:
-    - **Authentication Commands**: Implements the `login` command to authenticate users against the backend (which proxies/delegates to Pocketbase).
+    - **Authentication Commands**: Implements the `login` command to authenticate users against the backend (which authenticates via Dex OAuth2/OIDC).
     - **Project Commands**: Implements `create`, `ls`, and other project management commands.
     - **Build Module**: Supports building container images using buildpacks, nixpacks, and Dockerfiles.
     - **Deployment Commands**: Implements the `deploy` command to build, push, and deploy applications.
@@ -75,10 +75,10 @@ Let's outline the architecture and components needed for this Rust-based project
 
 1. **Set Up the Backend**:
    - [x] Initialize a new Rust project for the backend using `cargo new rise-backend`.
-   - [x] **Infrastructure**: Create a `docker-compose.yml` to run a local Pocketbase instance.
-   - [x] **Database & Auth**: Integrate `pocketbase-rs` to communicate with the Pocketbase instance.
-   - [x] Implement the authentication module wrapping Pocketbase auth.
-   - [x] Create the project management module using Pocketbase collections.
+   - [x] **Infrastructure**: Create a `docker-compose.yml` to run local PostgreSQL and Dex instances.
+   - [x] **Database & Auth**: Integrate SQLX for PostgreSQL and implement JWT validation for Dex.
+   - [x] Implement the authentication module with Dex OAuth2/OIDC integration.
+   - [x] Create the project management module using PostgreSQL with SQLX migrations.
    - [ ] Integrate with a container registry to generate temporary credentials.
    - [ ] Implement the deployment module to interface with Kubernetes.
    - [x] Set up the API layer using a web framework like Actix-web or Rocket (using Axum).

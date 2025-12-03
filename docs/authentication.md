@@ -1,6 +1,6 @@
 # Authentication
 
-Rise uses JWT tokens issued by PocketBase.
+Rise uses JWT tokens issued by Dex OAuth2/OIDC.
 
 ## Device Flow (Recommended)
 

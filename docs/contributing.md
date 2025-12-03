@@ -40,10 +40,15 @@ cargo build --bin rise-cli
 
 ### Schema Changes
 
-1. Access PocketBase Admin UI: http://localhost:8090/_/
-2. Modify collections (projects, teams, etc.)
-3. PocketBase auto-generates migrations in `pb_migrations/`
-4. Review and commit migration files
+1. Create a new SQLX migration:
+   ```bash
+   cd rise-backend
+   sqlx migrate add <migration_name>
+   ```
+2. Edit the migration file in `migrations/`
+3. Run migrations: `sqlx migrate run`
+4. Update SQLX cache: `cargo sqlx prepare`
+5. Review and commit migration files
 
 ## Code Style
 
@@ -69,9 +74,9 @@ cargo build --bin rise-cli
 cd rise-backend && cargo test
 
 # Full integration test
-docker compose down
-rm -rf pb_data/
+docker compose down -v  # -v removes volumes
 docker compose up -d
+cd rise-backend && sqlx migrate run && cd ..
 ./target/debug/rise-cli login --email test@example.com --password test1234
 ./target/debug/rise-cli project create test-app
 ```

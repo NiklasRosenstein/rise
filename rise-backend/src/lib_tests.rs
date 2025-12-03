@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::settings::{Settings, ServerSettings, AuthSettings, PocketbaseSettings};
+    use crate::settings::{Settings, ServerSettings, AuthSettings, DatabaseSettings};
 
     #[tokio::test]
     async fn test_router_builds_without_panic() {
@@ -15,20 +15,22 @@ mod tests {
                 public_url: "http://localhost:3000".to_string(),
             },
             auth: AuthSettings {
-                secret: "test-secret-key".to_string(),
+                issuer: "http://localhost:5556/dex".to_string(),
+                client_id: "rise-backend".to_string(),
+                client_secret: "test-secret".to_string(),
             },
-            pocketbase: PocketbaseSettings {
-                url: "http://localhost:8090".to_string(),
+            database: DatabaseSettings {
+                url: "postgres://rise:rise123@localhost:5432/rise".to_string(),
             },
             registry: None,
         };
 
-        // This test requires pocketbase to be running
-        // Skip if pocketbase is not available
+        // This test requires PostgreSQL and Dex to be running
+        // Skip if database is not available
         let state = match crate::state::AppState::new(&settings).await {
             Ok(s) => s,
             Err(e) => {
-                eprintln!("Skipping test - Pocketbase not available: {}", e);
+                eprintln!("Skipping test - Database/Auth not available: {}", e);
                 return;
             }
         };

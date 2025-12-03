@@ -5,12 +5,12 @@
 ### rise-backend
 
 Axum-based REST API handling:
-- Authentication (JWT validation via PocketBase)
+- Authentication (JWT validation via Dex OAuth2/OIDC)
 - Project/team CRUD with ownership model
 - Registry credential generation
 - Future: Build orchestration, deployments
 
-**Tech:** Rust, Axum, PocketBase SDK, AWS SDK
+**Tech:** Rust, Axum, SQLX, PostgreSQL, AWS SDK
 
 ### rise-cli
 
@@ -21,15 +21,23 @@ Command-line interface for:
 
 **Tech:** Rust, Clap, Reqwest
 
-### PocketBase
+### PostgreSQL
 
-Embedded database and auth provider:
-- User authentication with JWT tokens
-- Collections for projects, teams, users
-- Auto-generated migrations
-- Admin UI at http://localhost:8090/_/
+Relational database for persistent storage:
+- Tables for users, projects, teams, deployments
+- Managed via SQLX migrations
+- Connection pooling via sqlx::PgPool
+- Compile-time verified queries
 
-**Schema:** `pb_migrations/*.js`
+**Schema:** `rise-backend/migrations/*.sql`
+
+### Dex
+
+OAuth2/OIDC authentication provider:
+- JWT token issuance
+- Device flow and password authentication
+- JWKS endpoint for token validation
+- Configured via dex/config.yaml
 
 ## Request Flow
 
@@ -39,9 +47,9 @@ Embedded database and auth provider:
 └────┬─────┘
      │ 1. POST /login
      ▼
-┌─────────────┐      2. Validate      ┌────────────┐
-│ rise-backend├──────credentials──────►│ PocketBase │
-└────┬────────┘      3. Return JWT     └────────────┘
+┌─────────────┐      2. OAuth2 flow    ┌─────┐
+│ rise-backend├──────credentials────────►│ Dex │
+└────┬────────┘      3. Return JWT      └─────┘
      │ 4. Return token to CLI
      ▼
 ┌──────────┐
@@ -55,14 +63,14 @@ Subsequent requests:
 └────┬─────┘
      │ GET /projects
      ▼
-┌─────────────┐      Validate token    ┌────────────┐
-│ rise-backend├──────via /auth-────────►│ PocketBase │
-└────┬────────┘      refresh            └────────────┘
+┌─────────────┐      Validate token    ┌─────┐
+│ rise-backend├──────via JWKS──────────►│ Dex │
+└────┬────────┘                         └─────┘
      │
      │ Query database
      ▼
 ┌────────────┐
-│ PocketBase │
+│ PostgreSQL │
 │  Database  │
 └────────────┘
 ```
@@ -70,13 +78,13 @@ Subsequent requests:
 ## Security Model
 
 **Token Validation:**
-All protected endpoints validate JWT by calling PocketBase's `/auth-refresh` endpoint before processing requests.
+All protected endpoints validate JWT tokens by verifying signatures against Dex's JWKS endpoint. The middleware extracts user information from validated tokens.
 
 **Ownership:**
-Projects have `owner_user` or `owner_team`. PocketBase rules enforce that only owners can modify/delete.
+Projects have `owner_user_id` or `owner_team_id`. Database queries and application logic enforce that only owners can modify/delete resources.
 
-**Workaround:**
-Currently, after validating the JWT, backend uses hardcoded credentials to interact with PocketBase SDK. This is temporary—SDK doesn't support token-based auth yet.
+**Authorization:**
+The backend uses database-level checks to verify ownership and team membership before allowing operations on protected resources.
 
 ## Extension Points
 

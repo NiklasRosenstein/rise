@@ -5,9 +5,10 @@ A Rust-based platform for deploying containerized applications to Kubernetes and
 ## Overview
 
 Rise consists of:
-- **rise-backend**: REST API backend built with Axum and PocketBase
+- **rise-backend**: REST API backend built with Axum, PostgreSQL, and Dex OAuth2/OIDC
 - **rise-cli**: Command-line interface for managing projects and teams
-- **PocketBase**: Database and authentication provider
+- **PostgreSQL**: Primary database with SQLX migrations
+- **Dex**: OAuth2/OIDC authentication provider
 
 ## Quick Start
 
@@ -22,7 +23,7 @@ Rise consists of:
 **Option 1: Using Procfile (Recommended for Development)**
 
 ```bash
-# Start all services with overmind (pocketbase, registry, backend)
+# Start all services with overmind (postgres, dex, registry, backend)
 overmind start
 
 # Or start individual services
@@ -32,7 +33,7 @@ mise run rise-backend
 **Option 2: Using Docker Compose Only**
 
 ```bash
-# Start supporting services (PocketBase + Registry)
+# Start supporting services (PostgreSQL + Dex + Registry)
 docker compose up -d
 
 # Backend runs locally via mise
@@ -41,23 +42,25 @@ mise run rise-backend
 
 Services will be available at:
 - **Backend API**: http://localhost:3000
-- **PocketBase Admin UI**: http://localhost:8090/_/
-- **PocketBase API**: http://localhost:8090/api/
+- **Dex Auth**: http://localhost:5556/dex
+- **PostgreSQL**: localhost:5432
 - **Docker Registry**: http://localhost:5000
 
 ### Default Credentials
 
 The development environment includes pre-configured test accounts:
 
-#### PocketBase Admin
-- **Email**: `admin@example.com`
-- **Password**: `admin123`
-- **Access**: Full admin access to PocketBase Admin UI
+#### PostgreSQL
+- **Host**: `localhost`
+- **Port**: `5432`
+- **Database**: `rise`
+- **Username**: `rise`
+- **Password**: `rise123`
 
-#### Test User
+#### Dex Test User
 - **Email**: `test@example.com`
 - **Password**: `test1234`
-- **Access**: Regular user for testing authentication
+- **Access**: Regular user for testing OAuth2 authentication
 
 > **Note**: These credentials are for development only. Change them for production deployments via environment variables in `docker-compose.yml`.
 
@@ -210,11 +213,8 @@ rise/
 │       ├── login.rs      # Device flow & password auth
 │       ├── team.rs       # Team commands
 │       └── main.rs       # CLI entry point
-├── dev/pocketbase/       # PocketBase container setup
-│   ├── README.md         # Detailed PocketBase docs
-│   └── entrypoint.sh     # Auto-init script
-├── pb_migrations/        # PocketBase schema migrations
-└── docker-compose.yml    # Development services
+├── migrations/           # SQLX PostgreSQL migrations
+└── docker-compose.yml    # Development services (PostgreSQL, Dex, Registry)
 ```
 
 ### Working with the Backend
@@ -232,39 +232,45 @@ cargo run
 cargo test
 ```
 
-The backend uses PocketBase for:
-- User authentication (JWT tokens)
-- Database (teams, projects collections)
-- Admin UI for data management
+The backend uses:
+- **PostgreSQL** for persistent data storage (users, teams, projects, deployments)
+- **Dex** for OAuth2/OIDC authentication (JWT tokens)
+- **SQLX** for compile-time verified queries and migrations
 
-**Configuration**: The backend uses `config/local.toml` for local development overrides (gitignored). This file is auto-created when you first run via mise and points to localhost services instead of Docker service names.
+**Configuration**: The backend uses `config/local.toml` for local development overrides (gitignored).
 
-### Working with PocketBase
+### Working with PostgreSQL
 
-See [dev/pocketbase/README.md](dev/pocketbase/README.md) for detailed information about:
-- Accessing the Admin UI
-- Managing collections and migrations
-- Configuring API rules
-- Troubleshooting
+The backend uses SQLX for database management:
 
-### Making Schema Changes
+**Connecting to PostgreSQL**:
+```bash
+psql postgres://rise:rise123@localhost:5432/rise
+```
 
-1. Access PocketBase Admin UI at http://localhost:8090/_/
-2. Modify collections (teams, projects, etc.)
-3. PocketBase auto-generates migration files in `pb_migrations/`
-4. Review and commit the migration files to git
+**Creating Migrations**:
+```bash
+cd rise-backend
+sqlx migrate add <migration_name>
+# Edit the generated migration file in migrations/
+sqlx migrate run
+```
+
+**Updating SQLX Cache** (after schema changes):
+```bash
+cargo sqlx prepare
+```
 
 ### Database
 
-The development database is stored in `pb_data/` (gitignored). To reset:
+The PostgreSQL data is stored in a Docker volume. To reset:
 
 ```bash
-docker compose down
-rm -rf pb_data/
+docker compose down -v  # -v removes volumes
 docker compose up -d
+cd rise-backend
+sqlx migrate run        # Apply all migrations
 ```
-
-PocketBase will re-create the database and apply all migrations from `pb_migrations/`.
 
 ## API Authentication
 
@@ -299,11 +305,12 @@ With an invalid/expired token:
 |----------|---------|-------------|
 | `RISE_SERVER__HOST` | `0.0.0.0` | Server bind address |
 | `RISE_SERVER__PORT` | `3000` | Server port |
+| `RISE_DATABASE__URL` | - | PostgreSQL connection string |
+| `RISE_AUTH__ISSUER` | - | Dex issuer URL |
+| `RISE_AUTH__CLIENT_ID` | - | Dex client ID |
+| `RISE_AUTH__CLIENT_SECRET` | - | Dex client secret |
 | `RUST_LOG` | `info` | Log level (error/warn/info/debug/trace) |
-
-### PocketBase
-
-See [dev/pocketbase/README.md](dev/pocketbase/README.md#environment-variables) for PocketBase-specific variables.
+| `DATABASE_URL` | - | PostgreSQL connection for SQLX migrations |
 
 ## Troubleshooting
 
@@ -311,20 +318,31 @@ See [dev/pocketbase/README.md](dev/pocketbase/README.md#environment-variables) f
 
 This was a bug in early versions. Ensure you're running the latest code where all team endpoints validate JWT tokens before database queries.
 
-### PocketBase migration errors
+### SQLX migration errors
 
-Check that `pb_migrations/` is properly mounted and files are valid JavaScript:
+Check that migrations have been applied:
 
 ```bash
-docker compose logs pocketbase | grep migration
+cd rise-backend
+sqlx migrate info
+sqlx migrate run
 ```
 
-### Backend can't connect to PocketBase
+### Backend can't connect to PostgreSQL
 
-Verify PocketBase is healthy:
+Verify PostgreSQL is running and accessible:
 
 ```bash
-curl http://localhost:8090/api/health
+psql postgres://rise:rise123@localhost:5432/rise -c "SELECT 1;"
+docker compose ps postgres
+```
+
+### Dex authentication errors
+
+Verify Dex is running:
+
+```bash
+curl http://localhost:5556/dex/.well-known/openid-configuration
 ```
 
 ## Contributing
