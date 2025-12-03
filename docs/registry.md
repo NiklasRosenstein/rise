@@ -73,7 +73,7 @@ docker-compose up -d
 
 This starts:
 - PocketBase (port 8090)
-- Rise backend (port 3001)
+- Rise backend (port 3000)
 - Docker registry (port 5000)
 
 **2. Backend is configured via `rise-backend/config/production.toml`:**

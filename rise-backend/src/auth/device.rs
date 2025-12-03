@@ -203,20 +203,18 @@ pub async fn device_authorize(
     Query(query): Query<DeviceAuthorizeQuery>,
     Json(payload): Json<DeviceAuthorizeRequest>,
 ) -> Result<StatusCode, (StatusCode, String)> {
-    // Authenticate with PocketBase
-    let pb_client = state.pb_client.as_ref();
-    let authenticated_client = pb_client
-        .auth_with_password("users", &payload.identity, &payload.password)
+    // Authenticate with Dex OAuth2
+    let token_info = state
+        .oauth_client
+        .password_grant(&payload.identity, &payload.password)
+        .await
         .map_err(|e| (StatusCode::UNAUTHORIZED, format!("Authentication failed: {}", e)))?;
 
-    // Get user info to extract username
+    // Get user email from payload
     let user_email = payload.identity.clone();
 
-    // Get token from authenticated client
-    let token = authenticated_client.auth_token.ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Failed to get token from authenticated client".to_string(),
-    ))?;
+    // Use the id_token
+    let token = token_info.id_token;
 
     // Update device authorization
     let mut store = DEVICE_STORE.write().await;

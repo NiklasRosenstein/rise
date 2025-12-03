@@ -1,0 +1,28 @@
+issuer: http://localhost:5556/dex
+
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+staticClients:
+- id: rise-backend
+  redirectURIs:
+  - http://localhost:3000/auth/callback
+  name: 'Rise Backend'
+  secret: rise-backend-secret
+  public: false
+
+enablePasswordDB: true
+staticPasswords:
+- email: admin@example.com
+  hash: $2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W
+  username: admin
+  userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
+
+oauth2:
+  skipApprovalScreen: true
+  passwordConnector: local

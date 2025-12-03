@@ -51,17 +51,7 @@ pub async fn handle_deploy(
     info!("Deployment ID: {}", deployment_info.deployment_id);
     info!("Image tag: {}", deployment_info.image_tag);
 
-    // Step 2: Update status to 'building'
-    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Building", None).await?;
-
-    // Step 3: Build image with buildpacks
-    info!("Building image with buildpacks: {}", deployment_info.image_tag);
-    if let Err(e) = build_image_with_buildpacks(path, &deployment_info.image_tag) {
-        update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Failed", Some(&e.to_string())).await?;
-        return Err(e);
-    }
-
-    // Step 4: Login to registry if credentials provided
+    // Step 2: Login to registry if credentials provided (needed for pack --publish)
     if !deployment_info.credentials.username.is_empty() {
         info!("Logging into registry");
         if let Err(e) = docker_login(
@@ -74,17 +64,17 @@ pub async fn handle_deploy(
         }
     }
 
-    // Step 5: Update status to 'pushing'
-    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Pushing", None).await?;
+    // Step 3: Update status to 'building'
+    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Building", None).await?;
 
-    // Step 6: Push image
-    info!("Pushing image to registry");
-    if let Err(e) = docker_push(&deployment_info.image_tag) {
+    // Step 4: Build and push image with buildpacks (--publish handles both)
+    info!("Building and publishing image with buildpacks: {}", deployment_info.image_tag);
+    if let Err(e) = build_image_with_buildpacks(path, &deployment_info.image_tag) {
         update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Failed", Some(&e.to_string())).await?;
         return Err(e);
     }
 
-    // Step 7: Mark as completed
+    // Step 5: Mark as completed
     update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Completed", None).await?;
 
     info!("✓ Successfully deployed {} to {}", project_name, deployment_info.image_tag);
@@ -190,7 +180,9 @@ fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
         .arg("--docker-host")
         .arg("inherit")
         .arg("--builder")
-        .arg("paketobuildpacks/builder:base");
+        .arg("paketobuildpacks/builder:base")
+        .arg("--publish")
+        .env("DOCKER_API_VERSION", "1.44");
 
     debug!("Executing command: {:?}", cmd);
 
@@ -231,18 +223,3 @@ fn docker_login(registry: &str, username: &str, password: &str) -> Result<()> {
     Ok(())
 }
 
-fn docker_push(image_tag: &str) -> Result<()> {
-    debug!("Executing: docker push {}", image_tag);
-
-    let status = Command::new("docker")
-        .arg("push")
-        .arg(image_tag)
-        .status()
-        .context("Failed to execute docker push")?;
-
-    if !status.success() {
-        bail!("docker push failed with status: {}", status);
-    }
-
-    Ok(())
-}

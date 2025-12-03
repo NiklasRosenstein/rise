@@ -13,6 +13,24 @@ impl Default for ProjectVisibility {
     }
 }
 
+impl From<crate::db::models::ProjectVisibility> for ProjectVisibility {
+    fn from(visibility: crate::db::models::ProjectVisibility) -> Self {
+        match visibility {
+            crate::db::models::ProjectVisibility::Public => ProjectVisibility::Public,
+            crate::db::models::ProjectVisibility::Private => ProjectVisibility::Private,
+        }
+    }
+}
+
+impl From<ProjectVisibility> for crate::db::models::ProjectVisibility {
+    fn from(visibility: ProjectVisibility) -> Self {
+        match visibility {
+            ProjectVisibility::Public => crate::db::models::ProjectVisibility::Public,
+            ProjectVisibility::Private => crate::db::models::ProjectVisibility::Private,
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub enum ProjectStatus {
     Running,
@@ -24,6 +42,28 @@ pub enum ProjectStatus {
 impl Default for ProjectStatus {
     fn default() -> Self {
         ProjectStatus::Stopped
+    }
+}
+
+impl From<crate::db::models::ProjectStatus> for ProjectStatus {
+    fn from(status: crate::db::models::ProjectStatus) -> Self {
+        match status {
+            crate::db::models::ProjectStatus::Running => ProjectStatus::Running,
+            crate::db::models::ProjectStatus::Stopped => ProjectStatus::Stopped,
+            crate::db::models::ProjectStatus::Deploying => ProjectStatus::Deploying,
+            crate::db::models::ProjectStatus::Failed => ProjectStatus::Failed,
+        }
+    }
+}
+
+impl From<ProjectStatus> for crate::db::models::ProjectStatus {
+    fn from(status: ProjectStatus) -> Self {
+        match status {
+            ProjectStatus::Running => crate::db::models::ProjectStatus::Running,
+            ProjectStatus::Stopped => crate::db::models::ProjectStatus::Stopped,
+            ProjectStatus::Deploying => crate::db::models::ProjectStatus::Deploying,
+            ProjectStatus::Failed => crate::db::models::ProjectStatus::Failed,
+        }
     }
 }
 

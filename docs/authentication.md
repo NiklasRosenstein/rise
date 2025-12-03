@@ -26,7 +26,7 @@ Tokens stored in `~/.config/rise/config.json`:
 
 ```json
 {
-  "backend_url": "http://127.0.0.1:3001",
+  "backend_url": "http://127.0.0.1:3000",
   "token": "eyJhbG..."
 }
 ```
@@ -36,7 +36,7 @@ Tokens stored in `~/.config/rise/config.json`:
 All endpoints require `Authorization: Bearer <token>`:
 
 ```bash
-curl http://localhost:3001/projects \
+curl http://localhost:3000/projects \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 

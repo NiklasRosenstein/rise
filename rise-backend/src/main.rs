@@ -21,5 +21,8 @@ async fn main() {
         }
     };
 
-    let _ = run(settings).await;
+    if let Err(e) = run(settings).await {
+        tracing::error!("Application error: {}", e);
+        std::process::exit(1);
+    }
 }

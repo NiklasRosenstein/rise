@@ -1,41 +1,68 @@
 use axum::{
     Json,
-    extract::{State, Query},
+    extract::{State, Query, Extension},
     http::StatusCode,
 };
 
 use crate::state::AppState;
+use crate::db::models::User;
+use crate::db::{projects, teams as db_teams};
 use super::models::{GetRegistryCredsRequest, GetRegistryCredsResponse};
+use uuid::Uuid;
+
+/// Check if user has permission to deploy to the project
+async fn check_deploy_permission(
+    state: &AppState,
+    project: &crate::db::models::Project,
+    user_id: Uuid,
+) -> Result<(), String> {
+    // If project is owned by the user directly, allow
+    if let Some(owner_user_id) = project.owner_user_id {
+        if owner_user_id == user_id {
+            return Ok(());
+        }
+    }
+
+    // If project is owned by a team, check if user is an owner of that team
+    if let Some(team_id) = project.owner_team_id {
+        let is_owner = db_teams::is_owner(&state.db_pool, team_id, user_id)
+            .await
+            .map_err(|e| format!("Failed to check team ownership: {}", e))?;
+
+        if is_owner {
+            return Ok(());
+        }
+
+        let team = db_teams::find_by_id(&state.db_pool, team_id)
+            .await
+            .map_err(|e| format!("Failed to fetch team: {}", e))?
+            .ok_or_else(|| "Team not found".to_string())?;
+
+        return Err(format!(
+            "You must be an owner of team '{}' to deploy to this project",
+            team.name
+        ));
+    }
+
+    Err("You do not have permission to deploy to this project".to_string())
+}
 
 /// Get registry credentials for a project
 pub async fn get_registry_credentials(
     State(state): State<AppState>,
+    Extension(user): Extension<User>,
     Query(params): Query<GetRegistryCredsRequest>,
-    headers: axum::http::HeaderMap,
 ) -> Result<Json<GetRegistryCredsResponse>, (StatusCode, String)> {
-    // Extract and validate JWT token from Authorization header
-    let auth_header = headers
-        .get("authorization")
-        .and_then(|h| h.to_str().ok())
-        .ok_or((StatusCode::UNAUTHORIZED, "Unauthorized: No authentication token provided".to_string()))?;
-
-    let token = auth_header
-        .strip_prefix("Bearer ")
-        .ok_or((StatusCode::UNAUTHORIZED, "Unauthorized: Invalid Authorization header format".to_string()))?;
-
-    // Validate token with PocketBase
-    let user_info_url = format!("{}/api/collections/users/auth-refresh", state.settings.pocketbase.url);
-    let http_client = reqwest::Client::new();
-    let response = http_client
-        .post(&user_info_url)
-        .header("Authorization", token)
-        .send()
+    // Query project by name
+    let project = projects::find_by_name(&state.db_pool, &params.project)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to verify token: {}", e)))?;
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to query project: {}", e)))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Project '{}' not found", params.project)))?;
 
-    if !response.status().is_success() {
-        return Err((StatusCode::UNAUTHORIZED, "Unauthorized: Invalid or expired token".to_string()));
-    }
+    // Check if user has permission to deploy to this project
+    check_deploy_permission(&state, &project, user.id)
+        .await
+        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
 
     // Check if registry is configured
     let registry_provider = state.registry_provider.as_ref()

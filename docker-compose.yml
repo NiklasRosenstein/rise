@@ -26,12 +26,14 @@ services:
     image: dexidp/dex:v2.37.0
     container_name: rise-dex
     restart: unless-stopped
+    user: "0:0"
     ports:
       - "5556:5556"
     volumes:
-      - ./dev/dex/config.yaml:/etc/dex/config.yaml:ro
+      - ./dev/dex:/dex-config
       - dex_data:/var/dex
-    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    entrypoint: ["/usr/local/bin/dex"]
+    command: ["serve", "/dex-config/config.yaml"]
     healthcheck:
       test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5556/dex/healthz"]
       interval: 5s

@@ -12,7 +12,7 @@ docker compose up -d
 ```
 
 This starts:
-- **Backend API**: http://localhost:3001
+- **Backend API**: http://localhost:3000
 - **PocketBase**: http://localhost:8090
 
 ## Build CLI

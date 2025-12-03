@@ -1,6 +1,7 @@
 use clap::{Parser, Subcommand};
 use anyhow::Result;
 use reqwest::Client;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod config;
 mod login;
@@ -19,6 +20,9 @@ pub struct Cli {
 enum Commands {
     /// Authenticate with the Rise backend
     Login {
+        /// Backend URL to authenticate with
+        #[arg(long)]
+        url: Option<String>,
         /// Email for password authentication
         #[arg(long)]
         email: Option<String>,
@@ -151,26 +155,37 @@ enum TeamCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Initialize tracing
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
+
     let cli = Cli::parse();
     let http_client = Client::new();
     let mut config = config::Config::load()?;
     let backend_url = config.get_backend_url();
 
     match &cli.command {
-        Commands::Login { email, password } => {
+        Commands::Login { url, email, password } => {
+            // Use provided URL or fall back to config default
+            let login_url = url.as_deref().unwrap_or(&backend_url);
+
             match (email, password) {
                 (Some(email), Some(pass)) => {
                     // Password flow: both email and password provided
-                    login::handle_password_login(&http_client, &backend_url, email, pass, &mut config).await?;
+                    login::handle_password_login(&http_client, login_url, email, pass, &mut config, url.as_deref()).await?;
                 }
                 (Some(email), None) => {
                     // Password flow: prompt for password
                     let pass = rpassword::prompt_password("Password: ")?;
-                    login::handle_password_login(&http_client, &backend_url, email, &pass, &mut config).await?;
+                    login::handle_password_login(&http_client, login_url, email, &pass, &mut config, url.as_deref()).await?;
                 }
                 (None, _) => {
                     // Browser flow: no email provided, use device flow
-                    login::handle_device_login(&http_client, &backend_url, &mut config).await?;
+                    login::handle_device_login(&http_client, login_url, &mut config, url.as_deref()).await?;
                 }
             }
         }

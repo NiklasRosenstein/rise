@@ -73,10 +73,16 @@ impl Config {
         self.token.as_deref()
     }
 
+    /// Set the backend URL
+    pub fn set_backend_url(&mut self, url: String) -> Result<()> {
+        self.backend_url = Some(url);
+        self.save()
+    }
+
     /// Get the backend URL (with default fallback)
     pub fn get_backend_url(&self) -> String {
         self.backend_url
             .clone()
-            .unwrap_or_else(|| "http://127.0.0.1:3001".to_string())
+            .unwrap_or_else(|| "http://127.0.0.1:3000".to_string())
     }
 }

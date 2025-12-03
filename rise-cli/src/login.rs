@@ -11,6 +11,7 @@ pub async fn handle_password_login(
     username: &str,
     password: &str,
     config: &mut Config,
+    url_to_save: Option<&str>,
 ) -> Result<()> {
     #[derive(Debug, Serialize)]
     struct LoginRequest {
@@ -42,6 +43,12 @@ pub async fn handle_password_login(
     if response.status().is_success() {
         let login_response: LoginResponse = response.json().await.context("Failed to decode login response")?;
 
+        // Store the backend URL if provided
+        if let Some(url) = url_to_save {
+            config.set_backend_url(url.to_string())
+                .context("Failed to save backend URL")?;
+        }
+
         // Store the token
         config.set_token(login_response.token)
             .context("Failed to save authentication token")?;
@@ -62,6 +69,7 @@ pub async fn handle_device_login(
     http_client: &Client,
     backend_url: &str,
     config: &mut Config,
+    url_to_save: Option<&str>,
 ) -> Result<()> {
     #[derive(Debug, Deserialize)]
     struct DeviceInitResponse {
@@ -130,6 +138,12 @@ pub async fn handle_device_login(
 
         match response {
             DevicePollResponse::Authorized { token, username } => {
+                // Store the backend URL if provided
+                if let Some(url) = url_to_save {
+                    config.set_backend_url(url.to_string())
+                        .context("Failed to save backend URL")?;
+                }
+
                 config.set_token(token)
                     .context("Failed to save authentication token")?;
                 println!("\n✓ Login successful! Welcome back, {}!", username);

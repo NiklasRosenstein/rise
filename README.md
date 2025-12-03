@@ -174,7 +174,7 @@ Once configured, the registry credentials endpoint will be available:
 
 ```bash
 # Get registry credentials for a project
-curl http://localhost:3001/registry/credentials?project=my-app \
+curl http://localhost:3000/registry/credentials?project=my-app \
   -H "Authorization: Bearer YOUR_TOKEN_HERE"
 ```
 
@@ -272,12 +272,12 @@ All team management endpoints require JWT authentication:
 
 ```bash
 # Get auth token
-curl -X POST http://localhost:3001/login \
+curl -X POST http://localhost:3000/login \
   -H "Content-Type: application/json" \
   -d '{"username":"test@example.com","password":"test1234"}'
 
 # Use token in requests
-curl http://localhost:3001/teams \
+curl http://localhost:3000/teams \
   -H "Authorization: Bearer YOUR_TOKEN_HERE"
 ```
 
