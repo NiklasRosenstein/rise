@@ -227,8 +227,6 @@ async fn expand_project_with_owner(
         owner: owner_info,
         created: project.created_at.to_rfc3339(),
         updated: project.updated_at.to_rfc3339(),
-        collection_id: "projects".to_string(),
-        collection_name: "projects".to_string(),
     })
 }
 
@@ -303,8 +301,6 @@ async fn resolve_project(
 fn convert_project(project: crate::db::models::Project) -> ApiProject {
     ApiProject {
         id: project.id.to_string(),
-        collectionId: "projects".to_string(),
-        collectionName: "projects".to_string(),
         created: project.created_at.to_rfc3339(),
         updated: project.updated_at.to_rfc3339(),
         name: project.name,

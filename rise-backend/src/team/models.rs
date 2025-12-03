@@ -55,15 +55,11 @@ pub struct Team {
     pub members: Vec<String>,  // User IDs
     #[serde(default)]
     pub owners: Vec<String>,   // User IDs
-    // PocketBase system fields
+    // Timestamps
     #[serde(default)]
     pub created: String,
     #[serde(default)]
     pub updated: String,
-    #[serde(default)]
-    pub collectionId: String,
-    #[serde(default)]
-    pub collectionName: String,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -106,10 +102,6 @@ pub struct TeamWithEmails {
     pub owners: Vec<UserInfo>,
     pub created: String,
     pub updated: String,
-    #[serde(rename = "collectionId")]
-    pub collection_id: String,
-    #[serde(rename = "collectionName")]
-    pub collection_name: String,
 }
 
 // Error response with optional fuzzy match suggestions

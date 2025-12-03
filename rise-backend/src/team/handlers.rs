@@ -452,8 +452,6 @@ async fn expand_team_with_emails(
         owners: owner_infos,
         created: team.created_at.to_rfc3339(),
         updated: team.updated_at.to_rfc3339(),
-        collection_id: "teams".to_string(),
-        collection_name: "teams".to_string(),
     })
 }
 
@@ -533,7 +531,5 @@ fn convert_team(team: crate::db::models::Team, members: Vec<String>, owners: Vec
         owners,
         created: team.created_at.to_rfc3339(),
         updated: team.updated_at.to_rfc3339(),
-        collectionId: "teams".to_string(),
-        collectionName: "teams".to_string(),
     }
 }

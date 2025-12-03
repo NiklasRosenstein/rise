@@ -88,15 +88,11 @@ pub struct Project {
     pub owner_user: Option<String>,  // Relation to users collection
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_team: Option<String>,  // Relation to teams collection
-    // PocketBase system fields
+    // Timestamps
     #[serde(default)]
     pub created: String,
     #[serde(default)]
     pub updated: String,
-    #[serde(default)]
-    pub collectionId: String,
-    #[serde(default)]
-    pub collectionName: String,
 }
 
 impl Project {
@@ -175,10 +171,6 @@ pub struct ProjectWithOwnerInfo {
     pub owner: Option<OwnerInfo>,
     pub created: String,
     pub updated: String,
-    #[serde(rename = "collectionId")]
-    pub collection_id: String,
-    #[serde(rename = "collectionName")]
-    pub collection_name: String,
 }
 
 // Error response with optional fuzzy match suggestions
