@@ -179,8 +179,6 @@ mod tests {
                 owners: vec![],
                 created: String::new(),
                 updated: String::new(),
-                collectionId: String::new(),
-                collectionName: String::new(),
             },
             Team {
                 id: "2".to_string(),
@@ -189,8 +187,6 @@ mod tests {
                 owners: vec![],
                 created: String::new(),
                 updated: String::new(),
-                collectionId: String::new(),
-                collectionName: String::new(),
             },
             Team {
                 id: "3".to_string(),
@@ -199,8 +195,6 @@ mod tests {
                 owners: vec![],
                 created: String::new(),
                 updated: String::new(),
-                collectionId: String::new(),
-                collectionName: String::new(),
             },
         ];
 
@@ -221,8 +215,6 @@ mod tests {
                 owners: vec![],
                 created: String::new(),
                 updated: String::new(),
-                collectionId: String::new(),
-                collectionName: String::new(),
             },
         ];
 
