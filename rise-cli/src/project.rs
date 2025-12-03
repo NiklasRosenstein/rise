@@ -533,55 +533,81 @@ pub async fn list_deployments(
         .await
         .context("Failed to send list deployments request")?;
 
-    if response.status().is_success() {
-        let mut deployments: Vec<Deployment> = response.json().await
-            .context("Failed to parse list deployments response")?;
+    let status = response.status();
 
-        // Apply limit
-        deployments.truncate(limit);
+    if !status.is_success() {
+        // Get error text from response body
+        let error_text = response.text().await
+            .unwrap_or_else(|_| String::new());
 
-        if deployments.is_empty() {
-            println!("No deployments found for project '{}'.", project_name);
-        } else {
-            println!("Deployments for '{}':", project_name);
-            println!("{:<20} {:<15} {:<25} {:<25}", "DEPLOYMENT ID", "STATUS", "CREATED", "COMPLETED");
-            println!("{}", "-".repeat(90));
-            for deployment in deployments {
-                // Parse and format created timestamp
-                let created = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&deployment.created) {
-                    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+        // Provide helpful error messages based on status code
+        match status {
+            reqwest::StatusCode::NOT_FOUND => {
+                if error_text.is_empty() {
+                    anyhow::bail!("Project '{}' not found", project_name);
                 } else {
-                    deployment.created
-                };
-
-                // Parse and format completed timestamp
-                let completed = deployment.completed_at
-                    .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
-                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
-                    .unwrap_or_else(|| "-".to_string());
-
-                println!("{:<20} {:<15} {:<25} {:<25}",
-                    deployment.deployment_id,
-                    format!("{}", deployment.status),
-                    created,
-                    completed
-                );
-
-                // Show error message if failed
-                if let Some(error_msg) = deployment.error_message {
-                    println!("  └─ Error: {}", error_msg);
+                    anyhow::bail!("{}", error_text);
+                }
+            }
+            reqwest::StatusCode::UNAUTHORIZED => {
+                anyhow::bail!("Authentication failed. Please run 'rise login' again.");
+            }
+            reqwest::StatusCode::FORBIDDEN => {
+                if error_text.is_empty() {
+                    anyhow::bail!("You don't have permission to view deployments for project '{}'", project_name);
+                } else {
+                    anyhow::bail!("{}", error_text);
+                }
+            }
+            _ => {
+                if error_text.is_empty() {
+                    anyhow::bail!("Request failed with status {}", status);
+                } else {
+                    anyhow::bail!("Request failed ({}): {}", status, error_text);
                 }
             }
         }
-    } else if response.status() == reqwest::StatusCode::NOT_FOUND {
-        let error_text = response.text().await
-            .unwrap_or_else(|_| "Project not found".to_string());
-        anyhow::bail!("{}", error_text);
+    }
+
+    // Parse response
+    let mut deployments: Vec<Deployment> = response.json().await
+        .context("Failed to parse deployment list response")?;
+
+    // Apply limit
+    deployments.truncate(limit);
+
+    if deployments.is_empty() {
+        println!("No deployments found for project '{}'.", project_name);
     } else {
-        let status = response.status();
-        let error_text = response.text().await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!("Failed to list deployments (status {}): {}", status, error_text);
+        println!("Deployments for '{}':", project_name);
+        println!("{:<20} {:<15} {:<25} {:<25}", "DEPLOYMENT ID", "STATUS", "CREATED", "COMPLETED");
+        println!("{}", "-".repeat(90));
+        for deployment in deployments {
+            // Parse and format created timestamp
+            let created = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&deployment.created) {
+                dt.format("%Y-%m-%d %H:%M:%S").to_string()
+            } else {
+                deployment.created
+            };
+
+            // Parse and format completed timestamp
+            let completed = deployment.completed_at
+                .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+                .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                .unwrap_or_else(|| "-".to_string());
+
+            println!("{:<20} {:<15} {:<25} {:<25}",
+                deployment.deployment_id,
+                format!("{}", deployment.status),
+                created,
+                completed
+            );
+
+            // Show error message if failed
+            if let Some(error_msg) = deployment.error_message {
+                println!("  └─ Error: {}", error_msg);
+            }
+        }
     }
 
     Ok(())
