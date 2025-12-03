@@ -1,21 +1,74 @@
 use crate::settings::{Settings, RegistrySettings};
 use crate::registry::{RegistryProvider, providers::{EcrProvider, DockerProvider}, models::{EcrConfig, DockerConfig}};
+use crate::auth::{jwt::JwtValidator, oauth::DexOAuthClient};
 use std::sync::Arc;
-use pocketbase_sdk::client::Client as PocketbaseClient;
+use anyhow::{Result, Context};
+use sqlx::postgres::PgPoolOptions;
+use sqlx::PgPool;
 
 #[derive(Clone)]
 pub struct AppState {
     pub settings: Arc<Settings>,
     pub http_client: Arc<reqwest::Client>,
-    pub pocketbase_url: String,
-    pub pb_client: Arc<PocketbaseClient>,
+    pub db_pool: PgPool,
+    pub jwt_validator: Arc<JwtValidator>,
+    pub oauth_client: Arc<DexOAuthClient>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
 }
 
 impl AppState {
-    pub async fn new(settings: &Settings) -> Self {
+    /// Run database migrations
+    async fn run_migrations(pool: &PgPool) -> Result<()> {
+        tracing::info!("Running database migrations...");
+        sqlx::migrate!("./migrations")
+            .run(pool)
+            .await
+            .context("Failed to run migrations")?;
+        tracing::info!("Migrations completed successfully");
+        Ok(())
+    }
+
+    /// Wait for PostgreSQL to become available
+    async fn wait_for_postgres(database_url: &str) -> Result<PgPool> {
+        tracing::info!("Connecting to PostgreSQL...");
+
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(database_url)
+            .await
+            .context("Failed to connect to PostgreSQL")?;
+
+        tracing::info!("Successfully connected to PostgreSQL");
+        Ok(pool)
+    }
+
+    pub async fn new(settings: &Settings) -> Result<Self> {
         let http_client = reqwest::Client::new();
-        let pb_client = PocketbaseClient::new(&settings.pocketbase.url);
+
+        // Connect to PostgreSQL
+        let db_pool = Self::wait_for_postgres(&settings.database.url).await?;
+
+        // Run migrations
+        Self::run_migrations(&db_pool).await?;
+
+        // Initialize JWT validator
+        let jwt_validator = Arc::new(JwtValidator::new(
+            settings.auth.issuer.clone(),
+            settings.auth.client_id.clone(),
+        ));
+
+        // Fetch JWKS on startup
+        jwt_validator
+            .init()
+            .await
+            .context("Failed to initialize JWT validator")?;
+
+        // Initialize OAuth2 client
+        let oauth_client = Arc::new(DexOAuthClient::new(
+            settings.auth.issuer.clone(),
+            settings.auth.client_id.clone(),
+            settings.auth.client_secret.clone(),
+        )?);
 
         // Initialize registry provider based on configuration
         let registry_provider: Option<Arc<dyn RegistryProvider>> = if let Some(ref registry_config) = settings.registry {
@@ -60,12 +113,13 @@ impl AppState {
             None
         };
 
-        Self {
+        Ok(Self {
             settings: Arc::new(settings.clone()),
             http_client: Arc::new(http_client),
-            pocketbase_url: settings.pocketbase.url.clone(),
-            pb_client: Arc::new(pb_client),
+            db_pool,
+            jwt_validator,
+            oauth_client,
             registry_provider,
-        }
+        })
     }
 }
