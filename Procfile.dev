@@ -1,4 +1,5 @@
 registry: docker-compose up registry
+registry-ui: docker-compose up registry-ui
 postgres: docker-compose up postgres
 dex: docker-compose up dex
 backend: sleep 2 && mise run backend

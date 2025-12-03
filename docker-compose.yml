@@ -50,3 +50,16 @@ services:
       - registry_data:/var/lib/registry
     environment:
       - REGISTRY_STORAGE_DELETE_ENABLED=true
+
+  registry-ui:
+    image: quiq/registry-ui
+    container_name: rise-registry-ui
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - REGISTRY_HOSTNAME=registry:5000
+      - REGISTRY_INSECURE=true
+      - LISTEN_ADDR=0.0.0.0:8080
+    depends_on:
+      - registry
