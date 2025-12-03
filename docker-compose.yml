@@ -1,20 +1,39 @@
 volumes:
   registry_data:
+  postgres_data:
+  dex_data:
 
 services:
-  pocketbase:
-    build:
-      context: ./dev/pocketbase
-      dockerfile: Dockerfile
-    container_name: rise-pocketbase
+  postgres:
+    image: postgres:16-alpine
+    container_name: rise-postgres
     restart: unless-stopped
     ports:
-      - "8090:8090"
+      - "5432:5432"
     volumes:
-      - ./pb_data:/pb_data
-      - ./pb_migrations:/pb_migrations
+      - postgres_data:/var/lib/postgresql/data
+    environment:
+      - POSTGRES_USER=${POSTGRES_USER:-rise}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-rise123}
+      - POSTGRES_DB=${POSTGRES_DB:-rise}
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8090/api/health"]
+      test: ["CMD-SHELL", "pg_isready -U rise"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  dex:
+    image: dexidp/dex:v2.37.0
+    container_name: rise-dex
+    restart: unless-stopped
+    ports:
+      - "5556:5556"
+    volumes:
+      - ./dev/dex/config.yaml:/etc/dex/config.yaml:ro
+      - dex_data:/var/dex
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:5556/dex/healthz"]
       interval: 5s
       timeout: 5s
       retries: 5
