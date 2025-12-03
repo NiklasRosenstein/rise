@@ -6,7 +6,7 @@ use std::env;
 pub struct Settings {
     pub server: ServerSettings,
     pub auth: AuthSettings,
-    pub pocketbase: PocketbaseSettings,
+    pub database: DatabaseSettings,
     #[serde(default)]
     pub registry: Option<RegistrySettings>,
 }
@@ -20,14 +20,14 @@ pub struct ServerSettings {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct AuthSettings {
-    pub secret: String,
+    pub issuer: String,
+    pub client_id: String,
+    pub client_secret: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct PocketbaseSettings {
+pub struct DatabaseSettings {
     pub url: String,
-    pub service_email: String,
-    pub service_password: String,
 }
 
 /// Registry provider configuration
