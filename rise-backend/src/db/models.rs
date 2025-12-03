@@ -21,6 +21,7 @@ pub struct Project {
     pub visibility: ProjectVisibility,
     pub owner_user_id: Option<Uuid>,
     pub owner_team_id: Option<Uuid>,
+    pub active_deployment_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

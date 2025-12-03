@@ -206,21 +206,47 @@ pub async fn update_deployment_status(
     let status_copy = payload.status.clone();
     let updated_deployment = match payload.status {
         DeploymentStatus::Completed => {
-            db_deployments::mark_completed(&state.db_pool, deployment.id)
+            let deployment = db_deployments::mark_completed(&state.db_pool, deployment.id)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e)))?
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e)))?;
+
+            // Set this as the active deployment for the project
+            projects::set_active_deployment(&state.db_pool, project.id, deployment.id)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to set active deployment: {}", e)))?;
+
+            // Update project status to Running
+            projects::update_calculated_status(&state.db_pool, project.id)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update project status: {}", e)))?;
+
+            deployment
         }
         DeploymentStatus::Failed => {
             let error_msg = payload.error_message.as_deref().unwrap_or("Unknown error");
-            db_deployments::mark_failed(&state.db_pool, deployment.id, error_msg)
+            let deployment = db_deployments::mark_failed(&state.db_pool, deployment.id, error_msg)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e)))?
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e)))?;
+
+            // Update project status to Failed
+            projects::update_calculated_status(&state.db_pool, project.id)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update project status: {}", e)))?;
+
+            deployment
         }
         _ => {
             let db_status = convert_status_to_db(payload.status);
-            db_deployments::update_status(&state.db_pool, deployment.id, db_status)
+            let deployment = db_deployments::update_status(&state.db_pool, deployment.id, db_status)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e)))?
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e)))?;
+
+            // Update project status (e.g., to Deploying)
+            projects::update_calculated_status(&state.db_pool, project.id)
+                .await
+                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update project status: {}", e)))?;
+
+            deployment
         }
     };
 

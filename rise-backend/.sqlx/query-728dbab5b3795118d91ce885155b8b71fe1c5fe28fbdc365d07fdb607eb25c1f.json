@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE projects\n        SET visibility = $2\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            created_at, updated_at\n        ",
+  "query": "\n            SELECT\n                id, name,\n                status as \"status: ProjectStatus\",\n                visibility as \"visibility: ProjectVisibility\",\n                owner_user_id, owner_team_id, active_deployment_id,\n                created_at, updated_at\n            FROM projects\n            WHERE owner_user_id = $1\n            ORDER BY created_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -35,19 +35,23 @@
       },
       {
         "ordinal": 6,
+        "name": "active_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -57,9 +61,10 @@
       false,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "7017ae5ee432a81e9549ad49ee662f77ef0c3e3a2bb4c33dcd68cc0a2837ca32"
+  "hash": "728dbab5b3795118d91ce885155b8b71fe1c5fe28fbdc365d07fdb607eb25c1f"
 }

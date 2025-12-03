@@ -14,7 +14,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 id, name,
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
-                owner_user_id, owner_team_id,
+                owner_user_id, owner_team_id, active_deployment_id,
                 created_at, updated_at
             FROM projects
             WHERE owner_user_id = $1
@@ -32,7 +32,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 id, name,
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
-                owner_user_id, owner_team_id,
+                owner_user_id, owner_team_id, active_deployment_id,
                 created_at, updated_at
             FROM projects
             ORDER BY created_at DESC
@@ -54,7 +54,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id,
+            owner_user_id, owner_team_id, active_deployment_id,
             created_at, updated_at
         FROM projects
         WHERE name = $1
@@ -77,7 +77,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id,
+            owner_user_id, owner_team_id, active_deployment_id,
             created_at, updated_at
         FROM projects
         WHERE id = $1
@@ -112,7 +112,7 @@ pub async fn create(
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id,
+            owner_user_id, owner_team_id, active_deployment_id,
             created_at, updated_at
         "#,
         name,
@@ -142,7 +142,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id,
+            owner_user_id, owner_team_id, active_deployment_id,
             created_at, updated_at
         "#,
         id,
@@ -169,7 +169,7 @@ pub async fn update_visibility(pool: &PgPool, id: Uuid, visibility: ProjectVisib
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id,
+            owner_user_id, owner_team_id, active_deployment_id,
             created_at, updated_at
         "#,
         id,
@@ -219,4 +219,77 @@ pub async fn user_can_access(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> 
     .context("Failed to check project access")?;
 
     Ok(result.exists)
+}
+
+/// Set the active deployment for a project
+pub async fn set_active_deployment(pool: &PgPool, project_id: Uuid, deployment_id: Uuid) -> Result<Project> {
+    let project = sqlx::query_as!(
+        Project,
+        r#"
+        UPDATE projects
+        SET active_deployment_id = $2
+        WHERE id = $1
+        RETURNING
+            id, name,
+            status as "status: ProjectStatus",
+            visibility as "visibility: ProjectVisibility",
+            owner_user_id, owner_team_id, active_deployment_id,
+            created_at, updated_at
+        "#,
+        project_id,
+        deployment_id
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to set active deployment")?;
+
+    Ok(project)
+}
+
+/// Calculate and update project status based on active deployment and last deployment
+pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result<Project> {
+    use crate::db::models::DeploymentStatus;
+
+    // Get last deployment
+    let last_deployment = sqlx::query!(
+        r#"
+        SELECT id, status as "status: DeploymentStatus"
+        FROM deployments
+        WHERE project_id = $1
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+        project_id
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to get last deployment")?;
+
+    // Get project to check active deployment
+    let project = find_by_id(pool, project_id)
+        .await?
+        .context("Project not found")?;
+
+    // Determine status based on active deployment and last deployment
+    let status = if project.active_deployment_id.is_some() {
+        // Has an active deployment -> Running
+        ProjectStatus::Running
+    } else if let Some(last) = last_deployment {
+        // No active deployment, check last deployment status
+        match last.status {
+            DeploymentStatus::Failed => ProjectStatus::Failed,
+            DeploymentStatus::Pending | DeploymentStatus::Building |
+            DeploymentStatus::Pushing | DeploymentStatus::Deploying => ProjectStatus::Deploying,
+            DeploymentStatus::Completed => {
+                // This shouldn't happen (completed deployment should be active)
+                // but treat as Running anyway
+                ProjectStatus::Running
+            }
+        }
+    } else {
+        // No deployments at all -> Stopped
+        ProjectStatus::Stopped
+    };
+
+    update_status(pool, project_id, status).await
 }
