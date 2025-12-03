@@ -26,6 +26,8 @@ pub struct AuthSettings {
 #[derive(Debug, Deserialize, Clone)]
 pub struct PocketbaseSettings {
     pub url: String,
+    pub service_email: String,
+    pub service_password: String,
 }
 
 /// Registry provider configuration

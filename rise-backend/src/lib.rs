@@ -4,6 +4,7 @@ pub mod state;
 pub mod project;
 pub mod team;
 pub mod registry;
+pub mod deployment;
 
 #[cfg(test)]
 mod lib_tests;
@@ -16,7 +17,7 @@ use tracing::info;
 use anyhow::Result;
 
 pub async fn run(settings: settings::Settings) -> Result<()> {
-    let state = AppState::new(&settings).await;
+    let state = AppState::new(&settings).await?;
 
     let app = Router::new()
         .route("/health", axum::routing::get(health_check))
@@ -24,6 +25,7 @@ pub async fn run(settings: settings::Settings) -> Result<()> {
         .merge(project::routes::routes())
         .merge(team::routes::team_routes())
         .merge(registry::routes::routes())
+        .merge(deployment::routes::deployment_routes())
         .with_state(state.clone())
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 

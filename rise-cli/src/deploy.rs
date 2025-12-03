@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::process::Command;
 use std::path::Path;
+use tracing::{info, debug, warn};
 
 use crate::config::Config;
 
@@ -15,9 +16,10 @@ struct RegistryCredentials {
 }
 
 #[derive(Debug, Deserialize)]
-struct GetRegistryCredsResponse {
+struct CreateDeploymentResponse {
+    deployment_id: String,
+    image_tag: String,
     credentials: RegistryCredentials,
-    repository: String,
 }
 
 pub async fn handle_deploy(
@@ -27,7 +29,7 @@ pub async fn handle_deploy(
     project_name: &str,
     path: &str,
 ) -> Result<()> {
-    println!("Deploying project '{}' from path '{}'...", project_name, path);
+    info!("Deploying project '{}' from path '{}'", project_name, path);
 
     // Verify path exists
     let app_path = Path::new(path);
@@ -42,66 +44,128 @@ pub async fn handle_deploy(
     let token = config.get_token()
         .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run 'rise login' first."))?;
 
-    // Step 1: Get registry credentials from backend
-    println!("Fetching registry credentials for project '{}'...", project_name);
-    let registry_info = get_registry_credentials(http_client, backend_url, token, project_name).await?;
+    // Step 1: Create deployment and get deployment ID + credentials
+    info!("Creating deployment for project '{}'", project_name);
+    let deployment_info = create_deployment(http_client, backend_url, token, project_name).await?;
 
-    println!("Registry URL: {}", registry_info.credentials.registry_url);
-    println!("Repository: {}", registry_info.repository);
+    info!("Deployment ID: {}", deployment_info.deployment_id);
+    info!("Image tag: {}", deployment_info.image_tag);
 
-    // Step 2: Build image with buildpacks
-    let image_tag = format!("{}/{}", registry_info.credentials.registry_url, registry_info.repository);
-    println!("Building image with buildpacks: {}...", image_tag);
-    build_image_with_buildpacks(path, &image_tag)?;
+    // Step 2: Update status to 'building'
+    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Building", None).await?;
 
-    // Step 3: Login to registry if credentials provided
-    if !registry_info.credentials.username.is_empty() {
-        println!("Logging into registry...");
-        docker_login(
-            &registry_info.credentials.registry_url,
-            &registry_info.credentials.username,
-            &registry_info.credentials.password,
-        )?;
-    } else {
-        println!("Using existing Docker credentials for registry");
+    // Step 3: Build image with buildpacks
+    info!("Building image with buildpacks: {}", deployment_info.image_tag);
+    if let Err(e) = build_image_with_buildpacks(path, &deployment_info.image_tag) {
+        update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Failed", Some(&e.to_string())).await?;
+        return Err(e);
     }
 
-    // Step 4: Push image
-    println!("Pushing image to registry...");
-    docker_push(&image_tag)?;
+    // Step 4: Login to registry if credentials provided
+    if !deployment_info.credentials.username.is_empty() {
+        info!("Logging into registry");
+        if let Err(e) = docker_login(
+            &deployment_info.credentials.registry_url,
+            &deployment_info.credentials.username,
+            &deployment_info.credentials.password,
+        ) {
+            update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Failed", Some(&e.to_string())).await?;
+            return Err(e);
+        }
+    }
 
-    println!("✓ Successfully deployed {} to {}", project_name, image_tag);
+    // Step 5: Update status to 'pushing'
+    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Pushing", None).await?;
+
+    // Step 6: Push image
+    info!("Pushing image to registry");
+    if let Err(e) = docker_push(&deployment_info.image_tag) {
+        update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Failed", Some(&e.to_string())).await?;
+        return Err(e);
+    }
+
+    // Step 7: Mark as completed
+    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Completed", None).await?;
+
+    info!("✓ Successfully deployed {} to {}", project_name, deployment_info.image_tag);
+    info!("  Deployment ID: {}", deployment_info.deployment_id);
 
     Ok(())
 }
 
-async fn get_registry_credentials(
+async fn create_deployment(
     http_client: &Client,
     backend_url: &str,
     token: &str,
     project_name: &str,
-) -> Result<GetRegistryCredsResponse> {
-    let url = format!("{}/registry/credentials?project={}", backend_url, project_name);
+) -> Result<CreateDeploymentResponse> {
+    let url = format!("{}/deployments", backend_url);
+    let payload = serde_json::json!({
+        "project": project_name,
+    });
 
     let response = http_client
-        .get(&url)
+        .post(&url)
         .header("Authorization", format!("Bearer {}", token))
+        .json(&payload)
         .send()
         .await
-        .context("Failed to fetch registry credentials")?;
+        .context("Failed to create deployment")?;
 
     if !response.status().is_success() {
         let status = response.status();
         let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-        bail!("Failed to get registry credentials ({}): {}", status, error_text);
+        bail!("Failed to create deployment ({}): {}", status, error_text);
     }
 
-    let registry_info: GetRegistryCredsResponse = response
+    let deployment_info: CreateDeploymentResponse = response
         .json()
         .await
-        .context("Failed to parse registry credentials response")?;
+        .context("Failed to parse deployment response")?;
 
-    Ok(registry_info)
+    Ok(deployment_info)
+}
+
+async fn update_deployment_status(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    deployment_id: &str,
+    status: &str,
+    error_message: Option<&str>,
+) -> Result<()> {
+    let url = format!("{}/deployments/{}/status", backend_url, deployment_id);
+    let mut payload = serde_json::json!({
+        "status": status,
+    });
+
+    if let Some(error) = error_message {
+        payload["error_message"] = serde_json::json!(error);
+    }
+
+    debug!("Updating deployment {} status to {}", deployment_id, status);
+
+    let response = http_client
+        .patch(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&payload)
+        .send()
+        .await;
+
+    // Don't fail deployment if status update fails, just log it
+    match response {
+        Ok(resp) if resp.status().is_success() => Ok(()),
+        Ok(resp) => {
+            let status = resp.status();
+            let error = resp.text().await.unwrap_or_else(|_| "Unknown".to_string());
+            warn!("Failed to update deployment status: {} - {}", status, error);
+            Ok(())
+        }
+        Err(e) => {
+            warn!("Failed to update deployment status: {}", e);
+            Ok(())
+        }
+    }
 }
 
 fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
@@ -118,16 +182,19 @@ fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
         );
     }
 
-    println!("Running: pack build {} --path {}", image_tag, app_path);
-
-    let status = Command::new("pack")
-        .arg("build")
+    let mut cmd = Command::new("pack");
+    cmd.arg("build")
         .arg(image_tag)
         .arg("--path")
         .arg(app_path)
+        .arg("--docker-host")
+        .arg("inherit")
         .arg("--builder")
-        .arg("paketobuildpacks/builder:base")
-        .status()
+        .arg("paketobuildpacks/builder:base");
+
+    debug!("Executing command: {:?}", cmd);
+
+    let status = cmd.status()
         .context("Failed to execute pack build")?;
 
     if !status.success() {
@@ -138,6 +205,8 @@ fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
 }
 
 fn docker_login(registry: &str, username: &str, password: &str) -> Result<()> {
+    debug!("Executing: docker login {} --username {} --password-stdin", registry, username);
+
     let status = Command::new("docker")
         .arg("login")
         .arg(registry)
@@ -163,7 +232,7 @@ fn docker_login(registry: &str, username: &str, password: &str) -> Result<()> {
 }
 
 fn docker_push(image_tag: &str) -> Result<()> {
-    println!("Running: docker push {}", image_tag);
+    debug!("Executing: docker push {}", image_tag);
 
     let status = Command::new("docker")
         .arg("push")

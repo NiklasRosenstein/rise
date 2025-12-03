@@ -1,13 +1,15 @@
 [server]
 host = "0.0.0.0"
 port = 3000
-public_url = "http://localhost:3001"
+public_url = "http://localhost:3000"
 
 [auth]
 secret = "super-secret-key-for-development"
 
 [pocketbase]
 url = "http://pocketbase:8090"
+service_email = "rise@rise-backend.svc.local"
+service_password = "change-me-in-production"
 
 # Container registry configuration (optional)
 # Uncomment and configure ONE of the following registry providers:
