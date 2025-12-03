@@ -95,6 +95,14 @@ enum ProjectCommands {
         #[arg(long)]
         by_id: bool,
     },
+    /// List deployments for a project
+    Deployments {
+        /// Project name
+        project: String,
+        /// Limit number of deployments to show
+        #[arg(long, short, default_value = "10")]
+        limit: usize,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -232,6 +240,9 @@ async fn main() -> Result<()> {
                 }
                 ProjectCommands::Delete { project, by_id } => {
                     project::delete_project(&http_client, &backend_url, &config, project, *by_id).await?;
+                }
+                ProjectCommands::Deployments { project, limit } => {
+                    project::list_deployments(&http_client, &backend_url, &config, project, *limit).await?;
                 }
             }
         }

@@ -475,3 +475,114 @@ pub async fn delete_project(
 
     Ok(())
 }
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+enum DeploymentStatus {
+    Pending,
+    Building,
+    Pushing,
+    Deploying,
+    Completed,
+    Failed,
+}
+
+impl std::fmt::Display for DeploymentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeploymentStatus::Pending => write!(f, "Pending"),
+            DeploymentStatus::Building => write!(f, "Building"),
+            DeploymentStatus::Pushing => write!(f, "Pushing"),
+            DeploymentStatus::Deploying => write!(f, "Deploying"),
+            DeploymentStatus::Completed => write!(f, "Completed"),
+            DeploymentStatus::Failed => write!(f, "Failed"),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct Deployment {
+    id: String,
+    deployment_id: String,
+    project: String,
+    created_by: String,
+    status: DeploymentStatus,
+    error_message: Option<String>,
+    completed_at: Option<String>,
+    build_logs: Option<String>,
+    created: String,
+    updated: String,
+}
+
+// List deployments for a project
+pub async fn list_deployments(
+    http_client: &Client,
+    backend_url: &str,
+    config: &Config,
+    project_name: &str,
+    limit: usize,
+) -> Result<()> {
+    let token = config.get_token()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
+
+    let url = format!("{}/projects/{}/deployments", backend_url, project_name);
+    let response = http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .context("Failed to send list deployments request")?;
+
+    if response.status().is_success() {
+        let mut deployments: Vec<Deployment> = response.json().await
+            .context("Failed to parse list deployments response")?;
+
+        // Apply limit
+        deployments.truncate(limit);
+
+        if deployments.is_empty() {
+            println!("No deployments found for project '{}'.", project_name);
+        } else {
+            println!("Deployments for '{}':", project_name);
+            println!("{:<20} {:<15} {:<25} {:<25}", "DEPLOYMENT ID", "STATUS", "CREATED", "COMPLETED");
+            println!("{}", "-".repeat(90));
+            for deployment in deployments {
+                // Parse and format created timestamp
+                let created = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&deployment.created) {
+                    dt.format("%Y-%m-%d %H:%M:%S").to_string()
+                } else {
+                    deployment.created
+                };
+
+                // Parse and format completed timestamp
+                let completed = deployment.completed_at
+                    .and_then(|ts| chrono::DateTime::parse_from_rfc3339(&ts).ok())
+                    .map(|dt| dt.format("%Y-%m-%d %H:%M:%S").to_string())
+                    .unwrap_or_else(|| "-".to_string());
+
+                println!("{:<20} {:<15} {:<25} {:<25}",
+                    deployment.deployment_id,
+                    format!("{}", deployment.status),
+                    created,
+                    completed
+                );
+
+                // Show error message if failed
+                if let Some(error_msg) = deployment.error_message {
+                    println!("  └─ Error: {}", error_msg);
+                }
+            }
+        }
+    } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Project not found".to_string());
+        anyhow::bail!("{}", error_text);
+    } else {
+        let status = response.status();
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!("Failed to list deployments (status {}): {}", status, error_text);
+    }
+
+    Ok(())
+}

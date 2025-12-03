@@ -228,3 +228,48 @@ pub async fn update_deployment_status(
 
     Ok(Json(convert_deployment(updated_deployment)))
 }
+
+/// List deployments for a project
+pub async fn list_deployments(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(project_name): Path<String>,
+) -> Result<Json<Vec<Deployment>>, (StatusCode, String)> {
+    debug!("Listing deployments for project: {}", project_name);
+
+    // Find the project by name
+    let project = projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to find project: {}", e)))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Project '{}' not found", project_name)))?;
+
+    // Check if user has permission to view deployments (owns the project or is team member)
+    let has_permission = if let Some(owner_user_id) = project.owner_user_id {
+        owner_user_id == user.id
+    } else if let Some(team_id) = project.owner_team_id {
+        db_teams::is_member(&state.db_pool, team_id, user.id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to check team membership: {}", e)))?
+    } else {
+        false
+    };
+
+    if !has_permission {
+        return Err((StatusCode::FORBIDDEN, "You do not have permission to view deployments for this project".to_string()));
+    }
+
+    // Get deployments from database
+    let db_deployments = db_deployments::list_for_project(&state.db_pool, project.id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to list deployments: {}", e)))?;
+
+    // Convert to API models
+    let deployments: Vec<Deployment> = db_deployments
+        .into_iter()
+        .map(convert_deployment)
+        .collect();
+
+    info!("Found {} deployments for project '{}'", deployments.len(), project_name);
+
+    Ok(Json(deployments))
+}
