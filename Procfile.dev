@@ -1,3 +1,4 @@
-pocketbase: docker-compose up pocketbase
 registry: docker-compose up registry
-backend: mise run backend
+postgres: docker-compose up postgres
+dex: docker-compose up dex
+backend: sleep 2 && mise run backend
