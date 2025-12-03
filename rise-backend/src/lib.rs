@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod settings;
 pub mod state;
+pub mod db;
 pub mod project;
 pub mod team;
 pub mod registry;
