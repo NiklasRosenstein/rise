@@ -420,8 +420,6 @@ pub async fn list_deployments(
         .map(convert_deployment)
         .collect();
 
-    info!("Found {} deployments for project '{}'", deployments.len(), project_name);
-
     Ok(Json(deployments))
 }
 
