@@ -192,8 +192,17 @@ impl DeploymentBackend for DockerController {
                 };
                 metadata.assigned_port = Some(port);
 
-                // Construct image tag
-                let image_tag = self.construct_image_tag(&project.name, &deployment.deployment_id);
+                // Determine image to use
+                let image_tag = if let Some(ref digest) = deployment.image_digest {
+                    // Pre-built image - use the pinned digest
+                    debug!("Using pre-built image digest: {}", digest);
+                    digest.clone()
+                } else {
+                    // Built from source - construct image tag
+                    let tag = self.construct_image_tag(&project.name, &deployment.deployment_id);
+                    debug!("Using constructed image tag: {}", tag);
+                    tag
+                };
                 metadata.image_tag = Some(image_tag.clone());
 
                 // Create container (check if already exists first)
