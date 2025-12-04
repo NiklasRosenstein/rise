@@ -112,7 +112,9 @@ pub async fn handle_device_flow(
             .await
             .context("Failed to poll Dex token endpoint")?;
 
-        if response.status().is_success() {
+        let status = response.status();
+
+        if status.is_success() {
             // Successfully got the token
             let token_response: TokenResponse = response
                 .json()
@@ -132,8 +134,9 @@ pub async fn handle_device_flow(
             println!("\n✓ Login successful!");
             println!("  Token saved to: {}", Config::config_path()?.display());
             return Ok(());
-        } else if response.status() == 400 {
+        } else if status == 400 || status == 401 {
             // Check if it's authorization_pending or slow_down
+            // Dex may return either 400 or 401 for these cases
             let error_response: Result<TokenErrorResponse, _> = response.json().await;
 
             match error_response {
@@ -147,11 +150,10 @@ pub async fn handle_device_flow(
                     anyhow::bail!("Device authorization failed: {} - {}", err.error, err.error_description.unwrap_or_default());
                 }
                 Err(_) => {
-                    anyhow::bail!("Device authorization failed with status 400");
+                    anyhow::bail!("Device authorization failed with status {}", status);
                 }
             }
         } else {
-            let status = response.status();
             let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
             anyhow::bail!("Device token request failed with status {}: {}", status, error_text);
         }
