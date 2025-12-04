@@ -2,11 +2,27 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum DeploymentStatus {
+    // Build/Deploy states
     Pending,
     Building,
     Pushing,
     Pushed,     // Handoff point between CLI and controller
     Deploying,
+
+    // Running states
+    Healthy,
+    Unhealthy,
+
+    // Cancellation states
+    Cancelling,
+    Cancelled,
+
+    // Termination states
+    Terminating,
+    Stopped,
+    Superseded,
+
+    // Legacy/Terminal states
     Completed,
     Failed,
 }

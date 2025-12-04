@@ -109,6 +109,7 @@ pub struct Deployment {
     pub project_id: Uuid,
     pub created_by_id: Uuid,
     pub status: DeploymentStatus,
+    pub termination_reason: Option<TerminationReason>,
     pub completed_at: Option<DateTime<Utc>>,
     pub error_message: Option<String>,
     pub build_logs: Option<String>,
@@ -120,17 +121,33 @@ pub struct Deployment {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Deployment status enum
+/// Deployment status enum - tracks lifecycle of deployment
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(type_name = "text")]
 pub enum DeploymentStatus {
+    // Build/Deploy states (pre-infrastructure)
     Pending,
     Building,
     Pushing,
     Pushed,     // Handoff point between CLI and controller
     Deploying,
-    Completed,
-    Failed,
+
+    // Running states (post-infrastructure)
+    Healthy,    // Running and passing health checks
+    Unhealthy,  // Running but failing health checks
+
+    // Cancellation states (pre-infrastructure)
+    Cancelling, // Being cancelled before infrastructure provisioned
+    Cancelled,  // Terminal: cancelled before infrastructure provisioned
+
+    // Termination states (post-infrastructure)
+    Terminating, // Being gracefully terminated
+    Stopped,     // Terminal: user-initiated termination
+    Superseded,  // Terminal: replaced by newer deployment
+
+    // Legacy/Terminal states
+    Completed,   // Legacy: replaced by Healthy
+    Failed,      // Terminal: could not reach Healthy
 }
 
 impl std::fmt::Display for DeploymentStatus {
@@ -141,8 +158,34 @@ impl std::fmt::Display for DeploymentStatus {
             DeploymentStatus::Pushing => write!(f, "Pushing"),
             DeploymentStatus::Pushed => write!(f, "Pushed"),
             DeploymentStatus::Deploying => write!(f, "Deploying"),
+            DeploymentStatus::Healthy => write!(f, "Healthy"),
+            DeploymentStatus::Unhealthy => write!(f, "Unhealthy"),
+            DeploymentStatus::Cancelling => write!(f, "Cancelling"),
+            DeploymentStatus::Cancelled => write!(f, "Cancelled"),
+            DeploymentStatus::Terminating => write!(f, "Terminating"),
+            DeploymentStatus::Stopped => write!(f, "Stopped"),
+            DeploymentStatus::Superseded => write!(f, "Superseded"),
             DeploymentStatus::Completed => write!(f, "Completed"),
             DeploymentStatus::Failed => write!(f, "Failed"),
+        }
+    }
+}
+
+/// Termination reason enum - tracks why deployment was terminated
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
+#[sqlx(type_name = "termination_reason")]
+pub enum TerminationReason {
+    UserStopped, // User explicitly stopped the deployment
+    Superseded,  // Replaced by newer deployment
+    Cancelled,   // Cancelled before infrastructure provisioned
+}
+
+impl std::fmt::Display for TerminationReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TerminationReason::UserStopped => write!(f, "UserStopped"),
+            TerminationReason::Superseded => write!(f, "Superseded"),
+            TerminationReason::Cancelled => write!(f, "Cancelled"),
         }
     }
 }

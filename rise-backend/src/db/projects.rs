@@ -2,7 +2,7 @@ use sqlx::PgPool;
 use uuid::Uuid;
 use anyhow::{Result, Context};
 
-use crate::db::models::{Project, ProjectStatus, ProjectVisibility};
+use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectStatus, ProjectVisibility};
 
 /// List all projects (optionally filtered by owner)
 pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Project>> {
@@ -271,17 +271,45 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
         .context("Project not found")?;
 
     // Determine status based on active deployment and last deployment
-    let status = if project.active_deployment_id.is_some() {
-        // Has an active deployment -> Running
-        ProjectStatus::Running
+    let status = if let Some(active_id) = project.active_deployment_id {
+        // Get active deployment to check its status
+        let active_deployment = sqlx::query_as::<_, Deployment>(
+            "SELECT * FROM deployments WHERE id = $1"
+        )
+        .bind(active_id)
+        .fetch_optional(pool)
+        .await?;
+
+        match active_deployment {
+            Some(deployment) => match deployment.status {
+                DeploymentStatus::Healthy => ProjectStatus::Running,
+                DeploymentStatus::Unhealthy => ProjectStatus::Failed,
+                // Active deployment in transition - should not happen normally
+                _ => ProjectStatus::Failed
+            },
+            None => ProjectStatus::Stopped, // Active deployment was deleted
+        }
     } else if let Some(last) = last_deployment {
         // No active deployment, check last deployment status
         match last.status {
             DeploymentStatus::Failed => ProjectStatus::Failed,
+
+            // In-progress states
             DeploymentStatus::Pending | DeploymentStatus::Building |
-            DeploymentStatus::Pushing | DeploymentStatus::Pushed | DeploymentStatus::Deploying => ProjectStatus::Deploying,
+            DeploymentStatus::Pushing | DeploymentStatus::Pushed |
+            DeploymentStatus::Deploying => ProjectStatus::Deploying,
+
+            // Cancellation/Termination in progress
+            DeploymentStatus::Cancelling | DeploymentStatus::Terminating => ProjectStatus::Deploying,
+
+            // Terminal states (no active deployment)
+            DeploymentStatus::Cancelled | DeploymentStatus::Stopped |
+            DeploymentStatus::Superseded => ProjectStatus::Stopped,
+
+            // Running states without being active (shouldn't happen)
+            DeploymentStatus::Healthy | DeploymentStatus::Unhealthy |
             DeploymentStatus::Completed => {
-                // This shouldn't happen (completed deployment should be active)
+                // This shouldn't happen (running deployment should be active)
                 // but treat as Running anyway
                 ProjectStatus::Running
             }
