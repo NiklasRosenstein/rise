@@ -303,3 +303,43 @@ pub async fn list_deployments(
 
     Ok(Json(deployments))
 }
+
+/// GET /projects/{project_name}/deployments/{deployment_id} - Get a specific deployment
+pub async fn get_deployment_by_project(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((project_name, deployment_id)): Path<(String, String)>,
+) -> Result<Json<Deployment>, (StatusCode, String)> {
+    debug!("Getting deployment {} for project {}", deployment_id, project_name);
+
+    // Find the project by name
+    let project = projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to find project: {}", e)))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Project '{}' not found", project_name)))?;
+
+    // Check if user has permission to view deployments (owns the project or is team member)
+    let has_permission = if let Some(owner_user_id) = project.owner_user_id {
+        owner_user_id == user.id
+    } else if let Some(team_id) = project.owner_team_id {
+        db_teams::is_member(&state.db_pool, team_id, user.id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to check team membership: {}", e)))?
+    } else {
+        false
+    };
+
+    if !has_permission {
+        return Err((StatusCode::FORBIDDEN, "You do not have permission to view deployments for this project".to_string()));
+    }
+
+    // Find deployment by project_id and deployment_id
+    let deployment = db_deployments::find_by_project_and_deployment_id(&state.db_pool, project.id, &deployment_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to find deployment: {}", e)))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Deployment '{}' not found for project '{}'", deployment_id, project_name)))?;
+
+    info!("Found deployment {} for project {}", deployment_id, project_name);
+
+    Ok(Json(convert_deployment(deployment)))
+}
