@@ -9,9 +9,20 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-use crate::db::models::{Deployment, Project, DeploymentStatus};
+use crate::db::models::{Deployment, Project, DeploymentStatus, TerminationReason};
 use crate::db::{deployments as db_deployments, projects};
 use crate::state::AppState;
+
+/// Hint for when to reconcile a deployment next
+#[derive(Debug, Clone)]
+pub enum ReconcileHint {
+    /// Reconcile again immediately (status changed)
+    Immediate,
+    /// Reconcile after specific duration (e.g., retry after 30s, poll after 10s)
+    After(Duration),
+    /// Use default reconciliation interval
+    Default,
+}
 
 /// Result of a reconciliation operation
 pub struct ReconcileResult {
@@ -19,6 +30,7 @@ pub struct ReconcileResult {
     pub deployment_url: Option<String>,
     pub controller_metadata: serde_json::Value,
     pub error_message: Option<String>,
+    pub next_reconcile: ReconcileHint,
 }
 
 /// Health status of a deployment
@@ -69,6 +81,24 @@ pub trait DeploymentBackend: Send + Sync {
     /// # Arguments
     /// * `deployment` - The deployment to stop
     async fn stop(&self, deployment: &Deployment) -> anyhow::Result<()>;
+
+    /// Cancel a deployment that hasn't provisioned infrastructure yet
+    ///
+    /// Called when deployment is in Cancelling state (pre-infrastructure).
+    /// Should cleanup build artifacts but no infrastructure to deprovision.
+    ///
+    /// # Arguments
+    /// * `deployment` - The deployment to cancel
+    async fn cancel(&self, deployment: &Deployment) -> anyhow::Result<()>;
+
+    /// Terminate a running deployment gracefully
+    ///
+    /// Called when deployment is in Terminating state (post-infrastructure).
+    /// Should deprovision infrastructure (stop and remove containers/pods).
+    ///
+    /// # Arguments
+    /// * `deployment` - The deployment to terminate
+    async fn terminate(&self, deployment: &Deployment) -> anyhow::Result<()>;
 }
 
 /// Main controller orchestrator

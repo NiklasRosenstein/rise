@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::db::models::{Deployment, Project, DeploymentStatus};
 use super::{DeploymentBackend, ReconcileResult, HealthStatus};
@@ -180,6 +180,7 @@ impl DeploymentBackend for DockerController {
                     deployment_url: None,
                     controller_metadata: serde_json::to_value(&metadata)?,
                     error_message: None,
+                    next_reconcile: super::ReconcileHint::Default,
                 })
             }
 
@@ -218,6 +219,7 @@ impl DeploymentBackend for DockerController {
                             deployment_url: Some(format!("http://localhost:{}", port)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
+                            next_reconcile: super::ReconcileHint::Default,
                         })
                     }
                     Err(e) if e.to_string().contains("already exists") || e.to_string().contains("Conflict") => {
@@ -229,6 +231,7 @@ impl DeploymentBackend for DockerController {
                             deployment_url: Some(format!("http://localhost:{}", port)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
+                            next_reconcile: super::ReconcileHint::Default,
                         })
                     }
                     Err(e) => {
@@ -236,6 +239,7 @@ impl DeploymentBackend for DockerController {
                             status: DeploymentStatus::Failed,
                             deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
+                            next_reconcile: super::ReconcileHint::Default,
                             error_message: Some(format!("Failed to create container: {}", e)),
                         })
                     }
@@ -256,6 +260,7 @@ impl DeploymentBackend for DockerController {
                             deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
+                            next_reconcile: super::ReconcileHint::Default,
                         })
                     }
                     Err(e) if e.to_string().contains("already started") || e.to_string().contains("is not stopped") => {
@@ -267,6 +272,7 @@ impl DeploymentBackend for DockerController {
                             deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
+                            next_reconcile: super::ReconcileHint::Default,
                         })
                     }
                     Err(e) => {
@@ -274,6 +280,7 @@ impl DeploymentBackend for DockerController {
                             status: DeploymentStatus::Failed,
                             deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
+                            next_reconcile: super::ReconcileHint::Default,
                             error_message: Some(format!("Failed to start container: {}", e)),
                         })
                     }
@@ -292,6 +299,7 @@ impl DeploymentBackend for DockerController {
                         deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
+                        next_reconcile: super::ReconcileHint::Default,
                     })
                 } else {
                     // Still waiting for health, keep in Deploying state
@@ -301,6 +309,7 @@ impl DeploymentBackend for DockerController {
                         deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
+                        next_reconcile: super::ReconcileHint::Default,
                     })
                 }
             }
@@ -312,6 +321,7 @@ impl DeploymentBackend for DockerController {
                     deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                     controller_metadata: serde_json::to_value(&metadata)?,
                     error_message: None,
+                    next_reconcile: super::ReconcileHint::Default,
                 })
             }
         }
@@ -350,6 +360,33 @@ impl DeploymentBackend for DockerController {
         if let Some(container_id) = metadata.container_id {
             info!("Stopping container {}", container_id);
             self.docker.stop_container(&container_id, None).await?;
+        }
+        Ok(())
+    }
+
+    /// Cancel a deployment (pre-infrastructure)
+    async fn cancel(&self, deployment: &Deployment) -> anyhow::Result<()> {
+        info!("Cancelling deployment {} (no infrastructure to clean up)", deployment.deployment_id);
+        // For Docker backend, pre-infrastructure cancellation just means no cleanup needed
+        // Build artifacts are managed by CLI, not the controller
+        Ok(())
+    }
+
+    /// Terminate a running deployment (post-infrastructure)
+    async fn terminate(&self, deployment: &Deployment) -> anyhow::Result<()> {
+        let metadata: DockerMetadata = serde_json::from_value(deployment.controller_metadata.clone())?;
+        if let Some(container_id) = metadata.container_id {
+            info!("Terminating deployment {} - stopping and removing container {}", deployment.deployment_id, container_id);
+
+            // Stop container
+            if let Err(e) = self.docker.stop_container(&container_id, None).await {
+                warn!("Error stopping container {}: {}", container_id, e);
+            }
+
+            // Remove container
+            if let Err(e) = self.docker.remove_container(&container_id, None).await {
+                warn!("Error removing container {}: {}", container_id, e);
+            }
         }
         Ok(())
     }
