@@ -126,8 +126,8 @@ impl DeploymentController {
         Ok(Self {
             state,
             backend,
-            reconcile_interval: Duration::from_secs(5),
-            health_check_interval: Duration::from_secs(30),
+            reconcile_interval: Duration::from_secs(15),
+            health_check_interval: Duration::from_secs(5),
         })
     }
 
@@ -155,7 +155,7 @@ impl DeploymentController {
 
     /// Reconciliation loop - processes non-terminal deployments
     ///
-    /// Runs every 5 seconds and processes deployments in Pushed or Deploying states
+    /// Runs every 15 seconds and processes deployments in Pushed or Deploying states
     async fn reconcile_loop(&self) {
         info!("Deployment reconciliation loop started");
         let mut ticker = interval(self.reconcile_interval);
@@ -254,7 +254,7 @@ impl DeploymentController {
 
     /// Health check loop - monitors active deployments
     ///
-    /// Runs every 30 seconds and checks health of all Healthy/Unhealthy deployments
+    /// Runs every 5 seconds and checks health of all Healthy/Unhealthy deployments
     async fn health_check_loop(&self) {
         info!("Deployment health check loop started");
         let mut ticker = interval(self.health_check_interval);
