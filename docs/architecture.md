@@ -15,11 +15,11 @@ Axum-based REST API handling:
 ### rise-cli
 
 Command-line interface for:
-- Interactive authentication (device flow)
+- Interactive authentication (OAuth2 authorization code flow with PKCE)
 - Project and team management
-- Future: Building and deploying applications
+- Application building and deployment
 
-**Tech:** Rust, Clap, Reqwest
+**Tech:** Rust, Clap, Reqwest, Axum (local callback server)
 
 ### PostgreSQL
 
@@ -34,30 +34,51 @@ Relational database for persistent storage:
 ### Dex
 
 OAuth2/OIDC authentication provider:
-- JWT token issuance
-- Device flow and password authentication
+- JWT token issuance via OAuth2 authorization code flow
 - JWKS endpoint for token validation
-- Configured via dex/config.yaml
+- Configured via dev/dex/config.yaml
+- Local development credentials: admin@example.com / admin
 
 ## Request Flow
 
+### Authentication Flow (OAuth2 Authorization Code with PKCE)
+
 ```
 ┌──────────┐
-│ rise-cli │
+│ rise-cli │  1. rise login
 └────┬─────┘
-     │ 1. POST /login
+     │ 2. Start local callback server (port 8765-8767)
+     │ 3. Generate PKCE challenge
+     │ 4. Open browser to Dex
      ▼
-┌─────────────┐      2. OAuth2 flow    ┌─────┐
-│ rise-backend├──────credentials────────►│ Dex │
-└────┬────────┘      3. Return JWT      └─────┘
-     │ 4. Return token to CLI
+   ┌─────┐
+   │ Dex │  5. User authenticates
+   └──┬──┘
+      │ 6. Redirect to http://localhost:8765/callback?code=xxx
+      ▼
+┌──────────────────┐
+│ CLI callback     │
+│ server receives  │
+│ authorization    │
+│ code             │
+└────┬─────────────┘
+     │ 7. POST /auth/code/exchange
+     │    (code, code_verifier, redirect_uri)
+     ▼
+┌─────────────┐      8. Validate code    ┌─────┐
+│ rise-backend├──────with PKCE verifier──►│ Dex │
+└────┬────────┘      9. Return JWT       └─────┘
+     │ 10. Return token to CLI
      ▼
 ┌──────────┐
 │ CLI saves│
 │   token  │
 └──────────┘
+```
 
-Subsequent requests:
+### Subsequent API Requests
+
+```
 ┌──────────┐
 │ rise-cli │  Authorization: Bearer <token>
 └────┬─────┘
@@ -65,14 +86,19 @@ Subsequent requests:
      ▼
 ┌─────────────┐      Validate token    ┌─────┐
 │ rise-backend├──────via JWKS──────────►│ Dex │
-└────┬────────┘                         └─────┘
-     │
+│  Middleware │                         └─────┘
+└────┬────────┘
+     │ Token valid, extract user claims
      │ Query database
      ▼
 ┌────────────┐
 │ PostgreSQL │
 │  Database  │
-└────────────┘
+└────┬───────┘
+     │
+     ▼
+   Return
+   response
 ```
 
 ## Security Model
