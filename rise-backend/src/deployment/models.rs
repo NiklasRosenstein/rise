@@ -1,10 +1,11 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub enum DeploymentStatus {
     Pending,
     Building,
     Pushing,
+    Pushed,     // Handoff point between CLI and controller
     Deploying,
     Completed,
     Failed,
@@ -31,6 +32,10 @@ pub struct Deployment {
     pub completed_at: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub build_logs: Option<String>,
+    #[serde(default)]
+    pub controller_metadata: serde_json::Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_url: Option<String>,
     #[serde(default)]
     pub created: String,
     #[serde(default)]

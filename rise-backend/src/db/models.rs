@@ -112,17 +112,20 @@ pub struct Deployment {
     pub completed_at: Option<DateTime<Utc>>,
     pub error_message: Option<String>,
     pub build_logs: Option<String>,
+    pub controller_metadata: serde_json::Value,
+    pub deployment_url: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
 
 /// Deployment status enum
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, PartialEq)]
 #[sqlx(type_name = "text")]
 pub enum DeploymentStatus {
     Pending,
     Building,
     Pushing,
+    Pushed,     // Handoff point between CLI and controller
     Deploying,
     Completed,
     Failed,
@@ -134,6 +137,7 @@ impl std::fmt::Display for DeploymentStatus {
             DeploymentStatus::Pending => write!(f, "Pending"),
             DeploymentStatus::Building => write!(f, "Building"),
             DeploymentStatus::Pushing => write!(f, "Pushing"),
+            DeploymentStatus::Pushed => write!(f, "Pushed"),
             DeploymentStatus::Deploying => write!(f, "Deploying"),
             DeploymentStatus::Completed => write!(f, "Completed"),
             DeploymentStatus::Failed => write!(f, "Failed"),
