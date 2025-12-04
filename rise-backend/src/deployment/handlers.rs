@@ -343,3 +343,77 @@ pub async fn get_deployment_by_project(
 
     Ok(Json(convert_deployment(deployment)))
 }
+
+/// POST /projects/{project_name}/deployments/{deployment_id}/rollback - Rollback to a previous deployment
+pub async fn rollback_deployment(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((project_name, source_deployment_id)): Path<(String, String)>,
+) -> Result<Json<RollbackDeploymentResponse>, (StatusCode, String)> {
+    info!("Rolling back project '{}' to deployment '{}'", project_name, source_deployment_id);
+
+    // Find project by name
+    let project = projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to query project: {}", e)))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Project '{}' not found", project_name)))?;
+
+    // Check deployment permissions
+    check_deploy_permission(&state, &project, user.id)
+        .await
+        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
+
+    // Find the source deployment (the one we're rolling back to)
+    let source_deployment = db_deployments::find_by_project_and_deployment_id(&state.db_pool, project.id, &source_deployment_id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to find source deployment: {}", e)))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Source deployment '{}' not found for project '{}'", source_deployment_id, project_name)))?;
+
+    // Verify source deployment is in a terminal successful state
+    if source_deployment.status != DbDeploymentStatus::Completed {
+        return Err((StatusCode::BAD_REQUEST, format!("Cannot rollback to deployment '{}' with status '{:?}'. Only Completed deployments can be used for rollback.", source_deployment_id, source_deployment.status)));
+    }
+
+    // Extract image tag from controller metadata
+    let image_tag = source_deployment.controller_metadata
+        .get("image_tag")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Source deployment does not have image_tag in metadata".to_string()))?
+        .to_string();
+
+    info!("Rollback will use image tag: {}", image_tag);
+
+    // Generate new deployment ID
+    let new_deployment_id = generate_deployment_id();
+    debug!("Generated new deployment ID for rollback: {}", new_deployment_id);
+
+    // Create new deployment with Pushed status and pre-filled controller metadata
+    let controller_metadata = serde_json::json!({
+        "image_tag": image_tag,
+        "internal_port": 8080,  // Default port
+        "reconcile_phase": "NotStarted"
+    });
+
+    let new_deployment = db_deployments::create(
+        &state.db_pool,
+        &new_deployment_id,
+        project.id,
+        user.id,
+        DbDeploymentStatus::Pushed,  // Start in Pushed state so controller picks it up
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create rollback deployment: {}", e)))?;
+
+    // Update the controller metadata
+    db_deployments::update_controller_metadata(&state.db_pool, new_deployment.id, &controller_metadata)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update controller metadata: {}", e)))?;
+
+    info!("Created rollback deployment {} from {}", new_deployment_id, source_deployment_id);
+
+    Ok(Json(RollbackDeploymentResponse {
+        new_deployment_id,
+        rolled_back_from: source_deployment_id,
+        image_tag,
+    }))
+}

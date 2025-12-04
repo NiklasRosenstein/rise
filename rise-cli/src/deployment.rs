@@ -48,6 +48,13 @@ impl std::fmt::Display for DeploymentStatus {
     }
 }
 
+#[derive(Debug, Deserialize)]
+struct RollbackResponse {
+    new_deployment_id: String,
+    rolled_back_from: String,
+    image_tag: String,
+}
+
 /// Parse deployment reference in project:deployment_id format
 ///
 /// # Arguments
@@ -290,24 +297,65 @@ pub async fn rollback_deployment(
     let token = config.token.as_ref()
         .context("Not logged in. Please run 'rise login' first.")?;
 
-    info!("Rolling back to deployment {}:{}", project, deployment_id);
+    info!("Rolling back project '{}' to deployment '{}'", project, deployment_id);
 
-    // Fetch the reference deployment to get its image tag
-    let reference_deployment = fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
+    println!("Initiating rollback to {}:{}...", project, deployment_id);
 
-    println!("Reference deployment: {}:{}", project, deployment_id);
-    println!("Status: {}", reference_deployment.status);
+    // Call the rollback endpoint
+    let url = format!("{}/projects/{}/deployments/{}/rollback", backend_url, project, deployment_id);
+    let response = http_client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .context("Failed to send rollback request")?;
 
-    // For now, we just inform the user that rollback isn't fully implemented
-    // A full implementation would need to:
-    // 1. Extract image tag from controller_metadata
-    // 2. Create a new deployment with that image tag
-    // 3. Wait for it to complete
+    let status = response.status();
+    if !status.is_success() {
+        let error_text = response.text().await
+            .unwrap_or_else(|_| "Unknown error".to_string());
 
-    println!("\nNote: Rollback is not yet fully implemented.");
-    println!("To manually rollback:");
-    println!("  1. Check the image tag in the controller metadata above");
-    println!("  2. Re-deploy using that same image");
+        match status {
+            reqwest::StatusCode::NOT_FOUND => {
+                bail!("Deployment '{}:{}' not found", project, deployment_id);
+            }
+            reqwest::StatusCode::UNAUTHORIZED => {
+                bail!("Authentication failed. Please run 'rise login' again.");
+            }
+            reqwest::StatusCode::FORBIDDEN => {
+                bail!("You don't have permission to rollback project '{}'", project);
+            }
+            reqwest::StatusCode::BAD_REQUEST => {
+                bail!("Cannot rollback: {}", error_text);
+            }
+            _ => {
+                bail!("Rollback failed ({}): {}", status, error_text);
+            }
+        }
+    }
+
+    let rollback_response: RollbackResponse = response.json().await
+        .context("Failed to parse rollback response")?;
+
+    println!();
+    println!("✓ Rollback initiated successfully!");
+    println!("  New deployment ID: {}", rollback_response.new_deployment_id);
+    println!("  Rolled back from:  {}", rollback_response.rolled_back_from);
+    println!("  Using image:       {}", rollback_response.image_tag);
+    println!();
+    println!("Following deployment progress...");
+    println!();
+
+    // Follow the new deployment to completion
+    show_deployment(
+        http_client,
+        backend_url,
+        config,
+        project,
+        &rollback_response.new_deployment_id,
+        true,  // follow
+        "10m", // timeout
+    ).await?;
 
     Ok(())
 }

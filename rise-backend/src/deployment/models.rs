@@ -63,3 +63,11 @@ pub struct UpdateDeploymentStatusRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
 }
+
+// Response from rolling back a deployment
+#[derive(Debug, Serialize)]
+pub struct RollbackDeploymentResponse {
+    pub new_deployment_id: String,
+    pub rolled_back_from: String,
+    pub image_tag: String,
+}
