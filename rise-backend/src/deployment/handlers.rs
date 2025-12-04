@@ -88,6 +88,8 @@ fn convert_deployment(deployment: crate::db::models::Deployment) -> Deployment {
         build_logs: deployment.build_logs,
         controller_metadata: deployment.controller_metadata,
         deployment_url: deployment.deployment_url,
+        image: deployment.image,
+        image_digest: deployment.image_digest,
         created: deployment.created_at.to_rfc3339(),
         updated: deployment.updated_at.to_rfc3339(),
     }
@@ -124,22 +126,10 @@ pub async fn create_deployment(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get credentials: {}", e)))?;
 
     // Construct image tag
-    let namespace = if let Some(ref settings) = state.settings.registry {
-        match settings {
-            crate::settings::RegistrySettings::Docker { namespace, .. } => namespace.clone(),
-            crate::settings::RegistrySettings::Ecr { account_id, region, .. } => {
-                format!("{}.dkr.ecr.{}.amazonaws.com", account_id, region)
-            }
-        }
-    } else {
-        "rise-apps".to_string()
-    };
-
-    let image_tag = construct_image_tag(
-        &credentials.registry_url,
-        &namespace,
-        &payload.project,
-        &deployment_id
+    // Note: For Docker registry, credentials.registry_url already includes namespace
+    let image_tag = format!("{}:{}",
+        format!("{}/{}", credentials.registry_url.trim_end_matches('/'), payload.project),
+        deployment_id
     );
 
     debug!("Image tag: {}", image_tag);
@@ -151,6 +141,8 @@ pub async fn create_deployment(
         project.id,
         user.id,
         DbDeploymentStatus::Pending,
+        None,  // image - will be set if user provides pre-built image
+        None,  // image_digest - will be set if user provides pre-built image
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create deployment: {}", e)))?;
@@ -400,6 +392,8 @@ pub async fn rollback_deployment(
         project.id,
         user.id,
         DbDeploymentStatus::Pushed,  // Start in Pushed state so controller picks it up
+        source_deployment.image.as_deref(),  // Copy image from source if present
+        source_deployment.image_digest.as_deref(),  // Copy digest from source if present
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create rollback deployment: {}", e)))?;

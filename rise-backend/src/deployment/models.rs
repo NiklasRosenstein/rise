@@ -36,6 +36,10 @@ pub struct Deployment {
     pub controller_metadata: serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image_digest: Option<String>,
     #[serde(default)]
     pub created: String,
     #[serde(default)]
@@ -46,6 +50,8 @@ pub struct Deployment {
 #[derive(Debug, Deserialize)]
 pub struct CreateDeploymentRequest {
     pub project: String,  // Project name
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub image: Option<String>,  // Optional pre-built image reference
 }
 
 // Response from creating a deployment

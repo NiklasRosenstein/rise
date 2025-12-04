@@ -15,6 +15,7 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Dep
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -40,6 +41,7 @@ pub async fn find_by_deployment_id(pool: &PgPool, deployment_id: &str, project_i
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         FROM deployments
         WHERE deployment_id = $1 AND project_id = $2
@@ -65,6 +67,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Deployment>> {
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         FROM deployments
         WHERE id = $1
@@ -85,26 +88,31 @@ pub async fn create(
     project_id: Uuid,
     created_by_id: Uuid,
     status: DeploymentStatus,
+    image: Option<&str>,
+    image_digest: Option<&str>,
 ) -> Result<Deployment> {
     let status_str = status.to_string();
 
     let deployment = sqlx::query_as!(
         Deployment,
         r#"
-        INSERT INTO deployments (deployment_id, project_id, created_by_id, status)
-        VALUES ($1, $2, $3, $4)
+        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         "#,
         deployment_id,
         project_id,
         created_by_id,
-        status_str
+        status_str,
+        image,
+        image_digest
     )
     .fetch_one(pool)
     .await
@@ -129,6 +137,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: DeploymentStatus) ->
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         "#,
         id,
@@ -155,6 +164,7 @@ pub async fn mark_completed(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         "#,
         id
@@ -180,6 +190,7 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         "#,
         id,
@@ -206,6 +217,7 @@ pub async fn update_build_logs(pool: &PgPool, id: Uuid, build_logs: &str) -> Res
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         "#,
         id,
@@ -229,6 +241,7 @@ pub async fn get_latest_for_project(pool: &PgPool, project_id: Uuid) -> Result<O
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -255,6 +268,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         FROM deployments
         WHERE status IN ('Pushed', 'Deploying')
@@ -283,6 +297,7 @@ pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<V
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         FROM deployments
         WHERE status = $1
@@ -311,6 +326,7 @@ pub async fn update_controller_metadata(pool: &PgPool, id: Uuid, metadata: &serd
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         "#,
         id,
@@ -337,6 +353,7 @@ pub async fn update_deployment_url(pool: &PgPool, id: Uuid, url: &str) -> Result
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
+            image, image_digest,
             created_at, updated_at
         "#,
         id,

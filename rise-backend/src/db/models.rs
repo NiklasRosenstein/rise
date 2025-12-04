@@ -114,6 +114,8 @@ pub struct Deployment {
     pub build_logs: Option<String>,
     pub controller_metadata: serde_json::Value,
     pub deployment_url: Option<String>,
+    pub image: Option<String>,
+    pub image_digest: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
