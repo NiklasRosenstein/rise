@@ -86,10 +86,20 @@ Let's outline the architecture and components needed for this Rust-based project
    - [x] Add deployment controller with reconciliation loop and health checks.
    - [x] Support for pre-built image deployments with digest pinning.
    - [x] Implement deployment rollback functionality.
+   - [x] Replace custom device flow with standard OAuth2 flows:
+     - [x] Implement OAuth2 authorization code flow with PKCE
+     - [x] Remove custom backend device flow implementation
+     - [x] Remove password grant flow (deprecated in OAuth 2.1)
+     - [x] Add `/auth/code/exchange` endpoint for PKCE flow
 
 2. **Set Up the CLI**:
     - [x] Initialize a new Rust project for the CLI using `cargo new rise-cli`.
     - [x] Implement authentication commands to interact with the backend.
+    - [x] Implement standard OAuth2 authentication flows:
+      - [x] OAuth2 authorization code flow with PKCE (via `--browser` flag)
+      - [x] Native Dex device authorization flow (default)
+      - [x] Remove password authentication
+      - [x] Local HTTP callback server for authorization code flow
     - [x] Create project management commands for creating and listing projects.
     - [x] Develop the build module to support buildpacks (via pack CLI).
     - [x] Implement deployment commands to handle the build, push, and deploy process.
