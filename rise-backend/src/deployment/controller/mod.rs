@@ -103,9 +103,10 @@ pub trait DeploymentBackend: Send + Sync {
 
 /// Main controller orchestrator
 ///
-/// The DeploymentController runs two background loops:
-/// 1. Reconciliation loop - processes deployments in Pushed or Deploying states
-/// 2. Health check loop - monitors deployments in Completed state
+/// The DeploymentController runs three background loops:
+/// 1. Reconciliation loop - processes deployments in Pushed, Deploying, Healthy, Unhealthy states
+/// 2. Health check loop - monitors deployments in Healthy and Unhealthy states
+/// 3. Termination loop - processes deployments in Terminating state
 pub struct DeploymentController {
     state: Arc<AppState>,
     backend: Arc<dyn DeploymentBackend>,
@@ -213,10 +214,6 @@ impl DeploymentController {
 
         if let Some(error) = result.error_message {
             db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
-        } else if new_status == DeploymentStatus::Completed {
-            // Legacy: Completed is now Healthy
-            db_deployments::mark_completed(&self.state.db_pool, deployment.id).await?;
-            projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id).await?;
         } else if new_status == DeploymentStatus::Healthy {
             // New deployment just became healthy - set as active
             db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
@@ -320,35 +317,14 @@ impl DeploymentController {
             }
         }
 
-        // Also check legacy Completed deployments for backward compatibility
-        let completed_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Completed).await?;
-        for deployment in completed_deployments {
-            info!("Checking health for legacy completed deployment {}", deployment.deployment_id);
-            match self.backend.health_check(&deployment).await {
-                Ok(health) => {
-                    if !health.healthy {
-                        let msg = health.message.unwrap_or_else(|| "Health check failed".to_string());
-                        warn!("Legacy deployment {} failed health check: {}", deployment.deployment_id, msg);
-                        db_deployments::mark_failed(&self.state.db_pool, deployment.id, &msg).await?;
-                        projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
-                    }
-                }
-                Err(e) => {
-                    warn!("Health check error for deployment {}: {}", deployment.deployment_id, e);
-                }
-            }
-        }
-
         Ok(())
     }
 
-    /// Monitor Unhealthy deployments for recovery or timeout
+    /// Monitor Unhealthy deployments for recovery
     ///
-    /// Checks all Unhealthy deployments to see if they've recovered (mark as Healthy)
-    /// or if they've been unhealthy for too long (mark as Failed)
+    /// Checks all Unhealthy deployments to see if they've recovered (mark as Healthy).
+    /// Unhealthy deployments stay Unhealthy indefinitely until they recover or get terminated.
     async fn monitor_unhealthy_deployments(&self) -> anyhow::Result<()> {
-        use chrono::Duration as ChronoDuration;
-
         // Find all Unhealthy deployments
         let unhealthy_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Unhealthy).await?;
 
@@ -363,25 +339,13 @@ impl DeploymentController {
                         db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
                         projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
                     } else {
-                        // Still unhealthy - check if it's been too long (5 minutes)
+                        // Still unhealthy - keep waiting for recovery or explicit termination
                         let unhealthy_duration = chrono::Utc::now() - deployment.updated_at;
-                        let timeout = ChronoDuration::minutes(5);
-
-                        if unhealthy_duration > timeout {
-                            let msg = format!(
-                                "Deployment unhealthy for {} minutes, marking as Failed",
-                                unhealthy_duration.num_minutes()
-                            );
-                            warn!("Deployment {}: {}", deployment.deployment_id, msg);
-                            db_deployments::mark_failed(&self.state.db_pool, deployment.id, &msg).await?;
-                            projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
-                        } else {
-                            info!(
-                                "Deployment {} still unhealthy ({} minutes), waiting for recovery or timeout",
-                                deployment.deployment_id,
-                                unhealthy_duration.num_minutes()
-                            );
-                        }
+                        info!(
+                            "Deployment {} still unhealthy ({} minutes), waiting for recovery or termination",
+                            deployment.deployment_id,
+                            unhealthy_duration.num_minutes()
+                        );
                     }
                 }
                 Err(e) => {

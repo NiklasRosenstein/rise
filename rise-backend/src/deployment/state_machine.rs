@@ -8,7 +8,6 @@ pub fn is_terminal(status: &DeploymentStatus) -> bool {
         DeploymentStatus::Cancelled
             | DeploymentStatus::Stopped
             | DeploymentStatus::Superseded
-            | DeploymentStatus::Completed // Legacy terminal state
             | DeploymentStatus::Failed
     )
 }
@@ -106,7 +105,6 @@ mod tests {
         assert!(is_terminal(&Stopped));
         assert!(is_terminal(&Superseded));
         assert!(is_terminal(&Failed));
-        assert!(is_terminal(&Completed));
 
         assert!(!is_terminal(&Pending));
         assert!(!is_terminal(&Healthy));
@@ -205,7 +203,6 @@ mod tests {
         assert!(!is_valid_transition(&Stopped, &Healthy));
         assert!(!is_valid_transition(&Superseded, &Deploying));
         assert!(!is_valid_transition(&Failed, &Healthy));
-        assert!(!is_valid_transition(&Completed, &Deploying));
     }
 
     #[test]

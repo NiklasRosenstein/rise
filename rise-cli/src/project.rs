@@ -86,6 +86,8 @@ struct Project {
     owner_user: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     owner_team: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deployment_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -115,6 +117,8 @@ struct ProjectWithOwnerInfo {
     visibility: ProjectVisibility,
     #[serde(skip_serializing_if = "Option::is_none")]
     owner: Option<OwnerInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deployment_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -260,7 +264,9 @@ pub async fn list_projects(
             println!("{:<25} {:<15} {:<40}", "NAME", "STATUS", "URL");
             println!("{}", "-".repeat(85));
             for project in projects {
-                let url = format!("https://{}.rise.net", project.name);
+                let url = project.deployment_url
+                    .as_deref()
+                    .unwrap_or("(not deployed)");
                 println!("{:<25} {:<15} {:<40}",
                     project.name,
                     format!("{}", project.status),
@@ -308,7 +314,11 @@ pub async fn show_project(
         println!("Project: {}", project.name);
         println!("ID: {}", project.id);
         println!("Status: {}", project.status);
-        println!("URL: https://{}.rise.net", project.name);
+        if let Some(url) = project.deployment_url {
+            println!("URL: {}", url);
+        } else {
+            println!("URL: (not deployed)");
+        }
 
         println!("\nOwner:");
         if let Some(owner) = project.owner {

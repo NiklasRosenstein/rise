@@ -156,33 +156,6 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: DeploymentStatus) ->
     Ok(deployment)
 }
 
-/// Mark deployment as completed
-pub async fn mark_completed(pool: &PgPool, id: Uuid) -> Result<Deployment> {
-    let deployment = sqlx::query_as!(
-        Deployment,
-        r#"
-        UPDATE deployments
-        SET status = 'Completed', completed_at = NOW()
-        WHERE id = $1
-        RETURNING
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            deployment_url,
-            image, image_digest,
-            termination_reason as "termination_reason: _",
-            created_at, updated_at
-        "#,
-        id
-    )
-    .fetch_one(pool)
-    .await
-    .context("Failed to mark deployment as completed")?;
-
-    Ok(deployment)
-}
-
 /// Mark deployment as failed
 pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result<Deployment> {
     let deployment = sqlx::query_as!(

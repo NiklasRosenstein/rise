@@ -75,7 +75,28 @@ pub async fn list_projects(
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to list projects: {}", e)))?;
 
-    Ok(Json(projects.into_iter().map(convert_project).collect()))
+    // Batch fetch deployment URLs for efficiency
+    let project_ids: Vec<uuid::Uuid> = projects.iter().map(|p| p.id).collect();
+    let deployment_urls = projects::get_deployment_urls_batch(&state.db_pool, &project_ids)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get deployment URLs: {}", e)))?;
+
+    let api_projects = projects.into_iter().map(|project| {
+        let deployment_url = deployment_urls.get(&project.id).and_then(|u| u.clone());
+        ApiProject {
+            id: project.id.to_string(),
+            created: project.created_at.to_rfc3339(),
+            updated: project.updated_at.to_rfc3339(),
+            name: project.name,
+            status: ProjectStatus::from(project.status),
+            visibility: ProjectVisibility::from(project.visibility),
+            owner_user: project.owner_user_id.map(|id| id.to_string()),
+            owner_team: project.owner_team_id.map(|id| id.to_string()),
+            deployment_url,
+        }
+    }).collect();
+
+    Ok(Json(api_projects))
 }
 
 pub async fn get_project(
@@ -87,9 +108,22 @@ pub async fn get_project(
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
+    // Get deployment URL
+    let deployment_url = projects::get_deployment_url(&state.db_pool, project.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to get deployment URL: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+
     // Check if we should expand owner information
     if params.should_expand("owner") {
-        let expanded = expand_project_with_owner(&state, project).await.map_err(|e| {
+        let mut expanded = expand_project_with_owner(&state, project).await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ProjectErrorResponse {
@@ -99,9 +133,12 @@ pub async fn get_project(
             )
         })?;
 
+        expanded.deployment_url = deployment_url;
         Ok(Json(serde_json::to_value(expanded).unwrap()))
     } else {
-        Ok(Json(serde_json::to_value(convert_project(project)).unwrap()))
+        let mut api_project = convert_project(project);
+        api_project.deployment_url = deployment_url;
+        Ok(Json(serde_json::to_value(api_project).unwrap()))
     }
 }
 
@@ -225,6 +262,7 @@ async fn expand_project_with_owner(
         status: ProjectStatus::from(project.status),
         visibility: ProjectVisibility::from(project.visibility),
         owner: owner_info,
+        deployment_url: None,  // Will be populated by caller
         created: project.created_at.to_rfc3339(),
         updated: project.updated_at.to_rfc3339(),
     })
@@ -308,5 +346,6 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         visibility: ProjectVisibility::from(project.visibility),
         owner_user: project.owner_user_id.map(|id| id.to_string()),
         owner_team: project.owner_team_id.map(|id| id.to_string()),
+        deployment_url: None,  // Will be populated by caller
     }
 }

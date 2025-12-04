@@ -145,8 +145,7 @@ pub enum DeploymentStatus {
     Stopped,     // Terminal: user-initiated termination
     Superseded,  // Terminal: replaced by newer deployment
 
-    // Legacy/Terminal states
-    Completed,   // Legacy: replaced by Healthy
+    // Terminal states
     Failed,      // Terminal: could not reach Healthy
 }
 
@@ -165,7 +164,6 @@ impl std::fmt::Display for DeploymentStatus {
             DeploymentStatus::Terminating => write!(f, "Terminating"),
             DeploymentStatus::Stopped => write!(f, "Stopped"),
             DeploymentStatus::Superseded => write!(f, "Superseded"),
-            DeploymentStatus::Completed => write!(f, "Completed"),
             DeploymentStatus::Failed => write!(f, "Failed"),
         }
     }

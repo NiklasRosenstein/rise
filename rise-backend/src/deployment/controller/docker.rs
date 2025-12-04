@@ -210,12 +210,12 @@ impl DeploymentBackend for DockerController {
                                 }
                                 Err(e) => {
                                     warn!("Failed to restart container {}: {}", container_id, e);
-                                    // Keep in Unhealthy state, let timeout handle it
+                                    // Keep in Unhealthy state, will retry on next reconciliation
                                     return Ok(ReconcileResult {
                                         status: DeploymentStatus::Unhealthy,
                                         deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                                         controller_metadata: serde_json::to_value(&metadata)?,
-                                        error_message: None,  // Don't set error - timeout will mark as Failed
+                                        error_message: None,
                                         next_reconcile: super::ReconcileHint::Default,
                                     });
                                 }
@@ -223,47 +223,56 @@ impl DeploymentBackend for DockerController {
                         }
                     }
                     Err(e) if e.to_string().contains("404") || e.to_string().contains("No such container") => {
-                        // Container was removed - can't recover
-                        warn!("Container {} no longer exists, marking deployment as failed", container_id);
-                        return Ok(ReconcileResult {
-                            status: DeploymentStatus::Failed,
-                            deployment_url: None,
-                            controller_metadata: serde_json::to_value(&metadata)?,
-                            error_message: Some("Container was removed".to_string()),
-                            next_reconcile: super::ReconcileHint::Default,
-                        });
+                        // Container was removed - attempt to recreate it for recovery
+                        warn!("Container {} no longer exists, attempting to recreate for recovery", container_id);
+
+                        // Reset reconcile phase to recreate container
+                        metadata.reconcile_phase = ReconcilePhase::NotStarted;
+                        metadata.container_id = None;
+
+                        // Fall through to normal reconciliation logic to recreate container
+                        info!("Reset reconciliation phase to recreate container for deployment {}", deployment.deployment_id);
                     }
                     Err(e) => {
                         warn!("Error inspecting container {}: {}", container_id, e);
-                        // Keep in Unhealthy state, timeout will handle if persistent
+                        // Keep in Unhealthy state, will retry on next reconciliation
                         return Ok(ReconcileResult {
                             status: DeploymentStatus::Unhealthy,
                             deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
-                            error_message: None,  // Don't set error - timeout will mark as Failed
+                            error_message: None,
                             next_reconcile: super::ReconcileHint::Default,
                         });
                     }
                 }
             } else {
-                // No container ID in metadata - can't recover
-                return Ok(ReconcileResult {
-                    status: DeploymentStatus::Failed,
-                    deployment_url: None,
-                    controller_metadata: serde_json::to_value(&metadata)?,
-                    error_message: Some("No container ID in metadata".to_string()),
-                    next_reconcile: super::ReconcileHint::Default,
-                });
+                // No container ID in metadata - reset and recreate for recovery
+                warn!("Unhealthy deployment {} has no container ID, attempting to recreate", deployment.deployment_id);
+
+                // Reset reconcile phase to recreate container
+                metadata.reconcile_phase = ReconcilePhase::NotStarted;
+
+                // Fall through to normal reconciliation logic to recreate container
+                info!("Reset reconciliation phase to recreate container for deployment {}", deployment.deployment_id);
             }
         }
 
         match metadata.reconcile_phase {
             ReconcilePhase::NotStarted => {
-                // Transition to Deploying status
-                info!("Starting reconciliation for deployment {}", deployment.deployment_id);
+                // Determine status based on current deployment state
+                // If already Unhealthy, keep it Unhealthy (recovery attempt)
+                // Otherwise transition to Deploying (initial deployment)
+                let status = if deployment.status == DeploymentStatus::Unhealthy {
+                    info!("Starting recovery attempt for unhealthy deployment {}", deployment.deployment_id);
+                    DeploymentStatus::Unhealthy
+                } else {
+                    info!("Starting reconciliation for deployment {}", deployment.deployment_id);
+                    DeploymentStatus::Deploying
+                };
+
                 metadata.reconcile_phase = ReconcilePhase::CreatingContainer;
                 Ok(ReconcileResult {
-                    status: DeploymentStatus::Deploying,
+                    status,
                     deployment_url: None,
                     controller_metadata: serde_json::to_value(&metadata)?,
                     error_message: None,
@@ -301,8 +310,16 @@ impl DeploymentBackend for DockerController {
                     Ok(container_id) => {
                         metadata.container_id = Some(container_id);
                         metadata.reconcile_phase = ReconcilePhase::StartingContainer;
+
+                        // Preserve Unhealthy status during recovery, otherwise use Deploying
+                        let status = if deployment.status == DeploymentStatus::Unhealthy {
+                            DeploymentStatus::Unhealthy
+                        } else {
+                            DeploymentStatus::Deploying
+                        };
+
                         Ok(ReconcileResult {
-                            status: DeploymentStatus::Deploying,
+                            status,
                             deployment_url: Some(format!("http://localhost:{}", port)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
@@ -313,8 +330,16 @@ impl DeploymentBackend for DockerController {
                         // Container exists, move to next phase
                         info!("Container {} already exists, moving to next phase", container_name);
                         metadata.reconcile_phase = ReconcilePhase::StartingContainer;
+
+                        // Preserve Unhealthy status during recovery, otherwise use Deploying
+                        let status = if deployment.status == DeploymentStatus::Unhealthy {
+                            DeploymentStatus::Unhealthy
+                        } else {
+                            DeploymentStatus::Deploying
+                        };
+
                         Ok(ReconcileResult {
-                            status: DeploymentStatus::Deploying,
+                            status,
                             deployment_url: Some(format!("http://localhost:{}", port)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
@@ -322,8 +347,16 @@ impl DeploymentBackend for DockerController {
                         })
                     }
                     Err(e) => {
+                        // During recovery (Unhealthy), keep as Unhealthy and retry
+                        // During initial deployment, mark as Failed (no recovery needed)
+                        let status = if deployment.status == DeploymentStatus::Unhealthy {
+                            DeploymentStatus::Unhealthy
+                        } else {
+                            DeploymentStatus::Failed
+                        };
+
                         Ok(ReconcileResult {
-                            status: DeploymentStatus::Failed,
+                            status,
                             deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
                             next_reconcile: super::ReconcileHint::Default,
@@ -342,8 +375,16 @@ impl DeploymentBackend for DockerController {
                     Ok(_) => {
                         info!("Started container {}", container_id);
                         metadata.reconcile_phase = ReconcilePhase::WaitingForHealth;
+
+                        // Preserve Unhealthy status during recovery, otherwise use Deploying
+                        let status = if deployment.status == DeploymentStatus::Unhealthy {
+                            DeploymentStatus::Unhealthy
+                        } else {
+                            DeploymentStatus::Deploying
+                        };
+
                         Ok(ReconcileResult {
-                            status: DeploymentStatus::Deploying,
+                            status,
                             deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
@@ -354,8 +395,16 @@ impl DeploymentBackend for DockerController {
                         // Container already running, move to next phase
                         info!("Container {} already running", container_id);
                         metadata.reconcile_phase = ReconcilePhase::WaitingForHealth;
+
+                        // Preserve Unhealthy status during recovery, otherwise use Deploying
+                        let status = if deployment.status == DeploymentStatus::Unhealthy {
+                            DeploymentStatus::Unhealthy
+                        } else {
+                            DeploymentStatus::Deploying
+                        };
+
                         Ok(ReconcileResult {
-                            status: DeploymentStatus::Deploying,
+                            status,
                             deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
@@ -363,8 +412,16 @@ impl DeploymentBackend for DockerController {
                         })
                     }
                     Err(e) => {
+                        // During recovery (Unhealthy), keep as Unhealthy and retry
+                        // During initial deployment, mark as Failed (no recovery needed)
+                        let status = if deployment.status == DeploymentStatus::Unhealthy {
+                            DeploymentStatus::Unhealthy
+                        } else {
+                            DeploymentStatus::Failed
+                        };
+
                         Ok(ReconcileResult {
-                            status: DeploymentStatus::Failed,
+                            status,
                             deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
                             next_reconcile: super::ReconcileHint::Default,
@@ -389,10 +446,18 @@ impl DeploymentBackend for DockerController {
                         next_reconcile: super::ReconcileHint::Default,
                     })
                 } else {
-                    // Still waiting for health, keep in Deploying state
-                    debug!("Deployment {} still waiting for health", deployment.deployment_id);
+                    // Still waiting for health
+                    // Preserve Unhealthy status during recovery, otherwise use Deploying
+                    let status = if deployment.status == DeploymentStatus::Unhealthy {
+                        debug!("Deployment {} still unhealthy, waiting for health", deployment.deployment_id);
+                        DeploymentStatus::Unhealthy
+                    } else {
+                        debug!("Deployment {} still waiting for health", deployment.deployment_id);
+                        DeploymentStatus::Deploying
+                    };
+
                     Ok(ReconcileResult {
-                        status: DeploymentStatus::Deploying,
+                        status,
                         deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,

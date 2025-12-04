@@ -1,6 +1,7 @@
 use sqlx::PgPool;
 use uuid::Uuid;
 use anyhow::{Result, Context};
+use std::collections::HashMap;
 
 use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectStatus, ProjectVisibility};
 
@@ -307,8 +308,7 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
             DeploymentStatus::Superseded => ProjectStatus::Stopped,
 
             // Running states without being active (shouldn't happen)
-            DeploymentStatus::Healthy | DeploymentStatus::Unhealthy |
-            DeploymentStatus::Completed => {
+            DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => {
                 // This shouldn't happen (running deployment should be active)
                 // but treat as Running anyway
                 ProjectStatus::Running
@@ -320,4 +320,76 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
     };
 
     update_status(pool, project_id, status).await
+}
+
+/// Get deployment URL for a project
+/// Returns URL from active deployment if exists, otherwise from most recent deployment
+pub async fn get_deployment_url(pool: &PgPool, project_id: Uuid) -> Result<Option<String>> {
+    let result = sqlx::query!(
+        r#"
+        SELECT d.deployment_url
+        FROM projects p
+        LEFT JOIN deployments d ON (
+            CASE
+                WHEN p.active_deployment_id IS NOT NULL
+                THEN d.id = p.active_deployment_id
+                ELSE d.id = (
+                    SELECT id FROM deployments
+                    WHERE project_id = p.id
+                    ORDER BY created_at DESC
+                    LIMIT 1
+                )
+            END
+        )
+        WHERE p.id = $1
+        LIMIT 1
+        "#,
+        project_id
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to get deployment URL")?;
+
+    Ok(result.and_then(|r| r.deployment_url))
+}
+
+/// Get deployment URLs for multiple projects (batch operation)
+/// Returns a map of project_id -> deployment_url
+pub async fn get_deployment_urls_batch(
+    pool: &PgPool,
+    project_ids: &[Uuid]
+) -> Result<HashMap<Uuid, Option<String>>> {
+    let results = sqlx::query!(
+        r#"
+        WITH latest_deployments AS (
+            SELECT DISTINCT ON (project_id)
+                project_id,
+                id,
+                deployment_url,
+                created_at
+            FROM deployments
+            WHERE project_id = ANY($1)
+            ORDER BY project_id, created_at DESC
+        )
+        SELECT
+            p.id as project_id,
+            COALESCE(
+                active_d.deployment_url,
+                latest_d.deployment_url
+            ) as deployment_url
+        FROM unnest($1::uuid[]) AS p(id)
+        LEFT JOIN deployments active_d ON active_d.id = (
+            SELECT active_deployment_id FROM projects WHERE id = p.id
+        )
+        LEFT JOIN latest_deployments latest_d ON latest_d.project_id = p.id
+        "#,
+        project_ids
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to get deployment URLs in batch")?;
+
+    Ok(results.into_iter()
+        .filter_map(|r| r.project_id.map(|id| (id, r.deployment_url)))
+        .collect())
 }

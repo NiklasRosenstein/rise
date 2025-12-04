@@ -135,7 +135,6 @@ fn convert_status_to_db(status: DeploymentStatus) -> DbDeploymentStatus {
         DeploymentStatus::Terminating => DbDeploymentStatus::Terminating,
         DeploymentStatus::Stopped => DbDeploymentStatus::Stopped,
         DeploymentStatus::Superseded => DbDeploymentStatus::Superseded,
-        DeploymentStatus::Completed => DbDeploymentStatus::Completed,
         DeploymentStatus::Failed => DbDeploymentStatus::Failed,
     }
 }
@@ -155,7 +154,6 @@ fn convert_status_from_db(status: DbDeploymentStatus) -> DeploymentStatus {
         DbDeploymentStatus::Terminating => DeploymentStatus::Terminating,
         DbDeploymentStatus::Stopped => DeploymentStatus::Stopped,
         DbDeploymentStatus::Superseded => DeploymentStatus::Superseded,
-        DbDeploymentStatus::Completed => DeploymentStatus::Completed,
         DbDeploymentStatus::Failed => DeploymentStatus::Failed,
     }
 }
@@ -330,23 +328,6 @@ pub async fn update_deployment_status(
     // Update status in database
     let status_copy = payload.status.clone();
     let updated_deployment = match payload.status {
-        DeploymentStatus::Completed => {
-            let deployment = db_deployments::mark_completed(&state.db_pool, deployment.id)
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e)))?;
-
-            // Set this as the active deployment for the project
-            projects::set_active_deployment(&state.db_pool, project.id, deployment.id)
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to set active deployment: {}", e)))?;
-
-            // Update project status to Running
-            projects::update_calculated_status(&state.db_pool, project.id)
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update project status: {}", e)))?;
-
-            deployment
-        }
         DeploymentStatus::Failed => {
             let error_msg = payload.error_message.as_deref().unwrap_or("Unknown error");
             let deployment = db_deployments::mark_failed(&state.db_pool, deployment.id, error_msg)
@@ -489,8 +470,8 @@ pub async fn rollback_deployment(
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Source deployment '{}' not found for project '{}'", source_deployment_id, project_name)))?;
 
     // Verify source deployment is in a terminal successful state
-    if source_deployment.status != DbDeploymentStatus::Completed {
-        return Err((StatusCode::BAD_REQUEST, format!("Cannot rollback to deployment '{}' with status '{:?}'. Only Completed deployments can be used for rollback.", source_deployment_id, source_deployment.status)));
+    if source_deployment.status != DbDeploymentStatus::Healthy {
+        return Err((StatusCode::BAD_REQUEST, format!("Cannot rollback to deployment '{}' with status '{:?}'. Only Healthy deployments can be used for rollback.", source_deployment_id, source_deployment.status)));
     }
 
     // Determine image tag for rollback

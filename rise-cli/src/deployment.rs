@@ -186,13 +186,17 @@ pub async fn show_deployment(
         // Print deployment details
         print_deployment_details(&deployment, project);
 
-        // Check if deployment is in terminal state
-        let is_terminal = matches!(
+        // Check if deployment has reached a final state (terminal or healthy)
+        let is_done = matches!(
             deployment.status,
-            DeploymentStatus::Completed | DeploymentStatus::Failed
+            DeploymentStatus::Healthy |
+            DeploymentStatus::Cancelled |
+            DeploymentStatus::Stopped |
+            DeploymentStatus::Superseded |
+            DeploymentStatus::Failed
         );
 
-        if !follow || is_terminal {
+        if !follow || is_done {
             // Exit with error if deployment failed
             if deployment.status == DeploymentStatus::Failed {
                 if let Some(error) = deployment.error_message {
