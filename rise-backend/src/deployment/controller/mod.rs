@@ -208,8 +208,17 @@ impl DeploymentController {
         if let Some(error) = result.error_message {
             db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
         } else if new_status == DeploymentStatus::Completed {
+            // Legacy: Completed is now Healthy
             db_deployments::mark_completed(&self.state.db_pool, deployment.id).await?;
             projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id).await?;
+        } else if new_status == DeploymentStatus::Healthy {
+            // New deployment just became healthy - set as active
+            db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
+            projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id).await?;
+
+            // TODO: Handle supersession of old active deployment
+            // If there was a previous active deployment that is Healthy/Unhealthy,
+            // it should be marked as Terminating with reason=Superseded
         }
 
         // Update project status
@@ -220,28 +229,35 @@ impl DeploymentController {
 
     /// Health check loop - monitors active deployments
     ///
-    /// Runs every 30 seconds and checks health of all Completed deployments
+    /// Runs every 30 seconds and checks health of all Healthy/Unhealthy deployments
     async fn health_check_loop(&self) {
         info!("Deployment health check loop started");
         let mut ticker = interval(self.health_check_interval);
 
         loop {
+            // Check Healthy deployments (may transition to Unhealthy)
             if let Err(e) = self.check_deployment_health().await {
-                error!("Error in health check loop: {}", e);
+                error!("Error checking deployment health: {}", e);
             }
+
+            // Monitor Unhealthy deployments (may recover to Healthy or timeout to Failed)
+            if let Err(e) = self.monitor_unhealthy_deployments().await {
+                error!("Error monitoring unhealthy deployments: {}", e);
+            }
+
             ticker.tick().await;
         }
     }
 
-    /// Check health of all completed deployments
+    /// Check health of all Healthy deployments
     ///
-    /// If a deployment is unhealthy, marks it as Failed
+    /// If a deployment is unhealthy, marks it as Unhealthy (not Failed)
     async fn check_deployment_health(&self) -> anyhow::Result<()> {
-        // Find all Completed deployments
-        let deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Completed).await?;
+        // Find all Healthy deployments
+        let healthy_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Healthy).await?;
 
-        info!("Checking health for {} deployments", deployments.len());
-        for deployment in deployments {
+        info!("Checking health for {} healthy deployments", healthy_deployments.len());
+        for deployment in healthy_deployments {
             info!("Checking health for deployment {}", deployment.deployment_id);
             match self.backend.health_check(&deployment).await {
                 Ok(health) => {
@@ -256,16 +272,86 @@ impl DeploymentController {
                     }
                     db_deployments::update_controller_metadata(&self.state.db_pool, deployment.id, &metadata).await?;
 
-                    // If unhealthy, mark deployment as Failed
+                    // If unhealthy, mark deployment as Unhealthy (not Failed - allow recovery)
                     if !health.healthy {
                         let msg = health.message.unwrap_or_else(|| "Health check failed".to_string());
-                        warn!("Deployment {} failed health check: {}", deployment.deployment_id, msg);
+                        warn!("Deployment {} is now unhealthy: {}", deployment.deployment_id, msg);
+                        db_deployments::mark_unhealthy(&self.state.db_pool, deployment.id, msg).await?;
+                        projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
+                    }
+                }
+                Err(e) => {
+                    warn!("Health check error for deployment {}: {}", deployment.deployment_id, e);
+                }
+            }
+        }
+
+        // Also check legacy Completed deployments for backward compatibility
+        let completed_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Completed).await?;
+        for deployment in completed_deployments {
+            info!("Checking health for legacy completed deployment {}", deployment.deployment_id);
+            match self.backend.health_check(&deployment).await {
+                Ok(health) => {
+                    if !health.healthy {
+                        let msg = health.message.unwrap_or_else(|| "Health check failed".to_string());
+                        warn!("Legacy deployment {} failed health check: {}", deployment.deployment_id, msg);
                         db_deployments::mark_failed(&self.state.db_pool, deployment.id, &msg).await?;
                         projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
                     }
                 }
                 Err(e) => {
                     warn!("Health check error for deployment {}: {}", deployment.deployment_id, e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Monitor Unhealthy deployments for recovery or timeout
+    ///
+    /// Checks all Unhealthy deployments to see if they've recovered (mark as Healthy)
+    /// or if they've been unhealthy for too long (mark as Failed)
+    async fn monitor_unhealthy_deployments(&self) -> anyhow::Result<()> {
+        use chrono::Duration as ChronoDuration;
+
+        // Find all Unhealthy deployments
+        let unhealthy_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Unhealthy).await?;
+
+        info!("Monitoring {} unhealthy deployments for recovery", unhealthy_deployments.len());
+        for deployment in unhealthy_deployments {
+            info!("Checking unhealthy deployment {} for recovery", deployment.deployment_id);
+            match self.backend.health_check(&deployment).await {
+                Ok(health) => {
+                    if health.healthy {
+                        // Deployment has recovered!
+                        info!("Deployment {} has recovered, marking as Healthy", deployment.deployment_id);
+                        db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
+                        projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
+                    } else {
+                        // Still unhealthy - check if it's been too long (5 minutes)
+                        let unhealthy_duration = chrono::Utc::now() - deployment.updated_at;
+                        let timeout = ChronoDuration::minutes(5);
+
+                        if unhealthy_duration > timeout {
+                            let msg = format!(
+                                "Deployment unhealthy for {} minutes, marking as Failed",
+                                unhealthy_duration.num_minutes()
+                            );
+                            warn!("Deployment {}: {}", deployment.deployment_id, msg);
+                            db_deployments::mark_failed(&self.state.db_pool, deployment.id, &msg).await?;
+                            projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
+                        } else {
+                            info!(
+                                "Deployment {} still unhealthy ({} minutes), waiting for recovery or timeout",
+                                deployment.deployment_id,
+                                unhealthy_duration.num_minutes()
+                            );
+                        }
+                    }
+                }
+                Err(e) => {
+                    warn!("Health check error for unhealthy deployment {}: {}", deployment.deployment_id, e);
                 }
             }
         }

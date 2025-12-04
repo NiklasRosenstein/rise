@@ -292,10 +292,10 @@ impl DeploymentBackend for DockerController {
                 let health = self.health_check(deployment).await?;
 
                 if health.healthy {
-                    info!("Deployment {} is healthy, marking as completed", deployment.deployment_id);
+                    info!("Deployment {} is healthy", deployment.deployment_id);
                     metadata.reconcile_phase = ReconcilePhase::Completed;
                     Ok(ReconcileResult {
-                        status: DeploymentStatus::Completed,
+                        status: DeploymentStatus::Healthy,
                         deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
@@ -315,9 +315,9 @@ impl DeploymentBackend for DockerController {
             }
 
             ReconcilePhase::Completed => {
-                // Already completed, no-op
+                // Already healthy, no-op (keep returning Healthy)
                 Ok(ReconcileResult {
-                    status: DeploymentStatus::Completed,
+                    status: DeploymentStatus::Healthy,
                     deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                     controller_metadata: serde_json::to_value(&metadata)?,
                     error_message: None,
