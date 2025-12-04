@@ -25,3 +25,5 @@ base64 = "0.22"
 url = "2.5"
 axum = "0.8"
 rand = "0.8"
+# Backend dependency for shared models
+rise-backend = { path = "../rise-backend" }

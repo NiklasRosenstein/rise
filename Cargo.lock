@@ -2651,6 +2651,7 @@ dependencies = [
  "dirs",
  "rand",
  "reqwest 0.12.24",
+ "rise-backend",
  "serde",
  "serde_json",
  "sha2",

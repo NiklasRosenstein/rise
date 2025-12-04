@@ -33,6 +33,27 @@ impl Default for DeploymentStatus {
     }
 }
 
+impl std::fmt::Display for DeploymentStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeploymentStatus::Pending => write!(f, "Pending"),
+            DeploymentStatus::Building => write!(f, "Building"),
+            DeploymentStatus::Pushing => write!(f, "Pushing"),
+            DeploymentStatus::Pushed => write!(f, "Pushed"),
+            DeploymentStatus::Deploying => write!(f, "Deploying"),
+            DeploymentStatus::Healthy => write!(f, "Healthy"),
+            DeploymentStatus::Unhealthy => write!(f, "Unhealthy"),
+            DeploymentStatus::Cancelling => write!(f, "Cancelling"),
+            DeploymentStatus::Cancelled => write!(f, "Cancelled"),
+            DeploymentStatus::Terminating => write!(f, "Terminating"),
+            DeploymentStatus::Stopped => write!(f, "Stopped"),
+            DeploymentStatus::Superseded => write!(f, "Superseded"),
+            DeploymentStatus::Completed => write!(f, "Completed"),
+            DeploymentStatus::Failed => write!(f, "Failed"),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub struct Deployment {
     #[serde(default)]

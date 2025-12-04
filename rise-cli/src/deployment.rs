@@ -6,47 +6,8 @@ use tracing::{debug, info};
 
 use crate::config::Config;
 
-/// Deployment model matching the API
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct Deployment {
-    pub id: String,
-    pub deployment_id: String,
-    pub project: String,
-    pub created_by: String,
-    pub status: DeploymentStatus,
-    pub error_message: Option<String>,
-    pub completed_at: Option<String>,
-    pub build_logs: Option<String>,
-    pub controller_metadata: serde_json::Value,
-    pub deployment_url: Option<String>,
-    pub created: String,
-    pub updated: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-pub enum DeploymentStatus {
-    Pending,
-    Building,
-    Pushing,
-    Pushed,
-    Deploying,
-    Completed,
-    Failed,
-}
-
-impl std::fmt::Display for DeploymentStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            DeploymentStatus::Pending => write!(f, "Pending"),
-            DeploymentStatus::Building => write!(f, "Building"),
-            DeploymentStatus::Pushing => write!(f, "Pushing"),
-            DeploymentStatus::Pushed => write!(f, "Pushed"),
-            DeploymentStatus::Deploying => write!(f, "Deploying"),
-            DeploymentStatus::Completed => write!(f, "Completed"),
-            DeploymentStatus::Failed => write!(f, "Failed"),
-        }
-    }
-}
+// Re-export models from backend to ensure consistency
+pub use rise_backend::deployment::models::{Deployment, DeploymentStatus};
 
 #[derive(Debug, Deserialize)]
 struct RollbackResponse {
