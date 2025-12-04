@@ -11,6 +11,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::db::models::{Deployment, Project, DeploymentStatus, TerminationReason};
 use crate::db::{deployments as db_deployments, projects};
+use crate::deployment::state_machine;
 use crate::state::AppState;
 
 /// Hint for when to reconcile a deployment next
@@ -223,11 +224,11 @@ impl DeploymentController {
                 if old_active_id != deployment.id {
                     // Get the old active deployment
                     if let Ok(Some(old_deployment)) = db_deployments::find_by_id(&self.state.db_pool, old_active_id).await {
-                        // Only supersede if it's still running (Healthy or Unhealthy)
-                        if matches!(old_deployment.status, DeploymentStatus::Healthy | DeploymentStatus::Unhealthy) {
+                        // Supersede old deployment if it's not already terminal
+                        if !state_machine::is_terminal(&old_deployment.status) {
                             info!(
-                                "Deployment {} is replacing active deployment {}, marking old as Terminating",
-                                deployment.deployment_id, old_deployment.deployment_id
+                                "Deployment {} is replacing {} (status={:?}), marking old as Terminating",
+                                deployment.deployment_id, old_deployment.deployment_id, old_deployment.status
                             );
                             db_deployments::mark_terminating(
                                 &self.state.db_pool,
@@ -241,6 +242,36 @@ impl DeploymentController {
 
             // Set new deployment as active
             projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id).await?;
+
+            // Also clean up any other non-terminal deployments for this project
+            // (deployments that started but never became active)
+            let other_deployments = db_deployments::find_non_terminal_for_project(
+                &self.state.db_pool,
+                project.id
+            ).await?;
+
+            for other_deployment in other_deployments {
+                // Skip the new active deployment
+                if other_deployment.id == deployment.id {
+                    continue;
+                }
+
+                // Skip if already terminal
+                if state_machine::is_terminal(&other_deployment.status) {
+                    continue;
+                }
+
+                info!(
+                    "Cleaning up non-active deployment {} (status={:?}) for project {}, marking as Terminating",
+                    other_deployment.deployment_id, other_deployment.status, project.name
+                );
+
+                db_deployments::mark_terminating(
+                    &self.state.db_pool,
+                    other_deployment.id,
+                    crate::db::models::TerminationReason::Superseded
+                ).await?;
+            }
         }
 
         // Update project status

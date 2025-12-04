@@ -269,6 +269,34 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
     Ok(deployments)
 }
 
+/// Find all non-terminal deployments for a specific project
+pub async fn find_non_terminal_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Deployment>> {
+    let deployments = sqlx::query_as!(
+        Deployment,
+        r#"
+        SELECT
+            id, deployment_id, project_id, created_by_id,
+            status as "status: DeploymentStatus",
+            completed_at, error_message, build_logs,
+            controller_metadata as "controller_metadata: serde_json::Value",
+            deployment_url,
+            image, image_digest,
+            termination_reason as "termination_reason: _",
+            created_at, updated_at
+        FROM deployments
+        WHERE project_id = $1
+          AND status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed')
+        ORDER BY created_at DESC
+        "#,
+        project_id
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to find non-terminal deployments for project")?;
+
+    Ok(deployments)
+}
+
 /// Find all deployments with a specific status
 pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<Vec<Deployment>> {
     let status_str = status.to_string();
