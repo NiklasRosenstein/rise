@@ -6,6 +6,7 @@ use std::path::Path;
 use tracing::{info, debug, warn};
 
 use crate::config::Config;
+use crate::deployment;
 
 #[derive(Debug, Deserialize)]
 struct RegistryCredentials {
@@ -74,11 +75,25 @@ pub async fn handle_deploy(
         return Err(e);
     }
 
-    // Step 5: Mark as completed
-    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Completed", None).await?;
+    // Step 5: Mark as pushed (controller will take over deployment)
+    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Pushed", None).await?;
 
-    info!("✓ Successfully deployed {} to {}", project_name, deployment_info.image_tag);
+    info!("✓ Successfully pushed {} to {}", project_name, deployment_info.image_tag);
     info!("  Deployment ID: {}", deployment_info.deployment_id);
+    println!();
+    println!("Following deployment progress...");
+    println!();
+
+    // Step 6: Follow deployment until completion
+    deployment::show_deployment(
+        http_client,
+        backend_url,
+        config,
+        project_name,
+        &deployment_info.deployment_id,
+        true,  // follow
+        "10m", // timeout
+    ).await?;
 
     Ok(())
 }

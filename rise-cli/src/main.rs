@@ -8,6 +8,7 @@ mod login;
 mod team;
 mod project;
 mod deploy;
+mod deployment;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -45,6 +46,9 @@ enum Commands {
     /// Team management commands
     #[command(subcommand)]
     Team(TeamCommands),
+    /// Deployment management commands
+    #[command(subcommand)]
+    Deployment(DeploymentCommands),
 }
 
 #[derive(Subcommand, Debug)]
@@ -94,14 +98,6 @@ enum ProjectCommands {
         /// Force lookup by ID instead of name
         #[arg(long)]
         by_id: bool,
-    },
-    /// List deployments for a project
-    Deployments {
-        /// Project name
-        project: String,
-        /// Limit number of deployments to show
-        #[arg(long, short, default_value = "10")]
-        limit: usize,
     },
 }
 
@@ -158,6 +154,34 @@ enum TeamCommands {
         /// Force lookup by ID instead of name
         #[arg(long)]
         by_id: bool,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DeploymentCommands {
+    /// List deployments for a project
+    List {
+        /// Project name
+        project: String,
+        /// Limit number of deployments to show
+        #[arg(long, short, default_value = "10")]
+        limit: usize,
+    },
+    /// Show deployment details (format: project:deployment_id)
+    Show {
+        /// Deployment reference (format: project:deployment_id)
+        deployment: String,
+        /// Follow deployment until completion
+        #[arg(long, short)]
+        follow: bool,
+        /// Timeout for following deployment
+        #[arg(long, default_value = "5m")]
+        timeout: String,
+    },
+    /// Rollback to a previous deployment
+    Rollback {
+        /// Deployment reference (format: project:deployment_id)
+        deployment: String,
     },
 }
 
@@ -241,9 +265,6 @@ async fn main() -> Result<()> {
                 ProjectCommands::Delete { project, by_id } => {
                     project::delete_project(&http_client, &backend_url, &config, project, *by_id).await?;
                 }
-                ProjectCommands::Deployments { project, limit } => {
-                    project::list_deployments(&http_client, &backend_url, &config, project, *limit).await?;
-                }
             }
         }
         Commands::Team(team_cmd) => {
@@ -297,6 +318,21 @@ async fn main() -> Result<()> {
                 }
                 TeamCommands::Delete { team, by_id } => {
                     team::delete_team(&http_client, &backend_url, &config, team, *by_id).await?;
+                }
+            }
+        }
+        Commands::Deployment(deployment_cmd) => {
+            match deployment_cmd {
+                DeploymentCommands::List { project, limit } => {
+                    deployment::list_deployments(&http_client, &backend_url, &config, project, *limit).await?;
+                }
+                DeploymentCommands::Show { deployment, follow, timeout } => {
+                    let (project, deployment_id) = deployment::parse_deployment_ref(deployment)?;
+                    deployment::show_deployment(&http_client, &backend_url, &config, &project, &deployment_id, *follow, timeout).await?;
+                }
+                DeploymentCommands::Rollback { deployment } => {
+                    let (project, deployment_id) = deployment::parse_deployment_ref(deployment)?;
+                    deployment::rollback_deployment(&http_client, &backend_url, &config, &project, &deployment_id).await?;
                 }
             }
         }
