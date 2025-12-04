@@ -42,6 +42,9 @@ enum Commands {
         /// Path to the directory containing the application (defaults to current directory)
         #[arg(default_value = ".")]
         path: String,
+        /// Pre-built image to deploy (e.g., nginx:latest). Skips build if provided.
+        #[arg(long, short)]
+        image: Option<String>,
     },
     /// Team management commands
     #[command(subcommand)]
@@ -221,8 +224,8 @@ async fn main() -> Result<()> {
                 }
             }
         }
-        Commands::Deploy { project, path } => {
-            deploy::handle_deploy(&http_client, &backend_url, &config, project, path).await?;
+        Commands::Deploy { project, path, image } => {
+            deploy::handle_deploy(&http_client, &backend_url, &config, project, path, image.as_deref()).await?;
         }
         Commands::Project(project_cmd) => {
             match project_cmd {

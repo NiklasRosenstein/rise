@@ -29,16 +29,21 @@ pub async fn handle_deploy(
     config: &Config,
     project_name: &str,
     path: &str,
+    image: Option<&str>,
 ) -> Result<()> {
-    info!("Deploying project '{}' from path '{}'", project_name, path);
+    if let Some(image_ref) = image {
+        info!("Deploying project '{}' with pre-built image '{}'", project_name, image_ref);
+    } else {
+        info!("Deploying project '{}' from path '{}'", project_name, path);
 
-    // Verify path exists
-    let app_path = Path::new(path);
-    if !app_path.exists() {
-        bail!("Path '{}' does not exist", path);
-    }
-    if !app_path.is_dir() {
-        bail!("Path '{}' is not a directory", path);
+        // Verify path exists only when building from source
+        let app_path = Path::new(path);
+        if !app_path.exists() {
+            bail!("Path '{}' does not exist", path);
+        }
+        if !app_path.is_dir() {
+            bail!("Path '{}' is not a directory", path);
+        }
     }
 
     // Get authentication token
@@ -47,38 +52,44 @@ pub async fn handle_deploy(
 
     // Step 1: Create deployment and get deployment ID + credentials
     info!("Creating deployment for project '{}'", project_name);
-    let deployment_info = create_deployment(http_client, backend_url, token, project_name).await?;
+    let deployment_info = create_deployment(http_client, backend_url, token, project_name, image).await?;
 
     info!("Deployment ID: {}", deployment_info.deployment_id);
     info!("Image tag: {}", deployment_info.image_tag);
 
-    // Step 2: Login to registry if credentials provided (needed for pack --publish)
-    if !deployment_info.credentials.username.is_empty() {
-        info!("Logging into registry");
-        if let Err(e) = docker_login(
-            &deployment_info.credentials.registry_url,
-            &deployment_info.credentials.username,
-            &deployment_info.credentials.password,
-        ) {
+    if image.is_some() {
+        // Pre-built image path: Skip build/push, backend already marked as Pushed
+        info!("✓ Pre-built image deployment created");
+    } else {
+        // Build from source path: Execute build and push
+        // Step 2: Login to registry if credentials provided (needed for pack --publish)
+        if !deployment_info.credentials.username.is_empty() {
+            info!("Logging into registry");
+            if let Err(e) = docker_login(
+                &deployment_info.credentials.registry_url,
+                &deployment_info.credentials.username,
+                &deployment_info.credentials.password,
+            ) {
+                update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Failed", Some(&e.to_string())).await?;
+                return Err(e);
+            }
+        }
+
+        // Step 3: Update status to 'building'
+        update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Building", None).await?;
+
+        // Step 4: Build and push image with buildpacks (--publish handles both)
+        info!("Building and publishing image with buildpacks: {}", deployment_info.image_tag);
+        if let Err(e) = build_image_with_buildpacks(path, &deployment_info.image_tag) {
             update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Failed", Some(&e.to_string())).await?;
             return Err(e);
         }
+
+        // Step 5: Mark as pushed (controller will take over deployment)
+        update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Pushed", None).await?;
+
+        info!("✓ Successfully pushed {} to {}", project_name, deployment_info.image_tag);
     }
-
-    // Step 3: Update status to 'building'
-    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Building", None).await?;
-
-    // Step 4: Build and push image with buildpacks (--publish handles both)
-    info!("Building and publishing image with buildpacks: {}", deployment_info.image_tag);
-    if let Err(e) = build_image_with_buildpacks(path, &deployment_info.image_tag) {
-        update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Failed", Some(&e.to_string())).await?;
-        return Err(e);
-    }
-
-    // Step 5: Mark as pushed (controller will take over deployment)
-    update_deployment_status(http_client, backend_url, token, &deployment_info.deployment_id, "Pushed", None).await?;
-
-    info!("✓ Successfully pushed {} to {}", project_name, deployment_info.image_tag);
     info!("  Deployment ID: {}", deployment_info.deployment_id);
     println!();
     println!("Following deployment progress...");
@@ -103,11 +114,17 @@ async fn create_deployment(
     backend_url: &str,
     token: &str,
     project_name: &str,
+    image: Option<&str>,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/deployments", backend_url);
-    let payload = serde_json::json!({
+    let mut payload = serde_json::json!({
         "project": project_name,
     });
+
+    // Add image field if provided
+    if let Some(image_ref) = image {
+        payload["image"] = serde_json::json!(image_ref);
+    }
 
     let response = http_client
         .post(&url)
