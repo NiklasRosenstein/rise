@@ -46,6 +46,11 @@ struct TokenErrorResponse {
 }
 
 /// Handle device authorization flow by communicating directly with Dex
+///
+/// NOTE: Dex's device flow implementation has known issues. It uses a hybrid
+/// approach that redirects the browser with an authorization code instead of
+/// returning the token via polling (RFC 8628). This means the device flow may
+/// not work reliably. Use the browser flow (default) instead: `rise login`
 pub async fn handle_device_flow(
     http_client: &Client,
     dex_url: &str,
@@ -53,6 +58,10 @@ pub async fn handle_device_flow(
     config: &mut Config,
     backend_url_to_save: Option<&str>,
 ) -> Result<()> {
+    eprintln!("⚠️  Warning: Device flow has known compatibility issues with Dex.");
+    eprintln!("   For best results, use the browser flow: rise login");
+    eprintln!();
+
     // Step 1: Initialize device flow with Dex
     let device_auth_url = format!("{}/device/code", dex_url);
 
