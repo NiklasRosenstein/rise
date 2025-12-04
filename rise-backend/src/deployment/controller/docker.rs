@@ -184,10 +184,10 @@ impl DeploymentBackend for DockerController {
                         let is_running = state.running.unwrap_or(false);
 
                         if is_running {
-                            // Container is running again - it recovered!
-                            info!("Deployment {} has recovered (container is running)", deployment.deployment_id);
+                            // Container is running - keep as Unhealthy until health check confirms
+                            info!("Container {} is running, keeping deployment Unhealthy until health check confirms", container_id);
                             return Ok(ReconcileResult {
-                                status: DeploymentStatus::Healthy,
+                                status: DeploymentStatus::Unhealthy,
                                 deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
                                 controller_metadata: serde_json::to_value(&metadata)?,
                                 error_message: None,
