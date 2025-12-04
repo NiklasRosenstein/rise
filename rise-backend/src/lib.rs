@@ -16,9 +16,17 @@ use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 use anyhow::Result;
+use std::sync::Arc;
 
 pub async fn run(settings: settings::Settings) -> Result<()> {
     let state = AppState::new(&settings).await?;
+
+    // Start deployment controller
+    let controller = Arc::new(
+        deployment::controller::DeploymentController::new(Arc::new(state.clone()))?
+    );
+    controller.start();
+    info!("Deployment controller started");
 
     // Public routes (no authentication)
     let public_routes = Router::new()
