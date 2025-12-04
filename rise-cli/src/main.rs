@@ -24,10 +24,10 @@ enum Commands {
         /// Backend URL to authenticate with
         #[arg(long)]
         url: Option<String>,
-        /// Use browser-based OAuth2 authorization code flow
+        /// Use browser-based OAuth2 authorization code flow (default)
         #[arg(long, conflicts_with = "device")]
         browser: bool,
-        /// Use device authorization flow (default)
+        /// Use device authorization flow
         #[arg(long, conflicts_with = "browser")]
         device: bool,
     },
@@ -204,25 +204,25 @@ async fn main() -> Result<()> {
     let backend_url = config.get_backend_url();
 
     match &cli.command {
-        Commands::Login { url, browser, device: _ } => {
+        Commands::Login { url, browser, device } => {
             // Use provided URL or fall back to config default
             let login_url = url.as_deref().unwrap_or(&backend_url);
             let dex_url = config.get_dex_url();
 
-            if *browser {
-                // Authorization code flow with PKCE
-                login::handle_authorization_code_flow(
+            if *device {
+                // Device flow (explicit)
+                login::handle_device_flow(
                     &http_client,
-                    login_url,
                     &dex_url,
                     "rise-backend",
                     &mut config,
                     url.as_deref(),
                 ).await?;
             } else {
-                // Device flow (default)
-                login::handle_device_flow(
+                // Authorization code flow with PKCE (default)
+                login::handle_authorization_code_flow(
                     &http_client,
+                    login_url,
                     &dex_url,
                     "rise-backend",
                     &mut config,
