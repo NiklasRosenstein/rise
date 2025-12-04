@@ -283,7 +283,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
-        WHERE status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Completed', 'Failed', 'Pending', 'Building', 'Pushing')
+        WHERE status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Completed', 'Failed', 'Pending', 'Building', 'Pushing', 'Terminating', 'Cancelling')
         ORDER BY updated_at ASC
         LIMIT $1
         "#,

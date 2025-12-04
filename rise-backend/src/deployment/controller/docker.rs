@@ -422,23 +422,34 @@ impl DeploymentBackend for DockerController {
             .ok_or_else(|| anyhow::anyhow!("No container ID in metadata"))?;
 
         // Inspect container
-        let inspect = self.docker.inspect_container(&container_id, None).await?;
+        match self.docker.inspect_container(&container_id, None).await {
+            Ok(inspect) => {
+                let state = inspect.state.ok_or_else(|| anyhow::anyhow!("No state in inspect"))?;
+                let healthy = state.running.unwrap_or(false) && !state.restarting.unwrap_or(false);
 
-        let state = inspect.state.ok_or_else(|| anyhow::anyhow!("No state in inspect"))?;
-
-        let healthy = state.running.unwrap_or(false) && !state.restarting.unwrap_or(false);
-
-        Ok(HealthStatus {
-            healthy,
-            message: if !healthy {
-                Some(format!("Container state: running={}, status={:?}",
-                    state.running.unwrap_or(false),
-                    state.status))
-            } else {
-                None
-            },
-            last_check: Utc::now(),
-        })
+                Ok(HealthStatus {
+                    healthy,
+                    message: if !healthy {
+                        Some(format!("Container state: running={}, status={:?}",
+                            state.running.unwrap_or(false),
+                            state.status))
+                    } else {
+                        None
+                    },
+                    last_check: Utc::now(),
+                })
+            }
+            Err(e) if e.to_string().contains("404") || e.to_string().contains("No such container") => {
+                // Container doesn't exist - this is expected during termination or if removed externally
+                // Return unhealthy status instead of error
+                Ok(HealthStatus {
+                    healthy: false,
+                    message: Some("Container not found".to_string()),
+                    last_check: Utc::now(),
+                })
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     /// Stop a running deployment
