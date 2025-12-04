@@ -79,18 +79,24 @@ Let's outline the architecture and components needed for this Rust-based project
    - [x] **Database & Auth**: Integrate SQLX for PostgreSQL and implement JWT validation for Dex.
    - [x] Implement the authentication module with Dex OAuth2/OIDC integration.
    - [x] Create the project management module using PostgreSQL with SQLX migrations.
-   - [ ] Integrate with a container registry to generate temporary credentials.
-   - [ ] Implement the deployment module to interface with Kubernetes.
+   - [x] Integrate with a container registry to generate temporary credentials (Docker registry with DockerProvider).
+   - [x] Implement the deployment module with Docker controller (MVP runtime, Kubernetes future).
    - [x] Set up the API layer using a web framework like Actix-web or Rocket (using Axum).
-   - [ ] Implement configuration handling for the backend server.
+   - [x] Implement configuration handling for the backend server.
+   - [x] Add deployment controller with reconciliation loop and health checks.
+   - [x] Support for pre-built image deployments with digest pinning.
+   - [x] Implement deployment rollback functionality.
 
 2. **Set Up the CLI**:
     - [x] Initialize a new Rust project for the CLI using `cargo new rise-cli`.
     - [x] Implement authentication commands to interact with the backend.
     - [x] Create project management commands for creating and listing projects.
-    - [ ] Develop the build module to support different build methods.
-    - [ ] Implement deployment commands to handle the build, push, and deploy process.
-    - [ ] Set up configuration handling for the CLI tool.
+    - [x] Develop the build module to support buildpacks (via pack CLI).
+    - [x] Implement deployment commands to handle the build, push, and deploy process.
+    - [x] Set up configuration handling for the CLI tool (.rise-config.toml).
+    - [x] Add deployment management commands (list, show, rollback).
+    - [x] Implement `--image` flag for deploying pre-built images without builds.
+    - [x] Add deployment following with auto-refresh and timeout support.
 
 3. **Testing and Documentation**:
     - Write unit and integration tests for both the backend and CLI.
