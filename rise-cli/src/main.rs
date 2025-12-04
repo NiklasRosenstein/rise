@@ -24,12 +24,12 @@ enum Commands {
         /// Backend URL to authenticate with
         #[arg(long)]
         url: Option<String>,
-        /// Email for password authentication
-        #[arg(long)]
-        email: Option<String>,
-        /// Password for authentication (only used with --email)
-        #[arg(long)]
-        password: Option<String>,
+        /// Use browser-based OAuth2 authorization code flow
+        #[arg(long, conflicts_with = "device")]
+        browser: bool,
+        /// Use device authorization flow (default)
+        #[arg(long, conflicts_with = "browser")]
+        device: bool,
     },
     /// Project management commands
     #[command(subcommand)]
@@ -204,24 +204,30 @@ async fn main() -> Result<()> {
     let backend_url = config.get_backend_url();
 
     match &cli.command {
-        Commands::Login { url, email, password } => {
+        Commands::Login { url, browser, device: _ } => {
             // Use provided URL or fall back to config default
             let login_url = url.as_deref().unwrap_or(&backend_url);
+            let dex_url = config.get_dex_url();
 
-            match (email, password) {
-                (Some(email), Some(pass)) => {
-                    // Password flow: both email and password provided
-                    login::handle_password_login(&http_client, login_url, email, pass, &mut config, url.as_deref()).await?;
-                }
-                (Some(email), None) => {
-                    // Password flow: prompt for password
-                    let pass = rpassword::prompt_password("Password: ")?;
-                    login::handle_password_login(&http_client, login_url, email, &pass, &mut config, url.as_deref()).await?;
-                }
-                (None, _) => {
-                    // Browser flow: no email provided, use device flow
-                    login::handle_device_login(&http_client, login_url, &mut config, url.as_deref()).await?;
-                }
+            if *browser {
+                // Authorization code flow with PKCE
+                login::handle_authorization_code_flow(
+                    &http_client,
+                    login_url,
+                    &dex_url,
+                    "rise-backend",
+                    &mut config,
+                    url.as_deref(),
+                ).await?;
+            } else {
+                // Device flow (default)
+                login::handle_device_flow(
+                    &http_client,
+                    &dex_url,
+                    "rise-backend",
+                    &mut config,
+                    url.as_deref(),
+                ).await?;
             }
         }
         Commands::Deploy { project, path, image } => {

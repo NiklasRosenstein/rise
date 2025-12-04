@@ -9,9 +9,10 @@ use crate::db::{models::User, users};
 use tracing::instrument;
 
 #[derive(Debug, Deserialize)]
-pub struct LoginRequest {
-    pub identity: String,
-    pub password: String,
+pub struct CodeExchangeRequest {
+    pub code: String,
+    pub code_verifier: String,
+    pub redirect_uri: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -19,23 +20,27 @@ pub struct LoginResponse {
     pub token: String,
 }
 
-/// Login using Dex OAuth2 password grant
+/// Exchange authorization code for token (OAuth2 PKCE flow)
 #[instrument(skip(state, payload))]
-pub async fn login(
+pub async fn code_exchange(
     State(state): State<AppState>,
-    Json(payload): Json<LoginRequest>,
+    Json(payload): Json<CodeExchangeRequest>,
 ) -> Result<Json<LoginResponse>, (StatusCode, String)> {
-    // Exchange email/password for tokens using Dex OAuth2
+    // Exchange authorization code for tokens using PKCE
     let token_info = state
         .oauth_client
-        .password_grant(&payload.identity, &payload.password)
+        .exchange_code_pkce(
+            &payload.code,
+            &payload.code_verifier,
+            &payload.redirect_uri,
+        )
         .await
         .map_err(|e| {
-            tracing::warn!("OAuth2 password grant failed: {}", e);
-            (StatusCode::UNAUTHORIZED, format!("Authentication failed: {}", e))
+            tracing::warn!("OAuth2 code exchange failed: {}", e);
+            (StatusCode::UNAUTHORIZED, format!("Code exchange failed: {}", e))
         })?;
 
-    tracing::info!("Login successful for user: {}", payload.identity);
+    tracing::info!("Code exchange successful");
 
     // Return the ID token (which contains user claims)
     Ok(Json(LoginResponse {

@@ -192,6 +192,53 @@ impl DexOAuthClient {
         }
     }
 
+    /// Exchange authorization code for tokens (PKCE flow)
+    pub async fn exchange_code_pkce(
+        &self,
+        code: &str,
+        code_verifier: &str,
+        redirect_uri: &str,
+    ) -> Result<TokenInfo> {
+        let token_url = format!("{}/token", self.issuer);
+
+        let mut params = HashMap::new();
+        params.insert("grant_type", "authorization_code");
+        params.insert("code", code);
+        params.insert("redirect_uri", redirect_uri);
+        params.insert("code_verifier", code_verifier);
+
+        let response = self
+            .http_client
+            .post(&token_url)
+            .basic_auth(&self.client_id, Some(&self.client_secret))
+            .form(&params)
+            .send()
+            .await
+            .context("Failed to exchange authorization code")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(anyhow!("Code exchange failed with status {}: {}", status, error_text));
+        }
+
+        let token_response: DexTokenResponse = response
+            .json()
+            .await
+            .context("Failed to parse token response")?;
+
+        let id_token = token_response
+            .id_token
+            .ok_or_else(|| anyhow!("No id_token in response"))?;
+
+        Ok(TokenInfo {
+            access_token: token_response.access_token,
+            id_token,
+            token_type: token_response.token_type,
+            expires_in: token_response.expires_in.unwrap_or(3600),
+        })
+    }
+
     pub fn issuer(&self) -> &str {
         &self.issuer
     }

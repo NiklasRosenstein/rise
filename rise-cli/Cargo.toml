@@ -18,5 +18,10 @@ tokio = { version = "1.48.0", features = ["full"] }
 tracing = "0.1.43"
 tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 webbrowser = "1.0.2"
-rpassword = "7.3.1"
 chrono = "0.4"
+# OAuth2 and PKCE dependencies
+sha2 = "0.10"
+base64 = "0.22"
+url = "2.5"
+axum = "0.8"
+rand = "0.8"

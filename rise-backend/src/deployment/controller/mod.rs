@@ -7,7 +7,7 @@ use chrono::{DateTime, Utc};
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::db::models::{Deployment, Project, DeploymentStatus};
 use crate::db::{deployments as db_deployments, projects};
@@ -196,10 +196,10 @@ impl DeploymentController {
         let mut ticker = interval(self.health_check_interval);
 
         loop {
-            ticker.tick().await;
             if let Err(e) = self.check_deployment_health().await {
                 error!("Error in health check loop: {}", e);
             }
+            ticker.tick().await;
         }
     }
 
@@ -210,7 +210,9 @@ impl DeploymentController {
         // Find all Completed deployments
         let deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Completed).await?;
 
+        info!("Checking health for {} deployments", deployments.len());
         for deployment in deployments {
+            info!("Checking health for deployment {}", deployment.deployment_id);
             match self.backend.health_check(&deployment).await {
                 Ok(health) => {
                     // Update health status in metadata
