@@ -1,6 +1,7 @@
 /target
 pb_data
 .claude/
+/core.*
 
 # mdbook output
 /book
