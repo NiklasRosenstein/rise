@@ -28,6 +28,11 @@ pub async fn run(settings: settings::Settings) -> Result<()> {
     controller.start();
     info!("Deployment controller started");
 
+    // Start project controller
+    let project_controller = Arc::new(project::ProjectController::new(Arc::new(state.clone())));
+    project_controller.start();
+    info!("Project controller started");
+
     // Public routes (no authentication)
     let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))

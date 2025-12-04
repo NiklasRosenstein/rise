@@ -183,19 +183,28 @@ pub async fn delete_project(
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
-    projects::delete(&state.db_pool, project.id)
+    // Check if already deleting
+    if project.status == crate::db::models::ProjectStatus::Deleting {
+        return Ok(StatusCode::ACCEPTED);
+    }
+
+    // Mark project as deleting
+    projects::mark_deleting(&state.db_pool, project.id)
         .await
         .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ProjectErrorResponse {
-                    error: format!("Failed to delete project: {}", e),
+                    error: format!("Failed to mark project for deletion: {}", e),
                     suggestions: None,
                 }),
             )
         })?;
 
-    Ok(StatusCode::NO_CONTENT)
+    tracing::info!("Project {} marked for deletion", project.name);
+
+    // Return 202 Accepted - deletion is asynchronous
+    Ok(StatusCode::ACCEPTED)
 }
 
 /// Query project by ID

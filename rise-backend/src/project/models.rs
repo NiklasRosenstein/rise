@@ -37,6 +37,7 @@ pub enum ProjectStatus {
     Stopped,
     Deploying,
     Failed,
+    Deleting,
 }
 
 impl Default for ProjectStatus {
@@ -52,6 +53,7 @@ impl From<crate::db::models::ProjectStatus> for ProjectStatus {
             crate::db::models::ProjectStatus::Stopped => ProjectStatus::Stopped,
             crate::db::models::ProjectStatus::Deploying => ProjectStatus::Deploying,
             crate::db::models::ProjectStatus::Failed => ProjectStatus::Failed,
+            crate::db::models::ProjectStatus::Deleting => ProjectStatus::Deleting,
         }
     }
 }
@@ -63,6 +65,7 @@ impl From<ProjectStatus> for crate::db::models::ProjectStatus {
             ProjectStatus::Stopped => crate::db::models::ProjectStatus::Stopped,
             ProjectStatus::Deploying => crate::db::models::ProjectStatus::Deploying,
             ProjectStatus::Failed => crate::db::models::ProjectStatus::Failed,
+            ProjectStatus::Deleting => crate::db::models::ProjectStatus::Deleting,
         }
     }
 }

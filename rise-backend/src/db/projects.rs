@@ -393,3 +393,54 @@ pub async fn get_deployment_urls_batch(
         .filter_map(|r| r.project_id.map(|id| (id, r.deployment_url)))
         .collect())
 }
+
+/// Mark project as deleting
+pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
+    let project = sqlx::query_as!(
+        Project,
+        r#"
+        UPDATE projects
+        SET status = 'Deleting', updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+            id, name,
+            status as "status: ProjectStatus",
+            visibility as "visibility: ProjectVisibility",
+            owner_user_id, owner_team_id,
+            active_deployment_id,
+            created_at, updated_at
+        "#,
+        id
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to mark project as deleting")?;
+
+    Ok(project)
+}
+
+/// Find all projects in Deleting status
+pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
+    let projects = sqlx::query_as!(
+        Project,
+        r#"
+        SELECT
+            id, name,
+            status as "status: ProjectStatus",
+            visibility as "visibility: ProjectVisibility",
+            owner_user_id, owner_team_id,
+            active_deployment_id,
+            created_at, updated_at
+        FROM projects
+        WHERE status = 'Deleting'
+        ORDER BY updated_at ASC
+        LIMIT $1
+        "#,
+        limit
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to find deleting projects")?;
+
+    Ok(projects)
+}

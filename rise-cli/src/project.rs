@@ -63,6 +63,7 @@ enum ProjectStatus {
     Stopped,
     Deploying,
     Failed,
+    Deleting,
 }
 
 impl std::fmt::Display for ProjectStatus {
@@ -72,6 +73,7 @@ impl std::fmt::Display for ProjectStatus {
             ProjectStatus::Stopped => write!(f, "Stopped"),
             ProjectStatus::Deploying => write!(f, "Deploying"),
             ProjectStatus::Failed => write!(f, "Failed"),
+            ProjectStatus::Deleting => write!(f, "Deleting"),
         }
     }
 }
@@ -462,8 +464,8 @@ pub async fn delete_project(
         .await
         .context("Failed to send delete project request")?;
 
-    if response.status().is_success() {
-        println!("✓ Project deleted successfully!");
+    if response.status() == reqwest::StatusCode::ACCEPTED {
+        println!("✓ Project is being deleted (deployments are being cleaned up)");
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         let error: ProjectErrorResponse = response.json().await
             .context("Failed to parse error response")?;

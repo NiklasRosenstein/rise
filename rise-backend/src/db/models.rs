@@ -27,13 +27,14 @@ pub struct Project {
 }
 
 /// Project status enum
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type)]
 #[sqlx(type_name = "text")]
 pub enum ProjectStatus {
     Stopped,
     Running,
     Failed,
     Deploying,
+    Deleting,
 }
 
 impl std::fmt::Display for ProjectStatus {
@@ -43,6 +44,7 @@ impl std::fmt::Display for ProjectStatus {
             ProjectStatus::Running => write!(f, "Running"),
             ProjectStatus::Failed => write!(f, "Failed"),
             ProjectStatus::Deploying => write!(f, "Deploying"),
+            ProjectStatus::Deleting => write!(f, "Deleting"),
         }
     }
 }
