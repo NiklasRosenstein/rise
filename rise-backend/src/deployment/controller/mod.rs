@@ -138,8 +138,9 @@ impl DeploymentController {
         let deployments = db_deployments::find_non_terminal(&self.state.db_pool, 10).await?;
 
         for deployment in deployments {
+            let deployment_id = deployment.deployment_id.clone();
             if let Err(e) = self.reconcile_single_deployment(deployment).await {
-                error!("Failed to reconcile deployment {}: {}", deployment.deployment_id, e);
+                error!("Failed to reconcile deployment {}: {}", deployment_id, e);
             }
         }
 
@@ -158,6 +159,9 @@ impl DeploymentController {
         // Call backend reconcile
         let result = self.backend.reconcile(&deployment, &project).await?;
 
+        // Store status for later comparison
+        let new_status = result.status.clone();
+
         // Update deployment with reconciliation result
         db_deployments::update_status(&self.state.db_pool, deployment.id, result.status).await?;
 
@@ -173,7 +177,7 @@ impl DeploymentController {
 
         if let Some(error) = result.error_message {
             db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
-        } else if result.status == DeploymentStatus::Completed {
+        } else if new_status == DeploymentStatus::Completed {
             db_deployments::mark_completed(&self.state.db_pool, deployment.id).await?;
             projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id).await?;
         }

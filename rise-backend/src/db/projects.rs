@@ -279,7 +279,7 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
         match last.status {
             DeploymentStatus::Failed => ProjectStatus::Failed,
             DeploymentStatus::Pending | DeploymentStatus::Building |
-            DeploymentStatus::Pushing | DeploymentStatus::Deploying => ProjectStatus::Deploying,
+            DeploymentStatus::Pushing | DeploymentStatus::Pushed | DeploymentStatus::Deploying => ProjectStatus::Deploying,
             DeploymentStatus::Completed => {
                 // This shouldn't happen (completed deployment should be active)
                 // but treat as Running anyway
