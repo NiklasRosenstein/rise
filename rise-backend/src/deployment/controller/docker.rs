@@ -168,7 +168,94 @@ impl DeploymentBackend for DockerController {
             metadata.internal_port = 8080;
         }
 
-        debug!("Reconciling deployment {} in phase {:?}", deployment.deployment_id, metadata.reconcile_phase);
+        debug!("Reconciling deployment {} (status={:?}) in phase {:?}",
+            deployment.deployment_id, deployment.status, metadata.reconcile_phase);
+
+        // Handle Unhealthy deployments - attempt recovery
+        if deployment.status == DeploymentStatus::Unhealthy {
+            info!("Attempting to recover unhealthy deployment {}", deployment.deployment_id);
+
+            if let Some(ref container_id) = metadata.container_id {
+                // Check if container still exists
+                match self.docker.inspect_container(container_id, None).await {
+                    Ok(inspect) => {
+                        // Container exists - check if it's running
+                        let state = inspect.state.ok_or_else(|| anyhow::anyhow!("No state in inspect"))?;
+                        let is_running = state.running.unwrap_or(false);
+
+                        if is_running {
+                            // Container is running again - it recovered!
+                            info!("Deployment {} has recovered (container is running)", deployment.deployment_id);
+                            return Ok(ReconcileResult {
+                                status: DeploymentStatus::Healthy,
+                                deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                                controller_metadata: serde_json::to_value(&metadata)?,
+                                error_message: None,
+                                next_reconcile: super::ReconcileHint::Default,
+                            });
+                        } else {
+                            // Container exists but stopped - try to restart it
+                            info!("Attempting to restart stopped container {}", container_id);
+                            match self.docker.start_container(container_id, None::<StartContainerOptions<String>>).await {
+                                Ok(_) => {
+                                    info!("Successfully restarted container {}, waiting for health check", container_id);
+                                    // Keep in Unhealthy state until health check confirms it's healthy
+                                    return Ok(ReconcileResult {
+                                        status: DeploymentStatus::Unhealthy,
+                                        deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                                        controller_metadata: serde_json::to_value(&metadata)?,
+                                        error_message: None,  // Don't set error - we're attempting recovery
+                                        next_reconcile: super::ReconcileHint::Default,
+                                    });
+                                }
+                                Err(e) => {
+                                    warn!("Failed to restart container {}: {}", container_id, e);
+                                    // Keep in Unhealthy state, let timeout handle it
+                                    return Ok(ReconcileResult {
+                                        status: DeploymentStatus::Unhealthy,
+                                        deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                                        controller_metadata: serde_json::to_value(&metadata)?,
+                                        error_message: None,  // Don't set error - timeout will mark as Failed
+                                        next_reconcile: super::ReconcileHint::Default,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                    Err(e) if e.to_string().contains("404") || e.to_string().contains("No such container") => {
+                        // Container was removed - can't recover
+                        warn!("Container {} no longer exists, marking deployment as failed", container_id);
+                        return Ok(ReconcileResult {
+                            status: DeploymentStatus::Failed,
+                            deployment_url: None,
+                            controller_metadata: serde_json::to_value(&metadata)?,
+                            error_message: Some("Container was removed".to_string()),
+                            next_reconcile: super::ReconcileHint::Default,
+                        });
+                    }
+                    Err(e) => {
+                        warn!("Error inspecting container {}: {}", container_id, e);
+                        // Keep in Unhealthy state, timeout will handle if persistent
+                        return Ok(ReconcileResult {
+                            status: DeploymentStatus::Unhealthy,
+                            deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                            controller_metadata: serde_json::to_value(&metadata)?,
+                            error_message: None,  // Don't set error - timeout will mark as Failed
+                            next_reconcile: super::ReconcileHint::Default,
+                        });
+                    }
+                }
+            } else {
+                // No container ID in metadata - can't recover
+                return Ok(ReconcileResult {
+                    status: DeploymentStatus::Failed,
+                    deployment_url: None,
+                    controller_metadata: serde_json::to_value(&metadata)?,
+                    error_message: Some("No container ID in metadata".to_string()),
+                    next_reconcile: super::ReconcileHint::Default,
+                });
+            }
+        }
 
         match metadata.reconcile_phase {
             ReconcilePhase::NotStarted => {

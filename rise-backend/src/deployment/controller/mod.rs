@@ -214,11 +214,30 @@ impl DeploymentController {
         } else if new_status == DeploymentStatus::Healthy {
             // New deployment just became healthy - set as active
             db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
-            projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id).await?;
 
-            // TODO: Handle supersession of old active deployment
-            // If there was a previous active deployment that is Healthy/Unhealthy,
-            // it should be marked as Terminating with reason=Superseded
+            // Handle supersession: if there's an old active deployment, mark it for termination
+            if let Some(old_active_id) = project.active_deployment_id {
+                if old_active_id != deployment.id {
+                    // Get the old active deployment
+                    if let Ok(Some(old_deployment)) = db_deployments::find_by_id(&self.state.db_pool, old_active_id).await {
+                        // Only supersede if it's still running (Healthy or Unhealthy)
+                        if matches!(old_deployment.status, DeploymentStatus::Healthy | DeploymentStatus::Unhealthy) {
+                            info!(
+                                "Deployment {} is replacing active deployment {}, marking old as Terminating",
+                                deployment.deployment_id, old_deployment.deployment_id
+                            );
+                            db_deployments::mark_terminating(
+                                &self.state.db_pool,
+                                old_active_id,
+                                crate::db::models::TerminationReason::Superseded
+                            ).await?;
+                        }
+                    }
+                }
+            }
+
+            // Set new deployment as active
+            projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id).await?;
         }
 
         // Update project status
@@ -276,7 +295,16 @@ impl DeploymentController {
                     if !health.healthy {
                         let msg = health.message.unwrap_or_else(|| "Health check failed".to_string());
                         warn!("Deployment {} is now unhealthy: {}", deployment.deployment_id, msg);
-                        db_deployments::mark_unhealthy(&self.state.db_pool, deployment.id, msg).await?;
+                        info!("Calling mark_unhealthy for deployment id: {}", deployment.id);
+                        match db_deployments::mark_unhealthy(&self.state.db_pool, deployment.id, msg.clone()).await {
+                            Ok(updated) => {
+                                info!("Successfully marked deployment {} as Unhealthy. New status: {:?}", deployment.deployment_id, updated.status);
+                            }
+                            Err(e) => {
+                                error!("Failed to mark deployment {} as unhealthy: {}", deployment.deployment_id, e);
+                                return Err(e);
+                            }
+                        }
                         projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
                     }
                 }
