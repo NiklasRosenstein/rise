@@ -96,8 +96,8 @@ Let's outline the architecture and components needed for this Rust-based project
     - [x] Initialize a new Rust project for the CLI using `cargo new rise-cli`.
     - [x] Implement authentication commands to interact with the backend.
     - [x] Implement standard OAuth2 authentication flows:
-      - [x] OAuth2 authorization code flow with PKCE (via `--browser` flag)
-      - [x] Native Dex device authorization flow (default)
+      - [x] OAuth2 authorization code flow with PKCE (default)
+      - [x] Native Dex device authorization flow (via `--device` flag)
       - [x] Remove password authentication
       - [x] Local HTTP callback server for authorization code flow
     - [x] Create project management commands for creating and listing projects.
