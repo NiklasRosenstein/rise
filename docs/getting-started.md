@@ -27,27 +27,36 @@ cargo build --bin rise-cli
 ### 1. Login
 
 ```bash
-./target/debug/rise-cli login --email test@example.com --password test1234
+./target/debug/rise login
 ```
 
-Default credentials: `test@example.com` / `test1234`
+This will:
+1. Open your browser to Dex authentication
+2. Start a local callback server on port 8765 (or 8766/8767 if occupied)
+3. Redirect back to CLI after successful authentication
+
+**Default Dex credentials:**
+- Email: `admin@example.com`
+- Password: `admin`
+
+See [Authentication](./authentication.md) for more details on authentication flows.
 
 ### 2. Create a Project
 
 ```bash
-./target/debug/rise-cli project create my-app --visibility public
+./target/debug/rise project create my-app --visibility public
 ```
 
 ### 3. Create a Team
 
 ```bash
-./target/debug/rise-cli team create devops
+./target/debug/rise team create devops
 ```
 
 ### 4. Transfer Ownership
 
 ```bash
-./target/debug/rise-cli project update my-app --owner team:devops
+./target/debug/rise project update my-app --owner team:devops
 ```
 
 ## Development Database
