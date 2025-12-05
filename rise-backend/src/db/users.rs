@@ -69,6 +69,26 @@ pub async fn find_or_create(pool: &PgPool, email: &str) -> Result<User> {
     create(pool, email).await
 }
 
+/// Batch fetch user emails by IDs
+pub async fn get_emails_batch(
+    pool: &PgPool,
+    user_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, String>> {
+    let records = sqlx::query!(
+        r#"
+        SELECT id, email
+        FROM users
+        WHERE id = ANY($1)
+        "#,
+        user_ids
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to batch fetch user emails")?;
+
+    Ok(records.into_iter().map(|r| (r.id, r.email)).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

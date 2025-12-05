@@ -85,6 +85,10 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_team: Option<String>, // Relation to teams collection
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_user_email: Option<String>, // Email of the user owner (for display)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner_team_name: Option<String>, // Name of the team owner (for display)
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub active_deployment_id: Option<String>, // ID of the active deployment
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_deployment_status: Option<String>, // Status of the active deployment

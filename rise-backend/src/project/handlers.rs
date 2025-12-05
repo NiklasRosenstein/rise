@@ -117,6 +117,36 @@ pub async fn list_projects(
                 )
             })?;
 
+    // Batch fetch owner information (user emails and team names)
+    let user_ids: Vec<Uuid> = projects.iter().filter_map(|p| p.owner_user_id).collect();
+    let team_ids: Vec<Uuid> = projects.iter().filter_map(|p| p.owner_team_id).collect();
+
+    let user_emails = if !user_ids.is_empty() {
+        db_users::get_emails_batch(&state.db_pool, &user_ids)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get user emails: {}", e),
+                )
+            })?
+    } else {
+        std::collections::HashMap::new()
+    };
+
+    let team_names = if !team_ids.is_empty() {
+        db_teams::get_names_batch(&state.db_pool, &team_ids)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get team names: {}", e),
+                )
+            })?
+    } else {
+        std::collections::HashMap::new()
+    };
+
     let api_projects = projects
         .into_iter()
         .map(|project| {
@@ -131,6 +161,14 @@ pub async fn list_projects(
                     )
                 })
                 .unwrap_or((None, None));
+
+            let owner_user_email = project
+                .owner_user_id
+                .and_then(|id| user_emails.get(&id).cloned());
+            let owner_team_name = project
+                .owner_team_id
+                .and_then(|id| team_names.get(&id).cloned());
+
             ApiProject {
                 id: project.id.to_string(),
                 created: project.created_at.to_rfc3339(),
@@ -140,6 +178,8 @@ pub async fn list_projects(
                 visibility: ProjectVisibility::from(project.visibility),
                 owner_user: project.owner_user_id.map(|id| id.to_string()),
                 owner_team: project.owner_team_id.map(|id| id.to_string()),
+                owner_user_email,
+                owner_team_name,
                 active_deployment_id,
                 active_deployment_status,
                 deployment_url,
@@ -411,6 +451,8 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         visibility: ProjectVisibility::from(project.visibility),
         owner_user: project.owner_user_id.map(|id| id.to_string()),
         owner_team: project.owner_team_id.map(|id| id.to_string()),
+        owner_user_email: None, // Will be populated by caller if needed
+        owner_team_name: None,  // Will be populated by caller if needed
         active_deployment_id: project.active_deployment_id.map(|id| id.to_string()),
         active_deployment_status: None, // Will be populated by caller if needed
         deployment_url: None,           // Will be populated by caller

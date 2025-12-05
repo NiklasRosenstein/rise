@@ -251,3 +251,23 @@ pub async fn is_member(pool: &PgPool, team_id: Uuid, user_id: Uuid) -> Result<bo
 
     Ok(result.exists)
 }
+
+/// Batch fetch team names by IDs
+pub async fn get_names_batch(
+    pool: &PgPool,
+    team_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, String>> {
+    let records = sqlx::query!(
+        r#"
+        SELECT id, name
+        FROM teams
+        WHERE id = ANY($1)
+        "#,
+        team_ids
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to batch fetch team names")?;
+
+    Ok(records.into_iter().map(|r| (r.id, r.name)).collect())
+}

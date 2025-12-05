@@ -101,6 +101,10 @@ struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     owner_team: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    owner_user_email: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    owner_team_name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     active_deployment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     active_deployment_status: Option<String>,
@@ -321,10 +325,10 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                 };
 
                 // Format owner
-                let owner = if let Some(user_id) = &project.owner_user {
-                    format!("user:{}", user_id)
-                } else if let Some(team_id) = &project.owner_team {
-                    format!("team:{}", team_id)
+                let owner = if let Some(user_email) = &project.owner_user_email {
+                    format!("user:{}", user_email)
+                } else if let Some(team_name) = &project.owner_team_name {
+                    format!("team:{}", team_name)
                 } else {
                     "-".to_string()
                 };
