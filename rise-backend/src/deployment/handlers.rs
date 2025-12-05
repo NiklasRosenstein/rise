@@ -425,8 +425,6 @@ pub async fn get_deployment_by_project(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to find deployment: {}", e)))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Deployment '{}' not found for project '{}'", deployment_id, project_name)))?;
 
-    info!("Found deployment {} for project {}", deployment_id, project_name);
-
     Ok(Json(convert_deployment(deployment)))
 }
 

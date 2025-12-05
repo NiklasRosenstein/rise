@@ -189,6 +189,30 @@ impl DeploymentController {
     ///
     /// Calls the backend's reconcile method and updates the deployment in the database
     async fn reconcile_single_deployment(&self, deployment: Deployment) -> anyhow::Result<()> {
+        // Check for deployment timeout (5 minutes in Deploying state)
+        if deployment.status == DeploymentStatus::Deploying {
+            let elapsed = Utc::now().signed_duration_since(deployment.created_at);
+            let timeout_duration = chrono::Duration::minutes(5);
+
+            if elapsed > timeout_duration {
+                warn!(
+                    "Deployment {} timed out after {} seconds in Deploying state, marking as Terminating",
+                    deployment.deployment_id, elapsed.num_seconds()
+                );
+
+                db_deployments::mark_terminating(
+                    &self.state.db_pool,
+                    deployment.id,
+                    crate::db::models::TerminationReason::Failed
+                ).await?;
+
+                // Update project status after marking deployment as terminating
+                projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
+
+                return Ok(());
+            }
+        }
+
         // Get project info
         let project = projects::find_by_id(&self.state.db_pool, deployment.project_id)
             .await?

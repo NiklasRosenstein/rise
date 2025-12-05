@@ -178,6 +178,7 @@ pub enum TerminationReason {
     UserStopped, // User explicitly stopped the deployment
     Superseded,  // Replaced by newer deployment
     Cancelled,   // Cancelled before infrastructure provisioned
+    Failed,      // Deployment timed out or failed to become healthy
 }
 
 impl std::fmt::Display for TerminationReason {
@@ -186,6 +187,7 @@ impl std::fmt::Display for TerminationReason {
             TerminationReason::UserStopped => write!(f, "UserStopped"),
             TerminationReason::Superseded => write!(f, "Superseded"),
             TerminationReason::Cancelled => write!(f, "Cancelled"),
+            TerminationReason::Failed => write!(f, "Failed"),
         }
     }
 }
