@@ -13,26 +13,28 @@ mod lib_tests;
 
 use anyhow::Result;
 use axum::{middleware, Router};
-use state::AppState;
+use state::{AppState, ControllerState};
 use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::info;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-pub async fn run(settings: settings::Settings) -> Result<()> {
-    let state = AppState::new(&settings).await?;
+/// Initialize tracing for a process
+pub fn init_tracing(process_name: &str) {
+    tracing_subscriber::registry()
+        .with(tracing_subscriber::EnvFilter::new(
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+        ))
+        .with(tracing_subscriber::fmt::layer())
+        .init();
 
-    // Start deployment controller
-    let controller = Arc::new(deployment::controller::DeploymentController::new(
-        Arc::new(state.clone()),
-    )?);
-    controller.start();
-    info!("Deployment controller started");
+    tracing::info!("Starting {}", process_name);
+}
 
-    // Start project controller
-    let project_controller = Arc::new(project::ProjectController::new(Arc::new(state.clone())));
-    project_controller.start();
-    info!("Project controller started");
+/// Run the HTTP server process
+pub async fn run_server(settings: settings::Settings) -> Result<()> {
+    let state = AppState::new_for_server(&settings).await?;
 
     // Public routes (no authentication)
     let public_routes = Router::new()
@@ -57,9 +59,39 @@ pub async fn run(settings: settings::Settings) -> Result<()> {
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
-    info!("listening on {}", addr);
+    info!("HTTP server listening on {}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
+    Ok(())
+}
+
+/// Run the deployment controller process
+pub async fn run_deployment_controller(settings: settings::Settings) -> Result<()> {
+    let state = ControllerState::new(&settings.database.url, 3).await?;
+
+    let backend = Arc::new(deployment::controller::DockerController::new()?);
+    let controller = Arc::new(deployment::controller::DeploymentController::new(
+        Arc::new(state),
+        backend,
+    )?);
+    controller.start();
+    info!("Deployment controller started");
+
+    // Block forever
+    std::future::pending::<()>().await;
+    Ok(())
+}
+
+/// Run the project controller process
+pub async fn run_project_controller(settings: settings::Settings) -> Result<()> {
+    let state = ControllerState::new(&settings.database.url, 2).await?;
+
+    let controller = Arc::new(project::ProjectController::new(Arc::new(state)));
+    controller.start();
+    info!("Project controller started");
+
+    // Block forever
+    std::future::pending::<()>().await;
     Ok(())
 }
 
