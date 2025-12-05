@@ -308,7 +308,8 @@ impl DeploymentController {
                 }
             }
 
-            // Clean up other non-terminal deployments in this group
+            // Clean up other ACTIVE (Healthy/Unhealthy) deployments in this group
+            // Do NOT clean up deployments that are still being deployed (Pushed, Deploying, etc.)
             let other_in_group = db_deployments::find_non_terminal_for_project_and_group(
                 &self.state.db_pool,
                 project.id,
@@ -317,7 +318,12 @@ impl DeploymentController {
             .await?;
 
             for other in other_in_group {
-                if other.id != deployment.id && !state_machine::is_terminal(&other.status) {
+                // Only clean up OTHER deployments that are in ACTIVE running states
+                // Don't clean up deployments that are still being deployed (Pending, Building, Pushing, Pushed, Deploying)
+                if other.id != deployment.id
+                    && state_machine::is_active(&other.status)
+                    && !state_machine::is_terminal(&other.status)
+                {
                     info!(
                         "Cleaning up non-active deployment {} in group '{}', marking as Terminating",
                         other.deployment_id, deployment.deployment_group
