@@ -298,6 +298,7 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                 .set_header(vec![
                     Cell::new("NAME").add_attribute(Attribute::Bold),
                     Cell::new("STATUS").add_attribute(Attribute::Bold),
+                    Cell::new("OWNER").add_attribute(Attribute::Bold),
                     Cell::new("ACTIVE DEPLOYMENT").add_attribute(Attribute::Bold),
                     Cell::new("URL").add_attribute(Attribute::Bold),
                 ]);
@@ -319,9 +320,19 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                     _ => "-".to_string(),
                 };
 
+                // Format owner
+                let owner = if let Some(user_id) = &project.owner_user {
+                    format!("user:{}", user_id)
+                } else if let Some(team_id) = &project.owner_team {
+                    format!("team:{}", team_id)
+                } else {
+                    "-".to_string()
+                };
+
                 table.add_row(vec![
                     Cell::new(&project.name),
                     Cell::new(format!("{}", project.status)),
+                    Cell::new(&owner),
                     Cell::new(&active_deployment),
                     Cell::new(url),
                 ]);
