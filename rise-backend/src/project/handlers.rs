@@ -96,7 +96,7 @@ pub async fn list_projects(
         )
     })?;
 
-    // Batch fetch deployment URLs and active deployment IDs for efficiency
+    // Batch fetch deployment URLs and active deployment info for efficiency
     let project_ids: Vec<uuid::Uuid> = projects.iter().map(|p| p.id).collect();
     let deployment_urls = projects::get_deployment_urls_batch(&state.db_pool, &project_ids)
         .await
@@ -107,13 +107,13 @@ pub async fn list_projects(
             )
         })?;
 
-    let active_deployment_ids =
-        projects::get_active_deployment_ids_batch(&state.db_pool, &project_ids)
+    let active_deployment_info =
+        projects::get_active_deployment_info_batch(&state.db_pool, &project_ids)
             .await
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get active deployment IDs: {}", e),
+                    format!("Failed to get active deployment info: {}", e),
                 )
             })?;
 
@@ -121,9 +121,16 @@ pub async fn list_projects(
         .into_iter()
         .map(|project| {
             let deployment_url = deployment_urls.get(&project.id).and_then(|u| u.clone());
-            let active_deployment_id = active_deployment_ids
+            let (active_deployment_id, active_deployment_status) = active_deployment_info
                 .get(&project.id)
-                .and_then(|id| id.clone());
+                .and_then(|info| info.as_ref())
+                .map(|info| {
+                    (
+                        Some(info.deployment_id.clone()),
+                        Some(info.status.to_string()),
+                    )
+                })
+                .unwrap_or((None, None));
             ApiProject {
                 id: project.id.to_string(),
                 created: project.created_at.to_rfc3339(),
@@ -134,6 +141,7 @@ pub async fn list_projects(
                 owner_user: project.owner_user_id.map(|id| id.to_string()),
                 owner_team: project.owner_team_id.map(|id| id.to_string()),
                 active_deployment_id,
+                active_deployment_status,
                 deployment_url,
                 project_url: project.project_url,
             }
@@ -404,7 +412,8 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         owner_user: project.owner_user_id.map(|id| id.to_string()),
         owner_team: project.owner_team_id.map(|id| id.to_string()),
         active_deployment_id: project.active_deployment_id.map(|id| id.to_string()),
-        deployment_url: None, // Will be populated by caller
+        active_deployment_status: None, // Will be populated by caller if needed
+        deployment_url: None,           // Will be populated by caller
         project_url: project.project_url,
     }
 }

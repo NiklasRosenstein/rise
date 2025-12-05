@@ -103,6 +103,8 @@ struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     active_deployment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    active_deployment_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     deployment_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     project_url: Option<String>,
@@ -306,12 +308,21 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                     .as_deref()
                     .or(project.deployment_url.as_deref())
                     .unwrap_or("(not deployed)");
-                let active_deployment = project.active_deployment_id.as_deref().unwrap_or("-");
+
+                // Format active deployment with status
+                let active_deployment = match (
+                    project.active_deployment_id.as_deref(),
+                    project.active_deployment_status.as_deref(),
+                ) {
+                    (Some(id), Some(status)) => format!("{} ({})", id, status),
+                    (Some(id), None) => id.to_string(),
+                    _ => "-".to_string(),
+                };
 
                 table.add_row(vec![
                     Cell::new(&project.name),
                     Cell::new(format!("{}", project.status)),
-                    Cell::new(active_deployment),
+                    Cell::new(&active_deployment),
                     Cell::new(url),
                 ]);
             }

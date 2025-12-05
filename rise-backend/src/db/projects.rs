@@ -421,6 +421,13 @@ pub async fn get_deployment_urls_batch(
         .collect())
 }
 
+/// Active deployment info returned by batch queries
+#[derive(Debug, Clone)]
+pub struct ActiveDeploymentInfo {
+    pub deployment_id: String,
+    pub status: crate::db::models::DeploymentStatus,
+}
+
 /// Get active deployment IDs (deployment_id strings) for multiple projects (batch operation)
 /// Returns a map of project_id -> deployment_id (the string identifier, not UUID)
 pub async fn get_active_deployment_ids_batch(
@@ -446,6 +453,48 @@ pub async fn get_active_deployment_ids_batch(
     Ok(results
         .into_iter()
         .filter_map(|r| r.project_id.map(|id| (id, r.deployment_id)))
+        .collect())
+}
+
+/// Get active deployment info (deployment_id and status) for multiple projects (batch operation)
+/// Returns a map of project_id -> ActiveDeploymentInfo
+pub async fn get_active_deployment_info_batch(
+    pool: &PgPool,
+    project_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Option<ActiveDeploymentInfo>>> {
+    let results = sqlx::query!(
+        r#"
+        SELECT
+            p.id as project_id,
+            d.deployment_id,
+            d.status as "status: crate::db::models::DeploymentStatus"
+        FROM unnest($1::uuid[]) AS p(id)
+        LEFT JOIN deployments d ON d.id = (
+            SELECT active_deployment_id FROM projects WHERE id = p.id
+        )
+        "#,
+        project_ids
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to get active deployment info in batch")?;
+
+    Ok(results
+        .into_iter()
+        .filter_map(|r| {
+            r.project_id.map(|id| {
+                let info = if let (Some(deployment_id), Some(status)) = (r.deployment_id, r.status)
+                {
+                    Some(ActiveDeploymentInfo {
+                        deployment_id,
+                        status,
+                    })
+                } else {
+                    None
+                };
+                (id, info)
+            })
+        })
         .collect())
 }
 
