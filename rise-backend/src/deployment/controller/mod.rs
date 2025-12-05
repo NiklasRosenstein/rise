@@ -444,8 +444,11 @@ impl DeploymentController {
                         Some(crate::db::models::TerminationReason::UserStopped) => {
                             db_deployments::mark_stopped(&self.state.db_pool, deployment.id).await?;
                         }
-                        _ => {
-                            // Default to Stopped
+                        Some(crate::db::models::TerminationReason::Failed) => {
+                            db_deployments::mark_failed(&self.state.db_pool, deployment.id, "Deployment timed out").await?;
+                        }
+                        Some(crate::db::models::TerminationReason::Cancelled) | None => {
+                            // Cancelled or unknown reason - default to Stopped
                             db_deployments::mark_stopped(&self.state.db_pool, deployment.id).await?;
                         }
                     }
