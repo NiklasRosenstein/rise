@@ -47,19 +47,19 @@
             <a href="#" class="back-button" onclick="showView('projects'); return false;">Back to Projects</a>
             <div id="project-detail"></div>
             <h3>Deployments</h3>
-            <div id="deployment-filters" style="margin-bottom: 1rem;">
-                <label for="deployment-group-filter">
-                    Filter by group:
-                    <input type="text" id="deployment-group-filter" placeholder="Leave empty for all groups" style="display: inline-block; width: auto; margin-left: 0.5rem;">
+            <div id="deployment-filters" style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                <label for="deployment-group-filter" style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="white-space: nowrap;">Filter by group:</span>
+                    <input type="text" id="deployment-group-filter" placeholder="Leave empty for all groups" style="width: 250px; margin: 0;">
                 </label>
-                <button onclick="applyDeploymentFilter()" style="margin-left: 0.5rem;">Apply</button>
-                <button onclick="clearDeploymentFilter()" style="margin-left: 0.5rem;" class="secondary">Clear</button>
+                <button onclick="applyDeploymentFilter()" style="margin: 0; padding: 0.5rem 1rem;">Apply</button>
+                <button onclick="clearDeploymentFilter()" style="margin: 0; padding: 0.5rem 1rem;" class="secondary">Clear</button>
             </div>
             <div id="deployment-list"></div>
             <div id="deployment-pagination" style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
-                <button id="prev-page" onclick="prevPage()" disabled>Previous</button>
-                <span id="page-info"></span>
-                <button id="next-page" onclick="nextPage()">Next</button>
+                <button id="prev-page" onclick="prevPage()" disabled style="padding: 0.5rem 1rem;">Previous</button>
+                <span id="page-info" style="font-size: 0.9rem;"></span>
+                <button id="next-page" onclick="nextPage()" style="padding: 0.5rem 1rem;">Next</button>
             </div>
         </section>
 
