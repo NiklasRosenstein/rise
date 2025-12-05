@@ -96,7 +96,7 @@ pub async fn list_projects(
         )
     })?;
 
-    // Batch fetch deployment URLs for efficiency
+    // Batch fetch deployment URLs and active deployment IDs for efficiency
     let project_ids: Vec<uuid::Uuid> = projects.iter().map(|p| p.id).collect();
     let deployment_urls = projects::get_deployment_urls_batch(&state.db_pool, &project_ids)
         .await
@@ -107,10 +107,23 @@ pub async fn list_projects(
             )
         })?;
 
+    let active_deployment_ids =
+        projects::get_active_deployment_ids_batch(&state.db_pool, &project_ids)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get active deployment IDs: {}", e),
+                )
+            })?;
+
     let api_projects = projects
         .into_iter()
         .map(|project| {
             let deployment_url = deployment_urls.get(&project.id).and_then(|u| u.clone());
+            let active_deployment_id = active_deployment_ids
+                .get(&project.id)
+                .and_then(|id| id.clone());
             ApiProject {
                 id: project.id.to_string(),
                 created: project.created_at.to_rfc3339(),
@@ -120,7 +133,7 @@ pub async fn list_projects(
                 visibility: ProjectVisibility::from(project.visibility),
                 owner_user: project.owner_user_id.map(|id| id.to_string()),
                 owner_team: project.owner_team_id.map(|id| id.to_string()),
-                active_deployment_id: project.active_deployment_id.map(|id| id.to_string()),
+                active_deployment_id,
                 deployment_url,
                 project_url: project.project_url,
             }

@@ -1,6 +1,9 @@
 use anyhow::{Context, Result, bail};
+use comfy_table::{
+    Attribute, Cell, Color, Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL,
+};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use std::time::{Duration, Instant};
 use tracing::{debug, info};
 
@@ -158,12 +161,33 @@ pub async fn list_deployments(
         return Ok(());
     }
 
-    // Print table header
-    println!(
-        "{:<40} {:<15} {:<15} {:<20} {:<25} {:<50}",
-        "DEPLOYMENT", "STATUS", "GROUP", "EXPIRY", "CREATED", "URL"
-    );
-    println!("{}", "-".repeat(165));
+    // Group deployments by deployment_group to find active (Healthy) ones
+    let mut active_per_group = std::collections::HashMap::new();
+    for deployment in &deployments {
+        if deployment.status == DeploymentStatus::Healthy {
+            active_per_group.insert(
+                deployment.deployment_group.clone(),
+                deployment.deployment_id.clone(),
+            );
+        }
+    }
+
+    // Find the active deployment in the default group (this is the project's active deployment)
+    let default_active = active_per_group.get("default");
+
+    // Create table
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .apply_modifier(UTF8_ROUND_CORNERS)
+        .set_header(vec![
+            Cell::new("DEPLOYMENT").add_attribute(Attribute::Bold),
+            Cell::new("STATUS").add_attribute(Attribute::Bold),
+            Cell::new("GROUP").add_attribute(Attribute::Bold),
+            Cell::new("EXPIRY").add_attribute(Attribute::Bold),
+            Cell::new("CREATED").add_attribute(Attribute::Bold),
+            Cell::new("URL").add_attribute(Attribute::Bold),
+        ]);
 
     for deployment in deployments {
         let deployment_ref = format!("{}:{}", project, deployment.deployment_id);
@@ -187,15 +211,45 @@ pub async fn list_deployments(
             "-".to_string()
         };
 
-        println!(
-            "{:<40} {:<15} {:<15} {:<20} {:<25} {:<50}",
-            deployment_ref,
-            deployment.status.to_string(),
-            deployment.deployment_group,
-            expiry,
-            created,
-            url
-        );
+        // Determine if this deployment is active in its group
+        let is_active_in_group =
+            active_per_group.get(&deployment.deployment_group) == Some(&deployment.deployment_id);
+
+        // Determine if this is the default group's active deployment (bold)
+        let is_default_active = default_active == Some(&deployment.deployment_id);
+
+        // Create cells with appropriate styling
+        let mut deployment_cell = Cell::new(&deployment_ref);
+        let mut status_cell = Cell::new(deployment.status.to_string());
+        let mut group_cell = Cell::new(&deployment.deployment_group);
+        let mut expiry_cell = Cell::new(&expiry);
+        let mut created_cell = Cell::new(&created);
+        let mut url_cell = Cell::new(url);
+
+        // Apply bold to the entire row if this is the default group's active deployment
+        if is_default_active {
+            deployment_cell = deployment_cell.add_attribute(Attribute::Bold);
+            status_cell = status_cell.add_attribute(Attribute::Bold);
+            group_cell = group_cell.add_attribute(Attribute::Bold);
+            expiry_cell = expiry_cell.add_attribute(Attribute::Bold);
+            created_cell = created_cell.add_attribute(Attribute::Bold);
+            url_cell = url_cell.add_attribute(Attribute::Bold);
+        }
+
+        // Apply green color if this is active in its group
+        if is_active_in_group {
+            deployment_cell = deployment_cell.fg(Color::Green);
+            status_cell = status_cell.fg(Color::Green);
+        }
+
+        table.add_row(vec![
+            deployment_cell,
+            status_cell,
+            group_cell,
+            expiry_cell,
+            created_cell,
+            url_cell,
+        ]);
 
         // Show error message if failed
         if deployment.status == DeploymentStatus::Failed {
@@ -204,6 +258,8 @@ pub async fn list_deployments(
             }
         }
     }
+
+    println!("{}", table);
 
     Ok(())
 }

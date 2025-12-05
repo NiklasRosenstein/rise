@@ -1,5 +1,6 @@
 use crate::config::Config;
 use anyhow::{Context, Result};
+use comfy_table::{Attribute, Cell, Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -288,12 +289,17 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
         if projects.is_empty() {
             println!("No projects found.");
         } else {
-            println!("Projects:");
-            println!(
-                "{:<25} {:<15} {:<25} {:<40}",
-                "NAME", "STATUS", "ACTIVE DEPLOYMENT", "URL"
-            );
-            println!("{}", "-".repeat(110));
+            let mut table = Table::new();
+            table
+                .load_preset(UTF8_FULL)
+                .apply_modifier(UTF8_ROUND_CORNERS)
+                .set_header(vec![
+                    Cell::new("NAME").add_attribute(Attribute::Bold),
+                    Cell::new("STATUS").add_attribute(Attribute::Bold),
+                    Cell::new("ACTIVE DEPLOYMENT").add_attribute(Attribute::Bold),
+                    Cell::new("URL").add_attribute(Attribute::Bold),
+                ]);
+
             for project in projects {
                 let url = project
                     .project_url
@@ -301,14 +307,16 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                     .or(project.deployment_url.as_deref())
                     .unwrap_or("(not deployed)");
                 let active_deployment = project.active_deployment_id.as_deref().unwrap_or("-");
-                println!(
-                    "{:<25} {:<15} {:<25} {:<40}",
-                    project.name,
-                    format!("{}", project.status),
-                    active_deployment,
-                    url
-                );
+
+                table.add_row(vec![
+                    Cell::new(&project.name),
+                    Cell::new(format!("{}", project.status)),
+                    Cell::new(active_deployment),
+                    Cell::new(url),
+                ]);
             }
+
+            println!("{}", table);
         }
     } else {
         let status = response.status();

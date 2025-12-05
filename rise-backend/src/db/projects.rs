@@ -421,6 +421,34 @@ pub async fn get_deployment_urls_batch(
         .collect())
 }
 
+/// Get active deployment IDs (deployment_id strings) for multiple projects (batch operation)
+/// Returns a map of project_id -> deployment_id (the string identifier, not UUID)
+pub async fn get_active_deployment_ids_batch(
+    pool: &PgPool,
+    project_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Option<String>>> {
+    let results = sqlx::query!(
+        r#"
+        SELECT
+            p.id as project_id,
+            d.deployment_id
+        FROM unnest($1::uuid[]) AS p(id)
+        LEFT JOIN deployments d ON d.id = (
+            SELECT active_deployment_id FROM projects WHERE id = p.id
+        )
+        "#,
+        project_ids
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to get active deployment IDs in batch")?;
+
+    Ok(results
+        .into_iter()
+        .filter_map(|r| r.project_id.map(|id| (id, r.deployment_id)))
+        .collect())
+}
+
 /// Mark project as deleting
 pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
     let project = sqlx::query_as!(
