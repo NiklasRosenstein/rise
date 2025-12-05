@@ -16,6 +16,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
                 owner_user_id, owner_team_id, active_deployment_id,
+            project_url,
                 created_at, updated_at
             FROM projects
             WHERE owner_user_id = $1
@@ -34,6 +35,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
                 owner_user_id, owner_team_id, active_deployment_id,
+            project_url,
                 created_at, updated_at
             FROM projects
             ORDER BY created_at DESC
@@ -56,6 +58,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
+            project_url,
             created_at, updated_at
         FROM projects
         WHERE name = $1
@@ -79,6 +82,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
+            project_url,
             created_at, updated_at
         FROM projects
         WHERE id = $1
@@ -114,6 +118,7 @@ pub async fn create(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
+            project_url,
             created_at, updated_at
         "#,
         name,
@@ -144,6 +149,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
+            project_url,
             created_at, updated_at
         "#,
         id,
@@ -175,6 +181,7 @@ pub async fn update_visibility(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
+            project_url,
             created_at, updated_at
         "#,
         id,
@@ -240,6 +247,7 @@ pub async fn set_active_deployment(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
+            project_url,
             created_at, updated_at
         "#,
         project_id,
@@ -427,6 +435,7 @@ pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
+            project_url,
             created_at, updated_at
         "#,
         id
@@ -449,6 +458,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
+            project_url,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting'
@@ -462,4 +472,31 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
     .context("Failed to find deleting projects")?;
 
     Ok(projects)
+}
+
+/// Update project URL
+pub async fn update_project_url(pool: &PgPool, project_id: Uuid, url: &str) -> Result<Project> {
+    let project = sqlx::query_as!(
+        Project,
+        r#"
+        UPDATE projects
+        SET project_url = $2, updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+            id, name,
+            status as "status: ProjectStatus",
+            visibility as "visibility: ProjectVisibility",
+            owner_user_id, owner_team_id,
+            active_deployment_id,
+            project_url,
+            created_at, updated_at
+        "#,
+        project_id,
+        url
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to update project URL")?;
+
+    Ok(project)
 }

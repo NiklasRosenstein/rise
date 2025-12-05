@@ -244,6 +244,8 @@ pub async fn create_deployment(
             DbDeploymentStatus::Pushed, // Pre-built images skip build/push, go straight to Pushed
             Some(user_image),           // Store original user input
             Some(&image_digest),        // Store resolved digest
+            "default",                  // deployment_group
+            None,                       // expires_at
         )
         .await
         .map_err(|e| {
@@ -308,8 +310,10 @@ pub async fn create_deployment(
             project.id,
             user.id,
             DbDeploymentStatus::Pending,
-            None, // image - NULL for build-from-source
-            None, // image_digest - NULL for build-from-source
+            None,      // image - NULL for build-from-source
+            None,      // image_digest - NULL for build-from-source
+            "default", // deployment_group
+            None,      // expires_at
         )
         .await
         .map_err(|e| {
@@ -698,6 +702,8 @@ pub async fn rollback_deployment(
         DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
         source_deployment.image.as_deref(), // Copy image from source if present
         source_deployment.image_digest.as_deref(), // Copy digest from source if present
+        "default",                  // deployment_group
+        None,                       // expires_at
     )
     .await
     .map_err(|e| {

@@ -22,6 +22,7 @@ pub struct Project {
     pub owner_user_id: Option<Uuid>,
     pub owner_team_id: Option<Uuid>,
     pub active_deployment_id: Option<Uuid>,
+    pub project_url: Option<String>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -113,6 +114,8 @@ pub struct Deployment {
     pub project_id: Uuid,
     pub created_by_id: Uuid,
     pub status: DeploymentStatus,
+    pub deployment_group: String,
+    pub expires_at: Option<DateTime<Utc>>,
     pub termination_reason: Option<TerminationReason>,
     pub completed_at: Option<DateTime<Utc>>,
     pub error_message: Option<String>,
