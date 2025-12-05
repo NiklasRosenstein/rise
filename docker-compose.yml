@@ -22,6 +22,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # OIDC provider for authentication in the development environment.
   dex:
     image: dexidp/dex:v2.37.0
     container_name: rise-dex
@@ -30,7 +31,7 @@ services:
     ports:
       - "5556:5556"
     volumes:
-      - ./dev/dex:/dex-config
+      - ./dev/dex:/dex-config:ro
       - dex_data:/var/dex
     entrypoint: ["/usr/local/bin/dex"]
     command: ["serve", "/dex-config/config.yaml"]
@@ -40,6 +41,7 @@ services:
       timeout: 5s
       retries: 5
 
+  # Docker registry for images pushed by the rise CLI in the development environment.
   registry:
     image: registry:2
     container_name: rise-registry
@@ -51,12 +53,13 @@ services:
     environment:
       - REGISTRY_STORAGE_DELETE_ENABLED=true
 
+  # Helper UI to explore images pushed to the registry.
   registry-ui:
     image: quiq/registry-ui
     container_name: rise-registry-ui
     restart: unless-stopped
     ports:
-      - "8080:8080"
+      - "5001:8080"
     environment:
       - REGISTRY_HOSTNAME=registry:5000
       - REGISTRY_INSECURE=true

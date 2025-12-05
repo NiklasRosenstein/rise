@@ -1,4 +1,5 @@
 [tools]
+kind = "0.30.0"
 overmind = "2.5.1"
 pack = "0.39.0"
 
