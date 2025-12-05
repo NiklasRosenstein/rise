@@ -600,6 +600,36 @@ pub async fn create_deployment(
     info!("Deployment ID: {}", deployment_info.deployment_id);
     info!("Image tag: {}", deployment_info.image_tag);
 
+    // Set up Ctrl+C handler to gracefully cancel deployment
+    let deployment_id_clone = deployment_info.deployment_id.clone();
+    let backend_url_clone = backend_url.to_string();
+    let http_client_clone = http_client.clone();
+    let config_clone = config.clone();
+    let project_name_clone = project_name.to_string();
+
+    tokio::spawn(async move {
+        if let Ok(()) = tokio::signal::ctrl_c().await {
+            eprintln!("\n⚠️  Caught Ctrl+C, cancelling deployment...");
+
+            // Cancel the deployment
+            if let Err(e) = cancel_deployment(
+                &http_client_clone,
+                &backend_url_clone,
+                &config_clone,
+                &project_name_clone,
+                &deployment_id_clone,
+            )
+            .await
+            {
+                eprintln!("Failed to cancel deployment: {}", e);
+            } else {
+                eprintln!("✓ Deployment cancelled");
+            }
+
+            std::process::exit(130); // Standard exit code for SIGINT
+        }
+    });
+
     if image.is_some() {
         // Pre-built image path: Skip build/push, backend already marked as Pushed
         info!("✓ Pre-built image deployment created");
@@ -745,6 +775,45 @@ async fn call_create_deployment_api(
         .context("Failed to parse deployment response")?;
 
     Ok(deployment_info)
+}
+
+/// Cancel a deployment by marking it as Cancelling
+async fn cancel_deployment(
+    http_client: &Client,
+    backend_url: &str,
+    config: &Config,
+    project_name: &str,
+    deployment_id: &str,
+) -> Result<()> {
+    let url = format!(
+        "{}/projects/{}/deployments/{}/status",
+        backend_url, project_name, deployment_id
+    );
+
+    let token = config.get_token()?;
+
+    let payload = serde_json::json!({
+        "status": "Cancelling"
+    });
+
+    let response = http_client
+        .patch(&url)
+        .bearer_auth(token)
+        .json(&payload)
+        .send()
+        .await
+        .context("Failed to cancel deployment")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        bail!("Failed to cancel deployment ({}): {}", status, error_text);
+    }
+
+    Ok(())
 }
 
 async fn update_deployment_status(
