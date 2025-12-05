@@ -154,8 +154,14 @@ impl DeploymentController {
         });
 
         // Spawn termination loop
+        let self_clone = self.clone();
         tokio::spawn(async move {
-            self.termination_loop().await;
+            self_clone.termination_loop().await;
+        });
+
+        // Spawn expiration loop
+        tokio::spawn(async move {
+            self.expiration_loop().await;
         });
     }
 
@@ -247,64 +253,67 @@ impl DeploymentController {
         if let Some(error) = result.error_message {
             db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
         } else if new_status == DeploymentStatus::Healthy {
-            // New deployment just became healthy - set as active
+            // New deployment just became healthy - set as active in its group
             db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
 
-            // Handle supersession: if there's an old active deployment, mark it for termination
-            if let Some(old_active_id) = project.active_deployment_id {
-                if old_active_id != deployment.id {
-                    // Get the old active deployment
-                    if let Ok(Some(old_deployment)) =
-                        db_deployments::find_by_id(&self.state.db_pool, old_active_id).await
-                    {
-                        // Supersede old deployment if it's not already terminal
-                        if !state_machine::is_terminal(&old_deployment.status) {
-                            info!(
-                                "Deployment {} is replacing {} (status={:?}), marking old as Terminating",
-                                deployment.deployment_id, old_deployment.deployment_id, old_deployment.status
-                            );
-                            db_deployments::mark_terminating(
-                                &self.state.db_pool,
-                                old_active_id,
-                                crate::db::models::TerminationReason::Superseded,
-                            )
-                            .await?;
-                        }
-                    }
+            // Find active deployment IN THIS GROUP
+            let active_in_group = db_deployments::find_active_for_project_and_group(
+                &self.state.db_pool,
+                deployment.project_id,
+                &deployment.deployment_group,
+            )
+            .await?;
+
+            // Supersede old active deployment in this group
+            if let Some(old_active) = active_in_group {
+                if old_active.id != deployment.id && !state_machine::is_terminal(&old_active.status)
+                {
+                    info!(
+                        "Deployment {} replacing {} in group '{}', marking old as Terminating",
+                        deployment.deployment_id,
+                        old_active.deployment_id,
+                        deployment.deployment_group
+                    );
+                    db_deployments::mark_terminating(
+                        &self.state.db_pool,
+                        old_active.id,
+                        crate::db::models::TerminationReason::Superseded,
+                    )
+                    .await?;
                 }
             }
 
-            // Set new deployment as active
-            projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id).await?;
+            // Clean up other non-terminal deployments in this group
+            let other_in_group = db_deployments::find_non_terminal_for_project_and_group(
+                &self.state.db_pool,
+                project.id,
+                &deployment.deployment_group,
+            )
+            .await?;
 
-            // Also clean up any other non-terminal deployments for this project
-            // (deployments that started but never became active)
-            let other_deployments =
-                db_deployments::find_non_terminal_for_project(&self.state.db_pool, project.id)
+            for other in other_in_group {
+                if other.id != deployment.id && !state_machine::is_terminal(&other.status) {
+                    info!(
+                        "Cleaning up non-active deployment {} in group '{}', marking as Terminating",
+                        other.deployment_id, deployment.deployment_group
+                    );
+                    db_deployments::mark_terminating(
+                        &self.state.db_pool,
+                        other.id,
+                        crate::db::models::TerminationReason::Superseded,
+                    )
+                    .await?;
+                }
+            }
+
+            // If default group, update active_deployment_id and project_url for backward compatibility
+            if deployment.deployment_group == "default" {
+                projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id)
                     .await?;
 
-            for other_deployment in other_deployments {
-                // Skip the new active deployment
-                if other_deployment.id == deployment.id {
-                    continue;
+                if let Some(ref url) = deployment.deployment_url {
+                    projects::update_project_url(&self.state.db_pool, project.id, url).await?;
                 }
-
-                // Skip if already terminal
-                if state_machine::is_terminal(&other_deployment.status) {
-                    continue;
-                }
-
-                info!(
-                    "Cleaning up non-active deployment {} (status={:?}) for project {}, marking as Terminating",
-                    other_deployment.deployment_id, other_deployment.status, project.name
-                );
-
-                db_deployments::mark_terminating(
-                    &self.state.db_pool,
-                    other_deployment.id,
-                    crate::db::models::TerminationReason::Superseded,
-                )
-                .await?;
             }
         }
 
@@ -535,6 +544,50 @@ impl DeploymentController {
                     );
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Expiration loop - monitors and cleans up expired deployments
+    ///
+    /// Runs every 60 seconds and checks for deployments past their expires_at timestamp
+    async fn expiration_loop(&self) {
+        info!("Deployment expiration loop started");
+        let mut ticker = interval(Duration::from_secs(60));
+
+        loop {
+            ticker.tick().await;
+            if let Err(e) = self.cleanup_expired_deployments().await {
+                error!("Error in expiration loop: {}", e);
+            }
+        }
+    }
+
+    /// Find and terminate expired deployments
+    async fn cleanup_expired_deployments(&self) -> anyhow::Result<()> {
+        let expired = db_deployments::find_expired(&self.state.db_pool, 50).await?;
+
+        for deployment in &expired {
+            info!(
+                "Deployment {} in group '{}' has expired, marking as Terminating",
+                deployment.deployment_id, deployment.deployment_group
+            );
+
+            // Mark as terminating with Failed reason (expiration is a form of timeout)
+            db_deployments::mark_terminating(
+                &self.state.db_pool,
+                deployment.id,
+                crate::db::models::TerminationReason::Failed,
+            )
+            .await?;
+
+            // Update project status
+            projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
+        }
+
+        if !expired.is_empty() {
+            info!("Cleaned up {} expired deployments", expired.len());
         }
 
         Ok(())
