@@ -1,0 +1,132 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n                        deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n          AND deployment_group = $2\n          AND NOT is_terminal(status)\n        ORDER BY created_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "deployment_id",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "created_by_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 4,
+        "name": "status: DeploymentStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "deployment_group",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "termination_reason: _",
+        "type_info": {
+          "Custom": {
+            "name": "termination_reason",
+            "kind": {
+              "Enum": [
+                "UserStopped",
+                "Superseded",
+                "Cancelled",
+                "Failed",
+                "Expired"
+              ]
+            }
+          }
+        }
+      },
+      {
+        "ordinal": 8,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "build_logs",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "controller_metadata: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
+        "name": "deployment_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "image",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "image_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 15,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 16,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "5d319cbf7f4d3eacffd2599c8e884f077609edb7295772c21373586489d8c604"
+}

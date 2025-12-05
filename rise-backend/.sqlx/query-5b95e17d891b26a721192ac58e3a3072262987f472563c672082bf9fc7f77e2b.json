@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            completed_at, error_message, build_logs,\n            created_at, updated_at\n        FROM deployments\n        WHERE id = $1\n        ",
+  "query": "\n        UPDATE projects\n        SET status = 'Deleting', updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            active_deployment_id,\n            project_url,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -10,37 +10,37 @@
       },
       {
         "ordinal": 1,
-        "name": "deployment_id",
+        "name": "name",
         "type_info": "Text"
       },
       {
         "ordinal": 2,
-        "name": "project_id",
-        "type_info": "Uuid"
+        "name": "status: ProjectStatus",
+        "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "created_by_id",
-        "type_info": "Uuid"
+        "name": "visibility: ProjectVisibility",
+        "type_info": "Text"
       },
       {
         "ordinal": 4,
-        "name": "status: DeploymentStatus",
-        "type_info": "Text"
+        "name": "owner_user_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 5,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
+        "name": "owner_team_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 6,
-        "name": "error_message",
-        "type_info": "Text"
+        "name": "active_deployment_id",
+        "type_info": "Uuid"
       },
       {
         "ordinal": 7,
-        "name": "build_logs",
+        "name": "project_url",
         "type_info": "Text"
       },
       {
@@ -64,7 +64,7 @@
       false,
       false,
       false,
-      false,
+      true,
       true,
       true,
       true,
@@ -72,5 +72,5 @@
       false
     ]
   },
-  "hash": "81f80aa13e280ff9cb9692f0e77e147f1bcff3bb743b6712d75cda339b31b60b"
+  "hash": "5b95e17d891b26a721192ac58e3a3072262987f472563c672082bf9fc7f77e2b"
 }

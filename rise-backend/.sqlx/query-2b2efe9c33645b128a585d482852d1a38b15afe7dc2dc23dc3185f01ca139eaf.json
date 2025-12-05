@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id, active_deployment_id,\n            created_at, updated_at\n        FROM projects\n        WHERE name = $1\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            active_deployment_id,\n            project_url,\n            created_at, updated_at\n        FROM projects\n        WHERE status = 'Deleting'\n        ORDER BY updated_at ASC\n        LIMIT $1\n        ",
   "describe": {
     "columns": [
       {
@@ -40,18 +40,23 @@
       },
       {
         "ordinal": 7,
+        "name": "project_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Int8"
       ]
     },
     "nullable": [
@@ -62,9 +67,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "e76936d19bc121e66614d1af68f93dfd6e92a5d5f4028aeffccfdd30c2044ccf"
+  "hash": "2b2efe9c33645b128a585d482852d1a38b15afe7dc2dc23dc3185f01ca139eaf"
 }

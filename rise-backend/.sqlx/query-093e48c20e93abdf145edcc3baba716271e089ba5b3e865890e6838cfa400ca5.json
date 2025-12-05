@@ -1,0 +1,28 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            p.id as project_id,\n            d.deployment_id\n        FROM unnest($1::uuid[]) AS p(id)\n        LEFT JOIN deployments d ON d.id = (\n            SELECT active_deployment_id FROM projects WHERE id = p.id\n        )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "deployment_id",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null,
+      true
+    ]
+  },
+  "hash": "093e48c20e93abdf145edcc3baba716271e089ba5b3e865890e6838cfa400ca5"
+}
