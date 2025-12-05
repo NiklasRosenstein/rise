@@ -518,6 +518,37 @@ pub async fn mark_superseded(pool: &PgPool, id: Uuid) -> Result<Deployment> {
     Ok(deployment)
 }
 
+/// Mark a deployment as expired (terminal state for deployments that timed out)
+pub async fn mark_expired(pool: &PgPool, id: Uuid) -> Result<Deployment> {
+    let deployment = sqlx::query_as!(
+        Deployment,
+        r#"
+        UPDATE deployments
+        SET
+            status = 'Expired',
+            termination_reason = 'Expired',
+            updated_at = NOW()
+        WHERE id = $1
+        RETURNING
+            id, deployment_id, project_id, created_by_id,
+            status as "status: DeploymentStatus",
+            deployment_group, expires_at,
+            termination_reason as "termination_reason: _",
+            completed_at, error_message, build_logs,
+            controller_metadata as "controller_metadata: serde_json::Value",
+            deployment_url,
+            image, image_digest,
+            created_at, updated_at
+        "#,
+        id
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to mark deployment as expired")?;
+
+    Ok(deployment)
+}
+
 /// Mark deployment as healthy
 pub async fn mark_healthy(pool: &PgPool, id: Uuid) -> Result<Deployment> {
     let deployment = sqlx::query_as!(

@@ -539,6 +539,10 @@ impl DeploymentController {
                             )
                             .await?;
                         }
+                        Some(crate::db::models::TerminationReason::Expired) => {
+                            db_deployments::mark_expired(&self.state.db_pool, deployment.id)
+                                .await?;
+                        }
                         Some(crate::db::models::TerminationReason::Cancelled) | None => {
                             // Cancelled or unknown reason - default to Stopped
                             db_deployments::mark_stopped(&self.state.db_pool, deployment.id)
@@ -587,11 +591,11 @@ impl DeploymentController {
                 deployment.deployment_id, deployment.deployment_group
             );
 
-            // Mark as terminating with Failed reason (expiration is a form of timeout)
+            // Mark as terminating with Expired reason
             db_deployments::mark_terminating(
                 &self.state.db_pool,
                 deployment.id,
-                crate::db::models::TerminationReason::Failed,
+                crate::db::models::TerminationReason::Expired,
             )
             .await?;
 

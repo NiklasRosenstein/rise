@@ -153,7 +153,8 @@ pub enum DeploymentStatus {
     Superseded,  // Terminal: replaced by newer deployment
 
     // Terminal states
-    Failed, // Terminal: could not reach Healthy
+    Failed,  // Terminal: could not reach Healthy
+    Expired, // Terminal: deployment expired after reaching Healthy
 }
 
 impl std::fmt::Display for DeploymentStatus {
@@ -172,6 +173,7 @@ impl std::fmt::Display for DeploymentStatus {
             DeploymentStatus::Stopped => write!(f, "Stopped"),
             DeploymentStatus::Superseded => write!(f, "Superseded"),
             DeploymentStatus::Failed => write!(f, "Failed"),
+            DeploymentStatus::Expired => write!(f, "Expired"),
         }
     }
 }
@@ -184,6 +186,7 @@ pub enum TerminationReason {
     Superseded,  // Replaced by newer deployment
     Cancelled,   // Cancelled before infrastructure provisioned
     Failed,      // Deployment timed out or failed to become healthy
+    Expired,     // Deployment expired after specified time limit
 }
 
 impl std::fmt::Display for TerminationReason {
@@ -193,6 +196,7 @@ impl std::fmt::Display for TerminationReason {
             TerminationReason::Superseded => write!(f, "Superseded"),
             TerminationReason::Cancelled => write!(f, "Cancelled"),
             TerminationReason::Failed => write!(f, "Failed"),
+            TerminationReason::Expired => write!(f, "Expired"),
         }
     }
 }

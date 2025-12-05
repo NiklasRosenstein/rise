@@ -25,6 +25,7 @@ pub enum DeploymentStatus {
 
     // Terminal states
     Failed,
+    Expired,
 }
 
 impl std::fmt::Display for DeploymentStatus {
@@ -43,6 +44,7 @@ impl std::fmt::Display for DeploymentStatus {
             DeploymentStatus::Stopped => write!(f, "Stopped"),
             DeploymentStatus::Superseded => write!(f, "Superseded"),
             DeploymentStatus::Failed => write!(f, "Failed"),
+            DeploymentStatus::Expired => write!(f, "Expired"),
         }
     }
 }

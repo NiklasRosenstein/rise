@@ -9,6 +9,7 @@ pub fn is_terminal(status: &DeploymentStatus) -> bool {
             | DeploymentStatus::Stopped
             | DeploymentStatus::Superseded
             | DeploymentStatus::Failed
+            | DeploymentStatus::Expired
     )
 }
 
@@ -73,6 +74,7 @@ pub fn is_valid_transition(from: &DeploymentStatus, to: &DeploymentStatus) -> bo
         (Healthy | Unhealthy, Terminating) => true,
         (Terminating, Stopped) => true, // User-initiated termination
         (Terminating, Superseded) => true, // Replaced by newer deployment
+        (Terminating, Expired) => true, // Deployment expired
 
         // Build/Deploy failures (before reaching Healthy)
         (Pending | Building | Pushing | Pushed, Failed) => true,

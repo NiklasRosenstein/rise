@@ -331,7 +331,8 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
             // Terminal states (no active deployment)
             DeploymentStatus::Cancelled
             | DeploymentStatus::Stopped
-            | DeploymentStatus::Superseded => ProjectStatus::Stopped,
+            | DeploymentStatus::Superseded
+            | DeploymentStatus::Expired => ProjectStatus::Stopped,
 
             // Running states without being active (shouldn't happen)
             DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => {

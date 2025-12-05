@@ -172,6 +172,7 @@ fn convert_status_to_db(status: DeploymentStatus) -> DbDeploymentStatus {
         DeploymentStatus::Stopped => DbDeploymentStatus::Stopped,
         DeploymentStatus::Superseded => DbDeploymentStatus::Superseded,
         DeploymentStatus::Failed => DbDeploymentStatus::Failed,
+        DeploymentStatus::Expired => DbDeploymentStatus::Expired,
     }
 }
 
@@ -191,6 +192,7 @@ fn convert_status_from_db(status: DbDeploymentStatus) -> DeploymentStatus {
         DbDeploymentStatus::Stopped => DeploymentStatus::Stopped,
         DbDeploymentStatus::Superseded => DeploymentStatus::Superseded,
         DbDeploymentStatus::Failed => DeploymentStatus::Failed,
+        DbDeploymentStatus::Expired => DeploymentStatus::Expired,
     }
 }
 
