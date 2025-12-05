@@ -28,13 +28,13 @@ async fn check_deploy_permission(
         }
     }
 
-    // If project is owned by a team, check if user is an owner of that team
+    // If project is owned by a team, check if user is a member of that team
     if let Some(team_id) = project.owner_team_id {
-        let is_owner = db_teams::is_owner(&state.db_pool, team_id, user_id)
+        let is_member = db_teams::is_member(&state.db_pool, team_id, user_id)
             .await
-            .map_err(|e| format!("Failed to check team ownership: {}", e))?;
+            .map_err(|e| format!("Failed to check team membership: {}", e))?;
 
-        if is_owner {
+        if is_member {
             return Ok(());
         }
 
@@ -44,7 +44,7 @@ async fn check_deploy_permission(
             .ok_or_else(|| "Team not found".to_string())?;
 
         return Err(format!(
-            "You must be an owner of team '{}' to deploy to this project",
+            "You must be a member of team '{}' to deploy to this project",
             team.name
         ));
     }
