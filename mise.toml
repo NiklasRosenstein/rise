@@ -10,13 +10,15 @@ run = "overmind start -f Procfile.dev"
 run = "overmind r backend*"
 
 [tasks.minikube-start]
+description = "Start minikube with custom network and insecure registry."
 run = """
 set -x
 NETWORK_NAME=rise_bridge
 REGISTRY_NAME=rise-registry
 REGISTRY_DIR="/etc/containerd/certs.d/localhost:5000"
 
-minikube start --driver=docker --network="${NETWORK_NAME}" # --insecure-registry="localhost:5000"
+minikube start --driver=docker --network="${NETWORK_NAME}" --static-ip 172.28.0.50 --insecure-registry="${REGISTRY_NAME}:5000"
+minikube addons enable ingress
 
 for node in $(minikube node list | awk '{print $1}'); do
   docker exec "${node}" mkdir -p "${REGISTRY_DIR}"

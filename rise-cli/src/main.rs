@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use reqwest::Client;
+use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod backend;
@@ -192,9 +193,10 @@ enum DeploymentCommands {
         /// Expiration duration (e.g., '7d', '2h', '30m'). Deployment will be automatically cleaned up after this period.
         #[arg(long)]
         expire: Option<String>,
-        /// HTTP port the application listens on (e.g., 3000, 8080, 5000)
+        /// HTTP port the application listens on (e.g., 3000, 8080, 5000).
+        /// Required when using --image. Defaults to 8080 for buildpack builds.
         #[arg(long)]
-        http_port: u16,
+        http_port: Option<u16>,
     },
     /// List deployments for a project
     #[command(visible_alias = "ls")]
@@ -456,6 +458,25 @@ async fn main() -> Result<()> {
                 expire,
                 http_port,
             } => {
+                // Validate http_port requirements
+                let port = match (image.as_ref(), http_port) {
+                    // If using pre-built image, http_port is required
+                    (Some(_), None) => {
+                        eprintln!("Error: --http-port is required when using --image");
+                        eprintln!("Example: rise deployment create {} --image {} --http-port 80", project, image.as_ref().unwrap());
+                        std::process::exit(1);
+                    }
+                    // If using pre-built image with port specified, use it
+                    (Some(_), Some(p)) => *p,
+                    // If building from source without port specified, default to 8080 (Paketo buildpack default)
+                    (None, None) => {
+                        info!("No --http-port specified, defaulting to 8080 (Paketo buildpack default)");
+                        8080
+                    }
+                    // If building from source with port specified, use it
+                    (None, Some(p)) => *p,
+                };
+
                 deployment::create_deployment(
                     &http_client,
                     &backend_url,
@@ -465,7 +486,7 @@ async fn main() -> Result<()> {
                     image.as_deref(),
                     group.as_deref(),
                     expire.as_deref(),
-                    *http_port,
+                    port,
                 )
                 .await?;
             }
