@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod db;
 pub mod deployment;
+pub mod frontend;
 pub mod oci;
 pub mod project;
 pub mod registry;
@@ -42,6 +43,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 
     let app = public_routes
         .merge(protected_routes)
+        .merge(frontend::routes::frontend_routes())
         .with_state(state.clone())
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
