@@ -519,7 +519,21 @@ pub async fn update_deployment_status(
             deployment
         }
         _ => {
+            // Validate state transition against the state machine
             let db_status = convert_status_to_db(payload.status);
+            if let Err(e) = crate::deployment::state_machine::validate_transition(
+                &deployment.status,
+                &db_status,
+            ) {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "Invalid status transition from {} to {}: {}",
+                        deployment.status, db_status, e
+                    ),
+                ));
+            }
+
             let deployment =
                 db_deployments::update_status(&state.db_pool, deployment.id, db_status)
                     .await
