@@ -119,6 +119,49 @@ Let's outline the architecture and components needed for this Rust-based project
 By following this outline, we can create a robust Rust-based project that meets the requirements for deploying simple
 apps to container runtimes using a user-friendly CLI.
 
+## Process Architecture
+
+The Rise backend uses a multi-process architecture where the HTTP server and controllers run as separate processes:
+
+- **HTTP Server** (`rise backend server`): Handles API requests, authentication, and user interactions
+- **Deployment Controller** (`rise backend controller deployment-docker`): Background process that reconciles deployment state, monitors health, and manages Docker containers
+- **Project Controller** (`rise backend controller project`): Background process that handles project lifecycle (deletion and cleanup)
+
+### Benefits of Multi-Process Design
+
+1. **Better Log Separation**: Each process has distinct logs with process name prefixes
+2. **Independent Scaling**: Controllers can run multiple instances independently
+3. **Resource Optimization**: Each process only allocates resources it needs (e.g., controllers don't initialize auth/registry components)
+4. **Clearer Operations**: Start/stop/restart components independently
+5. **No God Objects**: Components get only the state they need (ControllerState vs AppState)
+
+### State Design
+
+- **AppState**: Full state for HTTP server (db_pool, jwt_validator, oauth_client, registry_provider, oci_client)
+- **ControllerState**: Minimal state for controllers (db_pool only)
+
+### Running Locally
+
+All processes are defined in `Procfile.dev` and can be started together:
+
+```bash
+mise run start  # Starts all processes via overmind
+```
+
+Or individually:
+
+```bash
+cargo run --bin rise -- backend server                          # HTTP server
+cargo run --bin rise -- backend controller deployment-docker    # Deployment controller
+cargo run --bin rise -- backend controller project              # Project controller
+```
+
+Environment variables are centralized in `.envrc` (loaded by direnv):
+- `DATABASE_URL`: PostgreSQL connection string
+- `RISE_CONFIG_DIR`: Configuration directory
+- `RUN_MODE`: development/production
+- `RISE_SERVER__HOST` and `RISE_SERVER__PORT`: Server binding
+
 ## Guidelines
 
 - You must focus on building any given feature at a time in small increments and commit your changes often.

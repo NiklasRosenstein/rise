@@ -52,7 +52,7 @@ pub enum RegistrySettings {
 impl Settings {
     pub fn new() -> Result<Self, ConfigError> {
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
-        let config_dir = env::var("CONFIG_DIR").unwrap_or_else(|_| "/config".into());
+        let config_dir = env::var("RISE_CONFIG_DIR").unwrap_or_else(|_| "/config".into());
 
         Config::builder()
             // Start off by merging in the "default" configuration file
