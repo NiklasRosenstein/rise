@@ -48,7 +48,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
 
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
-    info!("HTTP server listening on {}", addr);
+    info!("HTTP server listening on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     axum::serve(listener, app).await?;
     Ok(())
