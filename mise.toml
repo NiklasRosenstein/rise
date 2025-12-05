@@ -8,3 +8,15 @@ run = "overmind start -f Procfile.dev"
 
 [tasks.reload]
 run = "overmind r backend*"
+
+[tasks.setup-local-registry]
+run = """
+REGISTRY_NAME=rise-registry
+REGISTRY_DIR="/etc/containerd/certs.d/localhost:5000"
+for node in $(kind get nodes); do
+  docker exec "${node}" mkdir -p "${REGISTRY_DIR}"
+  cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${REGISTRY_DIR}/hosts.toml"
+[host."http://${REGISTRY_NAME}:5000"]
+EOF
+done
+"""

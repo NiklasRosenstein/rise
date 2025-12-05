@@ -69,8 +69,10 @@ services:
     ports:
       - "5001:8080"
     environment:
-      - REGISTRY_HOSTNAME=registry:5000
+      - REGISTRY_HOSTNAME=rise-registry:5000
       - REGISTRY_INSECURE=true
       - LISTEN_ADDR=0.0.0.0:8080
     depends_on:
       - registry
+    networks:
+      - bridge

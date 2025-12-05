@@ -301,76 +301,90 @@ pub async fn update_project(
     // Update owner if provided
     if let Some(owner) = payload.owner {
         let (owner_user_id, owner_team_id) = match owner {
-            ProjectOwner::User(user_id_str) => {
-                let uuid = Uuid::parse_str(&user_id_str).map_err(|e| {
+            ProjectOwner::User(user_identifier) => {
+                // Try to resolve as email first, then as UUID
+                let user = if let Ok(uuid) = Uuid::parse_str(&user_identifier) {
+                    // Valid UUID - look up by ID
+                    db_users::find_by_id(&state.db_pool, uuid)
+                        .await
+                        .map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(ProjectErrorResponse {
+                                    error: format!("Failed to verify user: {}", e),
+                                    suggestions: None,
+                                }),
+                            )
+                        })?
+                } else {
+                    // Not a UUID - treat as email
+                    db_users::find_by_email(&state.db_pool, &user_identifier)
+                        .await
+                        .map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(ProjectErrorResponse {
+                                    error: format!("Failed to verify user: {}", e),
+                                    suggestions: None,
+                                }),
+                            )
+                        })?
+                };
+
+                let user = user.ok_or_else(|| {
                     (
-                        StatusCode::BAD_REQUEST,
+                        StatusCode::NOT_FOUND,
                         Json(ProjectErrorResponse {
-                            error: format!("Invalid user ID: {}", e),
+                            error: format!("User '{}' not found", user_identifier),
                             suggestions: None,
                         }),
                     )
                 })?;
 
-                // Verify user exists
-                db_users::find_by_id(&state.db_pool, uuid)
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(ProjectErrorResponse {
-                                error: format!("Failed to verify user: {}", e),
-                                suggestions: None,
-                            }),
-                        )
-                    })?
-                    .ok_or_else(|| {
-                        (
-                            StatusCode::NOT_FOUND,
-                            Json(ProjectErrorResponse {
-                                error: format!("User '{}' not found", user_id_str),
-                                suggestions: None,
-                            }),
-                        )
-                    })?;
-
-                (Some(uuid), None)
+                (Some(user.id), None)
             }
-            ProjectOwner::Team(team_id_str) => {
-                let uuid = Uuid::parse_str(&team_id_str).map_err(|e| {
+            ProjectOwner::Team(team_identifier) => {
+                // Try to resolve as name first, then as UUID
+                let team = if let Ok(uuid) = Uuid::parse_str(&team_identifier) {
+                    // Valid UUID - look up by ID
+                    db_teams::find_by_id(&state.db_pool, uuid)
+                        .await
+                        .map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(ProjectErrorResponse {
+                                    error: format!("Failed to verify team: {}", e),
+                                    suggestions: None,
+                                }),
+                            )
+                        })?
+                } else {
+                    // Not a UUID - treat as team name
+                    db_teams::find_by_name(&state.db_pool, &team_identifier)
+                        .await
+                        .map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(ProjectErrorResponse {
+                                    error: format!("Failed to verify team: {}", e),
+                                    suggestions: None,
+                                }),
+                            )
+                        })?
+                };
+
+                let team = team.ok_or_else(|| {
                     (
-                        StatusCode::BAD_REQUEST,
+                        StatusCode::NOT_FOUND,
                         Json(ProjectErrorResponse {
-                            error: format!("Invalid team ID: {}", e),
+                            error: format!("Team '{}' not found", team_identifier),
                             suggestions: None,
                         }),
                     )
                 })?;
-
-                // Verify team exists
-                let team = db_teams::find_by_id(&state.db_pool, uuid)
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(ProjectErrorResponse {
-                                error: format!("Failed to verify team: {}", e),
-                                suggestions: None,
-                            }),
-                        )
-                    })?
-                    .ok_or_else(|| {
-                        (
-                            StatusCode::NOT_FOUND,
-                            Json(ProjectErrorResponse {
-                                error: format!("Team '{}' not found", team_id_str),
-                                suggestions: None,
-                            }),
-                        )
-                    })?;
 
                 // Verify the requesting user is a member of the team they're transferring to
-                let is_member = db_teams::is_member(&state.db_pool, uuid, user.id)
+                let is_member = db_teams::is_member(&state.db_pool, team.id, user.id)
                     .await
                     .map_err(|e| {
                         (
@@ -395,7 +409,7 @@ pub async fn update_project(
                     ));
                 }
 
-                (None, Some(uuid))
+                (None, Some(team.id))
             }
         };
 
