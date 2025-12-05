@@ -315,7 +315,8 @@ pub async fn show_deployment(
         let deployment =
             fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
 
-        print_deployment_details(&deployment, project);
+        // Use the same UI as follow mode
+        super::follow_ui::print_deployment_snapshot(&deployment);
 
         // Exit with error if deployment failed
         if deployment.status == DeploymentStatus::Failed {
@@ -327,36 +328,6 @@ pub async fn show_deployment(
         }
 
         Ok(())
-    }
-}
-
-/// Print deployment details
-fn print_deployment_details(deployment: &Deployment, project: &str) {
-    println!("\nDeployment: {}:{}", project, deployment.deployment_id);
-    println!("Status:     {}", deployment.status);
-    println!("Created:    {}", deployment.created);
-    println!("Updated:    {}", deployment.updated);
-
-    if let Some(url) = &deployment.deployment_url {
-        println!("URL:        {}", url);
-    }
-
-    if let Some(completed) = &deployment.completed_at {
-        println!("Completed:  {}", completed);
-    }
-
-    if let Some(error) = &deployment.error_message {
-        println!("Error:      {}", error);
-    }
-
-    // Show controller metadata if not empty
-    if !deployment.controller_metadata.is_null()
-        && deployment.controller_metadata != serde_json::json!({})
-    {
-        if let Ok(metadata_str) = serde_json::to_string_pretty(&deployment.controller_metadata) {
-            println!("\nController Metadata:");
-            println!("{}", metadata_str);
-        }
     }
 }
 

@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 use reqwest::Client;
 use serde::Deserialize;
 use std::io::{self, IsTerminal, Write as _};
@@ -9,6 +9,13 @@ use crate::config::Config;
 use rise_backend::deployment::models::{Deployment, DeploymentStatus};
 
 use super::core::{fetch_deployment, parse_duration};
+
+// Project info for fetching project URL
+#[derive(Deserialize)]
+struct ProjectInfo {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_url: Option<String>,
+}
 
 // Docker controller metadata structures
 #[derive(Deserialize, Debug, Clone, PartialEq)]
@@ -185,7 +192,6 @@ impl LiveStatusSection {
     }
 }
 
-
 /// Get status color ANSI code
 fn status_color(status: &DeploymentStatus) -> &'static str {
     match status {
@@ -306,6 +312,70 @@ fn is_tty() -> bool {
     io::stdout().is_terminal()
 }
 
+/// Print deployment snapshot (for non-follow mode)
+pub fn print_deployment_snapshot(deployment: &Deployment) {
+    // Parse controller metadata
+    let controller_phase =
+        parse_controller_metadata(&deployment.controller_metadata).map(|m| m.reconcile_phase);
+
+    // Status line with icon and color
+    let icon = status_icon(&deployment.status);
+    let color = status_color(&deployment.status);
+
+    // Show deployment status + controller phase if available
+    let status_text = if let Some(phase) = controller_phase {
+        format!(
+            "{} ({})",
+            deployment.status,
+            format_controller_phase(&phase)
+        )
+    } else {
+        format!("{}", deployment.status)
+    };
+
+    println!(
+        "{} Status:    {}{}{}",
+        icon,
+        color,
+        status_text,
+        ansi::RESET
+    );
+
+    // URL if available
+    if let Some(ref url) = deployment.deployment_url {
+        println!("   URL:       {}", url);
+    }
+
+    // Error message if present
+    if let Some(ref error) = deployment.error_message {
+        println!("   {}Error:{} {}", "\x1B[31m", ansi::RESET, error);
+    }
+
+    // Controller metadata summary (container ID if available)
+    if let Some(container_id) = extract_container_id(&deployment.controller_metadata) {
+        println!("   Container: {}", container_id);
+    }
+}
+
+/// Fetch project info to get project URL
+async fn fetch_project_info(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+) -> Result<ProjectInfo> {
+    let url = format!("{}/projects/{}", backend_url, project);
+
+    let response = http_client.get(&url).bearer_auth(token).send().await?;
+
+    if !response.status().is_success() {
+        bail!("Failed to fetch project info");
+    }
+
+    let project_info: ProjectInfo = response.json().await?;
+    Ok(project_info)
+}
+
 /// Main follow function with enhanced UX
 pub async fn follow_deployment_with_ui(
     http_client: &Client,
@@ -384,8 +454,8 @@ pub async fn follow_deployment_with_ui(
                 );
             }
 
-            // Wait before next poll
-            tokio::time::sleep(Duration::from_secs(2)).await;
+            // Wait before next poll (1 second for 2x faster spinner)
+            tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
     .await;
@@ -393,6 +463,22 @@ pub async fn follow_deployment_with_ui(
     // Always show cursor again before returning
     print!("{}", ansi::SHOW_CURSOR);
     io::stdout().flush().unwrap();
+
+    // Print project URL if deployment became active (Healthy in default group)
+    if let Ok(ref deployment) = result {
+        if deployment.status == DeploymentStatus::Healthy
+            && deployment.deployment_group == "default"
+        {
+            if let Ok(project_info) =
+                fetch_project_info(http_client, backend_url, token, project).await
+            {
+                if let Some(url) = project_info.project_url {
+                    println!();
+                    println!("Project URL: {}", url);
+                }
+            }
+        }
+    }
 
     result
 }
@@ -414,18 +500,36 @@ async fn follow_deployment_simple(
             fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
 
         // Parse controller metadata
-        let controller_phase = parse_controller_metadata(&deployment.controller_metadata)
-            .map(|m| m.reconcile_phase);
+        let controller_phase =
+            parse_controller_metadata(&deployment.controller_metadata).map(|m| m.reconcile_phase);
 
         // Log state changes only (not every poll)
         if state.should_log_state_change(&deployment, &controller_phase) {
-            log_state_change(project, deployment_id, &deployment.status, &controller_phase);
+            log_state_change(
+                project,
+                deployment_id,
+                &deployment.status,
+                &controller_phase,
+            );
         }
 
         // Update state
         state.update(&deployment, controller_phase);
 
         if is_terminal_state(&deployment.status) {
+            // Print project URL if deployment became active (Healthy in default group)
+            if deployment.status == DeploymentStatus::Healthy
+                && deployment.deployment_group == "default"
+            {
+                if let Ok(project_info) =
+                    fetch_project_info(http_client, backend_url, token, project).await
+                {
+                    if let Some(url) = project_info.project_url {
+                        println!();
+                        println!("Project URL: {}", url);
+                    }
+                }
+            }
             return Ok(deployment);
         }
 
@@ -433,6 +537,6 @@ async fn follow_deployment_simple(
             bail!("Timeout waiting for deployment");
         }
 
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 }
