@@ -19,23 +19,15 @@ pub enum ControllerCommands {
 }
 
 pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
+    let settings = Settings::new()?;
+
     match cmd {
-        BackendCommands::Server => {
-            rise_backend::init_tracing("rise-server");
-            let settings = Settings::new()?;
-            rise_backend::run_server(settings).await
-        }
+        BackendCommands::Server => rise_backend::run_server(settings).await,
         BackendCommands::Controller(controller_cmd) => match controller_cmd {
             ControllerCommands::DeploymentDocker => {
-                rise_backend::init_tracing("rise-controller-deployment");
-                let settings = Settings::new()?;
                 rise_backend::run_deployment_controller(settings).await
             }
-            ControllerCommands::Project => {
-                rise_backend::init_tracing("rise-controller-project");
-                let settings = Settings::new()?;
-                rise_backend::run_project_controller(settings).await
-            }
+            ControllerCommands::Project => rise_backend::run_project_controller(settings).await,
         },
     }
 }

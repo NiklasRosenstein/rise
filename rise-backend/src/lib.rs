@@ -18,19 +18,6 @@ use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::info;
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-/// Initialize tracing for a process
-pub fn init_tracing(process_name: &str) {
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
-        ))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-
-    tracing::info!("Starting {}", process_name);
-}
 
 /// Run the HTTP server process
 pub async fn run_server(settings: settings::Settings) -> Result<()> {
