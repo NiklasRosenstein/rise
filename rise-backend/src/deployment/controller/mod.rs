@@ -199,6 +199,18 @@ impl DeploymentController {
     ///
     /// Calls the backend's reconcile method and updates the deployment in the database
     async fn reconcile_single_deployment(&self, deployment: Deployment) -> anyhow::Result<()> {
+        // Skip reconciliation for deployments in cleanup states
+        if matches!(
+            deployment.status,
+            DeploymentStatus::Terminating | DeploymentStatus::Cancelling
+        ) {
+            debug!(
+                "Skipping reconciliation for deployment {} in {:?} state",
+                deployment.deployment_id, deployment.status
+            );
+            return Ok(());
+        }
+
         // Check for deployment timeout (5 minutes in Deploying state)
         if deployment.status == DeploymentStatus::Deploying {
             let elapsed = Utc::now().signed_duration_since(deployment.created_at);
