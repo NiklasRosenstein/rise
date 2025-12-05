@@ -225,6 +225,38 @@ pub async fn update_visibility(
     Ok(project)
 }
 
+/// Update project owner (either user or team, mutually exclusive)
+pub async fn update_owner(
+    pool: &PgPool,
+    id: Uuid,
+    owner_user_id: Option<Uuid>,
+    owner_team_id: Option<Uuid>,
+) -> Result<Project> {
+    let project = sqlx::query_as!(
+        Project,
+        r#"
+        UPDATE projects
+        SET owner_user_id = $2, owner_team_id = $3
+        WHERE id = $1
+        RETURNING
+            id, name,
+            status as "status: ProjectStatus",
+            visibility as "visibility: ProjectVisibility",
+            owner_user_id, owner_team_id, active_deployment_id,
+            project_url,
+            created_at, updated_at
+        "#,
+        id,
+        owner_user_id,
+        owner_team_id
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to update project owner")?;
+
+    Ok(project)
+}
+
 /// Delete project by ID
 pub async fn delete(pool: &PgPool, id: Uuid) -> Result<()> {
     sqlx::query!("DELETE FROM projects WHERE id = $1", id)

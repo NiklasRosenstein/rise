@@ -296,10 +296,132 @@ pub async fn update_project(
     }
 
     // Update project fields
-    let updated_project = if let Some(status) = payload.status {
-        projects::update_status(
+    let mut updated_project = project;
+
+    // Update owner if provided
+    if let Some(owner) = payload.owner {
+        let (owner_user_id, owner_team_id) = match owner {
+            ProjectOwner::User(user_id_str) => {
+                let uuid = Uuid::parse_str(&user_id_str).map_err(|e| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ProjectErrorResponse {
+                            error: format!("Invalid user ID: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+
+                // Verify user exists
+                db_users::find_by_id(&state.db_pool, uuid)
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ProjectErrorResponse {
+                                error: format!("Failed to verify user: {}", e),
+                                suggestions: None,
+                            }),
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        (
+                            StatusCode::NOT_FOUND,
+                            Json(ProjectErrorResponse {
+                                error: format!("User '{}' not found", user_id_str),
+                                suggestions: None,
+                            }),
+                        )
+                    })?;
+
+                (Some(uuid), None)
+            }
+            ProjectOwner::Team(team_id_str) => {
+                let uuid = Uuid::parse_str(&team_id_str).map_err(|e| {
+                    (
+                        StatusCode::BAD_REQUEST,
+                        Json(ProjectErrorResponse {
+                            error: format!("Invalid team ID: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+
+                // Verify team exists
+                let team = db_teams::find_by_id(&state.db_pool, uuid)
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ProjectErrorResponse {
+                                error: format!("Failed to verify team: {}", e),
+                                suggestions: None,
+                            }),
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        (
+                            StatusCode::NOT_FOUND,
+                            Json(ProjectErrorResponse {
+                                error: format!("Team '{}' not found", team_id_str),
+                                suggestions: None,
+                            }),
+                        )
+                    })?;
+
+                // Verify the requesting user is a member of the team they're transferring to
+                let is_member = db_teams::is_member(&state.db_pool, uuid, user.id)
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ProjectErrorResponse {
+                                error: format!("Failed to check team membership: {}", e),
+                                suggestions: None,
+                            }),
+                        )
+                    })?;
+
+                if !is_member {
+                    return Err((
+                        StatusCode::FORBIDDEN,
+                        Json(ProjectErrorResponse {
+                            error: format!(
+                                "You must be a member of team '{}' to transfer projects to it",
+                                team.name
+                            ),
+                            suggestions: None,
+                        }),
+                    ));
+                }
+
+                (None, Some(uuid))
+            }
+        };
+
+        updated_project = projects::update_owner(
             &state.db_pool,
-            project.id,
+            updated_project.id,
+            owner_user_id,
+            owner_team_id,
+        )
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to update project owner: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+    }
+
+    // Update status if provided
+    if let Some(status) = payload.status {
+        updated_project = projects::update_status(
+            &state.db_pool,
+            updated_project.id,
             crate::db::models::ProjectStatus::from(status),
         )
         .await
@@ -307,14 +429,12 @@ pub async fn update_project(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ProjectErrorResponse {
-                    error: format!("Failed to update project: {}", e),
+                    error: format!("Failed to update project status: {}", e),
                     suggestions: None,
                 }),
             )
-        })?
-    } else {
-        project
-    };
+        })?;
+    }
 
     Ok(Json(UpdateProjectResponse {
         project: convert_project(updated_project),

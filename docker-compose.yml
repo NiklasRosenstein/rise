@@ -3,6 +3,12 @@ volumes:
   postgres_data:
   dex_data:
 
+networks:
+  bridge:
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -52,6 +58,8 @@ services:
       - registry_data:/var/lib/registry
     environment:
       - REGISTRY_STORAGE_DELETE_ENABLED=true
+    networks:
+      - bridge # Needed for kind, see https://kind.sigs.k8s.io/docs/user/local-registry
 
   # Helper UI to explore images pushed to the registry.
   registry-ui:
