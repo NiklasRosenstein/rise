@@ -433,14 +433,16 @@ pub async fn delete_team(
 
 pub async fn list_teams(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    Extension(user): Extension<User>,
 ) -> Result<Json<Vec<ApiTeam>>, (StatusCode, String)> {
-    let teams = db_teams::list(&state.db_pool).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to list teams: {}", e),
-        )
-    })?;
+    let teams = db_teams::list_for_user(&state.db_pool, user.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to list teams: {}", e),
+            )
+        })?;
 
     let mut api_teams = Vec::new();
 
