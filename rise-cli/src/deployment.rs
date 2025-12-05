@@ -160,10 +160,10 @@ pub async fn list_deployments(
 
     // Print table header
     println!(
-        "{:<40} {:<15} {:<25} {:<50}",
-        "DEPLOYMENT", "STATUS", "CREATED", "URL"
+        "{:<40} {:<15} {:<15} {:<20} {:<25} {:<50}",
+        "DEPLOYMENT", "STATUS", "GROUP", "EXPIRY", "CREATED", "URL"
     );
-    println!("{}", "-".repeat(130));
+    println!("{}", "-".repeat(165));
 
     for deployment in deployments {
         let deployment_ref = format!("{}:{}", project, deployment.deployment_id);
@@ -176,10 +176,23 @@ pub async fn list_deployments(
             deployment.created.clone()
         };
 
+        // Format expiry time
+        let expiry = if let Some(ref expires_at) = deployment.expires_at {
+            if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(expires_at) {
+                dt.format("%Y-%m-%d %H:%M:%S").to_string()
+            } else {
+                expires_at.clone()
+            }
+        } else {
+            "-".to_string()
+        };
+
         println!(
-            "{:<40} {:<15} {:<25} {:<50}",
+            "{:<40} {:<15} {:<15} {:<20} {:<25} {:<50}",
             deployment_ref,
             deployment.status.to_string(),
+            deployment.deployment_group,
+            expiry,
             created,
             url
         );
