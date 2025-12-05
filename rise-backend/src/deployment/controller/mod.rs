@@ -249,7 +249,19 @@ impl DeploymentController {
         let new_status = result.status.clone();
 
         // Update deployment with reconciliation result
-        db_deployments::update_status(&self.state.db_pool, deployment.id, result.status).await?;
+        // Note: This will fail if deployment moved to Terminating/Cancelling, which is expected
+        match db_deployments::update_status(&self.state.db_pool, deployment.id, result.status).await
+        {
+            Ok(_) => {}
+            Err(e) => {
+                // If update failed, deployment might have moved to cleanup state
+                debug!(
+                    "Failed to update deployment {} status: {}. Deployment may have moved to cleanup state.",
+                    deployment.deployment_id, e
+                );
+                return Ok(());
+            }
+        }
 
         if let Some(url) = result.deployment_url {
             db_deployments::update_deployment_url(&self.state.db_pool, deployment.id, &url).await?;

@@ -153,6 +153,7 @@ pub async fn update_status(
         UPDATE deployments
         SET status = $2
         WHERE id = $1
+          AND status NOT IN ('Terminating', 'Cancelling')
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
