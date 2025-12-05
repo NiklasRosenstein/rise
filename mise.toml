@@ -9,11 +9,15 @@ run = "overmind start -f Procfile.dev"
 [tasks.reload]
 run = "overmind r backend*"
 
-[tasks.setup-local-registry]
+[tasks.minikube-start]
 run = """
 set -x
+NETWORK_NAME=rise_bridge
 REGISTRY_NAME=rise-registry
 REGISTRY_DIR="/etc/containerd/certs.d/localhost:5000"
+
+minikube start --driver=docker --network="${NETWORK_NAME}" # --insecure-registry="localhost:5000"
+
 for node in $(minikube node list | awk '{print $1}'); do
   docker exec "${node}" mkdir -p "${REGISTRY_DIR}"
   cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${REGISTRY_DIR}/hosts.toml"

@@ -8,6 +8,10 @@ networks:
     driver: bridge
     driver_opts:
       com.docker.network.bridge.host_binding_ipv4: "127.0.0.1"
+    ipam:
+      driver: default
+      config:
+        - subnet: 172.28.0.0/16
 
 services:
   postgres:
@@ -67,11 +71,13 @@ services:
     container_name: rise-registry-ui
     restart: unless-stopped
     ports:
-      - "5001:8080"
+      - "5001:5001"
     environment:
       - REGISTRY_HOSTNAME=rise-registry:5000
       - REGISTRY_INSECURE=true
-      - LISTEN_ADDR=0.0.0.0:8080
+      - PERFORMANCE_CATALOG_REFRESH_INTERVAL=10
+      - TAGS_COUNT_REFRESH_INTERVAL=10
+      - LISTEN_ADDR=0.0.0.0:5001
     depends_on:
       - registry
     networks:

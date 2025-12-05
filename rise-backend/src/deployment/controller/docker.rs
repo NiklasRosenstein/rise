@@ -7,8 +7,6 @@ use chrono::Utc;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
 use super::{DeploymentBackend, HealthStatus, ReconcileResult};
@@ -37,35 +35,24 @@ enum ReconcilePhase {
     Completed,
 }
 
-/// Port allocator that assigns ports in the 8000-9000 range
+/// Port allocator that assigns random ports in the ephemeral port range
 ///
-/// Simple incrementing allocator for MVP. Future: check for port availability
-struct PortAllocator {
-    next_port: Arc<Mutex<u16>>,
-    min_port: u16,
-    max_port: u16,
-}
+/// Uses random selection from the high port range (49152-65535) to minimize
+/// collision probability. This is stateless and doesn't require coordination
+/// between controller instances.
+struct PortAllocator;
 
 impl PortAllocator {
     fn new() -> Self {
-        Self {
-            next_port: Arc::new(Mutex::new(8000)),
-            min_port: 8000,
-            max_port: 9000,
-        }
+        Self
     }
 
-    async fn allocate(&self) -> anyhow::Result<u16> {
-        let mut port = self.next_port.lock().await;
-        let allocated = *port;
-        *port += 1;
-
-        // Wrap around if we exceed max_port
-        if *port > self.max_port {
-            *port = self.min_port;
-        }
-
-        Ok(allocated)
+    fn allocate(&self) -> u16 {
+        // IANA ephemeral port range: 49152-65535 (16,384 ports)
+        // This gives us a very low collision probability
+        use rand::Rng;
+        let mut rng = rand::thread_rng();
+        rng.gen_range(49152..=65535)
     }
 }
 
@@ -416,7 +403,7 @@ impl DeploymentBackend for DockerController {
                 let port = if let Some(p) = metadata.assigned_port {
                     p
                 } else {
-                    self.port_allocator.allocate().await?
+                    self.port_allocator.allocate()
                 };
                 metadata.assigned_port = Some(port);
 
