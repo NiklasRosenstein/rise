@@ -49,6 +49,12 @@ enum Commands {
         /// Pre-built image to deploy (e.g., nginx:latest). Skips build if provided.
         #[arg(long, short)]
         image: Option<String>,
+        /// Deployment group (e.g., 'default', 'mr/27'). Defaults to 'default' if not specified.
+        #[arg(long, short)]
+        group: Option<String>,
+        /// Expiration duration (e.g., '7d', '2h', '30m'). Deployment will be automatically cleaned up after this period.
+        #[arg(long)]
+        expire: Option<String>,
     },
     /// Team management commands
     #[command(subcommand)]
@@ -170,6 +176,9 @@ enum DeploymentCommands {
     List {
         /// Project name
         project: String,
+        /// Filter by deployment group
+        #[arg(long, short)]
+        group: Option<String>,
         /// Limit number of deployments to show
         #[arg(long, short, default_value = "10")]
         limit: usize,
@@ -189,6 +198,14 @@ enum DeploymentCommands {
     Rollback {
         /// Deployment reference (format: project:deployment_id)
         deployment: String,
+    },
+    /// Stop all deployments in a group
+    Stop {
+        /// Project name
+        project: String,
+        /// Deployment group to stop
+        #[arg(long, short)]
+        group: String,
     },
 }
 
@@ -248,6 +265,8 @@ async fn main() -> Result<()> {
             project,
             path,
             image,
+            group,
+            expire,
         } => {
             deploy::handle_deploy(
                 &http_client,
@@ -256,6 +275,8 @@ async fn main() -> Result<()> {
                 project,
                 path,
                 image.as_deref(),
+                group.as_deref(),
+                expire.as_deref(),
             )
             .await?;
         }
@@ -419,9 +440,20 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Deployment(deployment_cmd) => match deployment_cmd {
-            DeploymentCommands::List { project, limit } => {
-                deployment::list_deployments(&http_client, &backend_url, &config, project, *limit)
-                    .await?;
+            DeploymentCommands::List {
+                project,
+                group,
+                limit,
+            } => {
+                deployment::list_deployments(
+                    &http_client,
+                    &backend_url,
+                    &config,
+                    project,
+                    group.as_deref(),
+                    *limit,
+                )
+                .await?;
             }
             DeploymentCommands::Show {
                 deployment,
@@ -448,6 +480,16 @@ async fn main() -> Result<()> {
                     &config,
                     &project,
                     &deployment_id,
+                )
+                .await?;
+            }
+            DeploymentCommands::Stop { project, group } => {
+                deployment::stop_deployments_by_group(
+                    &http_client,
+                    &backend_url,
+                    &config,
+                    project,
+                    group,
                 )
                 .await?;
             }

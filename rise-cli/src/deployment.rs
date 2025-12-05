@@ -105,6 +105,7 @@ pub async fn list_deployments(
     backend_url: &str,
     config: &Config,
     project: &str,
+    group: Option<&str>,
     limit: usize,
 ) -> Result<()> {
     let token = config
@@ -112,9 +113,21 @@ pub async fn list_deployments(
         .as_ref()
         .context("Not logged in. Please run 'rise login' first.")?;
 
-    info!("Listing deployments for project '{}'", project);
+    if let Some(g) = group {
+        info!(
+            "Listing deployments for project '{}' in group '{}'",
+            project, g
+        );
+    } else {
+        info!("Listing deployments for project '{}'", project);
+    }
 
-    let url = format!("{}/projects/{}/deployments", backend_url, project);
+    let mut url = format!("{}/projects/{}/deployments", backend_url, project);
+
+    // Add group query parameter if provided
+    if let Some(g) = group {
+        url = format!("{}?group={}", url, urlencoding::encode(g));
+    }
 
     let response = http_client
         .get(&url)
@@ -368,6 +381,73 @@ pub async fn rollback_deployment(
         "10m", // timeout
     )
     .await?;
+
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct StopDeploymentsResponse {
+    stopped_count: usize,
+    deployment_ids: Vec<String>,
+}
+
+/// Stop all deployments in a group for a project
+pub async fn stop_deployments_by_group(
+    http_client: &Client,
+    backend_url: &str,
+    config: &Config,
+    project: &str,
+    group: &str,
+) -> Result<()> {
+    let token = config
+        .token
+        .as_ref()
+        .context("Not logged in. Please run 'rise login' first.")?;
+
+    info!(
+        "Stopping deployments in group '{}' for project '{}'",
+        group, project
+    );
+
+    let url = format!(
+        "{}/projects/{}/deployments/stop?group={}",
+        backend_url,
+        project,
+        urlencoding::encode(group)
+    );
+
+    let response = http_client
+        .post(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .context("Failed to stop deployments")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        bail!("Failed to stop deployments ({}): {}", status, error_text);
+    }
+
+    let stop_response: StopDeploymentsResponse = response
+        .json()
+        .await
+        .context("Failed to parse stop response")?;
+
+    if stop_response.stopped_count == 0 {
+        println!("No running deployments found in group '{}'", group);
+    } else {
+        println!(
+            "✓ Stopped {} deployment(s) in group '{}':",
+            stop_response.stopped_count, group
+        );
+        for deployment_id in &stop_response.deployment_ids {
+            println!("  - {}", deployment_id);
+        }
+    }
 
     Ok(())
 }

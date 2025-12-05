@@ -30,6 +30,8 @@ pub async fn handle_deploy(
     project_name: &str,
     path: &str,
     image: Option<&str>,
+    group: Option<&str>,
+    expires_in: Option<&str>,
 ) -> Result<()> {
     if let Some(image_ref) = image {
         info!(
@@ -56,8 +58,16 @@ pub async fn handle_deploy(
 
     // Step 1: Create deployment and get deployment ID + credentials
     info!("Creating deployment for project '{}'", project_name);
-    let deployment_info =
-        create_deployment(http_client, backend_url, token, project_name, image).await?;
+    let deployment_info = create_deployment(
+        http_client,
+        backend_url,
+        token,
+        project_name,
+        image,
+        group,
+        expires_in,
+    )
+    .await?;
 
     info!("Deployment ID: {}", deployment_info.deployment_id);
     info!("Image tag: {}", deployment_info.image_tag);
@@ -159,6 +169,8 @@ async fn create_deployment(
     token: &str,
     project_name: &str,
     image: Option<&str>,
+    group: Option<&str>,
+    expires_in: Option<&str>,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/deployments", backend_url);
     let mut payload = serde_json::json!({
@@ -168,6 +180,16 @@ async fn create_deployment(
     // Add image field if provided
     if let Some(image_ref) = image {
         payload["image"] = serde_json::json!(image_ref);
+    }
+
+    // Add group field if provided (defaults to "default" on backend)
+    if let Some(group_name) = group {
+        payload["group"] = serde_json::json!(group_name);
+    }
+
+    // Add expires_in field if provided
+    if let Some(expiration) = expires_in {
+        payload["expires_in"] = serde_json::json!(expiration);
     }
 
     let response = http_client
