@@ -463,14 +463,20 @@ async fn main() -> Result<()> {
                     // If using pre-built image, http_port is required
                     (Some(_), None) => {
                         eprintln!("Error: --http-port is required when using --image");
-                        eprintln!("Example: rise deployment create {} --image {} --http-port 80", project, image.as_ref().unwrap());
+                        eprintln!(
+                            "Example: rise deployment create {} --image {} --http-port 80",
+                            project,
+                            image.as_ref().unwrap()
+                        );
                         std::process::exit(1);
                     }
                     // If using pre-built image with port specified, use it
                     (Some(_), Some(p)) => *p,
                     // If building from source without port specified, default to 8080 (Paketo buildpack default)
                     (None, None) => {
-                        info!("No --http-port specified, defaulting to 8080 (Paketo buildpack default)");
+                        info!(
+                            "No --http-port specified, defaulting to 8080 (Paketo buildpack default)"
+                        );
                         8080
                     }
                     // If building from source with port specified, use it

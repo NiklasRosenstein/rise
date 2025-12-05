@@ -313,19 +313,27 @@ pub async fn create_deployment(
 
         // Normalize image reference (add registry and namespace if missing)
         let normalized_image = normalize_image_reference(user_image);
-        debug!("Normalized image: {} -> {}", user_image, normalized_image);
+        info!(
+            "Normalized image reference: {} -> {}",
+            user_image, normalized_image
+        );
 
         // Resolve image to digest
+        info!("Resolving image '{}' to digest...", normalized_image);
         let image_digest = resolve_image_digest(&state.oci_client, &normalized_image)
             .await
             .map_err(|e| {
+                error!(
+                    "Failed to resolve image '{}' (normalized from '{}'): {}",
+                    normalized_image, user_image, e
+                );
                 (
                     StatusCode::BAD_REQUEST,
                     format!("Failed to resolve image '{}': {}", user_image, e),
                 )
             })?;
 
-        info!("Resolved image digest: {}", image_digest);
+        info!("Successfully resolved image to digest: {}", image_digest);
 
         // Create deployment record with image fields set
         let _deployment = db_deployments::create(

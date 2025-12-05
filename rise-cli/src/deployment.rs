@@ -808,6 +808,8 @@ fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
         .arg(app_path)
         .arg("--docker-host")
         .arg("inherit")
+        .arg("--network")
+        .arg("host")
         .arg("--builder")
         .arg("paketobuildpacks/builder:base")
         .arg("--publish")
