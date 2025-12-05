@@ -100,7 +100,11 @@ struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     owner_team: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    active_deployment_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     deployment_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -285,17 +289,23 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
             println!("No projects found.");
         } else {
             println!("Projects:");
-            println!("{:<25} {:<15} {:<40}", "NAME", "STATUS", "URL");
-            println!("{}", "-".repeat(85));
+            println!(
+                "{:<25} {:<15} {:<25} {:<40}",
+                "NAME", "STATUS", "ACTIVE DEPLOYMENT", "URL"
+            );
+            println!("{}", "-".repeat(110));
             for project in projects {
                 let url = project
-                    .deployment_url
+                    .project_url
                     .as_deref()
+                    .or(project.deployment_url.as_deref())
                     .unwrap_or("(not deployed)");
+                let active_deployment = project.active_deployment_id.as_deref().unwrap_or("-");
                 println!(
-                    "{:<25} {:<15} {:<40}",
+                    "{:<25} {:<15} {:<25} {:<40}",
                     project.name,
                     format!("{}", project.status),
+                    active_deployment,
                     url
                 );
             }

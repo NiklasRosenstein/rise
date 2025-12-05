@@ -85,6 +85,8 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_team: Option<String>, // Relation to teams collection
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_deployment_id: Option<String>, // ID of the active deployment
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_url: Option<String>, // DEPRECATED: use project_url
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_url: Option<String>, // Stable project URL
@@ -169,6 +171,8 @@ pub struct ProjectWithOwnerInfo {
     pub visibility: ProjectVisibility,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<OwnerInfo>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub active_deployment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_url: Option<String>, // DEPRECATED: use project_url
     #[serde(skip_serializing_if = "Option::is_none")]

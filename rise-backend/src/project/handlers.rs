@@ -120,6 +120,7 @@ pub async fn list_projects(
                 visibility: ProjectVisibility::from(project.visibility),
                 owner_user: project.owner_user_id.map(|id| id.to_string()),
                 owner_team: project.owner_team_id.map(|id| id.to_string()),
+                active_deployment_id: project.active_deployment_id.map(|id| id.to_string()),
                 deployment_url,
                 project_url: project.project_url,
             }
@@ -306,6 +307,7 @@ async fn expand_project_with_owner(
         status: ProjectStatus::from(project.status),
         visibility: ProjectVisibility::from(project.visibility),
         owner: owner_info,
+        active_deployment_id: project.active_deployment_id.map(|id| id.to_string()),
         deployment_url: None, // Will be populated by caller
         project_url: project.project_url,
         created: project.created_at.to_rfc3339(),
@@ -388,6 +390,7 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         visibility: ProjectVisibility::from(project.visibility),
         owner_user: project.owner_user_id.map(|id| id.to_string()),
         owner_team: project.owner_team_id.map(|id| id.to_string()),
+        active_deployment_id: project.active_deployment_id.map(|id| id.to_string()),
         deployment_url: None, // Will be populated by caller
         project_url: project.project_url,
     }
