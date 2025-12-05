@@ -85,7 +85,9 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_team: Option<String>, // Relation to teams collection
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_url: Option<String>,
+    pub deployment_url: Option<String>, // DEPRECATED: use project_url
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_url: Option<String>, // Stable project URL
     // Timestamps
     #[serde(default)]
     pub created: String,
@@ -168,7 +170,9 @@ pub struct ProjectWithOwnerInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<OwnerInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_url: Option<String>,
+    pub deployment_url: Option<String>, // DEPRECATED: use project_url
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub project_url: Option<String>,
     pub created: String,
     pub updated: String,
 }

@@ -56,6 +56,10 @@ pub struct Deployment {
     pub created_by: String, // User ID
     #[serde(default)]
     pub status: DeploymentStatus,
+    #[serde(default = "default_group")]
+    pub deployment_group: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<String>, // RFC3339 timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -76,12 +80,20 @@ pub struct Deployment {
     pub updated: String,
 }
 
+fn default_group() -> String {
+    "default".to_string()
+}
+
 // Request to create a deployment
 #[derive(Debug, Deserialize)]
 pub struct CreateDeploymentRequest {
     pub project: String, // Project name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image: Option<String>, // Optional pre-built image reference
+    #[serde(default = "default_group")]
+    pub group: String, // Deployment group (e.g., 'default', 'mr/27')
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_in: Option<String>, // Expiration duration (e.g., '7d', '2h', '30m')
 }
 
 // Response from creating a deployment

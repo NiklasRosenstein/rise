@@ -16,6 +16,10 @@ pub fn deployment_routes() -> Router<AppState> {
             get(super::handlers::list_deployments),
         )
         .route(
+            "/projects/{project_name}/deployments/stop",
+            post(super::handlers::stop_deployments_by_group),
+        )
+        .route(
             "/projects/{project_name}/deployments/{deployment_id}",
             get(super::handlers::get_deployment_by_project),
         )

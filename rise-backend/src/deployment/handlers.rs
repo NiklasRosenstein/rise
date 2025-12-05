@@ -1,10 +1,12 @@
 use anyhow::Context;
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     Json,
 };
-use tracing::{debug, info};
+use chrono::{DateTime, Utc};
+use regex::Regex;
+use tracing::{debug, error, info};
 
 use super::models::*;
 use super::utils::generate_deployment_id;
@@ -48,6 +50,52 @@ async fn check_deploy_permission(
     }
 
     Err("You do not have permission to deploy to this project".to_string())
+}
+
+/// Validate group name format: must be 'default' or match [a-z0-9][a-z0-9/-]*[a-z0-9]
+fn is_valid_group_name(name: &str) -> bool {
+    if name == "default" {
+        return true;
+    }
+
+    if name.len() > 100 {
+        return false;
+    }
+
+    Regex::new(r"^[a-z0-9][a-z0-9/-]*[a-z0-9]$")
+        .unwrap()
+        .is_match(name)
+}
+
+/// Parse expiration duration string (e.g., "7d", "2h", "30m") to DateTime
+fn parse_expiration(expires_in: &str) -> Result<DateTime<Utc>, String> {
+    let s = expires_in.trim();
+    let (num_str, unit) = if s.ends_with('d') {
+        (&s[..s.len() - 1], "d")
+    } else if s.ends_with('h') {
+        (&s[..s.len() - 1], "h")
+    } else if s.ends_with('m') {
+        (&s[..s.len() - 1], "m")
+    } else {
+        return Err("Duration must end with d, h, or m".to_string());
+    };
+
+    let num: i64 = num_str
+        .parse()
+        .map_err(|_| "Invalid number in duration".to_string())?;
+
+    if num <= 0 {
+        return Err("Duration must be positive".to_string());
+    }
+
+    let duration = match unit {
+        "d" => chrono::Duration::days(num),
+        "h" => chrono::Duration::hours(num),
+        "m" => chrono::Duration::minutes(num),
+        _ => return Err("Invalid duration unit".to_string()),
+    };
+
+    Ok(Utc::now() + duration)
 }
 
 /// Normalize image reference by adding registry hostname and namespace if missing
@@ -154,6 +202,8 @@ fn convert_deployment(deployment: crate::db::models::Deployment) -> Deployment {
         project: deployment.project_id.to_string(),
         created_by: deployment.created_by_id.to_string(),
         status: convert_status_from_db(deployment.status),
+        deployment_group: deployment.deployment_group,
+        expires_at: deployment.expires_at.map(|dt| dt.to_rfc3339()),
         error_message: deployment.error_message,
         completed_at: deployment.completed_at.map(|dt| dt.to_rfc3339()),
         build_logs: deployment.build_logs,
@@ -173,6 +223,29 @@ pub async fn create_deployment(
     Json(payload): Json<CreateDeploymentRequest>,
 ) -> Result<Json<CreateDeploymentResponse>, (StatusCode, String)> {
     info!("Creating deployment for project '{}'", payload.project);
+
+    // Validate deployment group name
+    if !is_valid_group_name(&payload.group) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (max 100 chars)",
+                payload.group
+            ),
+        ));
+    }
+
+    // Parse expiration duration if provided
+    let expires_at = if let Some(ref expires_in) = payload.expires_in {
+        Some(parse_expiration(expires_in).map_err(|e| {
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Invalid expiration duration '{}': {}", expires_in, e),
+            )
+        })?)
+    } else {
+        None
+    };
 
     // Query project by name
     let project = projects::find_by_name(&state.db_pool, &payload.project)
@@ -244,8 +317,8 @@ pub async fn create_deployment(
             DbDeploymentStatus::Pushed, // Pre-built images skip build/push, go straight to Pushed
             Some(user_image),           // Store original user input
             Some(&image_digest),        // Store resolved digest
-            "default",                  // deployment_group
-            None,                       // expires_at
+            &payload.group,             // deployment_group
+            expires_at,                 // expires_at
         )
         .await
         .map_err(|e| {
@@ -310,10 +383,10 @@ pub async fn create_deployment(
             project.id,
             user.id,
             DbDeploymentStatus::Pending,
-            None,      // image - NULL for build-from-source
-            None,      // image_digest - NULL for build-from-source
-            "default", // deployment_group
-            None,      // expires_at
+            None,           // image - NULL for build-from-source
+            None,           // image_digest - NULL for build-from-source
+            &payload.group, // deployment_group
+            expires_at,     // expires_at
         )
         .await
         .map_err(|e| {
@@ -450,13 +523,24 @@ pub async fn update_deployment_status(
     Ok(Json(convert_deployment(updated_deployment)))
 }
 
+/// Query parameters for listing deployments
+#[derive(Debug, serde::Deserialize)]
+pub struct ListDeploymentsQuery {
+    #[serde(rename = "group")]
+    pub deployment_group: Option<String>,
+}
+
 /// List deployments for a project
 pub async fn list_deployments(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(project_name): Path<String>,
+    Query(query): Query<ListDeploymentsQuery>,
 ) -> Result<Json<Vec<Deployment>>, (StatusCode, String)> {
-    debug!("Listing deployments for project: {}", project_name);
+    debug!(
+        "Listing deployments for project: {} (group: {:?})",
+        project_name, query.deployment_group
+    );
 
     // Find the project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
@@ -497,20 +581,145 @@ pub async fn list_deployments(
         ));
     }
 
-    // Get deployments from database
-    let db_deployments = db_deployments::list_for_project(&state.db_pool, project.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list deployments: {}", e),
-            )
-        })?;
+    // Get deployments from database (optionally filtered by group)
+    let db_deployments = db_deployments::list_for_project_and_group(
+        &state.db_pool,
+        project.id,
+        query.deployment_group.as_deref(),
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to list deployments: {}", e),
+        )
+    })?;
 
     // Convert to API models
     let deployments: Vec<Deployment> = db_deployments.into_iter().map(convert_deployment).collect();
 
     Ok(Json(deployments))
+}
+
+/// Query parameters for stopping deployments
+#[derive(Debug, serde::Deserialize)]
+pub struct StopDeploymentsQuery {
+    pub group: String,
+}
+
+/// Response for stopping deployments
+#[derive(Debug, serde::Serialize)]
+pub struct StopDeploymentsResponse {
+    pub stopped_count: usize,
+    pub deployment_ids: Vec<String>,
+}
+
+/// POST /projects/{project_name}/deployments/stop - Stop all deployments in a group
+pub async fn stop_deployments_by_group(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(project_name): Path<String>,
+    Query(query): Query<StopDeploymentsQuery>,
+) -> Result<Json<StopDeploymentsResponse>, (StatusCode, String)> {
+    info!(
+        "Stopping all deployments in group '{}' for project '{}'",
+        query.group, project_name
+    );
+
+    // Validate group name
+    if !is_valid_group_name(&query.group) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9]",
+                query.group
+            ),
+        ));
+    }
+
+    // Find the project by name
+    let project = projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
+
+    // Check if user has permission to stop deployments (owns the project)
+    check_deploy_permission(&state, &project, user.id)
+        .await
+        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
+
+    // Find all non-terminal deployments in this group
+    let deployments = db_deployments::find_non_terminal_for_project_and_group(
+        &state.db_pool,
+        project.id,
+        &query.group,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to find deployments: {}", e),
+        )
+    })?;
+
+    let mut stopped_ids = Vec::new();
+
+    // Mark each deployment as Terminating with UserStopped reason
+    for deployment in deployments {
+        match db_deployments::mark_terminating(
+            &state.db_pool,
+            deployment.id,
+            crate::db::models::TerminationReason::UserStopped,
+        )
+        .await
+        {
+            Ok(_) => {
+                info!(
+                    "Marked deployment {} as Terminating",
+                    deployment.deployment_id
+                );
+                stopped_ids.push(deployment.deployment_id);
+            }
+            Err(e) => {
+                error!(
+                    "Failed to mark deployment {} as Terminating: {}",
+                    deployment.deployment_id, e
+                );
+            }
+        }
+    }
+
+    // Update project status
+    projects::update_calculated_status(&state.db_pool, project.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to update project status: {}", e),
+            )
+        })?;
+
+    info!(
+        "Stopped {} deployments in group '{}' for project '{}'",
+        stopped_ids.len(),
+        query.group,
+        project_name
+    );
+
+    Ok(Json(StopDeploymentsResponse {
+        stopped_count: stopped_ids.len(),
+        deployment_ids: stopped_ids,
+    }))
 }
 
 /// GET /projects/{project_name}/deployments/{deployment_id} - Get a specific deployment
@@ -694,6 +903,7 @@ pub async fn rollback_deployment(
 
     // Create new deployment with Pushed status
     // Copy image and image_digest from source (will be NULL for built images)
+    // Copy group from source deployment to maintain consistency
     let new_deployment = db_deployments::create(
         &state.db_pool,
         &new_deployment_id,
@@ -702,8 +912,8 @@ pub async fn rollback_deployment(
         DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
         source_deployment.image.as_deref(), // Copy image from source if present
         source_deployment.image_digest.as_deref(), // Copy digest from source if present
-        "default",                  // deployment_group
-        None,                       // expires_at
+        &source_deployment.deployment_group, // Copy group from source
+        None,                       // expires_at - rollbacks don't inherit expiration
     )
     .await
     .map_err(|e| {
