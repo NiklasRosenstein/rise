@@ -6,7 +6,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::path::Path;
 use std::process::Command;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tracing::{debug, info, warn};
 
 use crate::config::Config;
@@ -40,7 +40,7 @@ pub fn parse_deployment_ref(ref_str: &str) -> Result<(String, String)> {
 }
 
 /// Parse duration string (e.g., "5m", "30s", "1h")
-fn parse_duration(s: &str) -> Result<Duration> {
+pub(super) fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
     if s.is_empty() {
         bail!("Duration string is empty");
@@ -68,7 +68,7 @@ fn parse_duration(s: &str) -> Result<Duration> {
 }
 
 /// Fetch deployment by project name and deployment_id
-async fn fetch_deployment(
+pub(super) async fn fetch_deployment(
     http_client: &Client,
     backend_url: &str,
     token: &str,
@@ -283,55 +283,50 @@ pub async fn show_deployment(
     follow: bool,
     timeout_str: &str,
 ) -> Result<()> {
-    let token = config
-        .token
-        .as_ref()
-        .context("Not logged in. Please run 'rise login' first.")?;
+    if follow {
+        // Use new enhanced UI for follow mode
+        let deployment = super::follow_ui::follow_deployment_with_ui(
+            http_client,
+            backend_url,
+            config,
+            project,
+            deployment_id,
+            timeout_str,
+        )
+        .await?;
 
-    let timeout = parse_duration(timeout_str)?;
-    let start_time = Instant::now();
+        // Exit with error if deployment failed
+        if deployment.status == DeploymentStatus::Failed {
+            if let Some(error) = deployment.error_message {
+                bail!("Deployment failed: {}", error);
+            } else {
+                bail!("Deployment failed");
+            }
+        }
 
-    debug!("Fetching deployment {}:{}", project, deployment_id);
+        Ok(())
+    } else {
+        // One-shot display (no follow)
+        let token = config
+            .token
+            .as_ref()
+            .context("Not logged in. Please run 'rise login' first.")?;
 
-    loop {
         let deployment =
             fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
 
-        // Print deployment details
         print_deployment_details(&deployment, project);
 
-        // Check if deployment has reached a final state (terminal or healthy)
-        let is_done = matches!(
-            deployment.status,
-            DeploymentStatus::Healthy
-                | DeploymentStatus::Cancelled
-                | DeploymentStatus::Stopped
-                | DeploymentStatus::Superseded
-                | DeploymentStatus::Failed
-        );
-
-        if !follow || is_done {
-            // Exit with error if deployment failed
-            if deployment.status == DeploymentStatus::Failed {
-                if let Some(error) = deployment.error_message {
-                    bail!("Deployment failed: {}", error);
-                } else {
-                    bail!("Deployment failed");
-                }
+        // Exit with error if deployment failed
+        if deployment.status == DeploymentStatus::Failed {
+            if let Some(error) = deployment.error_message {
+                bail!("Deployment failed: {}", error);
+            } else {
+                bail!("Deployment failed");
             }
-            return Ok(());
         }
 
-        // Check timeout
-        if start_time.elapsed() >= timeout {
-            bail!(
-                "Timeout waiting for deployment to complete (status: {})",
-                deployment.status
-            );
-        }
-
-        // Wait before polling again
-        tokio::time::sleep(Duration::from_secs(2)).await;
+        Ok(())
     }
 }
 
