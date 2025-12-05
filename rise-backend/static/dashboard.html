@@ -11,7 +11,14 @@
     <header class="container">
         <nav>
             <ul>
-                <li><strong>Rise Dashboard</strong></li>
+                <li class="dashboard-header">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <strong>Rise Dashboard</strong>
+                </li>
             </ul>
             <ul>
                 <li><a href="#" onclick="showView('projects')">Projects</a></li>
@@ -37,7 +44,7 @@
 
         <!-- Project Detail View -->
         <section id="project-detail-view" style="display: none;">
-            <button onclick="showView('projects')">&larr; Back to Projects</button>
+            <a href="#" class="back-button" onclick="showView('projects'); return false;">Back to Projects</a>
             <div id="project-detail"></div>
             <h3>Deployments</h3>
             <div id="deployment-list"></div>
@@ -45,7 +52,7 @@
 
         <!-- Deployment Detail View -->
         <section id="deployment-detail-view" style="display: none;">
-            <button onclick="goBack()">&larr; Back</button>
+            <a href="#" class="back-button" onclick="goBack(); return false;">Back</a>
             <div id="deployment-detail"></div>
         </section>
     </main>

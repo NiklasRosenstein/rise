@@ -79,8 +79,8 @@ async function loadProjects() {
                 </thead>
                 <tbody>
                     ${projects.map(p => {
-                        const owner = p.owner_user ? `user:${p.owner_user}` :
-                                     p.owner_team ? `team:${p.owner_team}` : '-';
+                        const owner = p.owner_user_email ? `user:${p.owner_user_email}` :
+                                     p.owner_team_name ? `team:${p.owner_team_name}` : '-';
                         return `
                         <tr>
                             <td>${escapeHtml(p.name)}</td>
@@ -164,7 +164,7 @@ async function showProject(projectName) {
 
         detailEl.innerHTML = `
             <article>
-                <header><h3>${escapeHtml(project.name)}</h3></header>
+                <header><h3>Project ${escapeHtml(project.name)}</h3></header>
                 <dl>
                     <dt>Status</dt>
                     <dd><span class="status-badge status-${project.status.toLowerCase()}">${project.status}</span></dd>
