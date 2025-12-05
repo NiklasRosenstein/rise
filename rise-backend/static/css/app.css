@@ -7,16 +7,30 @@
     --rise-danger: #ef4444;
 }
 
+/* Header styling */
+header {
+    background: var(--pico-card-background-color);
+    border-bottom: 1px solid var(--pico-card-border-color);
+    margin-bottom: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+}
+
+header nav {
+    margin-bottom: 0;
+}
+
 /* Header logo */
 .dashboard-header {
     display: flex;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
 }
 
 .dashboard-header svg {
-    width: 28px;
-    height: 28px;
+    width: 20px;
+    height: 20px;
+    flex-shrink: 0;
 }
 
 /* Back button */
