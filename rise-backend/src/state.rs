@@ -14,6 +14,7 @@ pub struct AppState {
     pub jwt_validator: Arc<JwtValidator>,
     pub oauth_client: Arc<DexOAuthClient>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
+    pub oci_client: Arc<crate::oci::OciClient>,
 }
 
 impl AppState {
@@ -113,6 +114,13 @@ impl AppState {
             None
         };
 
+        // Initialize OCI client for direct registry interaction
+        let oci_client = Arc::new(
+            crate::oci::OciClient::new()
+                .context("Failed to initialize OCI client")?
+        );
+        tracing::info!("Initialized OCI client for registry digest resolution");
+
         Ok(Self {
             settings: Arc::new(settings.clone()),
             http_client: Arc::new(http_client),
@@ -120,6 +128,7 @@ impl AppState {
             jwt_validator,
             oauth_client,
             registry_provider,
+            oci_client,
         })
     }
 }

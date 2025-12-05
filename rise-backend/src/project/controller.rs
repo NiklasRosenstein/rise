@@ -57,9 +57,8 @@ impl ProjectController {
     async fn process_deleting_projects(&self) -> anyhow::Result<()> {
         let deleting = db_projects::find_deleting(&self.state.db_pool, 10).await?;
 
-        info!("Processing {} deleting projects", deleting.len());
         for project in deleting {
-            info!("Processing deletion for project {}", project.name);
+            debug!("Processing deletion for project {}", project.name);
 
             // Find all deployments for this project
             let deployments = db_deployments::list_for_project(&self.state.db_pool, project.id).await?;

@@ -79,45 +79,31 @@ fn normalize_image_reference(image: &str) -> String {
     }
 }
 
-/// Resolve image tag to digest by inspecting the image manifest
+/// Resolve image tag to digest by contacting OCI registry directly
 ///
-/// This function uses the Docker client to inspect the image manifest remotely
+/// This function uses the OCI Distribution API to fetch the image manifest
 /// (without pulling the entire image) and returns the digest-pinned reference.
 ///
 /// # Arguments
+/// * `oci_client` - OCI client for registry interaction
 /// * `normalized_image` - Normalized image reference (e.g., "docker.io/library/nginx:latest")
 ///
 /// # Returns
 /// Fully-qualified digest reference (e.g., "docker.io/library/nginx@sha256:abc123...")
 ///
 /// # Errors
-/// Returns error if image doesn't exist, manifest is inaccessible, or Docker client fails
-async fn resolve_image_digest(normalized_image: &str) -> anyhow::Result<String> {
-    use bollard::Docker;
-
-    // Connect to Docker daemon
-    let docker = Docker::connect_with_local_defaults()
-        .context("Failed to connect to Docker daemon")?;
-
-    // Inspect the image to get its digest
-    // Note: This may pull the image if not present locally
-    let image_info = docker.inspect_image(normalized_image)
+/// Returns error if image doesn't exist, requires authentication, or registry is unreachable
+async fn resolve_image_digest(
+    oci_client: &crate::oci::OciClient,
+    normalized_image: &str,
+) -> anyhow::Result<String> {
+    let digest_ref = oci_client
+        .resolve_image_digest(normalized_image)
         .await
-        .context(format!("Failed to inspect image '{}'. Image may not exist or is inaccessible.", normalized_image))?;
-
-    // Get the RepoDigests - these contain the digest-pinned references
-    let repo_digests = image_info.repo_digests
-        .ok_or_else(|| anyhow::anyhow!("Image '{}' has no repo digests", normalized_image))?;
-
-    // Find the digest for our specific image
-    // RepoDigests format: ["docker.io/library/nginx@sha256:abc123...", ...]
-    let digest_ref = repo_digests.iter()
-        .find(|digest| digest.starts_with(&normalized_image.split(':').next().unwrap_or("")))
-        .or_else(|| repo_digests.first())
-        .ok_or_else(|| anyhow::anyhow!("No digest found for image '{}'", normalized_image))?;
+        .context(format!("Failed to resolve image '{}'", normalized_image))?;
 
     info!("Resolved '{}' to digest '{}'", normalized_image, digest_ref);
-    Ok(digest_ref.clone())
+    Ok(digest_ref)
 }
 
 /// Convert API DeploymentStatus to DB DeploymentStatus
@@ -211,7 +197,7 @@ pub async fn create_deployment(
         debug!("Normalized image: {} -> {}", user_image, normalized_image);
 
         // Resolve image to digest
-        let image_digest = resolve_image_digest(&normalized_image).await
+        let image_digest = resolve_image_digest(&state.oci_client, &normalized_image).await
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to resolve image '{}': {}", user_image, e)))?;
 
         info!("Resolved image digest: {}", image_digest);

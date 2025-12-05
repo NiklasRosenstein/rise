@@ -309,9 +309,7 @@ impl DeploymentController {
         // Find all Healthy deployments
         let healthy_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Healthy).await?;
 
-        info!("Checking health for {} healthy deployments", healthy_deployments.len());
         for deployment in healthy_deployments {
-            info!("Checking health for deployment {}", deployment.deployment_id);
             match self.backend.health_check(&deployment).await {
                 Ok(health) => {
                     // Update health status in metadata
@@ -359,9 +357,8 @@ impl DeploymentController {
         // Find all Unhealthy deployments
         let unhealthy_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Unhealthy).await?;
 
-        info!("Monitoring {} unhealthy deployments for recovery", unhealthy_deployments.len());
         for deployment in unhealthy_deployments {
-            info!("Checking unhealthy deployment {} for recovery", deployment.deployment_id);
+            debug!("Checking unhealthy deployment {} for recovery", deployment.deployment_id);
             match self.backend.health_check(&deployment).await {
                 Ok(health) => {
                     if health.healthy {
@@ -407,9 +404,8 @@ impl DeploymentController {
     async fn process_terminating_deployments(&self) -> anyhow::Result<()> {
         let terminating = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Terminating).await?;
 
-        info!("Processing {} terminating deployments", terminating.len());
         for deployment in terminating {
-            info!("Terminating deployment {}", deployment.deployment_id);
+            debug!("Terminating deployment {}", deployment.deployment_id);
 
             // Call backend to terminate (stop and remove container)
             match self.backend.terminate(&deployment).await {

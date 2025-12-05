@@ -6,6 +6,7 @@ pub mod project;
 pub mod team;
 pub mod registry;
 pub mod deployment;
+pub mod oci;
 
 #[cfg(test)]
 mod lib_tests;
