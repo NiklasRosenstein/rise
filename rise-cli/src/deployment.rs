@@ -187,6 +187,7 @@ pub async fn list_deployments(
             Cell::new("EXPIRY").add_attribute(Attribute::Bold),
             Cell::new("CREATED").add_attribute(Attribute::Bold),
             Cell::new("URL").add_attribute(Attribute::Bold),
+            Cell::new("ERROR").add_attribute(Attribute::Bold),
         ]);
 
     for deployment in deployments {
@@ -242,6 +243,18 @@ pub async fn list_deployments(
             status_cell = status_cell.fg(Color::Green);
         }
 
+        // Create error cell with truncated message
+        let error_cell = if let Some(ref error) = deployment.error_message {
+            let truncated = if error.len() > 40 {
+                format!("{}...", &error[..37])
+            } else {
+                error.clone()
+            };
+            Cell::new(truncated).fg(Color::Red)
+        } else {
+            Cell::new("-")
+        };
+
         table.add_row(vec![
             deployment_cell,
             status_cell,
@@ -249,14 +262,8 @@ pub async fn list_deployments(
             expiry_cell,
             created_cell,
             url_cell,
+            error_cell,
         ]);
-
-        // Show error message if failed
-        if deployment.status == DeploymentStatus::Failed {
-            if let Some(error) = deployment.error_message {
-                println!("  Error: {}", error);
-            }
-        }
     }
 
     println!("{}", table);
