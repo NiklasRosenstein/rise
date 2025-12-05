@@ -26,11 +26,16 @@ impl OciClient {
             .await
             .map_err(|e| self.classify_error(e, image_ref))?;
 
-        // Construct digest-pinned reference
-        // Format: registry/namespace/image@sha256:digest
-        let registry = reference.registry();
-        let repository = reference.repository();
-        let digest_ref = format!("{}/{}@{}", registry, repository, digest);
+        // Construct digest-pinned reference using Reference::with_digest
+        // This ensures proper formatting: registry/namespace/image@sha256:digest
+        let digest_reference = Reference::with_digest(
+            reference.registry().to_string(),
+            reference.repository().to_string(),
+            digest,
+        );
+
+        // Use whole() to get the complete reference string
+        let digest_ref = digest_reference.whole();
 
         Ok(digest_ref)
     }
