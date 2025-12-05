@@ -192,6 +192,9 @@ enum DeploymentCommands {
         /// Expiration duration (e.g., '7d', '2h', '30m'). Deployment will be automatically cleaned up after this period.
         #[arg(long)]
         expire: Option<String>,
+        /// HTTP port the application listens on (e.g., 3000, 8080, 5000)
+        #[arg(long)]
+        http_port: u16,
     },
     /// List deployments for a project
     #[command(visible_alias = "ls")]
@@ -451,6 +454,7 @@ async fn main() -> Result<()> {
                 image,
                 group,
                 expire,
+                http_port,
             } => {
                 deployment::create_deployment(
                     &http_client,
@@ -461,6 +465,7 @@ async fn main() -> Result<()> {
                     image.as_deref(),
                     group.as_deref(),
                     expire.as_deref(),
+                    *http_port,
                 )
                 .await?;
             }

@@ -246,6 +246,14 @@ pub async fn create_deployment(
         ));
     }
 
+    // Validate http_port (should be 1-65535)
+    if payload.http_port == 0 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "HTTP port must be between 1 and 65535".to_string(),
+        ));
+    }
+
     // Parse expiration duration if provided
     let expires_at = if let Some(ref expires_in) = payload.expires_in {
         Some(parse_expiration(expires_in).map_err(|e| {
@@ -330,6 +338,7 @@ pub async fn create_deployment(
             Some(&image_digest),        // Store resolved digest
             &payload.group,             // deployment_group
             expires_at,                 // expires_at
+            payload.http_port as i32,   // http_port
         )
         .await
         .map_err(|e| {
@@ -394,10 +403,11 @@ pub async fn create_deployment(
             project.id,
             user.id,
             DbDeploymentStatus::Pending,
-            None,           // image - NULL for build-from-source
-            None,           // image_digest - NULL for build-from-source
-            &payload.group, // deployment_group
-            expires_at,     // expires_at
+            None,                     // image - NULL for build-from-source
+            None,                     // image_digest - NULL for build-from-source
+            &payload.group,           // deployment_group
+            expires_at,               // expires_at
+            payload.http_port as i32, // http_port
         )
         .await
         .map_err(|e| {
@@ -925,6 +935,7 @@ pub async fn rollback_deployment(
         source_deployment.image_digest.as_deref(), // Copy digest from source if present
         &source_deployment.deployment_group, // Copy group from source
         None,                       // expires_at - rollbacks don't inherit expiration
+        source_deployment.http_port, // Copy http_port from source
     )
     .await
     .map_err(|e| {

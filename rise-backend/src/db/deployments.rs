@@ -19,6 +19,7 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Dep
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -51,6 +52,7 @@ pub async fn find_by_deployment_id(
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -79,6 +81,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Deployment>> {
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -104,14 +107,15 @@ pub async fn create(
     image_digest: Option<&str>,
     deployment_group: &str,
     expires_at: Option<DateTime<Utc>>,
+    http_port: i32,
 ) -> Result<Deployment> {
     let status_str = status.to_string();
 
     let deployment = sqlx::query_as!(
         Deployment,
         r#"
-        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, deployment_group, expires_at)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, deployment_group, expires_at, http_port)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
@@ -121,6 +125,7 @@ pub async fn create(
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         "#,
         deployment_id,
@@ -130,7 +135,8 @@ pub async fn create(
         image,
         image_digest,
         deployment_group,
-        expires_at
+        expires_at,
+        http_port
     )
     .fetch_one(pool)
     .await
@@ -162,6 +168,7 @@ pub async fn update_status(
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -191,6 +198,7 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -220,6 +228,7 @@ pub async fn update_build_logs(pool: &PgPool, id: Uuid, build_logs: &str) -> Res
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -246,6 +255,7 @@ pub async fn get_latest_for_project(pool: &PgPool, project_id: Uuid) -> Result<O
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -276,6 +286,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -308,6 +319,7 @@ pub async fn find_non_terminal_for_project(
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -339,6 +351,7 @@ pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<V
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -374,6 +387,7 @@ pub async fn update_controller_metadata(
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -403,6 +417,7 @@ pub async fn update_deployment_url(pool: &PgPool, id: Uuid, url: &str) -> Result
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -446,6 +461,7 @@ pub async fn mark_cancelled(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         "#,
         id
@@ -477,6 +493,7 @@ pub async fn mark_stopped(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         "#,
         id
@@ -508,6 +525,7 @@ pub async fn mark_superseded(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         "#,
         id
@@ -539,6 +557,7 @@ pub async fn mark_expired(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         "#,
         id
@@ -570,6 +589,7 @@ pub async fn mark_healthy(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         "#,
         id
@@ -601,6 +621,7 @@ pub async fn mark_unhealthy(pool: &PgPool, id: Uuid, reason: String) -> Result<D
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         "#,
         id,
@@ -637,6 +658,7 @@ pub async fn mark_terminating(
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         "#,
         id,
@@ -669,6 +691,7 @@ pub async fn mark_cancelling(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         "#,
         id
@@ -697,6 +720,7 @@ pub async fn find_cancellable_for_project(
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -749,6 +773,7 @@ pub async fn find_active_for_project_and_group(
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -785,6 +810,7 @@ pub async fn find_non_terminal_for_project_and_group(
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -816,6 +842,7 @@ pub async fn find_expired(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> 
             controller_metadata as "controller_metadata: serde_json::Value",
             deployment_url,
             image, image_digest,
+            http_port,
             created_at, updated_at
         FROM deployments
         WHERE expires_at IS NOT NULL
@@ -852,6 +879,7 @@ pub async fn list_for_project_and_group(
                 controller_metadata as "controller_metadata: serde_json::Value",
                 deployment_url,
                 image, image_digest,
+                http_port,
                 created_at, updated_at
             FROM deployments
             WHERE project_id = $1 AND deployment_group = $2

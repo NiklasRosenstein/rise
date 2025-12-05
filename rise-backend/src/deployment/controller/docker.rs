@@ -138,6 +138,7 @@ impl DockerController {
         &self,
         image_tag: &str,
         host_port: u16,
+        container_port: u16,
         container_name: &str,
     ) -> anyhow::Result<String> {
         debug!(
@@ -173,9 +174,6 @@ impl DockerController {
             }
         }
         info!("Successfully pulled image: {}", image_tag);
-
-        // Container port (default 8080)
-        let container_port = 8080;
 
         // Port bindings
         let mut port_bindings = HashMap::new();
@@ -439,8 +437,9 @@ impl DeploymentBackend for DockerController {
                 let container_name = format!("rise-{}-{}", project.name, deployment.deployment_id);
                 metadata.container_name = Some(container_name.clone());
 
+                let container_port = deployment.http_port as u16;
                 match self
-                    .create_container(&image_tag, port, &container_name)
+                    .create_container(&image_tag, port, container_port, &container_name)
                     .await
                 {
                     Ok(container_id) => {

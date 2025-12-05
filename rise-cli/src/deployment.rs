@@ -558,6 +558,7 @@ pub async fn create_deployment(
     image: Option<&str>,
     group: Option<&str>,
     expires_in: Option<&str>,
+    http_port: u16,
 ) -> Result<()> {
     if let Some(image_ref) = image {
         info!(
@@ -592,6 +593,7 @@ pub async fn create_deployment(
         image,
         group,
         expires_in,
+        http_port,
     )
     .await?;
 
@@ -697,10 +699,12 @@ async fn call_create_deployment_api(
     image: Option<&str>,
     group: Option<&str>,
     expires_in: Option<&str>,
+    http_port: u16,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/deployments", backend_url);
     let mut payload = serde_json::json!({
         "project": project_name,
+        "http_port": http_port,
     });
 
     // Add image field if provided

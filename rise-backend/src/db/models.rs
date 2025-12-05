@@ -124,6 +124,7 @@ pub struct Deployment {
     pub deployment_url: Option<String>,
     pub image: Option<String>,
     pub image_digest: Option<String>,
+    pub http_port: i32,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
