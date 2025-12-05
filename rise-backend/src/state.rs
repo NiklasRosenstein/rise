@@ -170,4 +170,101 @@ impl AppState {
             admin_users,
         })
     }
+
+    /// Initialize minimal state for deployment controller
+    ///
+    /// The deployment controller only needs database and registry access.
+    /// We use dummy values for auth components since they're not used.
+    pub async fn new_for_controller(settings: &Settings) -> Result<Self> {
+        tracing::info!("Initializing AppState for deployment controller");
+
+        // Connect to PostgreSQL with controller-optimized pool size
+        let db_pool = PgPoolOptions::new()
+            .max_connections(3)
+            .connect(&settings.database.url)
+            .await
+            .context("Failed to connect to PostgreSQL")?;
+
+        tracing::info!("Successfully connected to PostgreSQL");
+
+        // Initialize registry provider based on configuration
+        let registry_provider: Option<Arc<dyn RegistryProvider>> =
+            if let Some(ref registry_config) = settings.registry {
+                match registry_config {
+                    RegistrySettings::Ecr {
+                        region,
+                        account_id,
+                        access_key_id,
+                        secret_access_key,
+                    } => {
+                        let ecr_config = EcrConfig {
+                            region: region.clone(),
+                            account_id: account_id.clone(),
+                            access_key_id: access_key_id.clone(),
+                            secret_access_key: secret_access_key.clone(),
+                        };
+                        match EcrProvider::new(ecr_config).await {
+                            Ok(provider) => {
+                                tracing::info!("Initialized ECR registry provider");
+                                Some(Arc::new(provider))
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to initialize ECR provider: {}", e);
+                                None
+                            }
+                        }
+                    }
+                    RegistrySettings::Docker {
+                        registry_url,
+                        namespace,
+                    } => {
+                        let docker_config = DockerConfig {
+                            registry_url: registry_url.clone(),
+                            namespace: namespace.clone(),
+                        };
+                        match DockerProvider::new(docker_config) {
+                            Ok(provider) => {
+                                tracing::info!(
+                                    "Initialized Docker registry provider at {}",
+                                    registry_url
+                                );
+                                Some(Arc::new(provider))
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to initialize Docker provider: {}", e);
+                                None
+                            }
+                        }
+                    }
+                }
+            } else {
+                tracing::warn!("No registry configured - image tag construction will use fallback");
+                None
+            };
+
+        // Initialize OCI client (needed for pre-built image deployments)
+        let oci_client =
+            Arc::new(crate::oci::OciClient::new().context("Failed to initialize OCI client")?);
+
+        // Dummy auth components (not used by controller)
+        let jwt_validator = Arc::new(JwtValidator::new(
+            settings.auth.issuer.clone(),
+            settings.auth.client_id.clone(),
+        ));
+        let oauth_client = Arc::new(DexOAuthClient::new(
+            settings.auth.issuer.clone(),
+            settings.auth.client_id.clone(),
+            settings.auth.client_secret.clone(),
+        )?);
+        let admin_users = Arc::new(Vec::new());
+
+        Ok(Self {
+            db_pool,
+            jwt_validator,
+            oauth_client,
+            registry_provider,
+            oci_client,
+            admin_users,
+        })
+    }
 }

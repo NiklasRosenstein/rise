@@ -11,6 +11,7 @@ use tracing::{debug, error, info, warn};
 
 use super::{DeploymentBackend, HealthStatus, ReconcileResult};
 use crate::db::models::{Deployment, DeploymentStatus, Project};
+use crate::state::AppState;
 
 /// Docker-specific metadata stored in deployment.controller_metadata
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -58,30 +59,22 @@ impl PortAllocator {
 
 /// Docker controller implementation
 pub struct DockerController {
+    state: AppState,
     docker: Docker,
     port_allocator: PortAllocator,
 }
 
 impl DockerController {
     /// Create a new Docker controller
-    pub fn new() -> anyhow::Result<Self> {
+    pub fn new(state: AppState) -> anyhow::Result<Self> {
         // Connect to local Docker daemon
         let docker = Docker::connect_with_local_defaults()?;
 
         Ok(Self {
+            state,
             docker,
             port_allocator: PortAllocator::new(),
         })
-    }
-
-    /// Construct image tag from project name and deployment ID
-    ///
-    /// Format: registry_url/namespace/project:deployment_id
-    /// For local Docker: project:deployment_id
-    fn construct_image_tag(&self, project_name: &str, deployment_id: &str) -> String {
-        // For MVP, use simple local format
-        // Future: Get registry URL from settings
-        format!("{}:{}", project_name, deployment_id)
     }
 
     /// Validate that required metadata exists for a phase
@@ -408,16 +401,12 @@ impl DeploymentBackend for DockerController {
                 metadata.assigned_port = Some(port);
 
                 // Determine image to use
-                let image_tag = if let Some(ref digest) = deployment.image_digest {
-                    // Pre-built image - use the pinned digest
-                    debug!("Using pre-built image digest: {}", digest);
-                    digest.clone()
-                } else {
-                    // Built from source - construct image tag
-                    let tag = self.construct_image_tag(&project.name, &deployment.deployment_id);
-                    debug!("Using constructed image tag: {}", tag);
-                    tag
-                };
+                let image_tag = crate::deployment::utils::get_deployment_image_tag(
+                    &self.state,
+                    deployment,
+                    project,
+                );
+                debug!("Using image tag: {}", image_tag);
                 metadata.image_tag = Some(image_tag.clone());
 
                 // Create container (check if already exists first)

@@ -18,6 +18,7 @@ mod tests {
                 issuer: "http://localhost:5556/dex".to_string(),
                 client_id: "rise-backend".to_string(),
                 client_secret: "test-secret".to_string(),
+                admin_users: vec![],
             },
             database: DatabaseSettings {
                 url: "postgres://rise:rise123@localhost:5432/rise".to_string(),
@@ -27,7 +28,7 @@ mod tests {
 
         // This test requires PostgreSQL and Dex to be running
         // Skip if database is not available
-        let state = match crate::state::AppState::new(&settings).await {
+        let state = match crate::state::AppState::new_for_server(&settings).await {
             Ok(s) => s,
             Err(e) => {
                 eprintln!("Skipping test - Database/Auth not available: {}", e);

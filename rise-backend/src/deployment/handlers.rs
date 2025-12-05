@@ -887,42 +887,6 @@ pub async fn rollback_deployment(
         return Err((StatusCode::BAD_REQUEST, format!("Cannot rollback to deployment '{}' with status '{:?}'. Only Healthy deployments can be used for rollback.", source_deployment_id, source_deployment.status)));
     }
 
-    // Determine image tag for rollback
-    let image_tag = if let Some(ref digest) = source_deployment.image_digest {
-        // Pre-built image deployment - use the pinned digest
-        info!("Rolling back to pre-built image: {}", digest);
-        digest.clone()
-    } else {
-        // Build-from-source deployment - construct image tag from deployment_id
-        // Get registry configuration to construct the image tag
-        let registry_provider = state.registry_provider.as_ref().ok_or((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "No registry configured".to_string(),
-        ))?;
-
-        let credentials = registry_provider
-            .get_credentials(&project_name)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get credentials: {}", e),
-                )
-            })?;
-
-        let constructed_tag = format!(
-            "{}:{}",
-            format!(
-                "{}/{}",
-                credentials.registry_url.trim_end_matches('/'),
-                project_name
-            ),
-            source_deployment_id
-        );
-        info!("Rolling back to built image: {}", constructed_tag);
-        constructed_tag
-    };
-
     // Generate new deployment ID
     let new_deployment_id = generate_deployment_id();
     debug!(
@@ -931,8 +895,9 @@ pub async fn rollback_deployment(
     );
 
     // Create new deployment with Pushed status
-    // Copy image and image_digest from source (will be NULL for built images)
-    // Copy group from source deployment to maintain consistency
+    // Copy image and image_digest from source - the helper function will determine the tag
+    // For pre-built images: image_digest is copied, helper returns it
+    // For build-from-source: both are NULL, helper constructs tag from deployment_id
     let new_deployment = db_deployments::create(
         &state.db_pool,
         &new_deployment_id,
@@ -953,29 +918,13 @@ pub async fn rollback_deployment(
         )
     })?;
 
-    // Store image_tag in controller metadata for visibility
-    let controller_metadata = serde_json::json!({
-        "image_tag": image_tag,
-        "internal_port": 8080,  // Default port
-        "reconcile_phase": "NotStarted"
-    });
-
-    db_deployments::update_controller_metadata(
-        &state.db_pool,
-        new_deployment.id,
-        &controller_metadata,
-    )
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to update controller metadata: {}", e),
-        )
-    })?;
+    // Use helper to determine image tag (for logging/response only)
+    let image_tag =
+        crate::deployment::utils::get_deployment_image_tag(&state, &new_deployment, &project);
 
     info!(
-        "Created rollback deployment {} from {}",
-        new_deployment_id, source_deployment_id
+        "Created rollback deployment {} from {} (image: {})",
+        new_deployment_id, source_deployment_id, image_tag
     );
 
     Ok(Json(RollbackDeploymentResponse {

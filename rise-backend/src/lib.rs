@@ -56,11 +56,19 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 
 /// Run the deployment controller process
 pub async fn run_deployment_controller(settings: settings::Settings) -> Result<()> {
-    let state = ControllerState::new(&settings.database.url, 3).await?;
+    let app_state = state::AppState::new_for_controller(&settings).await?;
 
-    let backend = Arc::new(deployment::controller::DockerController::new()?);
+    let backend = Arc::new(deployment::controller::DockerController::new(
+        app_state.clone(),
+    )?);
+
+    // Create minimal controller state for the base controller
+    let controller_state = ControllerState {
+        db_pool: app_state.db_pool.clone(),
+    };
+
     let controller = Arc::new(deployment::controller::DeploymentController::new(
-        Arc::new(state),
+        Arc::new(controller_state),
         backend,
     )?);
     controller.start();
