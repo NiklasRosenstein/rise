@@ -2,22 +2,24 @@ use anyhow::Result;
 use async_trait::async_trait;
 
 use crate::registry::{
-    models::{DockerConfig, RegistryCredentials},
+    models::{OciClientAuthConfig, RegistryCredentials},
     RegistryProvider,
 };
 
-/// Generic Docker registry provider
+/// OCI registry provider that relies on client-side authentication
 ///
-/// Assumes the user has already authenticated via `docker login`.
-/// This provider simply returns the registry URL - no credential generation.
-pub struct DockerProvider {
-    config: DockerConfig,
+/// This provider assumes the user has already authenticated via `docker login`
+/// or equivalent. It simply returns the registry URL - no credential generation.
+///
+/// Works with any OCI-compliant registry (Docker Hub, Harbor, Quay, etc.)
+pub struct OciClientAuthProvider {
+    config: OciClientAuthConfig,
     registry_url: String,
 }
 
-impl DockerProvider {
-    /// Create a new Docker registry provider
-    pub fn new(config: DockerConfig) -> Result<Self> {
+impl OciClientAuthProvider {
+    /// Create a new OCI client-auth registry provider
+    pub fn new(config: OciClientAuthConfig) -> Result<Self> {
         let registry_url = format!(
             "{}/{}",
             config.registry_url.trim_end_matches('/'),
@@ -31,12 +33,9 @@ impl DockerProvider {
 }
 
 #[async_trait]
-impl RegistryProvider for DockerProvider {
+impl RegistryProvider for OciClientAuthProvider {
     async fn get_credentials(&self, repository: &str) -> Result<RegistryCredentials> {
-        tracing::info!(
-            "Returning Docker registry info for repository: {}",
-            repository
-        );
+        tracing::info!("Returning OCI registry info for repository: {}", repository);
 
         // Return registry URL - credentials assumed to be configured via docker login
         Ok(RegistryCredentials {
@@ -48,7 +47,7 @@ impl RegistryProvider for DockerProvider {
     }
 
     fn registry_type(&self) -> &str {
-        "docker"
+        "oci-client-auth"
     }
 
     fn registry_url(&self) -> &str {

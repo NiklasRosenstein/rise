@@ -35,7 +35,7 @@ pub struct DatabaseSettings {
 
 /// Registry provider configuration
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum RegistrySettings {
     Ecr {
         region: String,
@@ -45,7 +45,8 @@ pub enum RegistrySettings {
         #[serde(default)]
         secret_access_key: Option<String>,
     },
-    Docker {
+    #[serde(rename = "oci-client-auth", alias = "docker")]
+    OciClientAuth {
         registry_url: String,
         #[serde(default)]
         namespace: String,

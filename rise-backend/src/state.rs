@@ -1,7 +1,7 @@
 use crate::auth::{jwt::JwtValidator, oauth::DexOAuthClient};
 use crate::registry::{
-    models::{DockerConfig, EcrConfig},
-    providers::{DockerProvider, EcrProvider},
+    models::{EcrConfig, OciClientAuthConfig},
+    providers::{EcrProvider, OciClientAuthProvider},
     RegistryProvider,
 };
 use crate::settings::{RegistrySettings, Settings};
@@ -120,24 +120,27 @@ impl AppState {
                             }
                         }
                     }
-                    RegistrySettings::Docker {
+                    RegistrySettings::OciClientAuth {
                         registry_url,
                         namespace,
                     } => {
-                        let docker_config = DockerConfig {
+                        let oci_config = OciClientAuthConfig {
                             registry_url: registry_url.clone(),
                             namespace: namespace.clone(),
                         };
-                        match DockerProvider::new(docker_config) {
+                        match OciClientAuthProvider::new(oci_config) {
                             Ok(provider) => {
                                 tracing::info!(
-                                    "Initialized Docker registry provider at {}",
+                                    "Initialized OCI client-auth registry provider at {}",
                                     registry_url
                                 );
                                 Some(Arc::new(provider))
                             }
                             Err(e) => {
-                                tracing::error!("Failed to initialize Docker provider: {}", e);
+                                tracing::error!(
+                                    "Failed to initialize OCI client-auth provider: {}",
+                                    e
+                                );
                                 None
                             }
                         }
@@ -214,24 +217,27 @@ impl AppState {
                             }
                         }
                     }
-                    RegistrySettings::Docker {
+                    RegistrySettings::OciClientAuth {
                         registry_url,
                         namespace,
                     } => {
-                        let docker_config = DockerConfig {
+                        let oci_config = OciClientAuthConfig {
                             registry_url: registry_url.clone(),
                             namespace: namespace.clone(),
                         };
-                        match DockerProvider::new(docker_config) {
+                        match OciClientAuthProvider::new(oci_config) {
                             Ok(provider) => {
                                 tracing::info!(
-                                    "Initialized Docker registry provider at {}",
+                                    "Initialized OCI client-auth registry provider at {}",
                                     registry_url
                                 );
                                 Some(Arc::new(provider))
                             }
                             Err(e) => {
-                                tracing::error!("Failed to initialize Docker provider: {}", e);
+                                tracing::error!(
+                                    "Failed to initialize OCI client-auth provider: {}",
+                                    e
+                                );
                                 None
                             }
                         }

@@ -25,14 +25,14 @@ url = "postgres://rise:rise123@localhost:5432/rise"
 # # access_key_id = "AKIAIOSFODNN7EXAMPLE"
 # # secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 
-# Docker registry for local development
+# OCI registry for local development (client-side auth via docker login)
 [registry]
-type = "docker"
+type = "oci-client-auth"
 registry_url = "localhost:5000"
 namespace = "rise-apps"
 
-# Docker Hub Example:
+# Docker Hub Example (using oci-client-auth):
 # [registry]
-# type = "docker"
+# type = "oci-client-auth"
 # registry_url = "docker.io"
 # namespace = "myorg"

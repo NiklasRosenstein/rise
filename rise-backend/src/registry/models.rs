@@ -41,12 +41,13 @@ pub struct EcrConfig {
     pub secret_access_key: Option<String>,
 }
 
-/// Configuration for generic Docker registry
+/// Configuration for OCI registry with client-side authentication
 ///
-/// Assumes user has already authenticated via `docker login`.
-/// Backend only provides registry URL to CLI.
+/// This provider is for OCI-compliant registries where the client has already
+/// authenticated (e.g., via `docker login`). The backend only provides the
+/// registry URL and namespace; credentials are managed by the client's Docker config.
 #[derive(Debug, Clone, Deserialize)]
-pub struct DockerConfig {
+pub struct OciClientAuthConfig {
     /// Registry URL (e.g., "localhost:5000", "registry.example.com")
     pub registry_url: String,
     /// Namespace/path within registry (e.g., "rise-apps", "myorg")
@@ -60,8 +61,9 @@ fn default_namespace() -> String {
 
 /// Registry provider configuration
 #[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "lowercase")]
+#[serde(tag = "type", rename_all = "kebab-case")]
 pub enum RegistryConfig {
     Ecr(EcrConfig),
-    Docker(DockerConfig),
+    #[serde(rename = "oci-client-auth", alias = "docker")]
+    OciClientAuth(OciClientAuthConfig),
 }
