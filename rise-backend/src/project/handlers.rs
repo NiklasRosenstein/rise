@@ -87,14 +87,16 @@ pub async fn create_project(
 
 pub async fn list_projects(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    Extension(user): Extension<User>,
 ) -> Result<Json<Vec<ApiProject>>, (StatusCode, String)> {
-    let projects = projects::list(&state.db_pool, None).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to list projects: {}", e),
-        )
-    })?;
+    let projects = projects::list_accessible_by_user(&state.db_pool, user.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to list projects: {}", e),
+            )
+        })?;
 
     // Batch fetch deployment URLs and active deployment info for efficiency
     let project_ids: Vec<uuid::Uuid> = projects.iter().map(|p| p.id).collect();
@@ -193,12 +195,36 @@ pub async fn list_projects(
 
 pub async fn get_project(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    Extension(user): Extension<User>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetProjectParams>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ProjectErrorResponse>)> {
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
+
+    // Check read permission
+    let can_read = check_read_permission(&state, &project, user.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to check permissions: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+
+    if !can_read {
+        // Use 404 to hide project existence from unauthorized users
+        return Err((
+            StatusCode::NOT_FOUND,
+            Json(ProjectErrorResponse {
+                error: format!("Project '{}' not found", id_or_name),
+                suggestions: None,
+            }),
+        ));
+    }
 
     // Get deployment URL
     let deployment_url = projects::get_deployment_url(&state.db_pool, project.id)
@@ -238,13 +264,36 @@ pub async fn get_project(
 
 pub async fn update_project(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    Extension(user): Extension<User>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetProjectParams>,
     Json(payload): Json<UpdateProjectRequest>,
 ) -> Result<Json<UpdateProjectResponse>, (StatusCode, Json<ProjectErrorResponse>)> {
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
+
+    // Check write permission
+    let can_write = check_write_permission(&state, &project, user.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to check permissions: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+
+    if !can_write {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ProjectErrorResponse {
+                error: "You do not have permission to update this project".to_string(),
+                suggestions: None,
+            }),
+        ));
+    }
 
     // Update project fields
     let updated_project = if let Some(status) = payload.status {
@@ -274,12 +323,35 @@ pub async fn update_project(
 
 pub async fn delete_project(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    Extension(user): Extension<User>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetProjectParams>,
 ) -> Result<StatusCode, (StatusCode, Json<ProjectErrorResponse>)> {
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
+
+    // Check write permission
+    let can_write = check_write_permission(&state, &project, user.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to check permissions: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+
+    if !can_write {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ProjectErrorResponse {
+                error: "You do not have permission to delete this project".to_string(),
+                suggestions: None,
+            }),
+        ));
+    }
 
     // Check if already deleting
     if project.status == crate::db::models::ProjectStatus::Deleting {
@@ -458,4 +530,28 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         deployment_url: None,           // Will be populated by caller
         project_url: project.project_url,
     }
+}
+
+/// Check if user can read a project (owner or team member)
+async fn check_read_permission(
+    state: &AppState,
+    project: &crate::db::models::Project,
+    user_id: Uuid,
+) -> Result<bool, String> {
+    // Check ownership or team membership
+    projects::user_can_access(&state.db_pool, project.id, user_id)
+        .await
+        .map_err(|e| format!("Failed to check access: {}", e))
+}
+
+/// Check if user can write to a project (owner or team member)
+async fn check_write_permission(
+    state: &AppState,
+    project: &crate::db::models::Project,
+    user_id: Uuid,
+) -> Result<bool, String> {
+    // Write access requires ownership (user or team member)
+    projects::user_can_access(&state.db_pool, project.id, user_id)
+        .await
+        .map_err(|e| format!("Failed to check access: {}", e))
 }
