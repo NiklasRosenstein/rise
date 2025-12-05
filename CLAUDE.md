@@ -20,15 +20,15 @@ An example interaction with the `rise` CLI that a user might perform might be:
 
   $ rise login
   Please login to rise at https://rise.net/oauth/login?code=1234-abcd
-  Login successful! Wlecome back, Niklas!
+  Login successful! Welcome back, Niklas!
 
-  $ rise create secret-app --visibility private --owner team:devopsy
+  $ rise p c secret-app --visibility private --owner team:devopsy
   Team 'devopsy' does not exist or you do not have permission to create projects for it. Did you mean 'devops'?
 
-  $ rise create secret-app --visibility private --owner team:devops
+  $ rise p c secret-app --visibility private --owner team:devops
   Created project 'secret-app' with private visibility owned by team:devops.
 
-  $ rise ls
+  $ rise p ls
   PROJECT         STATUS        URL                             VISIBILITY    OWNER
   my-first-app    running       https://my-first-app.rise.net   public        user:niklas
   secret-app      stopped       https://secret-app.rise.net     private       team:devops
@@ -39,7 +39,7 @@ An example interaction with the `rise` CLI that a user might perform might be:
   [build]
   backend = "buildpacks"
 
-  $ rise deploy
+  $ rise d c secret-app
   Building container image 'registry.rise.net/secret-app:latest' using buildpacks...
   Pushing container image to registry.rise.net...
   Deploying 'secret-app' ...
@@ -66,9 +66,10 @@ Let's outline the architecture and components needed for this Rust-based project
 
 2. **CLI Tool**:
     - **Authentication Commands**: Implements the `login` command to authenticate users against the backend (which authenticates via Dex OAuth2/OIDC).
-    - **Project Commands**: Implements `create`, `ls`, and other project management commands.
+    - **Project Commands**: Implements `project` (alias: `p`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `update/u/edit`, `delete/del/rm`.
+    - **Team Commands**: Implements `team` (alias: `t`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `update/u/edit`, `delete/del/rm`.
+    - **Deployment Commands**: Implements `deployment` (alias: `d`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `rollback`, `stop`.
     - **Build Module**: Supports building container images using buildpacks, nixpacks, and Dockerfiles.
-    - **Deployment Commands**: Implements the `deploy` command to build, push, and deploy applications.
     - **Configuration Module**: Handles reading and writing of `.rise.toml` configuration files.
 
 ## Implementation Steps

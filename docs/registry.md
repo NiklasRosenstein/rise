@@ -97,10 +97,12 @@ docker push localhost:5000/rise-apps/myapp:latest
 curl http://localhost:5000/v2/_catalog
 ```
 
-**4. CLI workflow (future):**
+**4. CLI workflow:**
 ```bash
 rise login
-rise deploy  # Fetches registry URL from backend, pushes to localhost:5000
+rise deployment create my-app  # Fetches registry URL from backend, pushes to localhost:5000
+# Or using aliases:
+rise d c my-app
 ```
 
 The local registry persists data in a Docker volume (`registry_data`), so images survive restarts.

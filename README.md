@@ -75,40 +75,95 @@ cargo build --bin rise-cli
 ### Team Management
 
 ```bash
-# Create a team
+# Create a team (aliases: t, c/new)
 ./target/debug/rise-cli team create my-team --owners owner@example.com --members member@example.com
+./target/debug/rise-cli t c my-team --owners owner@example.com
+./target/debug/rise-cli t new my-team --members member@example.com
 
-# List teams
+# List teams (aliases: t, ls/l)
 ./target/debug/rise-cli team list
+./target/debug/rise-cli t ls
+./target/debug/rise-cli t l
 
-# Show team details
+# Show team details (alias: s)
 ./target/debug/rise-cli team show my-team
+./target/debug/rise-cli t s my-team
 
-# Update team
+# Update team (alias: u/edit)
 ./target/debug/rise-cli team update my-team --add-members new@example.com
+./target/debug/rise-cli t u my-team --remove-owners old@example.com
 
-# Delete team
+# Delete team (alias: del/rm)
 ./target/debug/rise-cli team delete my-team
+./target/debug/rise-cli t del my-team
 ```
 
 ### Project Management
 
 ```bash
-# Create a project
+# Create a project (aliases: p, c/new)
 ./target/debug/rise-cli project create my-app --visibility public
+./target/debug/rise-cli p c my-app --visibility public
+./target/debug/rise-cli p new my-app
 
-# List projects
+# List projects (aliases: p, ls/l)
 ./target/debug/rise-cli project list
+./target/debug/rise-cli p ls
+./target/debug/rise-cli p l
 
-# Show project details
+# Show project details (alias: s)
 ./target/debug/rise-cli project show my-app
+./target/debug/rise-cli p s my-app
 
-# Update project (rename, change visibility, transfer ownership)
+# Update project (rename, change visibility, transfer ownership) (alias: u/edit)
 ./target/debug/rise-cli project update my-app --visibility private
-./target/debug/rise-cli project update my-app --owner team:devops
+./target/debug/rise-cli p u my-app --owner team:devops
+./target/debug/rise-cli p edit my-app --name new-name
 
-# Delete project
+# Delete project (alias: del/rm)
 ./target/debug/rise-cli project delete my-app
+./target/debug/rise-cli p del my-app
+```
+
+### Deployment Management
+
+```bash
+# Create a deployment (aliases: d, c/new)
+./target/debug/rise-cli deployment create my-app
+./target/debug/rise-cli d c my-app
+./target/debug/rise-cli d new my-app
+
+# Deploy from specific directory
+./target/debug/rise-cli d c my-app --path ./my-application
+
+# Deploy pre-built image (skip build)
+./target/debug/rise-cli d c my-app --image nginx:latest
+./target/debug/rise-cli d c my-app --image myregistry.io/my-app:v1.2.3
+
+# Deploy with custom group and expiration
+./target/debug/rise-cli d c my-app --group mr/123 --expire 7d
+./target/debug/rise-cli d c my-app --group staging --expire 24h
+
+# List deployments (aliases: d, ls/l)
+./target/debug/rise-cli deployment list my-app
+./target/debug/rise-cli d ls my-app
+./target/debug/rise-cli d l my-app --group default --limit 5
+
+# Show deployment details (alias: s)
+./target/debug/rise-cli deployment show my-app:20241205-1234
+./target/debug/rise-cli d s my-app:20241205-1234
+
+# Follow deployment until completion
+./target/debug/rise-cli d s my-app:20241205-1234 --follow
+./target/debug/rise-cli d s my-app:20241205-1234 --follow --timeout 10m
+
+# Rollback to previous deployment
+./target/debug/rise-cli deployment rollback my-app:20241205-1234
+./target/debug/rise-cli d rollback my-app:20241205-1234
+
+# Stop deployments in a group
+./target/debug/rise-cli deployment stop my-app --group mr/123
+./target/debug/rise-cli d stop my-app --group default
 ```
 
 ### Container Registry Integration
