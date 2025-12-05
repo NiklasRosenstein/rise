@@ -188,7 +188,7 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
         Deployment,
         r#"
         UPDATE deployments
-        SET status = 'Failed', completed_at = NOW(), error_message = $2
+        SET status = 'Failed', completed_at = NOW(), error_message = $2, deployment_url = NULL
         WHERE id = $1
         RETURNING
             id, deployment_id, project_id, created_by_id,
@@ -450,6 +450,7 @@ pub async fn mark_cancelled(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         SET
             status = 'Cancelled',
             termination_reason = 'Cancelled',
+            deployment_url = NULL,
             updated_at = NOW()
         WHERE id = $1
         RETURNING
@@ -482,6 +483,7 @@ pub async fn mark_stopped(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         SET
             status = 'Stopped',
             termination_reason = 'UserStopped',
+            deployment_url = NULL,
             updated_at = NOW()
         WHERE id = $1
         RETURNING
@@ -514,6 +516,7 @@ pub async fn mark_superseded(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         SET
             status = 'Superseded',
             termination_reason = 'Superseded',
+            deployment_url = NULL,
             updated_at = NOW()
         WHERE id = $1
         RETURNING
@@ -546,6 +549,7 @@ pub async fn mark_expired(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         SET
             status = 'Expired',
             termination_reason = 'Expired',
+            deployment_url = NULL,
             updated_at = NOW()
         WHERE id = $1
         RETURNING
