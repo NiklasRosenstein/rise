@@ -10,15 +10,39 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
 
+/// Minimal state for controllers - just database access
+#[derive(Clone)]
+pub struct ControllerState {
+    pub db_pool: PgPool,
+}
+
+/// Full state for HTTP server
 #[derive(Clone)]
 pub struct AppState {
-    pub settings: Arc<Settings>,
-    pub http_client: Arc<reqwest::Client>,
     pub db_pool: PgPool,
     pub jwt_validator: Arc<JwtValidator>,
     pub oauth_client: Arc<DexOAuthClient>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub oci_client: Arc<crate::oci::OciClient>,
+}
+
+impl ControllerState {
+    /// Create minimal controller state with database access only
+    pub async fn new(database_url: &str, max_connections: u32) -> Result<Self> {
+        tracing::info!(
+            "Connecting to PostgreSQL with {} max connections...",
+            max_connections
+        );
+
+        let db_pool = PgPoolOptions::new()
+            .max_connections(max_connections)
+            .connect(database_url)
+            .await
+            .context("Failed to connect to PostgreSQL")?;
+
+        tracing::info!("Successfully connected to PostgreSQL");
+        Ok(Self { db_pool })
+    }
 }
 
 impl AppState {
@@ -33,27 +57,20 @@ impl AppState {
         Ok(())
     }
 
-    /// Wait for PostgreSQL to become available
-    async fn wait_for_postgres(database_url: &str) -> Result<PgPool> {
-        tracing::info!("Connecting to PostgreSQL...");
+    /// Initialize full state for HTTP server
+    pub async fn new_for_server(settings: &Settings) -> Result<Self> {
+        tracing::info!("Initializing AppState for HTTP server");
 
-        let pool = PgPoolOptions::new()
-            .max_connections(5)
-            .connect(database_url)
+        // Connect to PostgreSQL with server-optimized pool size
+        let db_pool = PgPoolOptions::new()
+            .max_connections(10)
+            .connect(&settings.database.url)
             .await
             .context("Failed to connect to PostgreSQL")?;
 
         tracing::info!("Successfully connected to PostgreSQL");
-        Ok(pool)
-    }
 
-    pub async fn new(settings: &Settings) -> Result<Self> {
-        let http_client = reqwest::Client::new();
-
-        // Connect to PostgreSQL
-        let db_pool = Self::wait_for_postgres(&settings.database.url).await?;
-
-        // Run migrations
+        // Run migrations (server-only)
         Self::run_migrations(&db_pool).await?;
 
         // Initialize JWT validator
@@ -138,8 +155,6 @@ impl AppState {
         tracing::info!("Initialized OCI client for registry digest resolution");
 
         Ok(Self {
-            settings: Arc::new(settings.clone()),
-            http_client: Arc::new(http_client),
             db_pool,
             jwt_validator,
             oauth_client,

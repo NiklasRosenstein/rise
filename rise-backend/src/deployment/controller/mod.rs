@@ -12,7 +12,7 @@ use tracing::{debug, error, info, warn};
 use crate::db::models::{Deployment, DeploymentStatus, Project};
 use crate::db::{deployments as db_deployments, projects};
 use crate::deployment::state_machine;
-use crate::state::AppState;
+use crate::state::ControllerState;
 
 /// Hint for when to reconcile a deployment next
 #[derive(Debug, Clone)]
@@ -113,7 +113,7 @@ pub trait DeploymentBackend: Send + Sync {
 /// 2. Health check loop - monitors deployments in Healthy and Unhealthy states
 /// 3. Termination loop - processes deployments in Terminating state
 pub struct DeploymentController {
-    state: Arc<AppState>,
+    state: Arc<ControllerState>,
     backend: Arc<dyn DeploymentBackend>,
     reconcile_interval: Duration,
     health_check_interval: Duration,
@@ -123,12 +123,12 @@ impl DeploymentController {
     /// Create a new deployment controller
     ///
     /// # Arguments
-    /// * `state` - The application state (contains DB pool, settings, etc.)
-    pub fn new(state: Arc<AppState>) -> anyhow::Result<Self> {
-        // For MVP, hardcode Docker backend
-        // Future: read from config to select backend type
-        let backend: Arc<dyn DeploymentBackend> = Arc::new(DockerController::new()?);
-
+    /// * `state` - Minimal controller state with database access
+    /// * `backend` - The deployment backend implementation (e.g., DockerController)
+    pub fn new(
+        state: Arc<ControllerState>,
+        backend: Arc<dyn DeploymentBackend>,
+    ) -> anyhow::Result<Self> {
         Ok(Self {
             state,
             backend,

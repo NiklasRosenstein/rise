@@ -6,20 +6,20 @@ use tracing::{debug, error, info};
 use crate::db::models::DeploymentStatus;
 use crate::db::{deployments as db_deployments, projects as db_projects};
 use crate::deployment::state_machine;
-use crate::state::AppState;
+use crate::state::ControllerState;
 
 /// Project controller handles project lifecycle operations
 ///
 /// Currently implements:
 /// - Deletion loop: processes projects in Deleting status
 pub struct ProjectController {
-    state: Arc<AppState>,
+    state: Arc<ControllerState>,
     deletion_interval: Duration,
 }
 
 impl ProjectController {
     /// Create a new project controller
-    pub fn new(state: Arc<AppState>) -> Self {
+    pub fn new(state: Arc<ControllerState>) -> Self {
         Self {
             state,
             deletion_interval: Duration::from_secs(5),
