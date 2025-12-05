@@ -102,7 +102,7 @@ impl FollowState {
 
 /// Live status section that gets replaced on each poll
 struct LiveStatusSection {
-    last_line_count: usize,
+    pub last_line_count: usize,
 }
 
 impl LiveStatusSection {
@@ -422,20 +422,27 @@ pub async fn follow_deployment_with_ui(
             let controller_phase = parse_controller_metadata(&deployment.controller_metadata)
                 .map(|m| m.reconcile_phase);
 
-            // Log state changes to history
+            // Check if this is a state change
             if state.should_log_state_change(&deployment, &controller_phase) {
+                // Clear any existing live section before logging
+                live_section.clear_previous();
+
+                // Log state change to history
                 log_state_change(
                     project,
                     deployment_id,
                     &deployment.status,
                     &controller_phase,
                 );
-            }
 
-            // Render live status section
-            let output = live_section.render(&deployment, &state, &controller_phase);
-            print!("{}", output);
-            io::stdout().flush().unwrap();
+                // Reset line count so next render works correctly
+                live_section.last_line_count = 0;
+            } else {
+                // Only show live section when status is stable (spinner animation)
+                let output = live_section.render(&deployment, &state, &controller_phase);
+                print!("{}", output);
+                io::stdout().flush().unwrap();
+            }
 
             // Update state
             state.update(&deployment, controller_phase);
