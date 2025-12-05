@@ -1,0 +1,85 @@
+/* Custom styles for Rise frontend */
+
+:root {
+    --rise-primary: #4f46e5;
+    --rise-success: #10b981;
+    --rise-warning: #f59e0b;
+    --rise-danger: #ef4444;
+}
+
+/* Status badges */
+.status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.status-healthy { background: var(--rise-success); color: white; }
+.status-running { background: var(--rise-success); color: white; }
+.status-deploying { background: var(--rise-warning); color: white; }
+.status-pending { background: var(--rise-warning); color: white; }
+.status-building { background: var(--rise-warning); color: white; }
+.status-pushing { background: var(--rise-warning); color: white; }
+.status-pushed { background: var(--rise-warning); color: white; }
+.status-unhealthy { background: var(--rise-danger); color: white; }
+.status-failed { background: var(--rise-danger); color: white; }
+.status-stopped { background: var(--pico-muted-color); color: white; }
+.status-cancelled { background: var(--pico-muted-color); color: white; }
+.status-superseded { background: var(--pico-muted-color); color: white; }
+.status-expired { background: var(--pico-muted-color); color: white; }
+.status-terminating { background: var(--pico-muted-color); color: white; }
+
+/* Login card */
+#login-card {
+    max-width: 500px;
+    margin: 4rem auto;
+}
+
+/* Error messages */
+.error {
+    color: var(--rise-danger);
+    font-weight: 600;
+}
+
+/* Code blocks */
+code {
+    font-size: 0.875rem;
+}
+
+pre code {
+    display: block;
+    overflow-x: auto;
+    padding: 1rem;
+    background: var(--pico-code-background-color);
+}
+
+/* Responsive tables */
+@media (max-width: 768px) {
+    table {
+        font-size: 0.875rem;
+    }
+}
+
+/* Loading states */
+[aria-busy="true"] {
+    text-align: center;
+}
+
+/* Navigation spacing */
+nav ul li {
+    padding: 0 0.5rem;
+}
+
+/* Details/summary for logs */
+details summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+details[open] summary {
+    margin-bottom: 1rem;
+}
