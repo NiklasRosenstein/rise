@@ -153,7 +153,7 @@ pub async fn update_status(
         UPDATE deployments
         SET status = $2
         WHERE id = $1
-          AND status NOT IN ('Terminating', 'Cancelling')
+          AND status NOT IN ('Terminating', 'Cancelling', 'Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired')
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
@@ -263,7 +263,7 @@ pub async fn get_latest_for_project(pool: &PgPool, project_id: Uuid) -> Result<O
 }
 
 /// Find deployments in non-terminal states for reconciliation
-/// Non-terminal states include: Pushed, Deploying, Healthy, Unhealthy, Cancelling, Terminating
+/// Excludes terminal states: Cancelled, Stopped, Superseded, Failed, Expired
 pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(
         Deployment,
@@ -279,7 +279,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
-        WHERE status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed')
+        WHERE status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired')
         ORDER BY updated_at ASC
         LIMIT $1
         "#,
@@ -312,7 +312,7 @@ pub async fn find_non_terminal_for_project(
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
-          AND status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed')
+          AND status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired')
         ORDER BY created_at DESC
         "#,
         project_id
@@ -789,7 +789,7 @@ pub async fn find_non_terminal_for_project_and_group(
         FROM deployments
         WHERE project_id = $1
           AND deployment_group = $2
-          AND status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed')
+          AND status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired')
         ORDER BY created_at DESC
         "#,
         project_id,
