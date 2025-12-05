@@ -194,15 +194,19 @@ enum DeploymentCommands {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Initialize tracing
-    tracing_subscriber::registry()
-        .with(tracing_subscriber::EnvFilter::new(
-            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
-        ))
-        .with(tracing_subscriber::fmt::layer())
-        .init();
-
     let cli = Cli::parse();
+
+    // Backend commands handle their own tracing initialization
+    // Only initialize tracing for other commands
+    if !matches!(&cli.command, Commands::Backend(_)) {
+        tracing_subscriber::registry()
+            .with(tracing_subscriber::EnvFilter::new(
+                std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
+            ))
+            .with(tracing_subscriber::fmt::layer())
+            .init();
+    }
+
     let http_client = Client::new();
     let mut config = config::Config::load()?;
     let backend_url = config.get_backend_url();
