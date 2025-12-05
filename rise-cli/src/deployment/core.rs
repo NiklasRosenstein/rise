@@ -440,8 +440,6 @@ pub async fn rollback_deployment(
     );
     println!("  Using image:       {}", rollback_response.image_tag);
     println!();
-    println!("Following deployment progress...");
-    println!();
 
     // Follow the new deployment to completion
     show_deployment(
@@ -695,8 +693,6 @@ pub async fn create_deployment(
         );
     }
     info!("  Deployment ID: {}", deployment_info.deployment_id);
-    println!();
-    println!("Following deployment progress...");
     println!();
 
     // Step 6: Follow deployment until completion

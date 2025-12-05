@@ -1,6 +1,6 @@
 # Hello World Example
 
-A simple Node.js Express application for testing the `rise deploy` command.
+A simple Node.js Express application for testing the `rise deployment create` command.
 
 ## Local Development
 
@@ -25,7 +25,7 @@ rise login --email test@example.com --password test1234
 rise project create hello-world --visibility public
 
 # Deploy the application
-rise deploy --project hello-world example/hello-world
+rise deployment create hello-world example/hello-world
 ```
 
 The application will be built using Cloud Native Buildpacks and pushed to the configured registry.
