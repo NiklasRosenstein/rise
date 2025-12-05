@@ -675,12 +675,8 @@ impl DeploymentController {
                 deployment.status
             );
 
-            if let Err(e) = db_deployments::mark_failed(
-                &self.state.db_pool,
-                deployment.id,
-                &error_msg,
-            )
-            .await
+            if let Err(e) =
+                db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error_msg).await
             {
                 error!(
                     "Failed to mark deployment {} as failed: {}",
@@ -688,7 +684,10 @@ impl DeploymentController {
                 );
             } else {
                 // Update project status after marking as failed
-                if let Err(e) = projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await {
+                if let Err(e) =
+                    projects::update_calculated_status(&self.state.db_pool, deployment.project_id)
+                        .await
+                {
                     error!(
                         "Failed to update project status for deployment {}: {}",
                         deployment.deployment_id, e

@@ -604,7 +604,7 @@ pub async fn create_deployment(
     let deployment_id_clone = deployment_info.deployment_id.clone();
     let backend_url_clone = backend_url.to_string();
     let http_client_clone = http_client.clone();
-    let config_clone = config.clone();
+    let token_clone = token.to_string();
     let project_name_clone = project_name.to_string();
 
     tokio::spawn(async move {
@@ -615,7 +615,7 @@ pub async fn create_deployment(
             if let Err(e) = cancel_deployment(
                 &http_client_clone,
                 &backend_url_clone,
-                &config_clone,
+                &token_clone,
                 &project_name_clone,
                 &deployment_id_clone,
             )
@@ -781,7 +781,7 @@ async fn call_create_deployment_api(
 async fn cancel_deployment(
     http_client: &Client,
     backend_url: &str,
-    config: &Config,
+    token: &str,
     project_name: &str,
     deployment_id: &str,
 ) -> Result<()> {
@@ -789,8 +789,6 @@ async fn cancel_deployment(
         "{}/projects/{}/deployments/{}/status",
         backend_url, project_name, deployment_id
     );
-
-    let token = config.get_token()?;
 
     let payload = serde_json::json!({
         "status": "Cancelling"
