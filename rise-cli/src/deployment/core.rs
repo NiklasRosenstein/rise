@@ -167,6 +167,7 @@ pub async fn list_deployments(
         .set_header(vec![
             Cell::new("DEPLOYMENT").add_attribute(Attribute::Bold),
             Cell::new("STATUS").add_attribute(Attribute::Bold),
+            Cell::new("IMAGE").add_attribute(Attribute::Bold),
             Cell::new("GROUP").add_attribute(Attribute::Bold),
             Cell::new("EXPIRY").add_attribute(Attribute::Bold),
             Cell::new("CREATED").add_attribute(Attribute::Bold),
@@ -204,9 +205,13 @@ pub async fn list_deployments(
         // Determine if this is the default group's active deployment (bold)
         let is_default_active = default_active == Some(&deployment.deployment_id);
 
+        // Format image (show the image tag or "-" if not set)
+        let image_display = deployment.image.as_deref().unwrap_or("-");
+
         // Create cells with appropriate styling
         let mut deployment_cell = Cell::new(&deployment_display);
         let mut status_cell = Cell::new(deployment.status.to_string());
+        let mut image_cell = Cell::new(image_display);
         let mut group_cell = Cell::new(&deployment.deployment_group);
         let mut expiry_cell = Cell::new(&expiry);
         let mut created_cell = Cell::new(&created);
@@ -216,6 +221,7 @@ pub async fn list_deployments(
         if is_default_active {
             deployment_cell = deployment_cell.add_attribute(Attribute::Bold);
             status_cell = status_cell.add_attribute(Attribute::Bold);
+            image_cell = image_cell.add_attribute(Attribute::Bold);
             group_cell = group_cell.add_attribute(Attribute::Bold);
             expiry_cell = expiry_cell.add_attribute(Attribute::Bold);
             created_cell = created_cell.add_attribute(Attribute::Bold);
@@ -243,6 +249,7 @@ pub async fn list_deployments(
         table.add_row(vec![
             deployment_cell,
             status_cell,
+            image_cell,
             group_cell,
             expiry_cell,
             created_cell,
