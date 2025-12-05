@@ -4,8 +4,12 @@ use axum::{
     middleware::Next,
     response::Response,
 };
+use base64::{engine::general_purpose, Engine as _};
+use jsonwebtoken::decode_header;
+use serde::Deserialize;
+use std::collections::HashMap;
 
-use crate::db::users;
+use crate::db::{service_accounts, users, User};
 use crate::state::AppState;
 
 /// Extract Bearer token from Authorization header
@@ -34,7 +38,99 @@ fn extract_bearer_token(headers: &HeaderMap) -> Result<String, (StatusCode, Stri
     Ok(auth_header[7..].to_string())
 }
 
+/// Minimal JWT claims structure just to peek at the issuer
+#[derive(Debug, Deserialize)]
+struct MinimalClaims {
+    iss: String,
+}
+
+/// Authenticate as a service account using external OIDC provider
+async fn authenticate_service_account(
+    state: &AppState,
+    token: &str,
+    issuer: &str,
+) -> Result<User, (StatusCode, String)> {
+    // Find all service accounts with this issuer
+    let service_accounts = service_accounts::find_by_issuer(&state.db_pool, issuer)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find service accounts by issuer: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?;
+
+    if service_accounts.is_empty() {
+        tracing::warn!("No service accounts found for issuer: {}", issuer);
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "No service accounts configured for this issuer".to_string(),
+        ));
+    }
+
+    // Try to validate against each service account's claims
+    for sa in service_accounts {
+        // Convert JSONB claims to HashMap
+        let claims: HashMap<String, String> =
+            serde_json::from_value(sa.claims.clone()).map_err(|e| {
+                tracing::error!("Failed to deserialize service account claims: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Invalid service account configuration".to_string(),
+                )
+            })?;
+
+        // Try to validate with this service account's claims
+        match state
+            .external_jwt_validator
+            .validate(token, issuer, &claims)
+            .await
+        {
+            Ok(_jwt_claims) => {
+                // Valid! Return the service account's user
+                tracing::info!(
+                    "Service account authenticated: {} for project {}",
+                    sa.id,
+                    sa.project_id
+                );
+
+                let user = users::find_by_id(&state.db_pool, sa.user_id)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Failed to find user for service account: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Database error".to_string(),
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        tracing::error!("Service account user not found: {}", sa.user_id);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Service account user not found".to_string(),
+                        )
+                    })?;
+
+                return Ok(user);
+            }
+            Err(e) => {
+                // This service account's claims didn't match, try next one
+                tracing::debug!("Service account {} claim validation failed: {}", sa.id, e);
+                continue;
+            }
+        }
+    }
+
+    // No service account matched
+    Err((
+        StatusCode::UNAUTHORIZED,
+        "No service account matched the provided token claims".to_string(),
+    ))
+}
+
 /// Authentication middleware that validates JWT and injects User into request extensions
+/// Supports both Dex (user) authentication and external OIDC (service account) authentication
 pub async fn auth_middleware(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -44,26 +140,69 @@ pub async fn auth_middleware(
     // Extract token from Authorization header
     let token = extract_bearer_token(&headers)?;
 
-    // Validate JWT and extract claims
-    let claims = state.jwt_validator.validate(&token).await.map_err(|e| {
-        tracing::warn!("JWT validation failed: {}", e);
-        (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
-    })?;
-
-    tracing::debug!("JWT validated for user: {}", claims.email);
-
-    // Find or create user in database based on email from claims
-    let user = users::find_or_create(&state.db_pool, &claims.email)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to find/create user: {}", e);
+    // Peek at the issuer to determine authentication method
+    let issuer = {
+        // Decode header to check if JWT is well-formed
+        decode_header(&token).map_err(|e| {
+            tracing::warn!("Failed to decode JWT header: {}", e);
             (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
+                StatusCode::UNAUTHORIZED,
+                format!("Invalid token format: {}", e),
             )
         })?;
 
-    tracing::debug!("User found/created: {} ({})", user.email, user.id);
+        // Decode payload without validation to peek at issuer
+        let parts: Vec<&str> = token.split('.').collect();
+        if parts.len() != 3 {
+            return Err((StatusCode::UNAUTHORIZED, "Invalid JWT format".to_string()));
+        }
+
+        let payload = parts[1];
+        let decoded = general_purpose::URL_SAFE_NO_PAD
+            .decode(payload)
+            .map_err(|e| {
+                tracing::warn!("Failed to decode JWT payload: {}", e);
+                (
+                    StatusCode::UNAUTHORIZED,
+                    "Invalid token encoding".to_string(),
+                )
+            })?;
+
+        let claims: MinimalClaims = serde_json::from_slice(&decoded).map_err(|e| {
+            tracing::warn!("Failed to parse JWT claims: {}", e);
+            (StatusCode::UNAUTHORIZED, "Invalid token claims".to_string())
+        })?;
+
+        claims.iss
+    };
+
+    let user = if issuer == state.auth_settings.issuer {
+        // Dex user authentication (existing flow)
+        tracing::debug!("Authenticating as Dex user");
+
+        let claims = state.jwt_validator.validate(&token).await.map_err(|e| {
+            tracing::warn!("JWT validation failed: {}", e);
+            (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+        })?;
+
+        tracing::debug!("JWT validated for user: {}", claims.email);
+
+        users::find_or_create(&state.db_pool, &claims.email)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to find/create user: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?
+    } else {
+        // Service account authentication (new flow)
+        tracing::debug!("Authenticating as service account from issuer: {}", issuer);
+        authenticate_service_account(&state, &token, &issuer).await?
+    };
+
+    tracing::debug!("User authenticated: {} ({})", user.email, user.id);
 
     // Insert user into request extensions for handlers to access
     req.extensions_mut().insert(user);

@@ -1,10 +1,13 @@
-use crate::auth::{jwt::JwtValidator, oauth::DexOAuthClient};
+use crate::auth::{
+    jwt::{ExternalJwtValidator, JwtValidator},
+    oauth::DexOAuthClient,
+};
 use crate::registry::{
     models::{EcrConfig, OciClientAuthConfig},
     providers::{EcrProvider, OciClientAuthProvider},
     RegistryProvider,
 };
-use crate::settings::{RegistrySettings, Settings};
+use crate::settings::{AuthSettings, RegistrySettings, Settings};
 use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -21,10 +24,12 @@ pub struct ControllerState {
 pub struct AppState {
     pub db_pool: PgPool,
     pub jwt_validator: Arc<JwtValidator>,
+    pub external_jwt_validator: Arc<ExternalJwtValidator>,
     pub oauth_client: Arc<DexOAuthClient>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub oci_client: Arc<crate::oci::OciClient>,
     pub admin_users: Arc<Vec<String>>,
+    pub auth_settings: Arc<AuthSettings>,
 }
 
 impl ControllerState {
@@ -164,13 +169,22 @@ impl AppState {
             tracing::info!("Configured {} admin user(s)", admin_users.len());
         }
 
+        // Initialize external JWT validator for service accounts
+        let external_jwt_validator = Arc::new(ExternalJwtValidator::new());
+        tracing::info!("Initialized external JWT validator for service accounts");
+
+        // Store auth settings for issuer comparison
+        let auth_settings = Arc::new(settings.auth.clone());
+
         Ok(Self {
             db_pool,
             jwt_validator,
+            external_jwt_validator,
             oauth_client,
             registry_provider,
             oci_client,
             admin_users,
+            auth_settings,
         })
     }
 
@@ -257,20 +271,24 @@ impl AppState {
             settings.auth.issuer.clone(),
             settings.auth.client_id.clone(),
         ));
+        let external_jwt_validator = Arc::new(ExternalJwtValidator::new());
         let oauth_client = Arc::new(DexOAuthClient::new(
             settings.auth.issuer.clone(),
             settings.auth.client_id.clone(),
             settings.auth.client_secret.clone(),
         )?);
         let admin_users = Arc::new(Vec::new());
+        let auth_settings = Arc::new(settings.auth.clone());
 
         Ok(Self {
             db_pool,
             jwt_validator,
+            external_jwt_validator,
             oauth_client,
             registry_provider,
             oci_client,
             admin_users,
+            auth_settings,
         })
     }
 }
