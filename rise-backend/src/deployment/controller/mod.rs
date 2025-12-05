@@ -253,16 +253,17 @@ impl DeploymentController {
         if let Some(error) = result.error_message {
             db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
         } else if new_status == DeploymentStatus::Healthy {
-            // New deployment just became healthy - set as active in its group
-            db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
-
-            // Find active deployment IN THIS GROUP
+            // Find active deployment IN THIS GROUP *before* marking new as Healthy
+            // This prevents a race condition where the query would return the new deployment
             let active_in_group = db_deployments::find_active_for_project_and_group(
                 &self.state.db_pool,
                 deployment.project_id,
                 &deployment.deployment_group,
             )
             .await?;
+
+            // Now mark the new deployment as healthy
+            db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
 
             // Supersede old active deployment in this group
             if let Some(old_active) = active_in_group {
