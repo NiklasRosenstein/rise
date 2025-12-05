@@ -137,9 +137,9 @@ impl DeploymentController {
         })
     }
 
-    /// Start reconciliation, health check, and termination loops
+    /// Start reconciliation, health check, termination, and cancellation loops
     ///
-    /// This spawns three tokio tasks that run in the background
+    /// This spawns multiple tokio tasks that run in the background
     pub fn start(self: Arc<Self>) {
         // Spawn reconciliation loop
         let self_clone = self.clone();
@@ -157,6 +157,12 @@ impl DeploymentController {
         let self_clone = self.clone();
         tokio::spawn(async move {
             self_clone.termination_loop().await;
+        });
+
+        // Spawn cancellation loop
+        let self_clone = self.clone();
+        tokio::spawn(async move {
+            self_clone.cancellation_loop().await;
         });
 
         // Spawn expiration loop
@@ -582,6 +588,57 @@ impl DeploymentController {
                 Err(e) => {
                     error!(
                         "Failed to terminate deployment {}: {}",
+                        deployment.deployment_id, e
+                    );
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Cancellation loop - processes deployments in Cancelling state
+    ///
+    /// Runs every 5 seconds and cancels deployments that haven't provisioned infrastructure yet
+    async fn cancellation_loop(&self) {
+        info!("Deployment cancellation loop started");
+        let mut ticker = interval(Duration::from_secs(5));
+
+        loop {
+            ticker.tick().await;
+            if let Err(e) = self.process_cancelling_deployments().await {
+                error!("Error in cancellation loop: {}", e);
+            }
+        }
+    }
+
+    /// Process all deployments in Cancelling state
+    async fn process_cancelling_deployments(&self) -> anyhow::Result<()> {
+        let cancelling =
+            db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Cancelling)
+                .await?;
+
+        for deployment in cancelling {
+            debug!("Cancelling deployment {}", deployment.deployment_id);
+
+            // Call backend to cancel (cleanup build artifacts, no infrastructure to remove)
+            match self.backend.cancel(&deployment).await {
+                Ok(_) => {
+                    info!(
+                        "Successfully cancelled deployment {}",
+                        deployment.deployment_id
+                    );
+
+                    // Mark as Cancelled
+                    db_deployments::mark_cancelled(&self.state.db_pool, deployment.id).await?;
+
+                    // Update project status
+                    projects::update_calculated_status(&self.state.db_pool, deployment.project_id)
+                        .await?;
+                }
+                Err(e) => {
+                    error!(
+                        "Failed to cancel deployment {}: {}",
                         deployment.deployment_id, e
                     );
                 }
