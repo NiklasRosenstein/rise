@@ -1,6 +1,7 @@
 use axum::{
     body::Body,
-    http::{header, StatusCode, Uri},
+    extract::Path,
+    http::{header, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -13,15 +14,19 @@ use super::StaticAssets;
 pub fn frontend_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(serve_index))
-        .route("/*path", get(serve_static))
+        .route("/{*path}", get(serve_static))
 }
 
 async fn serve_index() -> Response {
-    serve_static(Uri::from_static("/index.html")).await
+    serve_file("index.html")
 }
 
-async fn serve_static(uri: Uri) -> Response {
-    let path = uri.path().trim_start_matches('/');
+async fn serve_static(Path(path): Path<String>) -> Response {
+    serve_file(&path)
+}
+
+fn serve_file(path: &str) -> Response {
+    let path = path.trim_start_matches('/');
 
     // Try to get the file from embedded assets
     match StaticAssets::get(path) {
