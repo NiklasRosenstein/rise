@@ -174,8 +174,15 @@ impl DeploymentController {
 
         loop {
             ticker.tick().await;
+
+            // Reconcile active deployments
             if let Err(e) = self.reconcile_deployments().await {
                 error!("Error in reconciliation loop: {}", e);
+            }
+
+            // Check for timed out deployments
+            if let Err(e) = self.check_deployment_timeouts().await {
+                error!("Error checking deployment timeouts: {}", e);
             }
         }
     }
@@ -623,6 +630,71 @@ impl DeploymentController {
 
         if !expired.is_empty() {
             info!("Cleaned up {} expired deployments", expired.len());
+        }
+
+        Ok(())
+    }
+
+    /// Check for deployments stuck in pre-Pushed states and mark them as Failed
+    ///
+    /// Deployments stuck in Pending, Building, or Pushing for >10 minutes are timed out.
+    /// This handles cases where the CLI is interrupted before pushing the image.
+    async fn check_deployment_timeouts(&self) -> anyhow::Result<()> {
+        // Find deployments stuck in pre-Pushed states for >10 minutes
+        let timeout_threshold = Utc::now() - chrono::Duration::minutes(10);
+
+        let stuck_deployments = sqlx::query_as!(
+            Deployment,
+            r#"
+            SELECT id, deployment_id, project_id, created_by_id,
+                   status as "status: DeploymentStatus",
+                   deployment_group, expires_at, error_message, completed_at,
+                   build_logs, controller_metadata, deployment_url,
+                   image, image_digest, http_port, created_at, updated_at,
+                   termination_reason as "termination_reason: _"
+            FROM deployments
+            WHERE status IN ('Pending', 'Building', 'Pushing')
+              AND created_at < $1
+              AND NOT is_protected(status)
+            LIMIT 50
+            "#,
+            timeout_threshold
+        )
+        .fetch_all(&self.state.db_pool)
+        .await?;
+
+        for deployment in stuck_deployments {
+            warn!(
+                "Deployment {} stuck in {} state for >10 minutes, marking as Failed",
+                deployment.deployment_id, deployment.status
+            );
+
+            let error_msg = format!(
+                "Deployment timed out after 10 minutes in {} state. \
+                 This usually indicates the CLI was interrupted during build/push.",
+                deployment.status
+            );
+
+            if let Err(e) = db_deployments::mark_failed(
+                &self.state.db_pool,
+                deployment.id,
+                &error_msg,
+            )
+            .await
+            {
+                error!(
+                    "Failed to mark deployment {} as failed: {}",
+                    deployment.deployment_id, e
+                );
+            } else {
+                // Update project status after marking as failed
+                if let Err(e) = projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await {
+                    error!(
+                        "Failed to update project status for deployment {}: {}",
+                        deployment.deployment_id, e
+                    );
+                }
+            }
         }
 
         Ok(())
