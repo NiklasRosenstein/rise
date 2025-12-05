@@ -1,4 +1,4 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, Instant};
@@ -70,7 +70,10 @@ async fn fetch_deployment(
     project: &str,
     deployment_id: &str,
 ) -> Result<Deployment> {
-    let url = format!("{}/projects/{}/deployments/{}", backend_url, project, deployment_id);
+    let url = format!(
+        "{}/projects/{}/deployments/{}",
+        backend_url, project, deployment_id
+    );
 
     let response = http_client
         .get(&url)
@@ -81,11 +84,17 @@ async fn fetch_deployment(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         bail!("Failed to fetch deployment ({}): {}", status, error_text);
     }
 
-    let deployment: Deployment = response.json().await.context("Failed to parse deployment response")?;
+    let deployment: Deployment = response
+        .json()
+        .await
+        .context("Failed to parse deployment response")?;
 
     Ok(deployment)
 }
@@ -98,7 +107,9 @@ pub async fn list_deployments(
     project: &str,
     limit: usize,
 ) -> Result<()> {
-    let token = config.token.as_ref()
+    let token = config
+        .token
+        .as_ref()
         .context("Not logged in. Please run 'rise login' first.")?;
 
     info!("Listing deployments for project '{}'", project);
@@ -114,11 +125,17 @@ pub async fn list_deployments(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         bail!("Failed to list deployments ({}): {}", status, error_text);
     }
 
-    let mut deployments: Vec<Deployment> = response.json().await.context("Failed to parse deployments")?;
+    let mut deployments: Vec<Deployment> = response
+        .json()
+        .await
+        .context("Failed to parse deployments")?;
 
     // Limit results
     deployments.truncate(limit);
@@ -129,7 +146,10 @@ pub async fn list_deployments(
     }
 
     // Print table header
-    println!("{:<40} {:<15} {:<25} {:<50}", "DEPLOYMENT", "STATUS", "CREATED", "URL");
+    println!(
+        "{:<40} {:<15} {:<25} {:<50}",
+        "DEPLOYMENT", "STATUS", "CREATED", "URL"
+    );
     println!("{}", "-".repeat(130));
 
     for deployment in deployments {
@@ -172,7 +192,9 @@ pub async fn show_deployment(
     follow: bool,
     timeout_str: &str,
 ) -> Result<()> {
-    let token = config.token.as_ref()
+    let token = config
+        .token
+        .as_ref()
         .context("Not logged in. Please run 'rise login' first.")?;
 
     let timeout = parse_duration(timeout_str)?;
@@ -181,7 +203,8 @@ pub async fn show_deployment(
     debug!("Fetching deployment {}:{}", project, deployment_id);
 
     loop {
-        let deployment = fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
+        let deployment =
+            fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
 
         // Print deployment details
         print_deployment_details(&deployment, project);
@@ -189,11 +212,11 @@ pub async fn show_deployment(
         // Check if deployment has reached a final state (terminal or healthy)
         let is_done = matches!(
             deployment.status,
-            DeploymentStatus::Healthy |
-            DeploymentStatus::Cancelled |
-            DeploymentStatus::Stopped |
-            DeploymentStatus::Superseded |
-            DeploymentStatus::Failed
+            DeploymentStatus::Healthy
+                | DeploymentStatus::Cancelled
+                | DeploymentStatus::Stopped
+                | DeploymentStatus::Superseded
+                | DeploymentStatus::Failed
         );
 
         if !follow || is_done {
@@ -241,7 +264,9 @@ fn print_deployment_details(deployment: &Deployment, project: &str) {
     }
 
     // Show controller metadata if not empty
-    if !deployment.controller_metadata.is_null() && deployment.controller_metadata != serde_json::json!({}) {
+    if !deployment.controller_metadata.is_null()
+        && deployment.controller_metadata != serde_json::json!({})
+    {
         if let Ok(metadata_str) = serde_json::to_string_pretty(&deployment.controller_metadata) {
             println!("\nController Metadata:");
             println!("{}", metadata_str);
@@ -259,15 +284,23 @@ pub async fn rollback_deployment(
     project: &str,
     deployment_id: &str,
 ) -> Result<()> {
-    let token = config.token.as_ref()
+    let token = config
+        .token
+        .as_ref()
         .context("Not logged in. Please run 'rise login' first.")?;
 
-    info!("Rolling back project '{}' to deployment '{}'", project, deployment_id);
+    info!(
+        "Rolling back project '{}' to deployment '{}'",
+        project, deployment_id
+    );
 
     println!("Initiating rollback to {}:{}...", project, deployment_id);
 
     // Call the rollback endpoint
-    let url = format!("{}/projects/{}/deployments/{}/rollback", backend_url, project, deployment_id);
+    let url = format!(
+        "{}/projects/{}/deployments/{}/rollback",
+        backend_url, project, deployment_id
+    );
     let response = http_client
         .post(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -277,7 +310,9 @@ pub async fn rollback_deployment(
 
     let status = response.status();
     if !status.is_success() {
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
 
         match status {
@@ -288,7 +323,10 @@ pub async fn rollback_deployment(
                 bail!("Authentication failed. Please run 'rise login' again.");
             }
             reqwest::StatusCode::FORBIDDEN => {
-                bail!("You don't have permission to rollback project '{}'", project);
+                bail!(
+                    "You don't have permission to rollback project '{}'",
+                    project
+                );
             }
             reqwest::StatusCode::BAD_REQUEST => {
                 bail!("Cannot rollback: {}", error_text);
@@ -299,13 +337,21 @@ pub async fn rollback_deployment(
         }
     }
 
-    let rollback_response: RollbackResponse = response.json().await
+    let rollback_response: RollbackResponse = response
+        .json()
+        .await
         .context("Failed to parse rollback response")?;
 
     println!();
     println!("✓ Rollback initiated successfully!");
-    println!("  New deployment ID: {}", rollback_response.new_deployment_id);
-    println!("  Rolled back from:  {}", rollback_response.rolled_back_from);
+    println!(
+        "  New deployment ID: {}",
+        rollback_response.new_deployment_id
+    );
+    println!(
+        "  Rolled back from:  {}",
+        rollback_response.rolled_back_from
+    );
     println!("  Using image:       {}", rollback_response.image_tag);
     println!();
     println!("Following deployment progress...");
@@ -320,7 +366,8 @@ pub async fn rollback_deployment(
         &rollback_response.new_deployment_id,
         true,  // follow
         "10m", // timeout
-    ).await?;
+    )
+    .await?;
 
     Ok(())
 }

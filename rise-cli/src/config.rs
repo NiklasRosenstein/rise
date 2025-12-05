@@ -18,15 +18,13 @@ pub struct Config {
 impl Config {
     /// Get the path to the config file
     pub fn config_path() -> Result<PathBuf> {
-        let home = dirs::home_dir()
-            .context("Failed to get home directory")?;
+        let home = dirs::home_dir().context("Failed to get home directory")?;
 
         let config_dir = home.join(".config").join("rise");
 
         // Create directory if it doesn't exist
         if !config_dir.exists() {
-            fs::create_dir_all(&config_dir)
-                .context("Failed to create config directory")?;
+            fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
         }
 
         Ok(config_dir.join("config.json"))
@@ -40,11 +38,10 @@ impl Config {
             return Ok(Config::default());
         }
 
-        let contents = fs::read_to_string(&config_path)
-            .context("Failed to read config file")?;
+        let contents = fs::read_to_string(&config_path).context("Failed to read config file")?;
 
-        let config: Config = serde_json::from_str(&contents)
-            .context("Failed to parse config file")?;
+        let config: Config =
+            serde_json::from_str(&contents).context("Failed to parse config file")?;
 
         Ok(config)
     }
@@ -53,11 +50,9 @@ impl Config {
     pub fn save(&self) -> Result<()> {
         let config_path = Self::config_path()?;
 
-        let json = serde_json::to_string_pretty(self)
-            .context("Failed to serialize config")?;
+        let json = serde_json::to_string_pretty(self).context("Failed to serialize config")?;
 
-        fs::write(&config_path, json)
-            .context("Failed to write config file")?;
+        fs::write(&config_path, json).context("Failed to write config file")?;
 
         Ok(())
     }

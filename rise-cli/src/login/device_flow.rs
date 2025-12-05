@@ -1,8 +1,8 @@
-use anyhow::{Result, Context};
+use crate::config::Config;
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
-use crate::config::Config;
 
 #[derive(Debug, Deserialize)]
 struct DeviceAuthResponse {
@@ -132,12 +132,14 @@ pub async fn handle_device_flow(
 
             // Store the backend URL if provided
             if let Some(url) = backend_url_to_save {
-                config.set_backend_url(url.to_string())
+                config
+                    .set_backend_url(url.to_string())
                     .context("Failed to save backend URL")?;
             }
 
             // Store the ID token
-            config.set_token(token_response.id_token)
+            config
+                .set_token(token_response.id_token)
                 .context("Failed to save authentication token")?;
 
             println!("\n✓ Login successful!");
@@ -156,15 +158,26 @@ pub async fn handle_device_flow(
                     std::io::stdout().flush()?;
                 }
                 Ok(err) => {
-                    anyhow::bail!("Device authorization failed: {} - {}", err.error, err.error_description.unwrap_or_default());
+                    anyhow::bail!(
+                        "Device authorization failed: {} - {}",
+                        err.error,
+                        err.error_description.unwrap_or_default()
+                    );
                 }
                 Err(_) => {
                     anyhow::bail!("Device authorization failed with status {}", status);
                 }
             }
         } else {
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            anyhow::bail!("Device token request failed with status {}: {}", status, error_text);
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!(
+                "Device token request failed with status {}: {}",
+                status,
+                error_text
+            );
         }
     }
 }

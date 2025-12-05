@@ -1,7 +1,7 @@
-use anyhow::{Result, Context};
+use crate::config::Config;
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use crate::config::Config;
 
 #[derive(Debug, Deserialize)]
 struct MeResponse {
@@ -26,12 +26,20 @@ async fn get_current_user(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!("Failed to get current user (status {}): {}", status, error_text);
+        anyhow::bail!(
+            "Failed to get current user (status {}): {}",
+            status,
+            error_text
+        );
     }
 
-    let me_response: MeResponse = response.json().await
+    let me_response: MeResponse = response
+        .json()
+        .await
         .context("Failed to parse me response")?;
 
     Ok(me_response)
@@ -51,7 +59,10 @@ impl std::str::FromStr for ProjectVisibility {
         match s.to_lowercase().as_str() {
             "public" => Ok(ProjectVisibility::Public),
             "private" => Ok(ProjectVisibility::Private),
-            _ => Err(anyhow::anyhow!("Invalid visibility: {}. Must be 'public' or 'private'", s)),
+            _ => Err(anyhow::anyhow!(
+                "Invalid visibility: {}. Must be 'public' or 'private'",
+                s
+            )),
         }
     }
 }
@@ -165,7 +176,8 @@ pub async fn create_project(
     visibility: ProjectVisibility,
     owner: Option<String>,
 ) -> Result<()> {
-    let token = config.get_token()
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     // Determine owner
@@ -222,29 +234,37 @@ pub async fn create_project(
         .context("Failed to send create project request")?;
 
     if response.status().is_success() {
-        let create_response: CreateProjectResponse = response.json().await
+        let create_response: CreateProjectResponse = response
+            .json()
+            .await
             .context("Failed to parse create project response")?;
 
-        println!("✓ Project '{}' created successfully!", create_response.project.name);
+        println!(
+            "✓ Project '{}' created successfully!",
+            create_response.project.name
+        );
         println!("  ID: {}", create_response.project.id);
         println!("  Status: {}", create_response.project.status);
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!("Failed to create project (status {}): {}", status, error_text);
+        anyhow::bail!(
+            "Failed to create project (status {}): {}",
+            status,
+            error_text
+        );
     }
 
     Ok(())
 }
 
 // List all projects
-pub async fn list_projects(
-    http_client: &Client,
-    backend_url: &str,
-    config: &Config,
-) -> Result<()> {
-    let token = config.get_token()
+pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Config) -> Result<()> {
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     let url = format!("{}/projects", backend_url);
@@ -256,7 +276,9 @@ pub async fn list_projects(
         .context("Failed to send list projects request")?;
 
     if response.status().is_success() {
-        let projects: Vec<Project> = response.json().await
+        let projects: Vec<Project> = response
+            .json()
+            .await
             .context("Failed to parse list projects response")?;
 
         if projects.is_empty() {
@@ -266,10 +288,12 @@ pub async fn list_projects(
             println!("{:<25} {:<15} {:<40}", "NAME", "STATUS", "URL");
             println!("{}", "-".repeat(85));
             for project in projects {
-                let url = project.deployment_url
+                let url = project
+                    .deployment_url
                     .as_deref()
                     .unwrap_or("(not deployed)");
-                println!("{:<25} {:<15} {:<40}",
+                println!(
+                    "{:<25} {:<15} {:<40}",
                     project.name,
                     format!("{}", project.status),
                     url
@@ -278,9 +302,15 @@ pub async fn list_projects(
         }
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!("Failed to list projects (status {}): {}", status, error_text);
+        anyhow::bail!(
+            "Failed to list projects (status {}): {}",
+            status,
+            error_text
+        );
     }
 
     Ok(())
@@ -294,7 +324,8 @@ pub async fn show_project(
     project_identifier: &str,
     by_id: bool,
 ) -> Result<()> {
-    let token = config.get_token()
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     // Always request expanded data with owner info
@@ -310,7 +341,9 @@ pub async fn show_project(
         .context("Failed to send get project request")?;
 
     if response.status().is_success() {
-        let project: ProjectWithOwnerInfo = response.json().await
+        let project: ProjectWithOwnerInfo = response
+            .json()
+            .await
             .context("Failed to parse get project response")?;
 
         println!("Project: {}", project.name);
@@ -339,7 +372,9 @@ pub async fn show_project(
         }
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         // Handle 404 with potential fuzzy match suggestions
-        let error: ProjectErrorResponse = response.json().await
+        let error: ProjectErrorResponse = response
+            .json()
+            .await
             .context("Failed to parse error response")?;
 
         eprintln!("{}", error.error);
@@ -352,7 +387,9 @@ pub async fn show_project(
         std::process::exit(1);
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Failed to get project (status {}): {}", status, error_text);
     }
@@ -371,7 +408,8 @@ pub async fn update_project(
     visibility: Option<ProjectVisibility>,
     owner: Option<String>,
 ) -> Result<()> {
-    let token = config.get_token()
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     #[derive(Serialize)]
@@ -408,7 +446,10 @@ pub async fn update_project(
         owner: owner_payload,
     };
 
-    let url = format!("{}/projects/{}?by_id={}", backend_url, project_identifier, by_id);
+    let url = format!(
+        "{}/projects/{}?by_id={}",
+        backend_url, project_identifier, by_id
+    );
     let response = http_client
         .put(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -418,13 +459,20 @@ pub async fn update_project(
         .context("Failed to send update project request")?;
 
     if response.status().is_success() {
-        let update_response: UpdateProjectResponse = response.json().await
+        let update_response: UpdateProjectResponse = response
+            .json()
+            .await
             .context("Failed to parse update project response")?;
 
-        println!("✓ Project '{}' updated successfully!", update_response.project.name);
+        println!(
+            "✓ Project '{}' updated successfully!",
+            update_response.project.name
+        );
         println!("  Status: {}", update_response.project.status);
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
-        let error: ProjectErrorResponse = response.json().await
+        let error: ProjectErrorResponse = response
+            .json()
+            .await
             .context("Failed to parse error response")?;
 
         eprintln!("{}", error.error);
@@ -437,9 +485,15 @@ pub async fn update_project(
         std::process::exit(1);
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!("Failed to update project (status {}): {}", status, error_text);
+        anyhow::bail!(
+            "Failed to update project (status {}): {}",
+            status,
+            error_text
+        );
     }
 
     Ok(())
@@ -453,10 +507,14 @@ pub async fn delete_project(
     project_identifier: &str,
     by_id: bool,
 ) -> Result<()> {
-    let token = config.get_token()
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    let url = format!("{}/projects/{}?by_id={}", backend_url, project_identifier, by_id);
+    let url = format!(
+        "{}/projects/{}?by_id={}",
+        backend_url, project_identifier, by_id
+    );
     let response = http_client
         .delete(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -467,7 +525,9 @@ pub async fn delete_project(
     if response.status() == reqwest::StatusCode::ACCEPTED {
         println!("✓ Project is being deleted (deployments are being cleaned up)");
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
-        let error: ProjectErrorResponse = response.json().await
+        let error: ProjectErrorResponse = response
+            .json()
+            .await
             .context("Failed to parse error response")?;
 
         eprintln!("{}", error.error);
@@ -480,9 +540,15 @@ pub async fn delete_project(
         std::process::exit(1);
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!("Failed to delete project (status {}): {}", status, error_text);
+        anyhow::bail!(
+            "Failed to delete project (status {}): {}",
+            status,
+            error_text
+        );
     }
 
     Ok(())

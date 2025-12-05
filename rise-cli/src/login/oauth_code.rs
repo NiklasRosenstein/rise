@@ -1,17 +1,12 @@
-use anyhow::{Result, Context};
+use crate::config::Config;
+use anyhow::{Context, Result};
+use axum::{Router, extract::Query, response::Html, routing::get};
+use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use sha2::{Sha256, Digest};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
-use url::Url;
-use axum::{
-    routing::get,
-    Router,
-    response::Html,
-    extract::Query,
-};
+use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
-use crate::config::Config;
+use url::Url;
 
 /// Generate PKCE code_verifier and code_challenge
 fn generate_pkce_challenge() -> (String, String) {
@@ -36,7 +31,8 @@ struct CallbackParams {
 }
 
 /// Start local HTTP server to receive OAuth callback
-async fn start_callback_server() -> Result<(String, tokio::sync::oneshot::Receiver<Result<String>>)> {
+async fn start_callback_server() -> Result<(String, tokio::sync::oneshot::Receiver<Result<String>>)>
+{
     use std::sync::Arc;
 
     // Try multiple ports in case one is in use
@@ -133,7 +129,8 @@ pub async fn handle_authorization_code_flow(
     let mut auth_url = Url::parse(&format!("{}/auth", dex_url))
         .context("Failed to parse Dex authorization URL")?;
 
-    auth_url.query_pairs_mut()
+    auth_url
+        .query_pairs_mut()
         .append_pair("client_id", client_id)
         .append_pair("redirect_uri", &redirect_uri)
         .append_pair("response_type", "code")
@@ -182,7 +179,10 @@ pub async fn handle_authorization_code_flow(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Code exchange failed (status {}): {}", status, error_text);
     }
 
@@ -193,12 +193,14 @@ pub async fn handle_authorization_code_flow(
 
     // Store the backend URL if provided
     if let Some(url) = backend_url_to_save {
-        config.set_backend_url(url.to_string())
+        config
+            .set_backend_url(url.to_string())
             .context("Failed to save backend URL")?;
     }
 
     // Store the token
-    config.set_token(exchange_response.token)
+    config
+        .set_token(exchange_response.token)
         .context("Failed to save authentication token")?;
 
     println!("✓ Login successful!");

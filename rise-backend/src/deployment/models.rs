@@ -1,7 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
-#[derive(Default)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
 pub enum DeploymentStatus {
     // Build/Deploy states
     #[default]
@@ -27,7 +26,6 @@ pub enum DeploymentStatus {
     // Terminal states
     Failed,
 }
-
 
 impl std::fmt::Display for DeploymentStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

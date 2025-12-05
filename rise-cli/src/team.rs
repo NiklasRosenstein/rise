@@ -1,7 +1,7 @@
-use anyhow::{Result, Context};
+use crate::config::Config;
+use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
-use crate::config::Config;
 
 #[derive(Debug, Deserialize)]
 struct MeResponse {
@@ -37,7 +37,9 @@ async fn lookup_users(
     }
 
     let url = format!("{}/users/lookup", backend_url);
-    let request = UsersLookupRequest { emails: emails.clone() };
+    let request = UsersLookupRequest {
+        emails: emails.clone(),
+    };
 
     let response = http_client
         .post(&url)
@@ -49,12 +51,16 @@ async fn lookup_users(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Failed to lookup users (status {}): {}", status, error_text);
     }
 
-    let lookup_response: UsersLookupResponse = response.json().await
+    let lookup_response: UsersLookupResponse = response
+        .json()
+        .await
         .context("Failed to parse lookup response")?;
 
     Ok(lookup_response.users.into_iter().map(|u| u.id).collect())
@@ -77,12 +83,20 @@ async fn get_current_user(
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!("Failed to get current user (status {}): {}", status, error_text);
+        anyhow::bail!(
+            "Failed to get current user (status {}): {}",
+            status,
+            error_text
+        );
     }
 
-    let me_response: MeResponse = response.json().await
+    let me_response: MeResponse = response
+        .json()
+        .await
         .context("Failed to parse me response")?;
 
     Ok(me_response)
@@ -129,7 +143,8 @@ pub async fn create_team(
     owners: Option<Vec<String>>,
     members: Vec<String>,
 ) -> Result<()> {
-    let token = config.get_token()
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     // If no owners specified, use current user
@@ -167,16 +182,23 @@ pub async fn create_team(
         .context("Failed to send create team request")?;
 
     if response.status().is_success() {
-        let create_response: CreateTeamResponse = response.json().await
+        let create_response: CreateTeamResponse = response
+            .json()
+            .await
             .context("Failed to parse create team response")?;
 
-        println!("✓ Team '{}' created successfully!", create_response.team.name);
+        println!(
+            "✓ Team '{}' created successfully!",
+            create_response.team.name
+        );
         println!("  ID: {}", create_response.team.id);
         println!("  Owners: {}", create_response.team.owners.join(", "));
         println!("  Members: {}", create_response.team.members.join(", "));
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Failed to create team (status {}): {}", status, error_text);
     }
@@ -185,12 +207,9 @@ pub async fn create_team(
 }
 
 // List all teams
-pub async fn list_teams(
-    http_client: &Client,
-    backend_url: &str,
-    config: &Config,
-) -> Result<()> {
-    let token = config.get_token()
+pub async fn list_teams(http_client: &Client, backend_url: &str, config: &Config) -> Result<()> {
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     let url = format!("{}/teams", backend_url);
@@ -202,17 +221,23 @@ pub async fn list_teams(
         .context("Failed to send list teams request")?;
 
     if response.status().is_success() {
-        let teams: Vec<Team> = response.json().await
+        let teams: Vec<Team> = response
+            .json()
+            .await
             .context("Failed to parse list teams response")?;
 
         if teams.is_empty() {
             println!("No teams found.");
         } else {
             println!("Teams:");
-            println!("{:<20} {:<36} {:<15} {:<15}", "NAME", "ID", "OWNERS", "MEMBERS");
+            println!(
+                "{:<20} {:<36} {:<15} {:<15}",
+                "NAME", "ID", "OWNERS", "MEMBERS"
+            );
             println!("{}", "-".repeat(90));
             for team in teams {
-                println!("{:<20} {:<36} {:<15} {:<15}",
+                println!(
+                    "{:<20} {:<36} {:<15} {:<15}",
                     team.name,
                     team.id,
                     team.owners.len(),
@@ -222,7 +247,9 @@ pub async fn list_teams(
         }
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Failed to list teams (status {}): {}", status, error_text);
     }
@@ -238,7 +265,8 @@ pub async fn show_team(
     team_identifier: &str,
     by_id: bool,
 ) -> Result<()> {
-    let token = config.get_token()
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     // Always request expanded data with user emails
@@ -254,7 +282,9 @@ pub async fn show_team(
         .context("Failed to send get team request")?;
 
     if response.status().is_success() {
-        let team: TeamWithEmails = response.json().await
+        let team: TeamWithEmails = response
+            .json()
+            .await
             .context("Failed to parse get team response")?;
 
         println!("Team: {}", team.name);
@@ -277,7 +307,9 @@ pub async fn show_team(
         }
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         // Handle 404 with potential fuzzy match suggestions
-        let error: TeamErrorResponse = response.json().await
+        let error: TeamErrorResponse = response
+            .json()
+            .await
             .context("Failed to parse error response")?;
 
         eprintln!("{}", error.error);
@@ -290,7 +322,9 @@ pub async fn show_team(
         std::process::exit(1);
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Failed to get team (status {}): {}", status, error_text);
     }
@@ -311,7 +345,8 @@ pub async fn update_team(
     add_members: Vec<String>,
     remove_members: Vec<String>,
 ) -> Result<()> {
-    let token = config.get_token()
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     // Convert email addresses to user IDs
@@ -331,7 +366,9 @@ pub async fn update_team(
 
     if !get_response.status().is_success() {
         if get_response.status() == reqwest::StatusCode::NOT_FOUND {
-            let error: TeamErrorResponse = get_response.json().await
+            let error: TeamErrorResponse = get_response
+                .json()
+                .await
                 .context("Failed to parse error response")?;
 
             eprintln!("{}", error.error);
@@ -346,7 +383,9 @@ pub async fn update_team(
         anyhow::bail!("Team not found");
     }
 
-    let mut team: Team = get_response.json().await
+    let mut team: Team = get_response
+        .json()
+        .await
         .context("Failed to parse team response")?;
 
     // Apply changes
@@ -395,15 +434,22 @@ pub async fn update_team(
         .context("Failed to send update team request")?;
 
     if response.status().is_success() {
-        let update_response: UpdateTeamResponse = response.json().await
+        let update_response: UpdateTeamResponse = response
+            .json()
+            .await
             .context("Failed to parse update team response")?;
 
-        println!("✓ Team '{}' updated successfully!", update_response.team.name);
+        println!(
+            "✓ Team '{}' updated successfully!",
+            update_response.team.name
+        );
         println!("  Owners: {}", update_response.team.owners.join(", "));
         println!("  Members: {}", update_response.team.members.join(", "));
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Failed to update team (status {}): {}", status, error_text);
     }
@@ -419,7 +465,8 @@ pub async fn delete_team(
     team_identifier: &str,
     by_id: bool,
 ) -> Result<()> {
-    let token = config.get_token()
+    let token = config
+        .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     let url = format!("{}/teams/{}?by_id={}", backend_url, team_identifier, by_id);
@@ -433,7 +480,9 @@ pub async fn delete_team(
     if response.status().is_success() {
         println!("✓ Team deleted successfully!");
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
-        let error: TeamErrorResponse = response.json().await
+        let error: TeamErrorResponse = response
+            .json()
+            .await
             .context("Failed to parse error response")?;
 
         eprintln!("{}", error.error);
@@ -446,7 +495,9 @@ pub async fn delete_team(
         std::process::exit(1);
     } else {
         let status = response.status();
-        let error_text = response.text().await
+        let error_text = response
+            .text()
+            .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!("Failed to delete team (status {}): {}", status, error_text);
     }

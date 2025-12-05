@@ -1,14 +1,12 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[derive(Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub enum ProjectVisibility {
     Public,
     #[default]
     Private,
 }
-
 
 impl From<crate::db::models::ProjectVisibility> for ProjectVisibility {
     fn from(visibility: crate::db::models::ProjectVisibility) -> Self {
@@ -28,8 +26,7 @@ impl From<ProjectVisibility> for crate::db::models::ProjectVisibility {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[derive(Default)]
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub enum ProjectStatus {
     Running,
     #[default]
@@ -39,7 +36,6 @@ pub enum ProjectStatus {
     Deleting,
     Terminated,
 }
-
 
 impl From<crate::db::models::ProjectStatus> for ProjectStatus {
     fn from(status: crate::db::models::ProjectStatus) -> Self {
@@ -107,7 +103,11 @@ impl Project {
     pub fn owner(&self) -> Option<ProjectOwner> {
         if let Some(ref user_id) = self.owner_user {
             Some(ProjectOwner::User(user_id.clone()))
-        } else { self.owner_team.as_ref().map(|team_id| ProjectOwner::Team(team_id.clone())) }
+        } else {
+            self.owner_team
+                .as_ref()
+                .map(|team_id| ProjectOwner::Team(team_id.clone()))
+        }
     }
 }
 

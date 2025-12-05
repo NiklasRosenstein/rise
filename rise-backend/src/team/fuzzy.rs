@@ -67,7 +67,6 @@ fn jaro_similarity(s1: &str, s2: &str) -> f64 {
     }
 
     let matches_f64 = matches as f64;
-    
 
     (matches_f64 / s1_len as f64
         + matches_f64 / s2_len as f64
