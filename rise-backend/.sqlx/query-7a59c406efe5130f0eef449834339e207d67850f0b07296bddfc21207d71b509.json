@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT\n            p.id, p.name,\n            p.status as \"status: ProjectStatus\",\n            p.visibility as \"visibility: ProjectVisibility\",\n            p.owner_user_id, p.owner_team_id, p.active_deployment_id,\n            p.project_url,\n            p.created_at, p.updated_at\n        FROM projects p\n        WHERE\n            p.owner_user_id = $1\n            OR EXISTS(\n                SELECT 1 FROM team_members tm\n                WHERE tm.team_id = p.owner_team_id\n                AND tm.user_id = $1\n            )\n        ORDER BY p.created_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status: ProjectStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "visibility: ProjectVisibility",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "owner_team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "active_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "project_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "7a59c406efe5130f0eef449834339e207d67850f0b07296bddfc21207d71b509"
+}

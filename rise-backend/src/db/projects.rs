@@ -48,6 +48,37 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
     Ok(projects)
 }
 
+/// List all projects accessible by a user (owned directly or via team membership)
+pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<Project>> {
+    let projects = sqlx::query_as!(
+        Project,
+        r#"
+        SELECT DISTINCT
+            p.id, p.name,
+            p.status as "status: ProjectStatus",
+            p.visibility as "visibility: ProjectVisibility",
+            p.owner_user_id, p.owner_team_id, p.active_deployment_id,
+            p.project_url,
+            p.created_at, p.updated_at
+        FROM projects p
+        WHERE
+            p.owner_user_id = $1
+            OR EXISTS(
+                SELECT 1 FROM team_members tm
+                WHERE tm.team_id = p.owner_team_id
+                AND tm.user_id = $1
+            )
+        ORDER BY p.created_at DESC
+        "#,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to list accessible projects")?;
+
+    Ok(projects)
+}
+
 /// Find project by name
 pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> {
     let project = sqlx::query_as!(
