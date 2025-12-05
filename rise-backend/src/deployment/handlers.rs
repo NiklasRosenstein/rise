@@ -9,6 +9,7 @@ use regex::Regex;
 use tracing::{debug, error, info};
 
 use super::models::*;
+use super::state_machine;
 use super::utils::generate_deployment_id;
 use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
 use crate::db::{deployments as db_deployments, projects, teams as db_teams};
@@ -896,9 +897,10 @@ pub async fn rollback_deployment(
         )
     })?;
 
-    // Verify source deployment is in a terminal successful state
-    if source_deployment.status != DbDeploymentStatus::Healthy {
-        return Err((StatusCode::BAD_REQUEST, format!("Cannot rollback to deployment '{}' with status '{:?}'. Only Healthy deployments can be used for rollback.", source_deployment_id, source_deployment.status)));
+    // Verify source deployment is in a valid state for rollback
+    // Allow Healthy (currently active) and Superseded (previously active, replaced by newer deployment)
+    if !state_machine::is_rollbackable(&source_deployment.status) {
+        return Err((StatusCode::BAD_REQUEST, format!("Cannot rollback to deployment '{}' with status '{:?}'. Only Healthy or Superseded deployments can be used for rollback.", source_deployment_id, source_deployment.status)));
     }
 
     // Generate new deployment ID

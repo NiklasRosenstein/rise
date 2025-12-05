@@ -43,6 +43,15 @@ pub fn is_terminable(status: &DeploymentStatus) -> bool {
     )
 }
 
+/// Check if a deployment can be used as a rollback source
+/// Only Healthy and Superseded deployments can be rolled back to
+pub fn is_rollbackable(status: &DeploymentStatus) -> bool {
+    matches!(
+        status,
+        DeploymentStatus::Healthy | DeploymentStatus::Superseded
+    )
+}
+
 /// Check if a state transition is valid
 pub fn is_valid_transition(from: &DeploymentStatus, to: &DeploymentStatus) -> bool {
     use DeploymentStatus::*;
