@@ -502,7 +502,7 @@ pub async fn get_active_deployment_ids_batch(
         r#"
         SELECT
             p.id as project_id,
-            d.deployment_id
+            d.deployment_id as "deployment_id?"
         FROM unnest($1::uuid[]) AS p(id)
         LEFT JOIN deployments d ON d.id = (
             SELECT active_deployment_id FROM projects WHERE id = p.id
@@ -516,7 +516,12 @@ pub async fn get_active_deployment_ids_batch(
 
     Ok(results
         .into_iter()
-        .filter_map(|r| r.project_id.map(|id| (id, r.deployment_id)))
+        .filter_map(|r| {
+            r.project_id.map(|id| {
+                // In sqlx 0.8, LEFT JOIN makes deployment_id Option<String> (already nullable)
+                (id, r.deployment_id)
+            })
+        })
         .collect())
 }
 
@@ -530,8 +535,8 @@ pub async fn get_active_deployment_info_batch(
         r#"
         SELECT
             p.id as project_id,
-            d.deployment_id,
-            d.status as "status: crate::db::models::DeploymentStatus"
+            d.deployment_id as "deployment_id?",
+            d.status as "status?: crate::db::models::DeploymentStatus"
         FROM unnest($1::uuid[]) AS p(id)
         LEFT JOIN deployments d ON d.id = (
             SELECT active_deployment_id FROM projects WHERE id = p.id
@@ -547,14 +552,13 @@ pub async fn get_active_deployment_info_batch(
         .into_iter()
         .filter_map(|r| {
             r.project_id.map(|id| {
-                let info = if let (Some(deployment_id), Some(status)) = (r.deployment_id, r.status)
-                {
-                    Some(ActiveDeploymentInfo {
+                // In sqlx 0.8, LEFT JOIN makes fields Option<T> (already nullable)
+                let info = match (r.deployment_id, r.status) {
+                    (Some(deployment_id), Some(status)) => Some(ActiveDeploymentInfo {
                         deployment_id,
                         status,
-                    })
-                } else {
-                    None
+                    }),
+                    _ => None,
                 };
                 (id, info)
             })

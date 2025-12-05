@@ -1,5 +1,5 @@
 [tools]
-kind = "0.30.0"
+minikube = "1.37.0"
 overmind = "2.5.1"
 pack = "0.39.0"
 
@@ -11,9 +11,10 @@ run = "overmind r backend*"
 
 [tasks.setup-local-registry]
 run = """
+set -x
 REGISTRY_NAME=rise-registry
 REGISTRY_DIR="/etc/containerd/certs.d/localhost:5000"
-for node in $(kind get nodes); do
+for node in $(minikube node list | awk '{print $1}'); do
   docker exec "${node}" mkdir -p "${REGISTRY_DIR}"
   cat <<EOF | docker exec -i "${node}" cp /dev/stdin "${REGISTRY_DIR}/hosts.toml"
 [host."http://${REGISTRY_NAME}:5000"]
