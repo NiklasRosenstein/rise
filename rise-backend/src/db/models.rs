@@ -106,6 +106,20 @@ impl std::fmt::Display for TeamRole {
     }
 }
 
+/// Service Account model - represents workload identity for CI/CD automation
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ServiceAccount {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub user_id: Uuid,
+    pub issuer_url: String,
+    pub claims: serde_json::Value, // JSONB stored as serde_json::Value
+    pub sequence: i32,
+    pub deleted_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
 /// Deployment model - represents application deployments
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct Deployment {
