@@ -6,41 +6,24 @@ A Rust-based platform for deploying containerized applications to Kubernetes and
 
 Rise consists of:
 - **rise-backend**: REST API backend built with Axum, PostgreSQL, and Dex OAuth2/OIDC
-- **rise-cli**: Command-line interface for managing projects and teams
+- **rise-cli**: Command-line interface, including the backend and commands to manage teams, projects and deployments
 - **PostgreSQL**: Primary database with SQLX migrations
 - **Dex**: OAuth2/OIDC authentication provider
 
-## Quick Start
+## Local Development
 
 ### Prerequisites
 
-- Docker and Docker Compose
-- Rust 1.91+ (for local development)
+- Docker and Docker Compose (for local development and testing)
 - [mise](https://mise.jdx.dev/) (for task management)
 
-### Start Development Environment
+To build and run the development environment, first run `mise install`. Then
 
-**Option 1: Using Procfile (Recommended for Development)**
-
-```bash
-# Start all services with overmind (postgres, dex, registry, backend)
-overmind start
-
-# Or start individual services
-mise run rise-backend
-```
-
-**Option 2: Using Docker Compose Only**
-
-```bash
-# Start supporting services (PostgreSQL + Dex + Registry)
-docker compose up -d
-
-# Backend runs locally via mise
-mise run rise-backend
-```
+- Run `mise start` to start the development stack.
+- After code changes, `mise reload` is usually enough to recompile and restart the backend processes.
 
 Services will be available at:
+
 - **Backend API**: http://localhost:3000
 - **Dex Auth**: http://localhost:5556/dex
 - **PostgreSQL**: localhost:5432
@@ -57,9 +40,16 @@ The development environment includes pre-configured test accounts:
 - **Username**: `rise`
 - **Password**: `rise123`
 
+#### Dex Admin User (not currently treated specially by backend)
+
+- **Email**: `admin@example.com`
+- **Password**: `password`
+- **Access**: Admin user for Dex web interface
+
 #### Dex Test User
+
 - **Email**: `test@example.com`
-- **Password**: `test1234`
+- **Password**: `password`
 - **Access**: Regular user for testing OAuth2 authentication
 
 > **Note**: These credentials are for development only. Change them for production deployments via environment variables in `docker-compose.yml`.

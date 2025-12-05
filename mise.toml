@@ -4,3 +4,6 @@ pack = "0.39.0"
 
 [tasks.start]
 run = "overmind start -f Procfile.dev"
+
+[tasks.reload]
+run = "overmind r backend*"
