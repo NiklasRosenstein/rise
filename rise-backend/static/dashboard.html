@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rise Dashboard</title>
+    <link rel="stylesheet" href="/css/pico.min.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+    <header class="container">
+        <nav>
+            <ul>
+                <li><strong>Rise Dashboard</strong></li>
+            </ul>
+            <ul>
+                <li><a href="#" onclick="showView('projects')">Projects</a></li>
+                <li><a href="#" onclick="showView('teams')">Teams</a></li>
+                <li><span id="user-email"></span></li>
+                <li><a href="#" onclick="logout()">Logout</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="container">
+        <!-- Projects View -->
+        <section id="projects-view" style="display: none;">
+            <h2>Projects</h2>
+            <div id="projects-list"></div>
+        </section>
+
+        <!-- Teams View -->
+        <section id="teams-view" style="display: none;">
+            <h2>Teams</h2>
+            <div id="teams-list"></div>
+        </section>
+
+        <!-- Project Detail View -->
+        <section id="project-detail-view" style="display: none;">
+            <button onclick="showView('projects')">&larr; Back to Projects</button>
+            <div id="project-detail"></div>
+            <h3>Deployments</h3>
+            <div id="deployment-list"></div>
+        </section>
+
+        <!-- Deployment Detail View -->
+        <section id="deployment-detail-view" style="display: none;">
+            <button onclick="goBack()">&larr; Back</button>
+            <div id="deployment-detail"></div>
+        </section>
+    </main>
+
+    <script src="/js/auth.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>
