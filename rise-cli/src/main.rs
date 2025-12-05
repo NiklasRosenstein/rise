@@ -211,11 +211,13 @@ enum DeploymentCommands {
         #[arg(long, short, default_value = "10")]
         limit: usize,
     },
-    /// Show deployment details (format: project:deployment_id)
+    /// Show deployment details
     #[command(visible_alias = "s")]
     Show {
-        /// Deployment reference (format: project:deployment_id)
-        deployment: String,
+        /// Project name
+        project: String,
+        /// Deployment ID
+        deployment_id: String,
         /// Follow deployment until completion
         #[arg(long, short)]
         follow: bool,
@@ -225,8 +227,10 @@ enum DeploymentCommands {
     },
     /// Rollback to a previous deployment
     Rollback {
-        /// Deployment reference (format: project:deployment_id)
-        deployment: String,
+        /// Project name
+        project: String,
+        /// Deployment ID to rollback to
+        deployment_id: String,
     },
     /// Stop all deployments in a group
     Stop {
@@ -512,30 +516,32 @@ async fn main() -> Result<()> {
                 .await?;
             }
             DeploymentCommands::Show {
-                deployment,
+                project,
+                deployment_id,
                 follow,
                 timeout,
             } => {
-                let (project, deployment_id) = deployment::parse_deployment_ref(deployment)?;
                 deployment::show_deployment(
                     &http_client,
                     &backend_url,
                     &config,
-                    &project,
-                    &deployment_id,
+                    project,
+                    deployment_id,
                     *follow,
                     timeout,
                 )
                 .await?;
             }
-            DeploymentCommands::Rollback { deployment } => {
-                let (project, deployment_id) = deployment::parse_deployment_ref(deployment)?;
+            DeploymentCommands::Rollback {
+                project,
+                deployment_id,
+            } => {
                 deployment::rollback_deployment(
                     &http_client,
                     &backend_url,
                     &config,
-                    &project,
-                    &deployment_id,
+                    project,
+                    deployment_id,
                 )
                 .await?;
             }

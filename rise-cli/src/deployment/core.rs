@@ -21,24 +21,6 @@ struct RollbackResponse {
     image_tag: String,
 }
 
-/// Parse deployment reference in project:deployment_id format
-///
-/// # Arguments
-/// * `ref_str` - Reference string (e.g., "my-app:20241124-1542")
-///
-/// # Returns
-/// Tuple of (project_name, deployment_id)
-pub fn parse_deployment_ref(ref_str: &str) -> Result<(String, String)> {
-    let parts: Vec<&str> = ref_str.split(':').collect();
-    if parts.len() != 2 {
-        bail!(
-            "Invalid deployment reference '{}'. Expected format: project:deployment_id (e.g., my-app:20241124-1542)",
-            ref_str
-        );
-    }
-    Ok((parts[0].to_string(), parts[1].to_string()))
-}
-
 /// Parse duration string (e.g., "5m", "30s", "1h")
 pub(super) fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
@@ -193,7 +175,8 @@ pub async fn list_deployments(
         ]);
 
     for deployment in deployments {
-        let deployment_ref = format!("{}:{}", project, deployment.deployment_id);
+        // Just use deployment_id in the table, project is already in context
+        let deployment_display = deployment.deployment_id.clone();
         let url = deployment.deployment_url.as_deref().unwrap_or("-");
 
         // Format created time (just show date and time, not full RFC3339)
@@ -222,7 +205,7 @@ pub async fn list_deployments(
         let is_default_active = default_active == Some(&deployment.deployment_id);
 
         // Create cells with appropriate styling
-        let mut deployment_cell = Cell::new(&deployment_ref);
+        let mut deployment_cell = Cell::new(&deployment_display);
         let mut status_cell = Cell::new(deployment.status.to_string());
         let mut group_cell = Cell::new(&deployment.deployment_group);
         let mut expiry_cell = Cell::new(&expiry);
@@ -351,7 +334,10 @@ pub async fn rollback_deployment(
         project, deployment_id
     );
 
-    println!("Initiating rollback to {}:{}...", project, deployment_id);
+    println!(
+        "Initiating rollback for project '{}' to deployment '{}'...",
+        project, deployment_id
+    );
 
     // Call the rollback endpoint
     let url = format!(
@@ -374,7 +360,11 @@ pub async fn rollback_deployment(
 
         match status {
             reqwest::StatusCode::NOT_FOUND => {
-                bail!("Deployment '{}:{}' not found", project, deployment_id);
+                bail!(
+                    "Deployment '{}' not found for project '{}'",
+                    deployment_id,
+                    project
+                );
             }
             reqwest::StatusCode::UNAUTHORIZED => {
                 bail!("Authentication failed. Please run 'rise login' again.");
