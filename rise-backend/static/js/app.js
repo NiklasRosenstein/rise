@@ -121,6 +121,7 @@ async function loadTeams() {
                         <th>Members</th>
                         <th>Owners</th>
                         <th>Created</th>
+                        <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -130,6 +131,7 @@ async function loadTeams() {
                             <td>${t.members.length}</td>
                             <td>${t.owners.length}</td>
                             <td>${formatDate(t.created)}</td>
+                            <td><a href="#" onclick="showTeam('${escapeHtml(t.name)}'); return false;">View</a></td>
                         </tr>
                     `).join('')}
                 </tbody>
@@ -137,6 +139,76 @@ async function loadTeams() {
         `;
     } catch (error) {
         listEl.innerHTML = `<p>Error loading teams: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+// Show team detail
+async function showTeam(teamName) {
+    // Hide all views
+    document.querySelectorAll('main > section').forEach(el => {
+        el.style.display = 'none';
+    });
+
+    // Show team detail view
+    const viewEl = document.getElementById('team-detail-view');
+    viewEl.style.display = 'block';
+
+    const detailEl = document.getElementById('team-detail');
+    detailEl.innerHTML = '<p aria-busy="true">Loading team...</p>';
+
+    try {
+        // Fetch team with expanded member and owner emails
+        const team = await api.getTeam(teamName, { expand: 'members,owners' });
+
+        detailEl.innerHTML = `
+            <article>
+                <header><h3>Team ${escapeHtml(team.name)}</h3></header>
+                <dl>
+                    <dt>Created</dt>
+                    <dd>${formatDate(team.created)}</dd>
+                    <dt>Updated</dt>
+                    <dd>${formatDate(team.updated)}</dd>
+                </dl>
+            </article>
+
+            <h4>Owners</h4>
+            ${team.owners && team.owners.length > 0 ? `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${team.owners.map(owner => `
+                            <tr>
+                                <td>${escapeHtml(owner.email)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            ` : '<p>No owners</p>'}
+
+            <h4>Members</h4>
+            ${team.members && team.members.length > 0 ? `
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${team.members.map(member => `
+                            <tr>
+                                <td>${escapeHtml(member.email)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            ` : '<p>No members</p>'}
+        `;
+    } catch (error) {
+        detailEl.innerHTML = `<p>Error loading team: ${escapeHtml(error.message)}</p>`;
     }
 }
 
