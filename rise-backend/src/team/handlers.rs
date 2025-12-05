@@ -4,7 +4,7 @@ use super::models::{
     TeamWithEmails, UpdateTeamRequest, UpdateTeamResponse, UserInfo,
 };
 use crate::db::models::{TeamRole, User};
-use crate::db::teams as db_teams;
+use crate::db::{service_accounts, teams as db_teams};
 use crate::state::AppState;
 use axum::{
     extract::{Extension, Path, Query, State},
@@ -259,6 +259,31 @@ pub async fn update_team(
             }
         }
 
+        // Validate that none of the new members are service accounts
+        for member_id in &member_ids {
+            let is_sa = service_accounts::is_service_account(&state.db_pool, *member_id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(TeamErrorResponse {
+                            error: format!("Failed to check service account status: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+
+            if is_sa {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(TeamErrorResponse {
+                        error: "Service accounts cannot be team members".to_string(),
+                        suggestions: None,
+                    }),
+                ));
+            }
+        }
+
         // Add new members
         for member_id in member_ids {
             if !current_member_ids.contains(&member_id) {
@@ -322,6 +347,31 @@ pub async fn update_team(
                             }),
                         )
                     })?;
+            }
+        }
+
+        // Validate that none of the new owners are service accounts
+        for owner_id in &owner_ids {
+            let is_sa = service_accounts::is_service_account(&state.db_pool, *owner_id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(TeamErrorResponse {
+                            error: format!("Failed to check service account status: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+
+            if is_sa {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(TeamErrorResponse {
+                        error: "Service accounts cannot be team members".to_string(),
+                        suggestions: None,
+                    }),
+                ));
             }
         }
 

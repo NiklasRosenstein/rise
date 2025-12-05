@@ -303,7 +303,7 @@ pub async fn show_deployment(
             .context("Not logged in. Please run 'rise login' first.")?;
 
         let deployment =
-            fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
+            fetch_deployment(http_client, backend_url, &token, project, deployment_id).await?;
 
         // Use the same UI as follow mode
         super::follow_ui::print_deployment_snapshot(&deployment);
@@ -549,7 +549,7 @@ pub async fn create_deployment(
     let deployment_info = call_create_deployment_api(
         http_client,
         backend_url,
-        token,
+        &token,
         project_name,
         image,
         group,
@@ -605,7 +605,7 @@ pub async fn create_deployment(
                 update_deployment_status(
                     http_client,
                     backend_url,
-                    token,
+                    &token,
                     &deployment_info.deployment_id,
                     "Failed",
                     Some(&e.to_string()),
@@ -619,7 +619,7 @@ pub async fn create_deployment(
         update_deployment_status(
             http_client,
             backend_url,
-            token,
+            &token,
             &deployment_info.deployment_id,
             "Building",
             None,
@@ -635,7 +635,7 @@ pub async fn create_deployment(
             update_deployment_status(
                 http_client,
                 backend_url,
-                token,
+                &token,
                 &deployment_info.deployment_id,
                 "Failed",
                 Some(&e.to_string()),
@@ -648,7 +648,7 @@ pub async fn create_deployment(
         update_deployment_status(
             http_client,
             backend_url,
-            token,
+            &token,
             &deployment_info.deployment_id,
             "Pushed",
             None,

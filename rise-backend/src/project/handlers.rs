@@ -5,7 +5,7 @@ use super::models::{
     ProjectWithOwnerInfo, TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
 };
 use crate::db::models::User;
-use crate::db::{projects, teams as db_teams, users as db_users};
+use crate::db::{projects, service_accounts, teams as db_teams, users as db_users};
 use crate::state::AppState;
 use axum::{
     extract::{Extension, Path, Query, State},
@@ -295,6 +295,29 @@ pub async fn update_project(
         ));
     }
 
+    // Service accounts cannot update projects
+    let is_sa = service_accounts::is_service_account(&state.db_pool, user.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to check service account status: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+
+    if is_sa {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ProjectErrorResponse {
+                error: "Service accounts cannot modify projects".to_string(),
+                suggestions: None,
+            }),
+        ));
+    }
+
     // Update project fields
     let mut updated_project = project;
 
@@ -487,6 +510,29 @@ pub async fn delete_project(
         ));
     }
 
+    // Service accounts cannot delete projects
+    let is_sa = service_accounts::is_service_account(&state.db_pool, user.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to check service account status: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+
+    if is_sa {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(ProjectErrorResponse {
+                error: "Service accounts cannot modify projects".to_string(),
+                suggestions: None,
+            }),
+        ));
+    }
+
     // Check if already deleting
     if project.status == crate::db::models::ProjectStatus::Deleting {
         return Ok(StatusCode::ACCEPTED);
@@ -672,7 +718,7 @@ fn is_admin(state: &AppState, user_email: &str) -> bool {
 }
 
 /// Check if user can read a project (owner, team member, or admin)
-async fn check_read_permission(
+pub async fn check_read_permission(
     state: &AppState,
     project: &crate::db::models::Project,
     user: &User,
@@ -689,7 +735,7 @@ async fn check_read_permission(
 }
 
 /// Check if user can write to a project (owner, team member, or admin)
-async fn check_write_permission(
+pub async fn check_write_permission(
     state: &AppState,
     project: &crate::db::models::Project,
     user: &User,

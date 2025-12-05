@@ -151,13 +151,13 @@ pub async fn create_team(
     let owner_emails = if let Some(emails) = owners {
         emails
     } else {
-        let current_user = get_current_user(http_client, backend_url, token).await?;
+        let current_user = get_current_user(http_client, backend_url, &token).await?;
         vec![current_user.email]
     };
 
     // Convert email addresses to user IDs
-    let owner_ids = lookup_users(http_client, backend_url, token, owner_emails).await?;
-    let member_ids = lookup_users(http_client, backend_url, token, members).await?;
+    let owner_ids = lookup_users(http_client, backend_url, &token, owner_emails).await?;
+    let member_ids = lookup_users(http_client, backend_url, &token, members).await?;
 
     #[derive(Serialize)]
     struct CreateRequest {
@@ -350,10 +350,10 @@ pub async fn update_team(
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     // Convert email addresses to user IDs
-    let add_owner_ids = lookup_users(http_client, backend_url, token, add_owners).await?;
-    let remove_owner_ids = lookup_users(http_client, backend_url, token, remove_owners).await?;
-    let add_member_ids = lookup_users(http_client, backend_url, token, add_members).await?;
-    let remove_member_ids = lookup_users(http_client, backend_url, token, remove_members).await?;
+    let add_owner_ids = lookup_users(http_client, backend_url, &token, add_owners).await?;
+    let remove_owner_ids = lookup_users(http_client, backend_url, &token, remove_owners).await?;
+    let add_member_ids = lookup_users(http_client, backend_url, &token, add_members).await?;
+    let remove_member_ids = lookup_users(http_client, backend_url, &token, remove_members).await?;
 
     // First, get the current team state (without expand for now)
     let get_url = format!("{}/teams/{}?by_id={}", backend_url, team_identifier, by_id);

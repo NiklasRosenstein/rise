@@ -64,8 +64,14 @@ impl Config {
     }
 
     /// Get the authentication token
-    pub fn get_token(&self) -> Option<&str> {
-        self.token.as_deref()
+    /// Checks RISE_TOKEN environment variable first, then falls back to config file
+    pub fn get_token(&self) -> Option<String> {
+        // Check environment variable first
+        if let Ok(token) = std::env::var("RISE_TOKEN") {
+            return Some(token);
+        }
+        // Fall back to config file
+        self.token.clone()
     }
 
     /// Set the backend URL

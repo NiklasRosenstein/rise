@@ -8,6 +8,7 @@ pub mod registry;
 pub mod settings;
 pub mod state;
 pub mod team;
+pub mod workload_identity;
 
 #[cfg(test)]
 mod lib_tests;
@@ -36,6 +37,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(team::routes::team_routes())
         .merge(registry::routes::routes())
         .merge(deployment::routes::deployment_routes())
+        .merge(workload_identity::routes::routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,

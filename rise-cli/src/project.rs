@@ -205,7 +205,7 @@ pub async fn create_project(
         }
     } else {
         // Default to current user
-        let current_user = get_current_user(http_client, backend_url, token).await?;
+        let current_user = get_current_user(http_client, backend_url, &token).await?;
         ("user".to_string(), current_user.id)
     };
 

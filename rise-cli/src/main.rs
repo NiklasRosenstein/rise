@@ -9,6 +9,7 @@ mod config;
 mod deployment;
 mod login;
 mod project;
+mod service_account;
 mod team;
 
 #[derive(Parser, Debug)]
@@ -47,6 +48,10 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "d")]
     Deployment(DeploymentCommands),
+    /// Service account (workload identity) management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "sa")]
+    ServiceAccount(ServiceAccountCommands),
 }
 
 #[derive(Subcommand, Debug)]
@@ -240,6 +245,64 @@ enum DeploymentCommands {
         #[arg(long, short)]
         group: String,
     },
+}
+
+#[derive(Subcommand, Debug)]
+enum ServiceAccountCommands {
+    /// Create a new service account for a project
+    #[command(visible_alias = "c")]
+    #[command(visible_alias = "new")]
+    Create {
+        /// Project name
+        project: String,
+        /// OIDC issuer URL (e.g., https://gitlab.com)
+        #[arg(long)]
+        issuer: String,
+        /// Claims to match (format: key=value, can be specified multiple times)
+        #[arg(long = "claim", value_parser = parse_key_val::<String, String>)]
+        claims: Vec<(String, String)>,
+    },
+    /// List all service accounts for a project
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
+    List {
+        /// Project name
+        project: String,
+    },
+    /// Show service account details
+    #[command(visible_alias = "s")]
+    #[command(visible_alias = "get")]
+    Show {
+        /// Project name
+        project: String,
+        /// Service account ID
+        id: String,
+    },
+    /// Delete a service account
+    #[command(visible_alias = "del")]
+    #[command(visible_alias = "rm")]
+    Delete {
+        /// Project name
+        project: String,
+        /// Service account ID
+        id: String,
+    },
+}
+
+/// Parse a single key-value pair
+fn parse_key_val<T, U>(
+    s: &str,
+) -> Result<(T, U), Box<dyn std::error::Error + Send + Sync + 'static>>
+where
+    T: std::str::FromStr,
+    T::Err: std::error::Error + Send + Sync + 'static,
+    U: std::str::FromStr,
+    U::Err: std::error::Error + Send + Sync + 'static,
+{
+    let pos = s
+        .find('=')
+        .ok_or_else(|| format!("invalid KEY=value: no `=` found in `{s}`"))?;
+    Ok((s[..pos].parse()?, s[pos + 1..].parse()?))
 }
 
 #[tokio::main]
@@ -552,6 +615,55 @@ async fn main() -> Result<()> {
                     &config,
                     project,
                     group,
+                )
+                .await?;
+            }
+        },
+        Commands::ServiceAccount(sa_cmd) => match sa_cmd {
+            ServiceAccountCommands::Create {
+                project,
+                issuer,
+                claims,
+            } => {
+                let claims_map: std::collections::HashMap<String, String> =
+                    claims.iter().cloned().collect();
+
+                service_account::create_service_account(
+                    &http_client,
+                    &backend_url,
+                    &config,
+                    project,
+                    issuer,
+                    claims_map,
+                )
+                .await?;
+            }
+            ServiceAccountCommands::List { project } => {
+                service_account::list_service_accounts(
+                    &http_client,
+                    &backend_url,
+                    &config,
+                    project,
+                )
+                .await?;
+            }
+            ServiceAccountCommands::Show { project, id } => {
+                service_account::show_service_account(
+                    &http_client,
+                    &backend_url,
+                    &config,
+                    project,
+                    id,
+                )
+                .await?;
+            }
+            ServiceAccountCommands::Delete { project, id } => {
+                service_account::delete_service_account(
+                    &http_client,
+                    &backend_url,
+                    &config,
+                    project,
+                    id,
                 )
                 .await?;
             }

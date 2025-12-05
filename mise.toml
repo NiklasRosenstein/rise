@@ -3,7 +3,13 @@ minikube = "1.37.0"
 overmind = "2.5.1"
 pack = "0.39.0"
 
+[tasks.migrate]
+description = "Run database migrations. Run before building the backend."
+dir = "rise-backend"
+run = "docker-compose up postgres -d && sqlx migrate run"
+
 [tasks.start]
+depends = "migrate"
 run = "overmind start -f Procfile.dev"
 
 [tasks.reload]

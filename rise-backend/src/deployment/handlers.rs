@@ -12,7 +12,7 @@ use super::models::*;
 use super::state_machine;
 use super::utils::generate_deployment_id;
 use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
-use crate::db::{deployments as db_deployments, projects, teams as db_teams};
+use crate::db::{deployments as db_deployments, projects, service_accounts, teams as db_teams};
 use crate::state::AppState;
 
 /// Check if a user is an admin (based on email in config)
@@ -28,6 +28,16 @@ async fn check_deploy_permission(
 ) -> Result<(), String> {
     // Admins have full access
     if is_admin(state, &user.email) {
+        return Ok(());
+    }
+
+    // Check if user is a service account for this project
+    let is_sa = service_accounts::find_by_user_and_project(&state.db_pool, user.id, project.id)
+        .await
+        .map_err(|e| format!("Failed to check service account status: {}", e))?
+        .is_some();
+
+    if is_sa {
         return Ok(());
     }
 
