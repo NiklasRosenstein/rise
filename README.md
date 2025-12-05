@@ -5,10 +5,44 @@ A Rust-based platform for deploying containerized applications to Kubernetes and
 ## Overview
 
 Rise consists of:
-- **rise-backend**: REST API backend built with Axum, PostgreSQL, and Dex OAuth2/OIDC
+- **rise-backend**: REST API backend built with Axum, PostgreSQL, and Dex OAuth2/OIDC with embedded web frontend
 - **rise-cli**: Command-line interface, including the backend and commands to manage teams, projects and deployments
 - **PostgreSQL**: Primary database with SQLX migrations
 - **Dex**: OAuth2/OIDC authentication provider
+
+## Web Frontend
+
+The Rise backend includes a read-only web frontend for viewing projects, teams, and deployments through a browser. All static assets are embedded directly into the binary using `rust-embed`, so no external files are needed for deployment.
+
+### Accessing the Frontend
+
+1. Start the backend server:
+   ```bash
+   mise run rise-backend
+   # Or manually: cargo run --bin rise -- backend server
+   ```
+
+2. Open your browser to http://localhost:3000
+
+3. Click "Login with OAuth" to authenticate via Dex
+
+### Features
+
+- **OAuth2 PKCE Authentication**: Secure browser-based authentication flow matching the CLI
+- **Projects Dashboard**: View all projects, their status, and deployments
+- **Teams Dashboard**: View teams and member counts
+- **Deployment Tracking**: Real-time deployment status updates with auto-refresh
+- **Deployment Logs**: View build logs inline
+- **Responsive Design**: Works on desktop and mobile browsers
+- **Single Binary Deployment**: All HTML/CSS/JS embedded in the binary
+
+### Technology Stack
+
+- **Backend**: Axum with rust-embed for embedded static files
+- **Frontend**: Vanilla HTML/CSS/JavaScript (no build step required)
+- **CSS Framework**: Pico CSS (classless, minimal)
+- **Authentication**: OAuth2 PKCE flow (Web Crypto API for SHA-256)
+- **Real-time Updates**: JavaScript polling (3-5 second intervals for active deployments)
 
 ## Local Development
 
