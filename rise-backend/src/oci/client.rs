@@ -30,7 +30,7 @@ impl OciClient {
         // Format: registry/namespace/image@sha256:digest
         let registry = reference.registry();
         let repository = reference.repository();
-        let digest_ref = format!("{}{}@{}", registry, repository, digest);
+        let digest_ref = format!("{}/{}@{}", registry, repository, digest);
 
         Ok(digest_ref)
     }
