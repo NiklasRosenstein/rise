@@ -177,3 +177,24 @@ Environment variables are centralized in `.envrc` (loaded by direnv):
 - Axum capture groups are formatted as `{capture}`
 - Keep the documentation updated. Don't be overly verbose when documenting the project. People can read the code, but things that are not obvious or help getting started and context are usually helpful in documentation, as well as well-placed and lean examples.
 - Your todo lists should always include tasks for ensuring formatting and linting are addressed and creating commits of reasonable size (related changes in one commit)
+
+## Future Enhancements
+
+### Ingress Authentication (Kubernetes Controller)
+
+The project `visibility` field (Public/Private) is currently stored but not enforced at the API level. This field is intended for future ingress-level authentication when deploying to Kubernetes:
+
+- **Public projects**: The ingress will serve the application without requiring authentication
+- **Private projects**: The ingress will require user authentication AND verify project access authorization before serving the application
+
+**Current State**: The visibility field is stored in the database and returned via the API, but does NOT affect:
+- API authorization (all projects require ownership/team membership to access via API)
+- Docker controller deployments (no ingress authentication layer)
+
+**Implementation Plan**:
+- When the Kubernetes controller is implemented, it will configure ingress resources based on the visibility field
+- Public projects will have standard ingress rules
+- Private projects will have OAuth2 proxy or similar authentication middleware configured in the ingress
+- The authentication layer will validate both user identity AND project access permissions before proxying requests to the application
+
+This feature is specifically for the Kubernetes controller and will not be implemented for the Docker controller.
