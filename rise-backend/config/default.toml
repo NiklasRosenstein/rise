@@ -7,6 +7,8 @@ public_url = "http://localhost:3000"
 issuer = "http://localhost:5556/dex"
 client_id = "rise-backend"
 client_secret = "rise-backend-secret"
+# List of admin user emails (have full permissions on all resources)
+admin_users = ["admin@example.com"]
 
 [database]
 url = "postgres://rise:rise123@localhost:5432/rise"

@@ -24,6 +24,7 @@ pub struct AppState {
     pub oauth_client: Arc<DexOAuthClient>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub oci_client: Arc<crate::oci::OciClient>,
+    pub admin_users: Arc<Vec<String>>,
 }
 
 impl ControllerState {
@@ -154,12 +155,19 @@ impl AppState {
             Arc::new(crate::oci::OciClient::new().context("Failed to initialize OCI client")?);
         tracing::info!("Initialized OCI client for registry digest resolution");
 
+        // Store admin users list
+        let admin_users = Arc::new(settings.auth.admin_users.clone());
+        if !admin_users.is_empty() {
+            tracing::info!("Configured {} admin user(s)", admin_users.len());
+        }
+
         Ok(Self {
             db_pool,
             jwt_validator,
             oauth_client,
             registry_provider,
             oci_client,
+            admin_users,
         })
     }
 }

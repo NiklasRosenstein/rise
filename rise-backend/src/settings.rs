@@ -23,6 +23,9 @@ pub struct AuthSettings {
     pub issuer: String,
     pub client_id: String,
     pub client_secret: String,
+    /// List of admin user emails (have full permissions)
+    #[serde(default)]
+    pub admin_users: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

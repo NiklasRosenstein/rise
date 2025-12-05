@@ -203,7 +203,7 @@ pub async fn get_project(
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
     // Check read permission
-    let can_read = check_read_permission(&state, &project, user.id)
+    let can_read = check_read_permission(&state, &project, &user)
         .await
         .map_err(|e| {
             (
@@ -273,7 +273,7 @@ pub async fn update_project(
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
     // Check write permission
-    let can_write = check_write_permission(&state, &project, user.id)
+    let can_write = check_write_permission(&state, &project, &user)
         .await
         .map_err(|e| {
             (
@@ -465,7 +465,7 @@ pub async fn delete_project(
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
     // Check write permission
-    let can_write = check_write_permission(&state, &project, user.id)
+    let can_write = check_write_permission(&state, &project, &user)
         .await
         .map_err(|e| {
             (
@@ -666,26 +666,41 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
     }
 }
 
-/// Check if user can read a project (owner or team member)
+/// Check if a user is an admin (based on email in config)
+fn is_admin(state: &AppState, user_email: &str) -> bool {
+    state.admin_users.contains(&user_email.to_string())
+}
+
+/// Check if user can read a project (owner, team member, or admin)
 async fn check_read_permission(
     state: &AppState,
     project: &crate::db::models::Project,
-    user_id: Uuid,
+    user: &User,
 ) -> Result<bool, String> {
+    // Admins have full access
+    if is_admin(state, &user.email) {
+        return Ok(true);
+    }
+
     // Check ownership or team membership
-    projects::user_can_access(&state.db_pool, project.id, user_id)
+    projects::user_can_access(&state.db_pool, project.id, user.id)
         .await
         .map_err(|e| format!("Failed to check access: {}", e))
 }
 
-/// Check if user can write to a project (owner or team member)
+/// Check if user can write to a project (owner, team member, or admin)
 async fn check_write_permission(
     state: &AppState,
     project: &crate::db::models::Project,
-    user_id: Uuid,
+    user: &User,
 ) -> Result<bool, String> {
+    // Admins have full access
+    if is_admin(state, &user.email) {
+        return Ok(true);
+    }
+
     // Write access requires ownership (user or team member)
-    projects::user_can_access(&state.db_pool, project.id, user_id)
+    projects::user_can_access(&state.db_pool, project.id, user.id)
         .await
         .map_err(|e| format!("Failed to check access: {}", e))
 }

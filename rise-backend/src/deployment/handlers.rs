@@ -13,24 +13,33 @@ use super::utils::generate_deployment_id;
 use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
 use crate::db::{deployments as db_deployments, projects, teams as db_teams};
 use crate::state::AppState;
-use uuid::Uuid;
+
+/// Check if a user is an admin (based on email in config)
+fn is_admin(state: &AppState, user_email: &str) -> bool {
+    state.admin_users.contains(&user_email.to_string())
+}
 
 /// Check if user has permission to deploy to the project
 async fn check_deploy_permission(
     state: &AppState,
     project: &crate::db::models::Project,
-    user_id: Uuid,
+    user: &User,
 ) -> Result<(), String> {
+    // Admins have full access
+    if is_admin(state, &user.email) {
+        return Ok(());
+    }
+
     // If project is owned by the user directly, allow
     if let Some(owner_user_id) = project.owner_user_id {
-        if owner_user_id == user_id {
+        if owner_user_id == user.id {
             return Ok(());
         }
     }
 
     // If project is owned by a team, check if user is a member of that team
     if let Some(team_id) = project.owner_team_id {
-        let is_member = db_teams::is_member(&state.db_pool, team_id, user_id)
+        let is_member = db_teams::is_member(&state.db_pool, team_id, user.id)
             .await
             .map_err(|e| format!("Failed to check team membership: {}", e))?;
 
@@ -281,7 +290,7 @@ pub async fn create_deployment(
     }
 
     // Check deployment permissions
-    check_deploy_permission(&state, &project, user.id)
+    check_deploy_permission(&state, &project, &user)
         .await
         .map_err(|e| (StatusCode::FORBIDDEN, e))?;
 
@@ -461,7 +470,7 @@ pub async fn update_deployment_status(
     ))?;
 
     // Check if user has permission (owns the project)
-    check_deploy_permission(&state, &project, user.id)
+    check_deploy_permission(&state, &project, &user)
         .await
         .map_err(|e| (StatusCode::FORBIDDEN, e))?;
 
@@ -656,7 +665,7 @@ pub async fn stop_deployments_by_group(
         })?;
 
     // Check if user has permission to stop deployments (owns the project)
-    check_deploy_permission(&state, &project, user.id)
+    check_deploy_permission(&state, &project, &user)
         .await
         .map_err(|e| (StatusCode::FORBIDDEN, e))?;
 
@@ -828,7 +837,7 @@ pub async fn rollback_deployment(
         })?;
 
     // Check deployment permissions
-    check_deploy_permission(&state, &project, user.id)
+    check_deploy_permission(&state, &project, &user)
         .await
         .map_err(|e| (StatusCode::FORBIDDEN, e))?;
 

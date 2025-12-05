@@ -174,18 +174,23 @@ pub async fn update_team(
     // Resolve team by ID or name
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
-    // Check if user is an owner of the team
-    let is_owner = db_teams::is_owner(&state.db_pool, team.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TeamErrorResponse {
-                    error: format!("Failed to check team ownership: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+    // Check if user is an admin or owner of the team
+    let is_admin = state.admin_users.contains(&user.email);
+    let is_owner = if !is_admin {
+        db_teams::is_owner(&state.db_pool, team.id, user.id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(TeamErrorResponse {
+                        error: format!("Failed to check team ownership: {}", e),
+                        suggestions: None,
+                    }),
+                )
+            })?
+    } else {
+        true // Admins bypass ownership check
+    };
 
     if !is_owner {
         return Err((
@@ -393,18 +398,23 @@ pub async fn delete_team(
     // Resolve team by ID or name
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
-    // Check if user is an owner of the team
-    let is_owner = db_teams::is_owner(&state.db_pool, team.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TeamErrorResponse {
-                    error: format!("Failed to check team ownership: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+    // Check if user is an admin or owner of the team
+    let is_admin = state.admin_users.contains(&user.email);
+    let is_owner = if !is_admin {
+        db_teams::is_owner(&state.db_pool, team.id, user.id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(TeamErrorResponse {
+                        error: format!("Failed to check team ownership: {}", e),
+                        suggestions: None,
+                    }),
+                )
+            })?
+    } else {
+        true // Admins bypass ownership check
+    };
 
     if !is_owner {
         return Err((
