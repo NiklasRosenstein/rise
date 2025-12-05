@@ -153,7 +153,7 @@ pub async fn update_status(
         UPDATE deployments
         SET status = $2
         WHERE id = $1
-          AND status NOT IN ('Terminating', 'Cancelling', 'Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired')
+          AND NOT is_protected(status)
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
@@ -263,7 +263,7 @@ pub async fn get_latest_for_project(pool: &PgPool, project_id: Uuid) -> Result<O
 }
 
 /// Find deployments in non-terminal states for reconciliation
-/// Excludes terminal states: Cancelled, Stopped, Superseded, Failed, Expired
+/// Excludes terminal states using is_terminal() PostgreSQL function
 pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(
         Deployment,
@@ -279,7 +279,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
-        WHERE status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired')
+        WHERE NOT is_terminal(status)
         ORDER BY updated_at ASC
         LIMIT $1
         "#,
@@ -312,7 +312,7 @@ pub async fn find_non_terminal_for_project(
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
-          AND status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired')
+          AND NOT is_terminal(status)
         ORDER BY created_at DESC
         "#,
         project_id
@@ -700,7 +700,7 @@ pub async fn find_cancellable_for_project(
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
-          AND status IN ('Pending', 'Building', 'Pushing', 'Pushed', 'Deploying')
+          AND is_cancellable(status)
         ORDER BY created_at DESC
         "#,
         project_id
@@ -789,7 +789,7 @@ pub async fn find_non_terminal_for_project_and_group(
         FROM deployments
         WHERE project_id = $1
           AND deployment_group = $2
-          AND status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired')
+          AND NOT is_terminal(status)
         ORDER BY created_at DESC
         "#,
         project_id,
@@ -820,7 +820,7 @@ pub async fn find_expired(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> 
         FROM deployments
         WHERE expires_at IS NOT NULL
           AND expires_at <= NOW()
-          AND status NOT IN ('Cancelled', 'Stopped', 'Superseded', 'Failed')
+          AND NOT is_terminal(status)
         ORDER BY expires_at ASC
         LIMIT $1
         "#,
@@ -868,4 +868,201 @@ pub async fn list_for_project_and_group(
     };
 
     Ok(deployments)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::deployment::state_machine;
+
+    fn str_to_status(s: &str) -> DeploymentStatus {
+        match s {
+            "Pending" => DeploymentStatus::Pending,
+            "Building" => DeploymentStatus::Building,
+            "Pushing" => DeploymentStatus::Pushing,
+            "Pushed" => DeploymentStatus::Pushed,
+            "Deploying" => DeploymentStatus::Deploying,
+            "Healthy" => DeploymentStatus::Healthy,
+            "Unhealthy" => DeploymentStatus::Unhealthy,
+            "Cancelling" => DeploymentStatus::Cancelling,
+            "Cancelled" => DeploymentStatus::Cancelled,
+            "Terminating" => DeploymentStatus::Terminating,
+            "Stopped" => DeploymentStatus::Stopped,
+            "Superseded" => DeploymentStatus::Superseded,
+            "Failed" => DeploymentStatus::Failed,
+            "Expired" => DeploymentStatus::Expired,
+            _ => panic!("Unknown status: {}", s),
+        }
+    }
+
+    /// Test that PostgreSQL is_terminal() function matches Rust is_terminal() function
+    #[sqlx::test]
+    async fn db_is_terminal_matches_rust_is_terminal(pool: PgPool) {
+        // Test all deployment statuses
+        let statuses = vec![
+            ("Pending", false),
+            ("Building", false),
+            ("Pushing", false),
+            ("Pushed", false),
+            ("Deploying", false),
+            ("Healthy", false),
+            ("Unhealthy", false),
+            ("Cancelling", false),
+            ("Terminating", false),
+            ("Cancelled", true),
+            ("Stopped", true),
+            ("Superseded", true),
+            ("Failed", true),
+            ("Expired", true),
+        ];
+
+        for (status_str, expected) in statuses {
+            // Test PostgreSQL function
+            let result: bool = sqlx::query_scalar("SELECT is_terminal($1)")
+                .bind(status_str)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                result, expected,
+                "is_terminal({}) returned {} but expected {}",
+                status_str, result, expected
+            );
+
+            // Also verify Rust function matches
+            let status = str_to_status(status_str);
+            assert_eq!(
+                state_machine::is_terminal(&status),
+                expected,
+                "Rust is_terminal mismatch for {}",
+                status_str
+            );
+        }
+    }
+
+    /// Test that PostgreSQL is_cancellable() function matches Rust is_cancellable() function
+    #[sqlx::test]
+    async fn db_is_cancellable_matches_rust_is_cancellable(pool: PgPool) {
+        let statuses = vec![
+            ("Pending", true),
+            ("Building", true),
+            ("Pushing", true),
+            ("Pushed", true),
+            ("Deploying", true),
+            ("Healthy", false),
+            ("Unhealthy", false),
+            ("Cancelling", false),
+            ("Terminating", false),
+            ("Cancelled", false),
+            ("Stopped", false),
+            ("Superseded", false),
+            ("Failed", false),
+            ("Expired", false),
+        ];
+
+        for (status_str, expected) in statuses {
+            // Test PostgreSQL function
+            let result: bool = sqlx::query_scalar("SELECT is_cancellable($1)")
+                .bind(status_str)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                result, expected,
+                "is_cancellable({}) returned {} but expected {}",
+                status_str, result, expected
+            );
+
+            // Also verify Rust function matches
+            let status = str_to_status(status_str);
+            assert_eq!(
+                state_machine::is_cancellable(&status),
+                expected,
+                "Rust is_cancellable mismatch for {}",
+                status_str
+            );
+        }
+    }
+
+    /// Test that PostgreSQL is_active() function matches Rust is_active() function
+    #[sqlx::test]
+    async fn db_is_active_matches_rust_is_active(pool: PgPool) {
+        let statuses = vec![
+            ("Pending", false),
+            ("Building", false),
+            ("Pushing", false),
+            ("Pushed", false),
+            ("Deploying", false),
+            ("Healthy", true),
+            ("Unhealthy", true),
+            ("Cancelling", false),
+            ("Terminating", false),
+            ("Cancelled", false),
+            ("Stopped", false),
+            ("Superseded", false),
+            ("Failed", false),
+            ("Expired", false),
+        ];
+
+        for (status_str, expected) in statuses {
+            // Test PostgreSQL function
+            let result: bool = sqlx::query_scalar("SELECT is_active($1)")
+                .bind(status_str)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                result, expected,
+                "is_active({}) returned {} but expected {}",
+                status_str, result, expected
+            );
+
+            // Also verify Rust function matches
+            let status = str_to_status(status_str);
+            assert_eq!(
+                state_machine::is_active(&status),
+                expected,
+                "Rust is_active mismatch for {}",
+                status_str
+            );
+        }
+    }
+
+    /// Test that PostgreSQL is_protected() function includes all terminal and cleanup states
+    #[sqlx::test]
+    async fn db_is_protected_includes_terminal_and_cleanup(pool: PgPool) {
+        let statuses = vec![
+            ("Pending", false),
+            ("Building", false),
+            ("Pushing", false),
+            ("Pushed", false),
+            ("Deploying", false),
+            ("Healthy", false),
+            ("Unhealthy", false),
+            ("Cancelling", true),  // Cleanup state
+            ("Terminating", true), // Cleanup state
+            ("Cancelled", true),   // Terminal
+            ("Stopped", true),     // Terminal
+            ("Superseded", true),  // Terminal
+            ("Failed", true),      // Terminal
+            ("Expired", true),     // Terminal
+        ];
+
+        for (status_str, expected) in statuses {
+            let result: bool = sqlx::query_scalar("SELECT is_protected($1)")
+                .bind(status_str)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+
+            assert_eq!(
+                result, expected,
+                "is_protected({}) returned {} but expected {}",
+                status_str, result, expected
+            );
+        }
+    }
 }
