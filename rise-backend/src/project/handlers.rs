@@ -1,17 +1,17 @@
-use axum::{
-    Json,
-    extract::{State, Path, Query, Extension},
-    http::StatusCode,
-};
-use crate::state::AppState;
-use crate::db::models::User;
-use crate::db::{projects, users as db_users, teams as db_teams};
-use super::models::{
-    CreateProjectRequest, CreateProjectResponse, Project as ApiProject, UpdateProjectRequest, UpdateProjectResponse,
-    ProjectWithOwnerInfo, ProjectErrorResponse, UserInfo, TeamInfo, OwnerInfo, GetProjectParams,
-    ProjectStatus, ProjectOwner, ProjectVisibility,
-};
 use super::fuzzy::find_similar_projects;
+use super::models::{
+    CreateProjectRequest, CreateProjectResponse, GetProjectParams, OwnerInfo,
+    Project as ApiProject, ProjectErrorResponse, ProjectOwner, ProjectStatus, ProjectVisibility,
+    ProjectWithOwnerInfo, TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
+};
+use crate::db::models::User;
+use crate::db::{projects, teams as db_teams, users as db_users};
+use crate::state::AppState;
+use axum::{
+    extract::{Extension, Path, Query, State},
+    http::StatusCode,
+    Json,
+};
 use uuid::Uuid;
 
 pub async fn create_project(
@@ -33,17 +33,29 @@ pub async fn create_project(
             // Verify user is a member of the team
             let is_member = db_teams::is_member(&state.db_pool, uuid, user.id)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to check team membership: {}", e)))?;
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to check team membership: {}", e),
+                    )
+                })?;
 
             if !is_member {
-                return Err((StatusCode::FORBIDDEN, "You are not a member of this team".to_string()));
+                return Err((
+                    StatusCode::FORBIDDEN,
+                    "You are not a member of this team".to_string(),
+                ));
             }
 
             (None, Some(uuid))
         }
     };
 
-    tracing::info!("Creating project '{}' for user {}", payload.name, user.email);
+    tracing::info!(
+        "Creating project '{}' for user {}",
+        payload.name,
+        user.email
+    );
 
     let project = projects::create(
         &state.db_pool,
@@ -56,9 +68,15 @@ pub async fn create_project(
     .await
     .map_err(|e| {
         if e.to_string().contains("duplicate key") || e.to_string().contains("unique constraint") {
-            (StatusCode::CONFLICT, format!("Project '{}' already exists", payload.name))
+            (
+                StatusCode::CONFLICT,
+                format!("Project '{}' already exists", payload.name),
+            )
         } else {
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create project: {}", e))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create project: {}", e),
+            )
         }
     })?;
 
@@ -71,30 +89,41 @@ pub async fn list_projects(
     State(state): State<AppState>,
     Extension(_user): Extension<User>,
 ) -> Result<Json<Vec<ApiProject>>, (StatusCode, String)> {
-    let projects = projects::list(&state.db_pool, None)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to list projects: {}", e)))?;
+    let projects = projects::list(&state.db_pool, None).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to list projects: {}", e),
+        )
+    })?;
 
     // Batch fetch deployment URLs for efficiency
     let project_ids: Vec<uuid::Uuid> = projects.iter().map(|p| p.id).collect();
     let deployment_urls = projects::get_deployment_urls_batch(&state.db_pool, &project_ids)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get deployment URLs: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get deployment URLs: {}", e),
+            )
+        })?;
 
-    let api_projects = projects.into_iter().map(|project| {
-        let deployment_url = deployment_urls.get(&project.id).and_then(|u| u.clone());
-        ApiProject {
-            id: project.id.to_string(),
-            created: project.created_at.to_rfc3339(),
-            updated: project.updated_at.to_rfc3339(),
-            name: project.name,
-            status: ProjectStatus::from(project.status),
-            visibility: ProjectVisibility::from(project.visibility),
-            owner_user: project.owner_user_id.map(|id| id.to_string()),
-            owner_team: project.owner_team_id.map(|id| id.to_string()),
-            deployment_url,
-        }
-    }).collect();
+    let api_projects = projects
+        .into_iter()
+        .map(|project| {
+            let deployment_url = deployment_urls.get(&project.id).and_then(|u| u.clone());
+            ApiProject {
+                id: project.id.to_string(),
+                created: project.created_at.to_rfc3339(),
+                updated: project.updated_at.to_rfc3339(),
+                name: project.name,
+                status: ProjectStatus::from(project.status),
+                visibility: ProjectVisibility::from(project.visibility),
+                owner_user: project.owner_user_id.map(|id| id.to_string()),
+                owner_team: project.owner_team_id.map(|id| id.to_string()),
+                deployment_url,
+            }
+        })
+        .collect();
 
     Ok(Json(api_projects))
 }
@@ -123,15 +152,17 @@ pub async fn get_project(
 
     // Check if we should expand owner information
     if params.should_expand("owner") {
-        let mut expanded = expand_project_with_owner(&state, project).await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to expand project data: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        let mut expanded = expand_project_with_owner(&state, project)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ProjectErrorResponse {
+                        error: format!("Failed to expand project data: {}", e),
+                        suggestions: None,
+                    }),
+                )
+            })?;
 
         expanded.deployment_url = deployment_url;
         Ok(Json(serde_json::to_value(expanded).unwrap()))
@@ -154,17 +185,21 @@ pub async fn update_project(
 
     // Update project fields
     let updated_project = if let Some(status) = payload.status {
-        projects::update_status(&state.db_pool, project.id, crate::db::models::ProjectStatus::from(status))
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ProjectErrorResponse {
-                        error: format!("Failed to update project: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?
+        projects::update_status(
+            &state.db_pool,
+            project.id,
+            crate::db::models::ProjectStatus::from(status),
+        )
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to update project: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?
     } else {
         project
     };
@@ -212,8 +247,7 @@ async fn query_project_by_id(
     state: &AppState,
     project_id: &str,
 ) -> Result<crate::db::models::Project, String> {
-    let uuid = Uuid::parse_str(project_id)
-        .map_err(|e| format!("Invalid project ID: {}", e))?;
+    let uuid = Uuid::parse_str(project_id).map_err(|e| format!("Invalid project ID: {}", e))?;
 
     projects::find_by_id(&state.db_pool, uuid)
         .await
@@ -271,7 +305,7 @@ async fn expand_project_with_owner(
         status: ProjectStatus::from(project.status),
         visibility: ProjectVisibility::from(project.visibility),
         owner: owner_info,
-        deployment_url: None,  // Will be populated by caller
+        deployment_url: None, // Will be populated by caller
         created: project.created_at.to_rfc3339(),
         updated: project.updated_at.to_rfc3339(),
     })
@@ -288,17 +322,15 @@ async fn resolve_project(
     let project = if by_id {
         // Explicit ID lookup
         tracing::info!("Using explicit ID lookup");
-        query_project_by_id(state, id_or_name)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::NOT_FOUND,
-                    Json(ProjectErrorResponse {
-                        error: e,
-                        suggestions: None,
-                    }),
-                )
-            })?
+        query_project_by_id(state, id_or_name).await.map_err(|e| {
+            (
+                StatusCode::NOT_FOUND,
+                Json(ProjectErrorResponse {
+                    error: e,
+                    suggestions: None,
+                }),
+            )
+        })?
     } else {
         // Try name first, fallback to ID
         tracing::info!("Trying name lookup first, will fallback to ID");
@@ -310,15 +342,14 @@ async fn resolve_project(
                     tracing::info!("Both lookups failed, generating fuzzy suggestions");
                     // Both failed - provide fuzzy suggestions
                     let all_projects = tokio::task::block_in_place(|| {
-                        tokio::runtime::Handle::current().block_on(projects::list(&state.db_pool, None))
+                        tokio::runtime::Handle::current()
+                            .block_on(projects::list(&state.db_pool, None))
                     });
 
                     let suggestions = match all_projects {
                         Ok(all_projects) => {
-                            let api_projects: Vec<ApiProject> = all_projects
-                                .into_iter()
-                                .map(convert_project)
-                                .collect();
+                            let api_projects: Vec<ApiProject> =
+                                all_projects.into_iter().map(convert_project).collect();
                             let similar = find_similar_projects(id_or_name, &api_projects, 0.85);
                             if similar.is_empty() {
                                 None
@@ -355,6 +386,6 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         visibility: ProjectVisibility::from(project.visibility),
         owner_user: project.owner_user_id.map(|id| id.to_string()),
         owner_team: project.owner_team_id.map(|id| id.to_string()),
-        deployment_url: None,  // Will be populated by caller
+        deployment_url: None, // Will be populated by caller
     }
 }

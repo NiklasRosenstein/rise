@@ -1,6 +1,6 @@
-use anyhow::{Result, Context, anyhow};
-use serde::{Deserialize, Serialize};
+use anyhow::{anyhow, Context, Result};
 use reqwest::Client as HttpClient;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 /// OAuth2 token response from Dex
@@ -84,8 +84,15 @@ impl DexOAuthClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(anyhow!("Token request failed with status {}: {}", status, error_text));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(anyhow!(
+                "Token request failed with status {}: {}",
+                status,
+                error_text
+            ));
         }
 
         let token_response: DexTokenResponse = response
@@ -123,8 +130,15 @@ impl DexOAuthClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(anyhow!("Device auth request failed with status {}: {}", status, error_text));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(anyhow!(
+                "Device auth request failed with status {}: {}",
+                status,
+                error_text
+            ));
         }
 
         let device_response: DexDeviceAuthResponse = response
@@ -138,7 +152,7 @@ impl DexOAuthClient {
             verification_uri: device_response.verification_uri.clone(),
             verification_uri_complete: device_response
                 .verification_uri_complete
-                .unwrap_or_else(|| device_response.verification_uri),
+                .unwrap_or(device_response.verification_uri),
             expires_in: device_response.expires_in.unwrap_or(600),
             interval: device_response.interval.unwrap_or(5),
         })
@@ -187,8 +201,15 @@ impl DexOAuthClient {
             }
         } else {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            Err(anyhow!("Device token request failed with status {}: {}", status, error_text))
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            Err(anyhow!(
+                "Device token request failed with status {}: {}",
+                status,
+                error_text
+            ))
         }
     }
 
@@ -218,8 +239,15 @@ impl DexOAuthClient {
 
         if !response.status().is_success() {
             let status = response.status();
-            let error_text = response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
-            return Err(anyhow!("Code exchange failed with status {}: {}", status, error_text));
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            return Err(anyhow!(
+                "Code exchange failed with status {}: {}",
+                status,
+                error_text
+            ));
         }
 
         let token_response: DexTokenResponse = response

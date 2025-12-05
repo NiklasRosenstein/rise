@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
-use anyhow::{Result, Context};
 
 use crate::db::models::User;
 

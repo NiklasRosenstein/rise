@@ -1,7 +1,10 @@
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 
-use crate::registry::{RegistryProvider, models::{RegistryCredentials, DockerConfig}};
+use crate::registry::{
+    models::{DockerConfig, RegistryCredentials},
+    RegistryProvider,
+};
 
 /// Generic Docker registry provider
 ///
@@ -15,21 +18,31 @@ pub struct DockerProvider {
 impl DockerProvider {
     /// Create a new Docker registry provider
     pub fn new(config: DockerConfig) -> Result<Self> {
-        let registry_url = format!("{}/{}", config.registry_url.trim_end_matches('/'), config.namespace);
-        Ok(Self { config, registry_url })
+        let registry_url = format!(
+            "{}/{}",
+            config.registry_url.trim_end_matches('/'),
+            config.namespace
+        );
+        Ok(Self {
+            config,
+            registry_url,
+        })
     }
 }
 
 #[async_trait]
 impl RegistryProvider for DockerProvider {
     async fn get_credentials(&self, repository: &str) -> Result<RegistryCredentials> {
-        tracing::info!("Returning Docker registry info for repository: {}", repository);
+        tracing::info!(
+            "Returning Docker registry info for repository: {}",
+            repository
+        );
 
         // Return registry URL - credentials assumed to be configured via docker login
         Ok(RegistryCredentials {
             registry_url: self.registry_url.clone(),
-            username: String::new(),  // Empty - docker CLI uses stored credentials
-            password: String::new(),  // Empty - docker CLI uses stored credentials
+            username: String::new(), // Empty - docker CLI uses stored credentials
+            password: String::new(), // Empty - docker CLI uses stored credentials
             expires_in: None,
         })
     }

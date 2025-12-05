@@ -1,10 +1,13 @@
+use anyhow::{Context, Result};
 use async_trait::async_trait;
-use anyhow::{Result, Context};
 use aws_config::BehaviorVersion;
 use aws_sdk_ecr::Client as EcrClient;
 use base64::Engine;
 
-use crate::registry::{RegistryProvider, models::{RegistryCredentials, EcrConfig}};
+use crate::registry::{
+    models::{EcrConfig, RegistryCredentials},
+    RegistryProvider,
+};
 
 /// AWS ECR registry provider
 pub struct EcrProvider {
@@ -18,15 +21,11 @@ impl EcrProvider {
     pub async fn new(config: EcrConfig) -> Result<Self> {
         // Build AWS config
         let aws_config = if let (Some(access_key), Some(secret_key)) =
-            (&config.access_key_id, &config.secret_access_key) {
+            (&config.access_key_id, &config.secret_access_key)
+        {
             // Use static credentials if provided
-            let creds = aws_sdk_ecr::config::Credentials::new(
-                access_key,
-                secret_key,
-                None,
-                None,
-                "static",
-            );
+            let creds =
+                aws_sdk_ecr::config::Credentials::new(access_key, secret_key, None, None, "static");
             aws_config::defaults(BehaviorVersion::latest())
                 .credentials_provider(creds)
                 .region(aws_config::Region::new(config.region.clone()))
@@ -42,9 +41,16 @@ impl EcrProvider {
 
         let client = EcrClient::new(&aws_config);
 
-        let registry_url = format!("{}.dkr.ecr.{}.amazonaws.com", config.account_id, config.region);
+        let registry_url = format!(
+            "{}.dkr.ecr.{}.amazonaws.com",
+            config.account_id, config.region
+        );
 
-        Ok(Self { config, client, registry_url })
+        Ok(Self {
+            config,
+            client,
+            registry_url,
+        })
     }
 }
 
@@ -54,7 +60,8 @@ impl RegistryProvider for EcrProvider {
         tracing::info!("Getting ECR credentials for repository: {}", repository);
 
         // Get authorization token from ECR
-        let response = self.client
+        let response = self
+            .client
             .get_authorization_token()
             .send()
             .await
@@ -74,8 +81,7 @@ impl RegistryProvider for EcrProvider {
             .decode(token)
             .context("Failed to decode ECR token")?;
 
-        let decoded_str = String::from_utf8(decoded)
-            .context("ECR token is not valid UTF-8")?;
+        let decoded_str = String::from_utf8(decoded).context("ECR token is not valid UTF-8")?;
 
         let parts: Vec<&str> = decoded_str.splitn(2, ':').collect();
         if parts.len() != 2 {

@@ -1,8 +1,8 @@
 use async_trait::async_trait;
-use bollard::Docker;
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
 use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, PortBinding};
+use bollard::Docker;
 use chrono::Utc;
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -11,8 +11,8 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tracing::{debug, error, info, warn};
 
-use crate::db::models::{Deployment, Project, DeploymentStatus};
-use super::{DeploymentBackend, ReconcileResult, HealthStatus};
+use super::{DeploymentBackend, HealthStatus, ReconcileResult};
+use crate::db::models::{Deployment, DeploymentStatus, Project};
 
 /// Docker-specific metadata stored in deployment.controller_metadata
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -20,7 +20,7 @@ struct DockerMetadata {
     container_id: Option<String>,
     container_name: Option<String>,
     assigned_port: Option<u16>,
-    internal_port: u16,  // Default 8080
+    internal_port: u16, // Default 8080
     image_tag: Option<String>,
     #[serde(default)]
     reconcile_phase: ReconcilePhase,
@@ -119,7 +119,9 @@ impl DockerController {
 
                     return Some(ReconcileResult {
                         status: deployment.status.clone(),
-                        deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                        deployment_url: metadata
+                            .assigned_port
+                            .map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&reset_metadata).ok()?,
                         error_message: None,
                         next_reconcile: super::ReconcileHint::Immediate,
@@ -138,7 +140,10 @@ impl DockerController {
         host_port: u16,
         container_name: &str,
     ) -> anyhow::Result<String> {
-        debug!("Creating container {} with image {} on port {}", container_name, image_tag, host_port);
+        debug!(
+            "Creating container {} with image {} on port {}",
+            container_name, image_tag, host_port
+        );
 
         // Pull the image first (required for digest references and ensures latest version)
         info!("Pulling image: {}", image_tag);
@@ -159,7 +164,11 @@ impl DockerController {
                     }
                 }
                 Err(e) => {
-                    return Err(anyhow::anyhow!("Failed to pull image '{}': {}", image_tag, e));
+                    return Err(anyhow::anyhow!(
+                        "Failed to pull image '{}': {}",
+                        image_tag,
+                        e
+                    ));
                 }
             }
         }
@@ -204,7 +213,10 @@ impl DockerController {
 
         let response = self.docker.create_container(Some(options), config).await?;
 
-        info!("Created container {} with ID {}", container_name, response.id);
+        info!(
+            "Created container {} with ID {}",
+            container_name, response.id
+        );
 
         Ok(response.id)
     }
@@ -219,35 +231,51 @@ impl DeploymentBackend for DockerController {
     /// 2. CreatingContainer → StartingContainer (create Docker container)
     /// 3. StartingContainer → WaitingForHealth (start container)
     /// 4. WaitingForHealth → Completed (wait for health check)
-    async fn reconcile(&self, deployment: &Deployment, project: &Project) -> anyhow::Result<ReconcileResult> {
+    async fn reconcile(
+        &self,
+        deployment: &Deployment,
+        project: &Project,
+    ) -> anyhow::Result<ReconcileResult> {
         // Parse existing metadata (or create default)
-        let mut metadata: DockerMetadata = serde_json::from_value(deployment.controller_metadata.clone())
-            .unwrap_or_default();
+        let mut metadata: DockerMetadata =
+            serde_json::from_value(deployment.controller_metadata.clone()).unwrap_or_default();
 
         // Default internal port
         if metadata.internal_port == 0 {
             metadata.internal_port = 8080;
         }
 
-        debug!("Reconciling deployment {} (status={:?}) in phase {:?}",
-            deployment.deployment_id, deployment.status, metadata.reconcile_phase);
+        debug!(
+            "Reconciling deployment {} (status={:?}) in phase {:?}",
+            deployment.deployment_id, deployment.status, metadata.reconcile_phase
+        );
 
         // Validate phase preconditions before proceeding
-        if let Some(result) = self.validate_phase_preconditions(&metadata.reconcile_phase, &metadata, deployment) {
-            info!("Phase validation failed, resetting deployment {}", deployment.deployment_id);
+        if let Some(result) =
+            self.validate_phase_preconditions(&metadata.reconcile_phase, &metadata, deployment)
+        {
+            info!(
+                "Phase validation failed, resetting deployment {}",
+                deployment.deployment_id
+            );
             return Ok(result);
         }
 
         // Handle Unhealthy deployments - attempt recovery
         if deployment.status == DeploymentStatus::Unhealthy {
-            info!("Attempting to recover unhealthy deployment {}", deployment.deployment_id);
+            info!(
+                "Attempting to recover unhealthy deployment {}",
+                deployment.deployment_id
+            );
 
             if let Some(ref container_id) = metadata.container_id {
                 // Check if container still exists
                 match self.docker.inspect_container(container_id, None).await {
                     Ok(inspect) => {
                         // Container exists - check if it's running
-                        let state = inspect.state.ok_or_else(|| anyhow::anyhow!("No state in inspect"))?;
+                        let state = inspect
+                            .state
+                            .ok_or_else(|| anyhow::anyhow!("No state in inspect"))?;
                         let is_running = state.running.unwrap_or(false);
 
                         if is_running {
@@ -255,7 +283,9 @@ impl DeploymentBackend for DockerController {
                             info!("Container {} is running, keeping deployment Unhealthy until health check confirms", container_id);
                             return Ok(ReconcileResult {
                                 status: DeploymentStatus::Unhealthy,
-                                deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                                deployment_url: metadata
+                                    .assigned_port
+                                    .map(|p| format!("http://localhost:{}", p)),
                                 controller_metadata: serde_json::to_value(&metadata)?,
                                 error_message: None,
                                 next_reconcile: super::ReconcileHint::Default,
@@ -263,15 +293,24 @@ impl DeploymentBackend for DockerController {
                         } else {
                             // Container exists but stopped - try to restart it
                             info!("Attempting to restart stopped container {}", container_id);
-                            match self.docker.start_container(container_id, None::<StartContainerOptions<String>>).await {
+                            match self
+                                .docker
+                                .start_container(
+                                    container_id,
+                                    None::<StartContainerOptions<String>>,
+                                )
+                                .await
+                            {
                                 Ok(_) => {
                                     info!("Successfully restarted container {}, waiting for health check", container_id);
                                     // Keep in Unhealthy state until health check confirms it's healthy
                                     return Ok(ReconcileResult {
                                         status: DeploymentStatus::Unhealthy,
-                                        deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                                        deployment_url: metadata
+                                            .assigned_port
+                                            .map(|p| format!("http://localhost:{}", p)),
                                         controller_metadata: serde_json::to_value(&metadata)?,
-                                        error_message: None,  // Don't set error - we're attempting recovery
+                                        error_message: None, // Don't set error - we're attempting recovery
                                         next_reconcile: super::ReconcileHint::Default,
                                     });
                                 }
@@ -280,7 +319,9 @@ impl DeploymentBackend for DockerController {
                                     // Keep in Unhealthy state, will retry on next reconciliation
                                     return Ok(ReconcileResult {
                                         status: DeploymentStatus::Unhealthy,
-                                        deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                                        deployment_url: metadata
+                                            .assigned_port
+                                            .map(|p| format!("http://localhost:{}", p)),
                                         controller_metadata: serde_json::to_value(&metadata)?,
                                         error_message: None,
                                         next_reconcile: super::ReconcileHint::Default,
@@ -289,9 +330,15 @@ impl DeploymentBackend for DockerController {
                             }
                         }
                     }
-                    Err(e) if e.to_string().contains("404") || e.to_string().contains("No such container") => {
+                    Err(e)
+                        if e.to_string().contains("404")
+                            || e.to_string().contains("No such container") =>
+                    {
                         // Container was removed - attempt to recreate it for recovery
-                        warn!("Container {} no longer exists, attempting to recreate for recovery", container_id);
+                        warn!(
+                            "Container {} no longer exists, attempting to recreate for recovery",
+                            container_id
+                        );
 
                         // Reset reconcile phase to recreate container
                         // Use CreatingContainer (not NotStarted) to preserve port allocation
@@ -299,14 +346,19 @@ impl DeploymentBackend for DockerController {
                         metadata.container_id = None;
 
                         // Fall through to normal reconciliation logic to recreate container
-                        info!("Reset reconciliation phase to CreatingContainer for deployment {}", deployment.deployment_id);
+                        info!(
+                            "Reset reconciliation phase to CreatingContainer for deployment {}",
+                            deployment.deployment_id
+                        );
                     }
                     Err(e) => {
                         warn!("Error inspecting container {}: {}", container_id, e);
                         // Keep in Unhealthy state, will retry on next reconciliation
                         return Ok(ReconcileResult {
                             status: DeploymentStatus::Unhealthy,
-                            deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                            deployment_url: metadata
+                                .assigned_port
+                                .map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
                             next_reconcile: super::ReconcileHint::Default,
@@ -325,7 +377,10 @@ impl DeploymentBackend for DockerController {
                 metadata.reconcile_phase = ReconcilePhase::CreatingContainer;
 
                 // Fall through to normal reconciliation logic to recreate container
-                info!("Reset reconciliation phase to CreatingContainer for deployment {}", deployment.deployment_id);
+                info!(
+                    "Reset reconciliation phase to CreatingContainer for deployment {}",
+                    deployment.deployment_id
+                );
             }
         }
 
@@ -335,10 +390,16 @@ impl DeploymentBackend for DockerController {
                 // If already Unhealthy, keep it Unhealthy (recovery attempt)
                 // Otherwise transition to Deploying (initial deployment)
                 let status = if deployment.status == DeploymentStatus::Unhealthy {
-                    info!("Starting recovery attempt for unhealthy deployment {}", deployment.deployment_id);
+                    info!(
+                        "Starting recovery attempt for unhealthy deployment {}",
+                        deployment.deployment_id
+                    );
                     DeploymentStatus::Unhealthy
                 } else {
-                    info!("Starting reconciliation for deployment {}", deployment.deployment_id);
+                    info!(
+                        "Starting reconciliation for deployment {}",
+                        deployment.deployment_id
+                    );
                     DeploymentStatus::Deploying
                 };
 
@@ -378,7 +439,10 @@ impl DeploymentBackend for DockerController {
                 let container_name = format!("rise-{}-{}", project.name, deployment.deployment_id);
                 metadata.container_name = Some(container_name.clone());
 
-                match self.create_container(&image_tag, port, &container_name).await {
+                match self
+                    .create_container(&image_tag, port, &container_name)
+                    .await
+                {
                     Ok(container_id) => {
                         metadata.container_id = Some(container_id);
                         metadata.reconcile_phase = ReconcilePhase::StartingContainer;
@@ -398,15 +462,26 @@ impl DeploymentBackend for DockerController {
                             next_reconcile: super::ReconcileHint::Default,
                         })
                     }
-                    Err(e) if e.to_string().contains("already exists") || e.to_string().contains("Conflict") => {
+                    Err(e)
+                        if e.to_string().contains("already exists")
+                            || e.to_string().contains("Conflict") =>
+                    {
                         // Container exists - need to get its ID
-                        info!("Container {} already exists, retrieving container ID", container_name);
+                        info!(
+                            "Container {} already exists, retrieving container ID",
+                            container_name
+                        );
 
                         // Use Docker API to find the container by name
                         match self.docker.inspect_container(&container_name, None).await {
                             Ok(inspect) => {
-                                let container_id = inspect.id.ok_or_else(|| anyhow::anyhow!("No ID in container inspect"))?;
-                                info!("Found existing container {} with ID {}", container_name, container_id);
+                                let container_id = inspect
+                                    .id
+                                    .ok_or_else(|| anyhow::anyhow!("No ID in container inspect"))?;
+                                info!(
+                                    "Found existing container {} with ID {}",
+                                    container_name, container_id
+                                );
 
                                 metadata.container_id = Some(container_id);
                                 metadata.reconcile_phase = ReconcilePhase::StartingContainer;
@@ -428,7 +503,10 @@ impl DeploymentBackend for DockerController {
                             }
                             Err(inspect_err) => {
                                 // Container name conflict but can't inspect - likely in intermediate state
-                                warn!("Container {} exists but cannot inspect: {}", container_name, inspect_err);
+                                warn!(
+                                    "Container {} exists but cannot inspect: {}",
+                                    container_name, inspect_err
+                                );
 
                                 // Keep in current status and retry
                                 let status = if deployment.status == DeploymentStatus::Unhealthy {
@@ -441,7 +519,10 @@ impl DeploymentBackend for DockerController {
                                     status,
                                     deployment_url: Some(format!("http://localhost:{}", port)),
                                     controller_metadata: serde_json::to_value(&metadata)?,
-                                    error_message: Some(format!("Container exists but cannot inspect: {}", inspect_err)),
+                                    error_message: Some(format!(
+                                        "Container exists but cannot inspect: {}",
+                                        inspect_err
+                                    )),
                                     next_reconcile: super::ReconcileHint::Default,
                                 })
                             }
@@ -487,16 +568,24 @@ impl DeploymentBackend for DockerController {
                             } else {
                                 DeploymentStatus::Deploying
                             },
-                            deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                            deployment_url: metadata
+                                .assigned_port
+                                .map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
-                            error_message: Some("Internal error: missing container ID, retrying".to_string()),
+                            error_message: Some(
+                                "Internal error: missing container ID, retrying".to_string(),
+                            ),
                             next_reconcile: super::ReconcileHint::Immediate,
                         });
                     }
                 };
 
                 // Start container (idempotent - Docker handles if already running)
-                match self.docker.start_container(container_id, None::<StartContainerOptions<String>>).await {
+                match self
+                    .docker
+                    .start_container(container_id, None::<StartContainerOptions<String>>)
+                    .await
+                {
                     Ok(_) => {
                         info!("Started container {}", container_id);
                         metadata.reconcile_phase = ReconcilePhase::WaitingForHealth;
@@ -510,13 +599,18 @@ impl DeploymentBackend for DockerController {
 
                         Ok(ReconcileResult {
                             status,
-                            deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                            deployment_url: metadata
+                                .assigned_port
+                                .map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
                             next_reconcile: super::ReconcileHint::Default,
                         })
                     }
-                    Err(e) if e.to_string().contains("already started") || e.to_string().contains("is not stopped") => {
+                    Err(e)
+                        if e.to_string().contains("already started")
+                            || e.to_string().contains("is not stopped") =>
+                    {
                         // Container already running, move to next phase
                         info!("Container {} already running", container_id);
                         metadata.reconcile_phase = ReconcilePhase::WaitingForHealth;
@@ -530,7 +624,9 @@ impl DeploymentBackend for DockerController {
 
                         Ok(ReconcileResult {
                             status,
-                            deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                            deployment_url: metadata
+                                .assigned_port
+                                .map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
                             next_reconcile: super::ReconcileHint::Default,
@@ -565,7 +661,9 @@ impl DeploymentBackend for DockerController {
                     metadata.reconcile_phase = ReconcilePhase::Completed;
                     Ok(ReconcileResult {
                         status: DeploymentStatus::Healthy,
-                        deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                        deployment_url: metadata
+                            .assigned_port
+                            .map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
                         next_reconcile: super::ReconcileHint::Default,
@@ -574,16 +672,24 @@ impl DeploymentBackend for DockerController {
                     // Still waiting for health
                     // Preserve Unhealthy status during recovery, otherwise use Deploying
                     let status = if deployment.status == DeploymentStatus::Unhealthy {
-                        debug!("Deployment {} still unhealthy, waiting for health", deployment.deployment_id);
+                        debug!(
+                            "Deployment {} still unhealthy, waiting for health",
+                            deployment.deployment_id
+                        );
                         DeploymentStatus::Unhealthy
                     } else {
-                        debug!("Deployment {} still waiting for health", deployment.deployment_id);
+                        debug!(
+                            "Deployment {} still waiting for health",
+                            deployment.deployment_id
+                        );
                         DeploymentStatus::Deploying
                     };
 
                     Ok(ReconcileResult {
                         status,
-                        deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                        deployment_url: metadata
+                            .assigned_port
+                            .map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
                         next_reconcile: super::ReconcileHint::Default,
@@ -595,7 +701,9 @@ impl DeploymentBackend for DockerController {
                 // Already healthy, no-op (keep returning Healthy)
                 Ok(ReconcileResult {
                     status: DeploymentStatus::Healthy,
-                    deployment_url: metadata.assigned_port.map(|p| format!("http://localhost:{}", p)),
+                    deployment_url: metadata
+                        .assigned_port
+                        .map(|p| format!("http://localhost:{}", p)),
                     controller_metadata: serde_json::to_value(&metadata)?,
                     error_message: None,
                     next_reconcile: super::ReconcileHint::Default,
@@ -606,30 +714,38 @@ impl DeploymentBackend for DockerController {
 
     /// Check if container is healthy and running
     async fn health_check(&self, deployment: &Deployment) -> anyhow::Result<HealthStatus> {
-        let metadata: DockerMetadata = serde_json::from_value(deployment.controller_metadata.clone())?;
+        let metadata: DockerMetadata =
+            serde_json::from_value(deployment.controller_metadata.clone())?;
 
-        let container_id = metadata.container_id
+        let container_id = metadata
+            .container_id
             .ok_or_else(|| anyhow::anyhow!("No container ID in metadata"))?;
 
         // Inspect container
         match self.docker.inspect_container(&container_id, None).await {
             Ok(inspect) => {
-                let state = inspect.state.ok_or_else(|| anyhow::anyhow!("No state in inspect"))?;
+                let state = inspect
+                    .state
+                    .ok_or_else(|| anyhow::anyhow!("No state in inspect"))?;
                 let healthy = state.running.unwrap_or(false) && !state.restarting.unwrap_or(false);
 
                 Ok(HealthStatus {
                     healthy,
                     message: if !healthy {
-                        Some(format!("Container state: running={}, status={:?}",
+                        Some(format!(
+                            "Container state: running={}, status={:?}",
                             state.running.unwrap_or(false),
-                            state.status))
+                            state.status
+                        ))
                     } else {
                         None
                     },
                     last_check: Utc::now(),
                 })
             }
-            Err(e) if e.to_string().contains("404") || e.to_string().contains("No such container") => {
+            Err(e)
+                if e.to_string().contains("404") || e.to_string().contains("No such container") =>
+            {
                 // Container doesn't exist - this is expected during termination or if removed externally
                 // Return unhealthy status instead of error
                 Ok(HealthStatus {
@@ -644,7 +760,8 @@ impl DeploymentBackend for DockerController {
 
     /// Stop a running deployment
     async fn stop(&self, deployment: &Deployment) -> anyhow::Result<()> {
-        let metadata: DockerMetadata = serde_json::from_value(deployment.controller_metadata.clone())?;
+        let metadata: DockerMetadata =
+            serde_json::from_value(deployment.controller_metadata.clone())?;
         if let Some(container_id) = metadata.container_id {
             info!("Stopping container {}", container_id);
             self.docker.stop_container(&container_id, None).await?;
@@ -654,7 +771,10 @@ impl DeploymentBackend for DockerController {
 
     /// Cancel a deployment (pre-infrastructure)
     async fn cancel(&self, deployment: &Deployment) -> anyhow::Result<()> {
-        info!("Cancelling deployment {} (no infrastructure to clean up)", deployment.deployment_id);
+        info!(
+            "Cancelling deployment {} (no infrastructure to clean up)",
+            deployment.deployment_id
+        );
         // For Docker backend, pre-infrastructure cancellation just means no cleanup needed
         // Build artifacts are managed by CLI, not the controller
         Ok(())
@@ -662,9 +782,13 @@ impl DeploymentBackend for DockerController {
 
     /// Terminate a running deployment (post-infrastructure)
     async fn terminate(&self, deployment: &Deployment) -> anyhow::Result<()> {
-        let metadata: DockerMetadata = serde_json::from_value(deployment.controller_metadata.clone())?;
+        let metadata: DockerMetadata =
+            serde_json::from_value(deployment.controller_metadata.clone())?;
         if let Some(container_id) = metadata.container_id {
-            info!("Terminating deployment {} - stopping and removing container {}", deployment.deployment_id, container_id);
+            info!(
+                "Terminating deployment {} - stopping and removing container {}",
+                deployment.deployment_id, container_id
+            );
 
             // Stop container
             if let Err(e) = self.docker.stop_container(&container_id, None).await {

@@ -1,9 +1,9 @@
+use anyhow::{Context, Result};
 use sqlx::PgPool;
-use uuid::Uuid;
-use anyhow::{Result, Context};
 use std::collections::HashMap;
+use uuid::Uuid;
 
-use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectStatus, ProjectVisibility};
+use crate::db::models::{Deployment, Project, ProjectStatus, ProjectVisibility};
 
 /// List all projects (optionally filtered by owner)
 pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Project>> {
@@ -157,7 +157,11 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
 }
 
 /// Update project visibility
-pub async fn update_visibility(pool: &PgPool, id: Uuid, visibility: ProjectVisibility) -> Result<Project> {
+pub async fn update_visibility(
+    pool: &PgPool,
+    id: Uuid,
+    visibility: ProjectVisibility,
+) -> Result<Project> {
     let visibility_str = visibility.to_string();
 
     let project = sqlx::query_as!(
@@ -185,13 +189,10 @@ pub async fn update_visibility(pool: &PgPool, id: Uuid, visibility: ProjectVisib
 
 /// Delete project by ID
 pub async fn delete(pool: &PgPool, id: Uuid) -> Result<()> {
-    sqlx::query!(
-        "DELETE FROM projects WHERE id = $1",
-        id
-    )
-    .execute(pool)
-    .await
-    .context("Failed to delete project")?;
+    sqlx::query!("DELETE FROM projects WHERE id = $1", id)
+        .execute(pool)
+        .await
+        .context("Failed to delete project")?;
 
     Ok(())
 }
@@ -223,7 +224,11 @@ pub async fn user_can_access(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> 
 }
 
 /// Set the active deployment for a project
-pub async fn set_active_deployment(pool: &PgPool, project_id: Uuid, deployment_id: Uuid) -> Result<Project> {
+pub async fn set_active_deployment(
+    pool: &PgPool,
+    project_id: Uuid,
+    deployment_id: Uuid,
+) -> Result<Project> {
     let project = sqlx::query_as!(
         Project,
         r#"
@@ -251,6 +256,20 @@ pub async fn set_active_deployment(pool: &PgPool, project_id: Uuid, deployment_i
 pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result<Project> {
     use crate::db::models::DeploymentStatus;
 
+    // Get current project to check if it's in a protected lifecycle state
+    let project = find_by_id(pool, project_id)
+        .await?
+        .context("Project not found")?;
+
+    // Don't recalculate status for projects in deletion lifecycle
+    // The deletion controller manages transitions for these states
+    if matches!(
+        project.status,
+        ProjectStatus::Deleting | ProjectStatus::Terminated
+    ) {
+        return Ok(project);
+    }
+
     // Get last deployment
     let last_deployment = sqlx::query!(
         r#"
@@ -266,27 +285,21 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
     .await
     .context("Failed to get last deployment")?;
 
-    // Get project to check active deployment
-    let project = find_by_id(pool, project_id)
-        .await?
-        .context("Project not found")?;
-
     // Determine status based on active deployment and last deployment
     let status = if let Some(active_id) = project.active_deployment_id {
         // Get active deployment to check its status
-        let active_deployment = sqlx::query_as::<_, Deployment>(
-            "SELECT * FROM deployments WHERE id = $1"
-        )
-        .bind(active_id)
-        .fetch_optional(pool)
-        .await?;
+        let active_deployment =
+            sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE id = $1")
+                .bind(active_id)
+                .fetch_optional(pool)
+                .await?;
 
         match active_deployment {
             Some(deployment) => match deployment.status {
                 DeploymentStatus::Healthy => ProjectStatus::Running,
                 DeploymentStatus::Unhealthy => ProjectStatus::Failed,
                 // Active deployment in transition - should not happen normally
-                _ => ProjectStatus::Failed
+                _ => ProjectStatus::Failed,
             },
             None => ProjectStatus::Stopped, // Active deployment was deleted
         }
@@ -296,16 +309,21 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
             DeploymentStatus::Failed => ProjectStatus::Failed,
 
             // In-progress states
-            DeploymentStatus::Pending | DeploymentStatus::Building |
-            DeploymentStatus::Pushing | DeploymentStatus::Pushed |
-            DeploymentStatus::Deploying => ProjectStatus::Deploying,
+            DeploymentStatus::Pending
+            | DeploymentStatus::Building
+            | DeploymentStatus::Pushing
+            | DeploymentStatus::Pushed
+            | DeploymentStatus::Deploying => ProjectStatus::Deploying,
 
             // Cancellation/Termination in progress
-            DeploymentStatus::Cancelling | DeploymentStatus::Terminating => ProjectStatus::Deploying,
+            DeploymentStatus::Cancelling | DeploymentStatus::Terminating => {
+                ProjectStatus::Deploying
+            }
 
             // Terminal states (no active deployment)
-            DeploymentStatus::Cancelled | DeploymentStatus::Stopped |
-            DeploymentStatus::Superseded => ProjectStatus::Stopped,
+            DeploymentStatus::Cancelled
+            | DeploymentStatus::Stopped
+            | DeploymentStatus::Superseded => ProjectStatus::Stopped,
 
             // Running states without being active (shouldn't happen)
             DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => {
@@ -357,7 +375,7 @@ pub async fn get_deployment_url(pool: &PgPool, project_id: Uuid) -> Result<Optio
 /// Returns a map of project_id -> deployment_url
 pub async fn get_deployment_urls_batch(
     pool: &PgPool,
-    project_ids: &[Uuid]
+    project_ids: &[Uuid],
 ) -> Result<HashMap<Uuid, Option<String>>> {
     let results = sqlx::query!(
         r#"
@@ -389,7 +407,8 @@ pub async fn get_deployment_urls_batch(
     .await
     .context("Failed to get deployment URLs in batch")?;
 
-    Ok(results.into_iter()
+    Ok(results
+        .into_iter()
         .filter_map(|r| r.project_id.map(|id| (id, r.deployment_url)))
         .collect())
 }

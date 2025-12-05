@@ -9,7 +9,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-use crate::db::models::{Deployment, Project, DeploymentStatus, TerminationReason};
+use crate::db::models::{Deployment, DeploymentStatus, Project};
 use crate::db::{deployments as db_deployments, projects};
 use crate::deployment::state_machine;
 use crate::state::AppState;
@@ -61,7 +61,11 @@ pub trait DeploymentBackend: Send + Sync {
     ///
     /// # Returns
     /// A ReconcileResult containing the new status, metadata, and optional error message
-    async fn reconcile(&self, deployment: &Deployment, project: &Project) -> anyhow::Result<ReconcileResult>;
+    async fn reconcile(
+        &self,
+        deployment: &Deployment,
+        project: &Project,
+    ) -> anyhow::Result<ReconcileResult>;
 
     /// Check health of a running deployment
     ///
@@ -203,11 +207,13 @@ impl DeploymentController {
                 db_deployments::mark_terminating(
                     &self.state.db_pool,
                     deployment.id,
-                    crate::db::models::TerminationReason::Failed
-                ).await?;
+                    crate::db::models::TerminationReason::Failed,
+                )
+                .await?;
 
                 // Update project status after marking deployment as terminating
-                projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
+                projects::update_calculated_status(&self.state.db_pool, deployment.project_id)
+                    .await?;
 
                 return Ok(());
             }
@@ -234,8 +240,9 @@ impl DeploymentController {
         db_deployments::update_controller_metadata(
             &self.state.db_pool,
             deployment.id,
-            &result.controller_metadata
-        ).await?;
+            &result.controller_metadata,
+        )
+        .await?;
 
         if let Some(error) = result.error_message {
             db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
@@ -247,7 +254,9 @@ impl DeploymentController {
             if let Some(old_active_id) = project.active_deployment_id {
                 if old_active_id != deployment.id {
                     // Get the old active deployment
-                    if let Ok(Some(old_deployment)) = db_deployments::find_by_id(&self.state.db_pool, old_active_id).await {
+                    if let Ok(Some(old_deployment)) =
+                        db_deployments::find_by_id(&self.state.db_pool, old_active_id).await
+                    {
                         // Supersede old deployment if it's not already terminal
                         if !state_machine::is_terminal(&old_deployment.status) {
                             info!(
@@ -257,8 +266,9 @@ impl DeploymentController {
                             db_deployments::mark_terminating(
                                 &self.state.db_pool,
                                 old_active_id,
-                                crate::db::models::TerminationReason::Superseded
-                            ).await?;
+                                crate::db::models::TerminationReason::Superseded,
+                            )
+                            .await?;
                         }
                     }
                 }
@@ -269,10 +279,9 @@ impl DeploymentController {
 
             // Also clean up any other non-terminal deployments for this project
             // (deployments that started but never became active)
-            let other_deployments = db_deployments::find_non_terminal_for_project(
-                &self.state.db_pool,
-                project.id
-            ).await?;
+            let other_deployments =
+                db_deployments::find_non_terminal_for_project(&self.state.db_pool, project.id)
+                    .await?;
 
             for other_deployment in other_deployments {
                 // Skip the new active deployment
@@ -293,8 +302,9 @@ impl DeploymentController {
                 db_deployments::mark_terminating(
                     &self.state.db_pool,
                     other_deployment.id,
-                    crate::db::models::TerminationReason::Superseded
-                ).await?;
+                    crate::db::models::TerminationReason::Superseded,
+                )
+                .await?;
             }
         }
 
@@ -331,7 +341,8 @@ impl DeploymentController {
     /// If a deployment is unhealthy, marks it as Unhealthy (not Failed)
     async fn check_deployment_health(&self) -> anyhow::Result<()> {
         // Find all Healthy deployments
-        let healthy_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Healthy).await?;
+        let healthy_deployments =
+            db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Healthy).await?;
 
         for deployment in healthy_deployments {
             match self.backend.health_check(&deployment).await {
@@ -339,33 +350,65 @@ impl DeploymentController {
                     // Update health status in metadata
                     let mut metadata = deployment.controller_metadata.clone();
                     if let Some(obj) = metadata.as_object_mut() {
-                        obj.insert("health".to_string(), serde_json::json!({
-                            "healthy": health.healthy,
-                            "message": health.message,
-                            "last_check": health.last_check.to_rfc3339(),
-                        }));
+                        obj.insert(
+                            "health".to_string(),
+                            serde_json::json!({
+                                "healthy": health.healthy,
+                                "message": health.message,
+                                "last_check": health.last_check.to_rfc3339(),
+                            }),
+                        );
                     }
-                    db_deployments::update_controller_metadata(&self.state.db_pool, deployment.id, &metadata).await?;
+                    db_deployments::update_controller_metadata(
+                        &self.state.db_pool,
+                        deployment.id,
+                        &metadata,
+                    )
+                    .await?;
 
                     // If unhealthy, mark deployment as Unhealthy (not Failed - allow recovery)
                     if !health.healthy {
-                        let msg = health.message.unwrap_or_else(|| "Health check failed".to_string());
-                        warn!("Deployment {} is now unhealthy: {}", deployment.deployment_id, msg);
-                        info!("Calling mark_unhealthy for deployment id: {}", deployment.id);
-                        match db_deployments::mark_unhealthy(&self.state.db_pool, deployment.id, msg.clone()).await {
+                        let msg = health
+                            .message
+                            .unwrap_or_else(|| "Health check failed".to_string());
+                        warn!(
+                            "Deployment {} is now unhealthy: {}",
+                            deployment.deployment_id, msg
+                        );
+                        info!(
+                            "Calling mark_unhealthy for deployment id: {}",
+                            deployment.id
+                        );
+                        match db_deployments::mark_unhealthy(
+                            &self.state.db_pool,
+                            deployment.id,
+                            msg.clone(),
+                        )
+                        .await
+                        {
                             Ok(updated) => {
                                 info!("Successfully marked deployment {} as Unhealthy. New status: {:?}", deployment.deployment_id, updated.status);
                             }
                             Err(e) => {
-                                error!("Failed to mark deployment {} as unhealthy: {}", deployment.deployment_id, e);
+                                error!(
+                                    "Failed to mark deployment {} as unhealthy: {}",
+                                    deployment.deployment_id, e
+                                );
                                 return Err(e);
                             }
                         }
-                        projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
+                        projects::update_calculated_status(
+                            &self.state.db_pool,
+                            deployment.project_id,
+                        )
+                        .await?;
                     }
                 }
                 Err(e) => {
-                    warn!("Health check error for deployment {}: {}", deployment.deployment_id, e);
+                    warn!(
+                        "Health check error for deployment {}: {}",
+                        deployment.deployment_id, e
+                    );
                 }
             }
         }
@@ -379,17 +422,29 @@ impl DeploymentController {
     /// Unhealthy deployments stay Unhealthy indefinitely until they recover or get terminated.
     async fn monitor_unhealthy_deployments(&self) -> anyhow::Result<()> {
         // Find all Unhealthy deployments
-        let unhealthy_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Unhealthy).await?;
+        let unhealthy_deployments =
+            db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Unhealthy)
+                .await?;
 
         for deployment in unhealthy_deployments {
-            debug!("Checking unhealthy deployment {} for recovery", deployment.deployment_id);
+            debug!(
+                "Checking unhealthy deployment {} for recovery",
+                deployment.deployment_id
+            );
             match self.backend.health_check(&deployment).await {
                 Ok(health) => {
                     if health.healthy {
                         // Deployment has recovered!
-                        info!("Deployment {} has recovered, marking as Healthy", deployment.deployment_id);
+                        info!(
+                            "Deployment {} has recovered, marking as Healthy",
+                            deployment.deployment_id
+                        );
                         db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
-                        projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
+                        projects::update_calculated_status(
+                            &self.state.db_pool,
+                            deployment.project_id,
+                        )
+                        .await?;
                     } else {
                         // Still unhealthy - keep waiting for recovery or explicit termination
                         let unhealthy_duration = chrono::Utc::now() - deployment.updated_at;
@@ -401,7 +456,10 @@ impl DeploymentController {
                     }
                 }
                 Err(e) => {
-                    warn!("Health check error for unhealthy deployment {}: {}", deployment.deployment_id, e);
+                    warn!(
+                        "Health check error for unhealthy deployment {}: {}",
+                        deployment.deployment_id, e
+                    );
                 }
             }
         }
@@ -426,7 +484,9 @@ impl DeploymentController {
 
     /// Process all deployments in Terminating state
     async fn process_terminating_deployments(&self) -> anyhow::Result<()> {
-        let terminating = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Terminating).await?;
+        let terminating =
+            db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Terminating)
+                .await?;
 
         for deployment in terminating {
             debug!("Terminating deployment {}", deployment.deployment_id);
@@ -434,30 +494,45 @@ impl DeploymentController {
             // Call backend to terminate (stop and remove container)
             match self.backend.terminate(&deployment).await {
                 Ok(_) => {
-                    info!("Successfully terminated deployment {}", deployment.deployment_id);
+                    info!(
+                        "Successfully terminated deployment {}",
+                        deployment.deployment_id
+                    );
 
                     // Mark as terminal state based on termination reason
                     match deployment.termination_reason {
                         Some(crate::db::models::TerminationReason::Superseded) => {
-                            db_deployments::mark_superseded(&self.state.db_pool, deployment.id).await?;
+                            db_deployments::mark_superseded(&self.state.db_pool, deployment.id)
+                                .await?;
                         }
                         Some(crate::db::models::TerminationReason::UserStopped) => {
-                            db_deployments::mark_stopped(&self.state.db_pool, deployment.id).await?;
+                            db_deployments::mark_stopped(&self.state.db_pool, deployment.id)
+                                .await?;
                         }
                         Some(crate::db::models::TerminationReason::Failed) => {
-                            db_deployments::mark_failed(&self.state.db_pool, deployment.id, "Deployment timed out").await?;
+                            db_deployments::mark_failed(
+                                &self.state.db_pool,
+                                deployment.id,
+                                "Deployment timed out",
+                            )
+                            .await?;
                         }
                         Some(crate::db::models::TerminationReason::Cancelled) | None => {
                             // Cancelled or unknown reason - default to Stopped
-                            db_deployments::mark_stopped(&self.state.db_pool, deployment.id).await?;
+                            db_deployments::mark_stopped(&self.state.db_pool, deployment.id)
+                                .await?;
                         }
                     }
 
                     // Update project status
-                    projects::update_calculated_status(&self.state.db_pool, deployment.project_id).await?;
+                    projects::update_calculated_status(&self.state.db_pool, deployment.project_id)
+                        .await?;
                 }
                 Err(e) => {
-                    error!("Failed to terminate deployment {}: {}", deployment.deployment_id, e);
+                    error!(
+                        "Failed to terminate deployment {}: {}",
+                        deployment.deployment_id, e
+                    );
                 }
             }
         }

@@ -1,9 +1,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::interval;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info};
 
-use crate::db::models::{DeploymentStatus, ProjectStatus};
+use crate::db::models::DeploymentStatus;
 use crate::db::{deployments as db_deployments, projects as db_projects};
 use crate::deployment::state_machine;
 use crate::state::AppState;
@@ -61,7 +61,8 @@ impl ProjectController {
             debug!("Processing deletion for project {}", project.name);
 
             // Find all deployments for this project
-            let deployments = db_deployments::list_for_project(&self.state.db_pool, project.id).await?;
+            let deployments =
+                db_deployments::list_for_project(&self.state.db_pool, project.id).await?;
 
             // Check if any non-terminal deployments exist
             let mut has_non_terminal = false;
@@ -76,7 +77,9 @@ impl ProjectController {
                 // Distinguish pre-infrastructure vs post-infrastructure
                 let is_pre_infrastructure = matches!(
                     deployment.status,
-                    DeploymentStatus::Pending | DeploymentStatus::Building | DeploymentStatus::Pushing
+                    DeploymentStatus::Pending
+                        | DeploymentStatus::Building
+                        | DeploymentStatus::Pushing
                 );
 
                 if is_pre_infrastructure {
@@ -101,17 +104,32 @@ impl ProjectController {
                             &self.state.db_pool,
                             deployment.id,
                             crate::db::models::TerminationReason::UserStopped,
-                        ).await?;
+                        )
+                        .await?;
                     }
                 }
             }
 
-            // If all deployments are terminal, delete the project
+            // If all deployments are terminal, transition to Terminated then delete
             if !has_non_terminal {
                 info!(
-                    "All deployments for project {} are terminated, deleting project",
+                    "All deployments for project {} are terminated, marking as Terminated",
                     project.name
                 );
+
+                // Transition to Terminated status before removal
+                db_projects::update_status(
+                    &self.state.db_pool,
+                    project.id,
+                    crate::db::models::ProjectStatus::Terminated,
+                )
+                .await?;
+
+                info!(
+                    "Project {} is Terminated, deleting from database",
+                    project.name
+                );
+
                 db_projects::delete(&self.state.db_pool, project.id).await?;
             } else {
                 debug!(

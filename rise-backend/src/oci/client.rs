@@ -1,6 +1,6 @@
-use oci_distribution::{Reference, Client, secrets::RegistryAuth};
-use anyhow::Result;
 use super::error::OciError;
+use anyhow::Result;
+use oci_distribution::{secrets::RegistryAuth, Client, Reference};
 
 pub struct OciClient {
     client: Client,
@@ -21,7 +21,8 @@ impl OciClient {
 
         // Fetch manifest (anonymous access for public images)
         let auth = RegistryAuth::Anonymous;
-        let (_manifest, digest) = self.client
+        let (_manifest, digest) = self
+            .client
             .pull_manifest(&reference, &auth)
             .await
             .map_err(|e| self.classify_error(e, image_ref))?;
@@ -40,13 +41,20 @@ impl OciClient {
         Ok(digest_ref)
     }
 
-    fn classify_error(&self, err: oci_distribution::errors::OciDistributionError, image: &str) -> OciError {
+    fn classify_error(
+        &self,
+        err: oci_distribution::errors::OciDistributionError,
+        image: &str,
+    ) -> OciError {
         let error_string = err.to_string();
 
         // Classify based on error type
         if error_string.contains("404") || error_string.contains("not found") {
             OciError::ImageNotFound(image.to_string())
-        } else if error_string.contains("401") || error_string.contains("403") || error_string.contains("unauthorized") {
+        } else if error_string.contains("401")
+            || error_string.contains("403")
+            || error_string.contains("unauthorized")
+        {
             OciError::PrivateImage(image.to_string())
         } else {
             OciError::Network(error_string)

@@ -1,12 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Default)]
 pub enum DeploymentStatus {
     // Build/Deploy states
+    #[default]
     Pending,
     Building,
     Pushing,
-    Pushed,     // Handoff point between CLI and controller
+    Pushed, // Handoff point between CLI and controller
     Deploying,
 
     // Running states
@@ -26,11 +28,6 @@ pub enum DeploymentStatus {
     Failed,
 }
 
-impl Default for DeploymentStatus {
-    fn default() -> Self {
-        DeploymentStatus::Pending
-    }
-}
 
 impl std::fmt::Display for DeploymentStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -57,8 +54,8 @@ pub struct Deployment {
     #[serde(default)]
     pub id: String,
     pub deployment_id: String,
-    pub project: String,  // Project ID
-    pub created_by: String,     // User ID
+    pub project: String,    // Project ID
+    pub created_by: String, // User ID
     #[serde(default)]
     pub status: DeploymentStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -84,16 +81,16 @@ pub struct Deployment {
 // Request to create a deployment
 #[derive(Debug, Deserialize)]
 pub struct CreateDeploymentRequest {
-    pub project: String,  // Project name
+    pub project: String, // Project name
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub image: Option<String>,  // Optional pre-built image reference
+    pub image: Option<String>, // Optional pre-built image reference
 }
 
 // Response from creating a deployment
 #[derive(Debug, Serialize)]
 pub struct CreateDeploymentResponse {
     pub deployment_id: String,
-    pub image_tag: String,  // Full tag: registry_url/namespace/project:deployment_id
+    pub image_tag: String, // Full tag: registry_url/namespace/project:deployment_id
     pub credentials: crate::registry::models::RegistryCredentials,
 }
 

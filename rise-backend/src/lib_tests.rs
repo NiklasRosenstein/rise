@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use crate::settings::{Settings, ServerSettings, AuthSettings, DatabaseSettings};
+    use crate::settings::{AuthSettings, DatabaseSettings, ServerSettings, Settings};
 
     #[tokio::test]
     async fn test_router_builds_without_panic() {

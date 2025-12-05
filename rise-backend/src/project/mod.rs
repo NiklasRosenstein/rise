@@ -1,7 +1,7 @@
-pub mod handlers;
-pub mod routes;
-pub mod models;
-pub mod fuzzy;
 mod controller;
+pub mod fuzzy;
+pub mod handlers;
+pub mod models;
+pub mod routes;
 
 pub use controller::ProjectController;

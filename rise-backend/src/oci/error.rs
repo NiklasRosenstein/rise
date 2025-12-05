@@ -5,7 +5,9 @@ pub enum OciError {
     #[error("Image not found: {0}")]
     ImageNotFound(String),
 
-    #[error("Private image requires authentication: {0}. Public images only are currently supported.")]
+    #[error(
+        "Private image requires authentication: {0}. Public images only are currently supported."
+    )]
     PrivateImage(String),
 
     #[error("Invalid image reference: {0}")]

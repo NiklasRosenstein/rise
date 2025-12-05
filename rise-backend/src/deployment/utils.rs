@@ -15,5 +15,8 @@ pub fn construct_image_tag(
     project_name: &str,
     deployment_id: &str,
 ) -> String {
-    format!("{}/{}/{}:{}", registry_url, namespace, project_name, deployment_id)
+    format!(
+        "{}/{}/{}:{}",
+        registry_url, namespace, project_name, deployment_id
+    )
 }

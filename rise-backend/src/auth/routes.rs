@@ -1,9 +1,9 @@
+use super::handlers;
+use crate::state::AppState;
 use axum::{
-    routing::{post, get},
+    routing::{get, post},
     Router,
 };
-use crate::state::AppState;
-use super::handlers;
 
 pub fn routes() -> Router<AppState> {
     Router::new()
@@ -14,8 +14,7 @@ pub fn routes() -> Router<AppState> {
 
 /// Public routes that don't require authentication
 pub fn public_routes() -> Router<AppState> {
-    Router::new()
-        .route("/auth/code/exchange", post(handlers::code_exchange))
+    Router::new().route("/auth/code/exchange", post(handlers::code_exchange))
 }
 
 /// Protected routes that require authentication

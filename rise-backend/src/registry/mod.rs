@@ -1,11 +1,11 @@
+pub mod handlers;
 pub mod models;
 pub mod providers;
-pub mod handlers;
 pub mod routes;
 
-use async_trait::async_trait;
-use anyhow::Result;
 use crate::registry::models::RegistryCredentials;
+use anyhow::Result;
+use async_trait::async_trait;
 
 /// Trait for container registry providers
 #[async_trait]

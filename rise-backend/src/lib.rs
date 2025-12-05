@@ -1,31 +1,31 @@
 pub mod auth;
-pub mod settings;
-pub mod state;
 pub mod db;
-pub mod project;
-pub mod team;
-pub mod registry;
 pub mod deployment;
 pub mod oci;
+pub mod project;
+pub mod registry;
+pub mod settings;
+pub mod state;
+pub mod team;
 
 #[cfg(test)]
 mod lib_tests;
 
-use axum::{Router, middleware};
+use anyhow::Result;
+use axum::{middleware, Router};
 use state::AppState;
+use std::sync::Arc;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::info;
-use anyhow::Result;
-use std::sync::Arc;
 
 pub async fn run(settings: settings::Settings) -> Result<()> {
     let state = AppState::new(&settings).await?;
 
     // Start deployment controller
-    let controller = Arc::new(
-        deployment::controller::DeploymentController::new(Arc::new(state.clone()))?
-    );
+    let controller = Arc::new(deployment::controller::DeploymentController::new(
+        Arc::new(state.clone()),
+    )?);
     controller.start();
     info!("Deployment controller started");
 

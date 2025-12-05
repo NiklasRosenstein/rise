@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
-use anyhow::{Result, Context};
 
 use crate::db::models::{Team, TeamMember, TeamRole, User};
 
@@ -97,13 +97,10 @@ pub async fn create(pool: &PgPool, name: &str) -> Result<Team> {
 
 /// Delete team by ID
 pub async fn delete(pool: &PgPool, id: Uuid) -> Result<()> {
-    sqlx::query!(
-        "DELETE FROM teams WHERE id = $1",
-        id
-    )
-    .execute(pool)
-    .await
-    .context("Failed to delete team")?;
+    sqlx::query!("DELETE FROM teams WHERE id = $1", id)
+        .execute(pool)
+        .await
+        .context("Failed to delete team")?;
 
     Ok(())
 }
@@ -149,7 +146,12 @@ pub async fn get_owners(pool: &PgPool, team_id: Uuid) -> Result<Vec<User>> {
 }
 
 /// Add member to team
-pub async fn add_member(pool: &PgPool, team_id: Uuid, user_id: Uuid, role: TeamRole) -> Result<TeamMember> {
+pub async fn add_member(
+    pool: &PgPool,
+    team_id: Uuid,
+    user_id: Uuid,
+    role: TeamRole,
+) -> Result<TeamMember> {
     let role_str = role.to_string();
 
     let member = sqlx::query_as!(
@@ -185,7 +187,12 @@ pub async fn remove_member(pool: &PgPool, team_id: Uuid, user_id: Uuid) -> Resul
 }
 
 /// Update member role
-pub async fn update_member_role(pool: &PgPool, team_id: Uuid, user_id: Uuid, role: TeamRole) -> Result<TeamMember> {
+pub async fn update_member_role(
+    pool: &PgPool,
+    team_id: Uuid,
+    user_id: Uuid,
+    role: TeamRole,
+) -> Result<TeamMember> {
     let role_str = role.to_string();
 
     let member = sqlx::query_as!(

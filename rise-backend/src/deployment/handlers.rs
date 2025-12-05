@@ -1,16 +1,16 @@
-use axum::{
-    Json,
-    extract::{State, Path, Extension},
-    http::StatusCode,
-};
-use tracing::{info, debug};
 use anyhow::Context;
+use axum::{
+    extract::{Extension, Path, State},
+    http::StatusCode,
+    Json,
+};
+use tracing::{debug, info};
 
-use crate::state::AppState;
-use crate::db::models::{User, DeploymentStatus as DbDeploymentStatus};
-use crate::db::{projects, teams as db_teams, deployments as db_deployments};
 use super::models::*;
 use super::utils::generate_deployment_id;
+use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
+use crate::db::{deployments as db_deployments, projects, teams as db_teams};
+use crate::state::AppState;
 use uuid::Uuid;
 
 /// Check if user has permission to deploy to the project
@@ -59,7 +59,9 @@ async fn check_deploy_permission(
 /// - `quay.io/nginx:latest` → `quay.io/nginx:latest` (unchanged)
 fn normalize_image_reference(image: &str) -> String {
     // Check if image already has a registry hostname (contains '.' or ':' before first '/')
-    let has_registry = image.split('/').next()
+    let has_registry = image
+        .split('/')
+        .next()
         .map(|first_part| first_part.contains('.') || first_part.contains(':'))
         .unwrap_or(false);
 
@@ -175,8 +177,33 @@ pub async fn create_deployment(
     // Query project by name
     let project = projects::find_by_name(&state.db_pool, &payload.project)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to query project: {}", e)))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Project '{}' not found", payload.project)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to query project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", payload.project),
+            )
+        })?;
+
+    // Prevent deployments on projects in deletion lifecycle
+    // Projects in Deleting or Terminated status should not accept new deployments
+    if matches!(
+        project.status,
+        crate::db::models::ProjectStatus::Deleting | crate::db::models::ProjectStatus::Terminated
+    ) {
+        return Err((
+            StatusCode::CONFLICT,
+            format!(
+                "Cannot create deployment for project in {:?} state",
+                project.status
+            ),
+        ));
+    }
 
     // Check deployment permissions
     check_deploy_permission(&state, &project, user.id)
@@ -197,8 +224,14 @@ pub async fn create_deployment(
         debug!("Normalized image: {} -> {}", user_image, normalized_image);
 
         // Resolve image to digest
-        let image_digest = resolve_image_digest(&state.oci_client, &normalized_image).await
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("Failed to resolve image '{}': {}", user_image, e)))?;
+        let image_digest = resolve_image_digest(&state.oci_client, &normalized_image)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    format!("Failed to resolve image '{}': {}", user_image, e),
+                )
+            })?;
 
         info!("Resolved image digest: {}", image_digest);
 
@@ -208,19 +241,27 @@ pub async fn create_deployment(
             &deployment_id,
             project.id,
             user.id,
-            DbDeploymentStatus::Pushed,  // Pre-built images skip build/push, go straight to Pushed
-            Some(user_image),  // Store original user input
-            Some(&image_digest),  // Store resolved digest
+            DbDeploymentStatus::Pushed, // Pre-built images skip build/push, go straight to Pushed
+            Some(user_image),           // Store original user input
+            Some(&image_digest),        // Store resolved digest
         )
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create deployment: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create deployment: {}", e),
+            )
+        })?;
 
-        info!("Created pre-built image deployment {} for project {}", deployment_id, payload.project);
+        info!(
+            "Created pre-built image deployment {} for project {}",
+            deployment_id, payload.project
+        );
 
         // Return response with digest as image_tag and empty credentials
         Ok(Json(CreateDeploymentResponse {
             deployment_id,
-            image_tag: image_digest,  // Return digest for consistency
+            image_tag: image_digest, // Return digest for consistency
             credentials: crate::registry::models::RegistryCredentials {
                 registry_url: String::new(),
                 username: String::new(),
@@ -231,16 +272,30 @@ pub async fn create_deployment(
     } else {
         // Path 2: Build from source (current behavior)
         // Get registry credentials
-        let registry_provider = state.registry_provider.as_ref()
-            .ok_or((StatusCode::SERVICE_UNAVAILABLE, "No registry configured".to_string()))?;
+        let registry_provider = state.registry_provider.as_ref().ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "No registry configured".to_string(),
+        ))?;
 
-        let credentials = registry_provider.get_credentials(&payload.project).await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get credentials: {}", e)))?;
+        let credentials = registry_provider
+            .get_credentials(&payload.project)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get credentials: {}", e),
+                )
+            })?;
 
         // Construct image tag
         // Note: For Docker registry, credentials.registry_url already includes namespace
-        let image_tag = format!("{}:{}",
-            format!("{}/{}", credentials.registry_url.trim_end_matches('/'), payload.project),
+        let image_tag = format!(
+            "{}:{}",
+            format!(
+                "{}/{}",
+                credentials.registry_url.trim_end_matches('/'),
+                payload.project
+            ),
             deployment_id
         );
 
@@ -253,13 +308,21 @@ pub async fn create_deployment(
             project.id,
             user.id,
             DbDeploymentStatus::Pending,
-            None,  // image - NULL for build-from-source
-            None,  // image_digest - NULL for build-from-source
+            None, // image - NULL for build-from-source
+            None, // image_digest - NULL for build-from-source
         )
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create deployment: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create deployment: {}", e),
+            )
+        })?;
 
-        info!("Created build-from-source deployment {} for project {}", deployment_id, payload.project);
+        info!(
+            "Created build-from-source deployment {} for project {}",
+            deployment_id, payload.project
+        );
 
         // Return response
         Ok(Json(CreateDeploymentResponse {
@@ -277,7 +340,10 @@ pub async fn update_deployment_status(
     Path(deployment_id): Path<String>,
     Json(payload): Json<UpdateDeploymentStatusRequest>,
 ) -> Result<Json<Deployment>, (StatusCode, String)> {
-    info!("Updating deployment {} status to {:?}", deployment_id, payload.status);
+    info!(
+        "Updating deployment {} status to {:?}",
+        deployment_id, payload.status
+    );
 
     // Find all deployments with this deployment_id (there should only be one)
     // We need to find the project first to check the deployment_id
@@ -285,26 +351,35 @@ pub async fn update_deployment_status(
     // We'll need to add a function to find by deployment_id only
 
     // Query all projects to find the one with this deployment
-    let all_projects = projects::list(&state.db_pool, None)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to list projects: {}", e)))?;
+    let all_projects = projects::list(&state.db_pool, None).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to list projects: {}", e),
+        )
+    })?;
 
     let mut found_deployment: Option<crate::db::models::Deployment> = None;
     let mut found_project: Option<crate::db::models::Project> = None;
 
     for project in all_projects {
-        if let Ok(Some(deployment)) = db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id).await {
+        if let Ok(Some(deployment)) =
+            db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id).await
+        {
             found_deployment = Some(deployment);
             found_project = Some(project);
             break;
         }
     }
 
-    let deployment = found_deployment
-        .ok_or((StatusCode::NOT_FOUND, format!("Deployment '{}' not found", deployment_id)))?;
+    let deployment = found_deployment.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Deployment '{}' not found", deployment_id),
+    ))?;
 
-    let project = found_project
-        .ok_or((StatusCode::NOT_FOUND, format!("Project for deployment '{}' not found", deployment_id)))?;
+    let project = found_project.ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Project for deployment '{}' not found", deployment_id),
+    ))?;
 
     // Check if user has permission (owns the project)
     check_deploy_permission(&state, &project, user.id)
@@ -318,31 +393,55 @@ pub async fn update_deployment_status(
             let error_msg = payload.error_message.as_deref().unwrap_or("Unknown error");
             let deployment = db_deployments::mark_failed(&state.db_pool, deployment.id, error_msg)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e)))?;
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to update deployment: {}", e),
+                    )
+                })?;
 
             // Update project status to Failed
             projects::update_calculated_status(&state.db_pool, project.id)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update project status: {}", e)))?;
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to update project status: {}", e),
+                    )
+                })?;
 
             deployment
         }
         _ => {
             let db_status = convert_status_to_db(payload.status);
-            let deployment = db_deployments::update_status(&state.db_pool, deployment.id, db_status)
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e)))?;
+            let deployment =
+                db_deployments::update_status(&state.db_pool, deployment.id, db_status)
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            format!("Failed to update deployment: {}", e),
+                        )
+                    })?;
 
             // Update project status (e.g., to Deploying)
             projects::update_calculated_status(&state.db_pool, project.id)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update project status: {}", e)))?;
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to update project status: {}", e),
+                    )
+                })?;
 
             deployment
         }
     };
 
-    info!("Updated deployment {} to status {:?}", deployment_id, status_copy);
+    info!(
+        "Updated deployment {} to status {:?}",
+        deployment_id, status_copy
+    );
 
     Ok(Json(convert_deployment(updated_deployment)))
 }
@@ -358,8 +457,18 @@ pub async fn list_deployments(
     // Find the project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to find project: {}", e)))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Project '{}' not found", project_name)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
 
     // Check if user has permission to view deployments (owns the project or is team member)
     let has_permission = if let Some(owner_user_id) = project.owner_user_id {
@@ -367,25 +476,35 @@ pub async fn list_deployments(
     } else if let Some(team_id) = project.owner_team_id {
         db_teams::is_member(&state.db_pool, team_id, user.id)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to check team membership: {}", e)))?
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to check team membership: {}", e),
+                )
+            })?
     } else {
         false
     };
 
     if !has_permission {
-        return Err((StatusCode::FORBIDDEN, "You do not have permission to view deployments for this project".to_string()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "You do not have permission to view deployments for this project".to_string(),
+        ));
     }
 
     // Get deployments from database
     let db_deployments = db_deployments::list_for_project(&state.db_pool, project.id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to list deployments: {}", e)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to list deployments: {}", e),
+            )
+        })?;
 
     // Convert to API models
-    let deployments: Vec<Deployment> = db_deployments
-        .into_iter()
-        .map(convert_deployment)
-        .collect();
+    let deployments: Vec<Deployment> = db_deployments.into_iter().map(convert_deployment).collect();
 
     Ok(Json(deployments))
 }
@@ -396,13 +515,26 @@ pub async fn get_deployment_by_project(
     Extension(user): Extension<User>,
     Path((project_name, deployment_id)): Path<(String, String)>,
 ) -> Result<Json<Deployment>, (StatusCode, String)> {
-    debug!("Getting deployment {} for project {}", deployment_id, project_name);
+    debug!(
+        "Getting deployment {} for project {}",
+        deployment_id, project_name
+    );
 
     // Find the project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to find project: {}", e)))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Project '{}' not found", project_name)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
 
     // Check if user has permission to view deployments (owns the project or is team member)
     let has_permission = if let Some(owner_user_id) = project.owner_user_id {
@@ -410,20 +542,45 @@ pub async fn get_deployment_by_project(
     } else if let Some(team_id) = project.owner_team_id {
         db_teams::is_member(&state.db_pool, team_id, user.id)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to check team membership: {}", e)))?
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to check team membership: {}", e),
+                )
+            })?
     } else {
         false
     };
 
     if !has_permission {
-        return Err((StatusCode::FORBIDDEN, "You do not have permission to view deployments for this project".to_string()));
+        return Err((
+            StatusCode::FORBIDDEN,
+            "You do not have permission to view deployments for this project".to_string(),
+        ));
     }
 
     // Find deployment by project_id and deployment_id
-    let deployment = db_deployments::find_by_project_and_deployment_id(&state.db_pool, project.id, &deployment_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to find deployment: {}", e)))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Deployment '{}' not found for project '{}'", deployment_id, project_name)))?;
+    let deployment = db_deployments::find_by_project_and_deployment_id(
+        &state.db_pool,
+        project.id,
+        &deployment_id,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to find deployment: {}", e),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!(
+                "Deployment '{}' not found for project '{}'",
+                deployment_id, project_name
+            ),
+        )
+    })?;
 
     Ok(Json(convert_deployment(deployment)))
 }
@@ -434,13 +591,26 @@ pub async fn rollback_deployment(
     Extension(user): Extension<User>,
     Path((project_name, source_deployment_id)): Path<(String, String)>,
 ) -> Result<Json<RollbackDeploymentResponse>, (StatusCode, String)> {
-    info!("Rolling back project '{}' to deployment '{}'", project_name, source_deployment_id);
+    info!(
+        "Rolling back project '{}' to deployment '{}'",
+        project_name, source_deployment_id
+    );
 
     // Find project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to query project: {}", e)))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Project '{}' not found", project_name)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to query project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
 
     // Check deployment permissions
     check_deploy_permission(&state, &project, user.id)
@@ -448,10 +618,27 @@ pub async fn rollback_deployment(
         .map_err(|e| (StatusCode::FORBIDDEN, e))?;
 
     // Find the source deployment (the one we're rolling back to)
-    let source_deployment = db_deployments::find_by_project_and_deployment_id(&state.db_pool, project.id, &source_deployment_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to find source deployment: {}", e)))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Source deployment '{}' not found for project '{}'", source_deployment_id, project_name)))?;
+    let source_deployment = db_deployments::find_by_project_and_deployment_id(
+        &state.db_pool,
+        project.id,
+        &source_deployment_id,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to find source deployment: {}", e),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!(
+                "Source deployment '{}' not found for project '{}'",
+                source_deployment_id, project_name
+            ),
+        )
+    })?;
 
     // Verify source deployment is in a terminal successful state
     if source_deployment.status != DbDeploymentStatus::Healthy {
@@ -466,14 +653,28 @@ pub async fn rollback_deployment(
     } else {
         // Build-from-source deployment - construct image tag from deployment_id
         // Get registry configuration to construct the image tag
-        let registry_provider = state.registry_provider.as_ref()
-            .ok_or((StatusCode::SERVICE_UNAVAILABLE, "No registry configured".to_string()))?;
+        let registry_provider = state.registry_provider.as_ref().ok_or((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "No registry configured".to_string(),
+        ))?;
 
-        let credentials = registry_provider.get_credentials(&project_name).await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to get credentials: {}", e)))?;
+        let credentials = registry_provider
+            .get_credentials(&project_name)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get credentials: {}", e),
+                )
+            })?;
 
-        let constructed_tag = format!("{}:{}",
-            format!("{}/{}", credentials.registry_url.trim_end_matches('/'), project_name),
+        let constructed_tag = format!(
+            "{}:{}",
+            format!(
+                "{}/{}",
+                credentials.registry_url.trim_end_matches('/'),
+                project_name
+            ),
             source_deployment_id
         );
         info!("Rolling back to built image: {}", constructed_tag);
@@ -482,7 +683,10 @@ pub async fn rollback_deployment(
 
     // Generate new deployment ID
     let new_deployment_id = generate_deployment_id();
-    debug!("Generated new deployment ID for rollback: {}", new_deployment_id);
+    debug!(
+        "Generated new deployment ID for rollback: {}",
+        new_deployment_id
+    );
 
     // Create new deployment with Pushed status
     // Copy image and image_digest from source (will be NULL for built images)
@@ -491,12 +695,17 @@ pub async fn rollback_deployment(
         &new_deployment_id,
         project.id,
         user.id,
-        DbDeploymentStatus::Pushed,  // Start in Pushed state so controller picks it up
-        source_deployment.image.as_deref(),  // Copy image from source if present
-        source_deployment.image_digest.as_deref(),  // Copy digest from source if present
+        DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
+        source_deployment.image.as_deref(), // Copy image from source if present
+        source_deployment.image_digest.as_deref(), // Copy digest from source if present
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create rollback deployment: {}", e)))?;
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create rollback deployment: {}", e),
+        )
+    })?;
 
     // Store image_tag in controller metadata for visibility
     let controller_metadata = serde_json::json!({
@@ -505,11 +714,23 @@ pub async fn rollback_deployment(
         "reconcile_phase": "NotStarted"
     });
 
-    db_deployments::update_controller_metadata(&state.db_pool, new_deployment.id, &controller_metadata)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update controller metadata: {}", e)))?;
+    db_deployments::update_controller_metadata(
+        &state.db_pool,
+        new_deployment.id,
+        &controller_metadata,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to update controller metadata: {}", e),
+        )
+    })?;
 
-    info!("Created rollback deployment {} from {}", new_deployment_id, source_deployment_id);
+    info!(
+        "Created rollback deployment {} from {}",
+        new_deployment_id, source_deployment_id
+    );
 
     Ok(Json(RollbackDeploymentResponse {
         new_deployment_id,

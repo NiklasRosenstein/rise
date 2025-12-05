@@ -1,7 +1,7 @@
+pub mod deployments;
 pub mod models;
-pub mod users;
 pub mod projects;
 pub mod teams;
-pub mod deployments;
+pub mod users;
 
 pub use models::*;

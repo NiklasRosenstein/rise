@@ -1,6 +1,6 @@
+use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
-use anyhow::{Result, Context};
 
 use crate::db::models::{Deployment, DeploymentStatus, TerminationReason};
 use crate::deployment::state_machine;
@@ -33,7 +33,11 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Dep
 }
 
 /// Find deployment by deployment_id and project_id
-pub async fn find_by_deployment_id(pool: &PgPool, deployment_id: &str, project_id: Uuid) -> Result<Option<Deployment>> {
+pub async fn find_by_deployment_id(
+    pool: &PgPool,
+    deployment_id: &str,
+    project_id: Uuid,
+) -> Result<Option<Deployment>> {
     let deployment = sqlx::query_as!(
         Deployment,
         r#"
@@ -127,7 +131,11 @@ pub async fn create(
 }
 
 /// Update deployment status
-pub async fn update_status(pool: &PgPool, id: Uuid, status: DeploymentStatus) -> Result<Deployment> {
+pub async fn update_status(
+    pool: &PgPool,
+    id: Uuid,
+    status: DeploymentStatus,
+) -> Result<Deployment> {
     let status_str = status.to_string();
 
     let deployment = sqlx::query_as!(
@@ -270,7 +278,10 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
 }
 
 /// Find all non-terminal deployments for a specific project
-pub async fn find_non_terminal_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Deployment>> {
+pub async fn find_non_terminal_for_project(
+    pool: &PgPool,
+    project_id: Uuid,
+) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(
         Deployment,
         r#"
@@ -327,7 +338,11 @@ pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<V
 }
 
 /// Update controller metadata
-pub async fn update_controller_metadata(pool: &PgPool, id: Uuid, metadata: &serde_json::Value) -> Result<Deployment> {
+pub async fn update_controller_metadata(
+    pool: &PgPool,
+    id: Uuid,
+    metadata: &serde_json::Value,
+) -> Result<Deployment> {
     let deployment = sqlx::query_as!(
         Deployment,
         r#"

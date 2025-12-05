@@ -52,9 +52,9 @@ pub struct Team {
     #[serde(default)]
     pub name: String,
     #[serde(default, deserialize_with = "deserialize_string_or_vec")]
-    pub members: Vec<String>,  // User IDs
+    pub members: Vec<String>, // User IDs
     #[serde(default)]
-    pub owners: Vec<String>,   // User IDs
+    pub owners: Vec<String>, // User IDs
     // Timestamps
     #[serde(default)]
     pub created: String,
@@ -65,8 +65,8 @@ pub struct Team {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CreateTeamRequest {
     pub name: String,
-    pub members: Vec<String>,  // User IDs to add as members
-    pub owners: Vec<String>,   // User IDs to add as owners (must include authenticated user)
+    pub members: Vec<String>, // User IDs to add as members
+    pub owners: Vec<String>,  // User IDs to add as owners (must include authenticated user)
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -118,7 +118,7 @@ pub struct GetTeamParams {
     #[serde(default)]
     pub by_id: bool,
     #[serde(default)]
-    pub expand: String,  // Comma-separated list like "members,owners"
+    pub expand: String, // Comma-separated list like "members,owners"
 }
 
 impl GetTeamParams {

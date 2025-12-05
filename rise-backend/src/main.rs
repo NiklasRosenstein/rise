@@ -1,5 +1,5 @@
-use rise_backend::settings::Settings;
 use rise_backend::run;
+use rise_backend::settings::Settings;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 #[tokio::main]

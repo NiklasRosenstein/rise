@@ -4,21 +4,31 @@ use axum::{
     middleware::Next,
     response::Response,
 };
-use anyhow::Context;
 
+use crate::db::users;
 use crate::state::AppState;
-use crate::db::{models::User, users};
 
 /// Extract Bearer token from Authorization header
 fn extract_bearer_token(headers: &HeaderMap) -> Result<String, (StatusCode, String)> {
     let auth_header = headers
         .get("Authorization")
-        .ok_or((StatusCode::UNAUTHORIZED, "Missing Authorization header".to_string()))?
+        .ok_or((
+            StatusCode::UNAUTHORIZED,
+            "Missing Authorization header".to_string(),
+        ))?
         .to_str()
-        .map_err(|_| (StatusCode::UNAUTHORIZED, "Invalid Authorization header".to_string()))?;
+        .map_err(|_| {
+            (
+                StatusCode::UNAUTHORIZED,
+                "Invalid Authorization header".to_string(),
+            )
+        })?;
 
     if !auth_header.starts_with("Bearer ") {
-        return Err((StatusCode::UNAUTHORIZED, "Invalid Authorization header format".to_string()));
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Invalid Authorization header format".to_string(),
+        ));
     }
 
     Ok(auth_header[7..].to_string())
@@ -35,14 +45,10 @@ pub async fn auth_middleware(
     let token = extract_bearer_token(&headers)?;
 
     // Validate JWT and extract claims
-    let claims = state
-        .jwt_validator
-        .validate(&token)
-        .await
-        .map_err(|e| {
-            tracing::warn!("JWT validation failed: {}", e);
-            (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
-        })?;
+    let claims = state.jwt_validator.validate(&token).await.map_err(|e| {
+        tracing::warn!("JWT validation failed: {}", e);
+        (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+    })?;
 
     tracing::debug!("JWT validated for user: {}", claims.email);
 
@@ -51,7 +57,10 @@ pub async fn auth_middleware(
         .await
         .map_err(|e| {
             tracing::error!("Failed to find/create user: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
         })?;
 
     tracing::debug!("User found/created: {} ({})", user.email, user.id);

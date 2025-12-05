@@ -1,13 +1,13 @@
 use axum::{
-    Json,
-    extract::{State, Query, Extension},
+    extract::{Extension, Query, State},
     http::StatusCode,
+    Json,
 };
 
-use crate::state::AppState;
+use super::models::{GetRegistryCredsRequest, GetRegistryCredsResponse};
 use crate::db::models::User;
 use crate::db::{projects, teams as db_teams};
-use super::models::{GetRegistryCredsRequest, GetRegistryCredsResponse};
+use crate::state::AppState;
 use uuid::Uuid;
 
 /// Check if user has permission to deploy to the project
@@ -56,8 +56,18 @@ pub async fn get_registry_credentials(
     // Query project by name
     let project = projects::find_by_name(&state.db_pool, &params.project)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to query project: {}", e)))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("Project '{}' not found", params.project)))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to query project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", params.project),
+            )
+        })?;
 
     // Check if user has permission to deploy to this project
     check_deploy_permission(&state, &project, user.id)
@@ -65,8 +75,10 @@ pub async fn get_registry_credentials(
         .map_err(|e| (StatusCode::FORBIDDEN, e))?;
 
     // Check if registry is configured
-    let registry_provider = state.registry_provider.as_ref()
-        .ok_or((StatusCode::SERVICE_UNAVAILABLE, "No registry configured".to_string()))?;
+    let registry_provider = state.registry_provider.as_ref().ok_or((
+        StatusCode::SERVICE_UNAVAILABLE,
+        "No registry configured".to_string(),
+    ))?;
 
     // Get credentials from the registry provider
     // The repository name is typically the project name
@@ -75,10 +87,12 @@ pub async fn get_registry_credentials(
     let credentials = registry_provider
         .get_credentials(&repository)
         .await
-        .map_err(|e| (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to get registry credentials: {}", e)
-        ))?;
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get registry credentials: {}", e),
+            )
+        })?;
 
     Ok(Json(GetRegistryCredsResponse {
         credentials,

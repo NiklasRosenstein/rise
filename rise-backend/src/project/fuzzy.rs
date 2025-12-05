@@ -2,7 +2,6 @@
 ///
 /// This module provides fuzzy matching capabilities for project names, allowing
 /// helpful suggestions when users make typos.
-
 use super::models::Project;
 
 /// Calculate Jaro similarity between two strings
@@ -68,12 +67,12 @@ fn jaro_similarity(s1: &str, s2: &str) -> f64 {
     }
 
     let matches_f64 = matches as f64;
-    let jaro = (matches_f64 / s1_len as f64
+    
+
+    (matches_f64 / s1_len as f64
         + matches_f64 / s2_len as f64
         + (matches_f64 - transpositions as f64 / 2.0) / matches_f64)
-        / 3.0;
-
-    jaro
+        / 3.0
 }
 
 /// Calculate Jaro-Winkler distance between two strings

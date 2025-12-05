@@ -1,5 +1,5 @@
-pub mod ecr;
 pub mod docker;
+pub mod ecr;
 
-pub use ecr::EcrProvider;
 pub use docker::DockerProvider;
+pub use ecr::EcrProvider;

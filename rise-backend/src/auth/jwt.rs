@@ -1,6 +1,6 @@
+use anyhow::{anyhow, Context, Result};
 use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
-use anyhow::{Result, Context, anyhow};
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -8,15 +8,15 @@ use tokio::sync::RwLock;
 /// JWT claims from Dex ID token
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,           // Subject (user ID from Dex)
-    pub email: String,         // User email
-    pub email_verified: bool,  // Email verification status
-    pub iss: String,           // Issuer (Dex URL)
-    pub aud: String,           // Audience (client ID)
-    pub exp: usize,            // Expiration time
-    pub iat: usize,            // Issued at
+    pub sub: String,          // Subject (user ID from Dex)
+    pub email: String,        // User email
+    pub email_verified: bool, // Email verification status
+    pub iss: String,          // Issuer (Dex URL)
+    pub aud: String,          // Audience (client ID)
+    pub exp: usize,           // Expiration time
+    pub iat: usize,           // Issued at
     #[serde(default)]
-    pub name: Option<String>,  // User's full name
+    pub name: Option<String>, // User's full name
 }
 
 /// JWKS (JSON Web Key Set) response from Dex
@@ -129,8 +129,8 @@ impl JwtValidator {
         validation.set_issuer(&[&self.issuer]);
 
         // Validate and decode the token
-        let token_data = decode::<Claims>(token, &key, &validation)
-            .context("Failed to validate JWT token")?;
+        let token_data =
+            decode::<Claims>(token, &key, &validation).context("Failed to validate JWT token")?;
 
         Ok(token_data.claims)
     }

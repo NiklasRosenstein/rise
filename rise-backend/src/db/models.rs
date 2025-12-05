@@ -35,6 +35,7 @@ pub enum ProjectStatus {
     Failed,
     Deploying,
     Deleting,
+    Terminated,
 }
 
 impl std::fmt::Display for ProjectStatus {
@@ -45,6 +46,7 @@ impl std::fmt::Display for ProjectStatus {
             ProjectStatus::Failed => write!(f, "Failed"),
             ProjectStatus::Deploying => write!(f, "Deploying"),
             ProjectStatus::Deleting => write!(f, "Deleting"),
+            ProjectStatus::Terminated => write!(f, "Terminated"),
         }
     }
 }
@@ -131,12 +133,12 @@ pub enum DeploymentStatus {
     Pending,
     Building,
     Pushing,
-    Pushed,     // Handoff point between CLI and controller
+    Pushed, // Handoff point between CLI and controller
     Deploying,
 
     // Running states (post-infrastructure)
-    Healthy,    // Running and passing health checks
-    Unhealthy,  // Running but failing health checks
+    Healthy,   // Running and passing health checks
+    Unhealthy, // Running but failing health checks
 
     // Cancellation states (pre-infrastructure)
     Cancelling, // Being cancelled before infrastructure provisioned
@@ -148,7 +150,7 @@ pub enum DeploymentStatus {
     Superseded,  // Terminal: replaced by newer deployment
 
     // Terminal states
-    Failed,      // Terminal: could not reach Healthy
+    Failed, // Terminal: could not reach Healthy
 }
 
 impl std::fmt::Display for DeploymentStatus {

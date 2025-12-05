@@ -1,10 +1,14 @@
-use crate::settings::{Settings, RegistrySettings};
-use crate::registry::{RegistryProvider, providers::{EcrProvider, DockerProvider}, models::{EcrConfig, DockerConfig}};
 use crate::auth::{jwt::JwtValidator, oauth::DexOAuthClient};
-use std::sync::Arc;
-use anyhow::{Result, Context};
+use crate::registry::{
+    models::{DockerConfig, EcrConfig},
+    providers::{DockerProvider, EcrProvider},
+    RegistryProvider,
+};
+use crate::settings::{RegistrySettings, Settings};
+use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
+use std::sync::Arc;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -72,53 +76,65 @@ impl AppState {
         )?);
 
         // Initialize registry provider based on configuration
-        let registry_provider: Option<Arc<dyn RegistryProvider>> = if let Some(ref registry_config) = settings.registry {
-            match registry_config {
-                RegistrySettings::Ecr { region, account_id, access_key_id, secret_access_key } => {
-                    let ecr_config = EcrConfig {
-                        region: region.clone(),
-                        account_id: account_id.clone(),
-                        access_key_id: access_key_id.clone(),
-                        secret_access_key: secret_access_key.clone(),
-                    };
-                    match EcrProvider::new(ecr_config).await {
-                        Ok(provider) => {
-                            tracing::info!("Initialized ECR registry provider");
-                            Some(Arc::new(provider))
+        let registry_provider: Option<Arc<dyn RegistryProvider>> =
+            if let Some(ref registry_config) = settings.registry {
+                match registry_config {
+                    RegistrySettings::Ecr {
+                        region,
+                        account_id,
+                        access_key_id,
+                        secret_access_key,
+                    } => {
+                        let ecr_config = EcrConfig {
+                            region: region.clone(),
+                            account_id: account_id.clone(),
+                            access_key_id: access_key_id.clone(),
+                            secret_access_key: secret_access_key.clone(),
+                        };
+                        match EcrProvider::new(ecr_config).await {
+                            Ok(provider) => {
+                                tracing::info!("Initialized ECR registry provider");
+                                Some(Arc::new(provider))
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to initialize ECR provider: {}", e);
+                                None
+                            }
                         }
-                        Err(e) => {
-                            tracing::error!("Failed to initialize ECR provider: {}", e);
-                            None
+                    }
+                    RegistrySettings::Docker {
+                        registry_url,
+                        namespace,
+                    } => {
+                        let docker_config = DockerConfig {
+                            registry_url: registry_url.clone(),
+                            namespace: namespace.clone(),
+                        };
+                        match DockerProvider::new(docker_config) {
+                            Ok(provider) => {
+                                tracing::info!(
+                                    "Initialized Docker registry provider at {}",
+                                    registry_url
+                                );
+                                Some(Arc::new(provider))
+                            }
+                            Err(e) => {
+                                tracing::error!("Failed to initialize Docker provider: {}", e);
+                                None
+                            }
                         }
                     }
                 }
-                RegistrySettings::Docker { registry_url, namespace } => {
-                    let docker_config = DockerConfig {
-                        registry_url: registry_url.clone(),
-                        namespace: namespace.clone(),
-                    };
-                    match DockerProvider::new(docker_config) {
-                        Ok(provider) => {
-                            tracing::info!("Initialized Docker registry provider at {}", registry_url);
-                            Some(Arc::new(provider))
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to initialize Docker provider: {}", e);
-                            None
-                        }
-                    }
-                }
-            }
-        } else {
-            tracing::warn!("No registry configured - registry credentials endpoint will not be available");
-            None
-        };
+            } else {
+                tracing::warn!(
+                    "No registry configured - registry credentials endpoint will not be available"
+                );
+                None
+            };
 
         // Initialize OCI client for direct registry interaction
-        let oci_client = Arc::new(
-            crate::oci::OciClient::new()
-                .context("Failed to initialize OCI client")?
-        );
+        let oci_client =
+            Arc::new(crate::oci::OciClient::new().context("Failed to initialize OCI client")?);
         tracing::info!("Initialized OCI client for registry digest resolution");
 
         Ok(Self {

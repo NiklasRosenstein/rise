@@ -1,11 +1,11 @@
+use crate::db::{models::User, users};
+use crate::state::AppState;
 use axum::{
-    Json,
-    extract::{State, Extension},
+    extract::{Extension, State},
     http::StatusCode,
+    Json,
 };
 use serde::{Deserialize, Serialize};
-use crate::state::AppState;
-use crate::db::{models::User, users};
 use tracing::instrument;
 
 #[derive(Debug, Deserialize)]
@@ -29,15 +29,14 @@ pub async fn code_exchange(
     // Exchange authorization code for tokens using PKCE
     let token_info = state
         .oauth_client
-        .exchange_code_pkce(
-            &payload.code,
-            &payload.code_verifier,
-            &payload.redirect_uri,
-        )
+        .exchange_code_pkce(&payload.code, &payload.code_verifier, &payload.redirect_uri)
         .await
         .map_err(|e| {
             tracing::warn!("OAuth2 code exchange failed: {}", e);
-            (StatusCode::UNAUTHORIZED, format!("Code exchange failed: {}", e))
+            (
+                StatusCode::UNAUTHORIZED,
+                format!("Code exchange failed: {}", e),
+            )
         })?;
 
     tracing::info!("Code exchange successful");
@@ -98,7 +97,10 @@ pub async fn users_lookup(
             .await
             .map_err(|e| {
                 tracing::error!("Database error looking up user {}: {}", email, e);
-                (StatusCode::INTERNAL_SERVER_ERROR, "Database error".to_string())
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
             })?;
 
         match user {

@@ -2,16 +2,13 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Default)]
 pub enum ProjectVisibility {
     Public,
+    #[default]
     Private,
 }
 
-impl Default for ProjectVisibility {
-    fn default() -> Self {
-        ProjectVisibility::Private
-    }
-}
 
 impl From<crate::db::models::ProjectVisibility> for ProjectVisibility {
     fn from(visibility: crate::db::models::ProjectVisibility) -> Self {
@@ -32,19 +29,17 @@ impl From<ProjectVisibility> for crate::db::models::ProjectVisibility {
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Default)]
 pub enum ProjectStatus {
     Running,
+    #[default]
     Stopped,
     Deploying,
     Failed,
     Deleting,
+    Terminated,
 }
 
-impl Default for ProjectStatus {
-    fn default() -> Self {
-        ProjectStatus::Stopped
-    }
-}
 
 impl From<crate::db::models::ProjectStatus> for ProjectStatus {
     fn from(status: crate::db::models::ProjectStatus) -> Self {
@@ -54,6 +49,7 @@ impl From<crate::db::models::ProjectStatus> for ProjectStatus {
             crate::db::models::ProjectStatus::Deploying => ProjectStatus::Deploying,
             crate::db::models::ProjectStatus::Failed => ProjectStatus::Failed,
             crate::db::models::ProjectStatus::Deleting => ProjectStatus::Deleting,
+            crate::db::models::ProjectStatus::Terminated => ProjectStatus::Terminated,
         }
     }
 }
@@ -66,6 +62,7 @@ impl From<ProjectStatus> for crate::db::models::ProjectStatus {
             ProjectStatus::Deploying => crate::db::models::ProjectStatus::Deploying,
             ProjectStatus::Failed => crate::db::models::ProjectStatus::Failed,
             ProjectStatus::Deleting => crate::db::models::ProjectStatus::Deleting,
+            ProjectStatus::Terminated => crate::db::models::ProjectStatus::Terminated,
         }
     }
 }
@@ -73,8 +70,8 @@ impl From<ProjectStatus> for crate::db::models::ProjectStatus {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub enum ProjectOwner {
-    User(String),  // User ID
-    Team(String),  // Team ID
+    User(String), // User ID
+    Team(String), // Team ID
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -88,9 +85,9 @@ pub struct Project {
     #[serde(default)]
     pub visibility: ProjectVisibility,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_user: Option<String>,  // Relation to users collection
+    pub owner_user: Option<String>, // Relation to users collection
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_team: Option<String>,  // Relation to teams collection
+    pub owner_team: Option<String>, // Relation to teams collection
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_url: Option<String>,
     // Timestamps
@@ -110,11 +107,7 @@ impl Project {
     pub fn owner(&self) -> Option<ProjectOwner> {
         if let Some(ref user_id) = self.owner_user {
             Some(ProjectOwner::User(user_id.clone()))
-        } else if let Some(ref team_id) = self.owner_team {
-            Some(ProjectOwner::Team(team_id.clone()))
-        } else {
-            None
-        }
+        } else { self.owner_team.as_ref().map(|team_id| ProjectOwner::Team(team_id.clone())) }
     }
 }
 
@@ -194,7 +187,7 @@ pub struct GetProjectParams {
     #[serde(default)]
     pub by_id: bool,
     #[serde(default)]
-    pub expand: String,  // Comma-separated list like "owner"
+    pub expand: String, // Comma-separated list like "owner"
 }
 
 impl GetProjectParams {

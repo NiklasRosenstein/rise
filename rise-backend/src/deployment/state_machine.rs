@@ -61,18 +61,18 @@ pub fn is_valid_transition(from: &DeploymentStatus, to: &DeploymentStatus) -> bo
         (Pushed, Deploying) => true,
 
         // Deployment outcomes
-        (Deploying, Healthy) => true,   // Health checks pass
-        (Deploying, Failed) => true,    // Health checks fail
+        (Deploying, Healthy) => true, // Health checks pass
+        (Deploying, Failed) => true,  // Health checks fail
 
         // Post-Infrastructure (Running State)
-        (Healthy, Unhealthy) => true,   // Health degradation
-        (Unhealthy, Healthy) => true,   // Health recovery
-        (Unhealthy, Failed) => true,    // Timeout without recovery
+        (Healthy, Unhealthy) => true, // Health degradation
+        (Unhealthy, Healthy) => true, // Health recovery
+        (Unhealthy, Failed) => true,  // Timeout without recovery
 
         // Post-Infrastructure (Termination Path)
         (Healthy | Unhealthy, Terminating) => true,
-        (Terminating, Stopped) => true,     // User-initiated termination
-        (Terminating, Superseded) => true,  // Replaced by newer deployment
+        (Terminating, Stopped) => true, // User-initiated termination
+        (Terminating, Superseded) => true, // Replaced by newer deployment
 
         // Build/Deploy failures (before reaching Healthy)
         (Pending | Building | Pushing | Pushed, Failed) => true,

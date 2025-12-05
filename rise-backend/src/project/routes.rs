@@ -1,6 +1,9 @@
-use axum::{routing::{get, post, put, delete}, Router};
-use crate::state::AppState;
 use super::handlers;
+use crate::state::AppState;
+use axum::{
+    routing::{delete, get, post, put},
+    Router,
+};
 
 pub fn routes() -> Router<AppState> {
     Router::new()
