@@ -1,8 +1,10 @@
 use async_trait::async_trait;
 use bollard::Docker;
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
+use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, PortBinding};
 use chrono::Utc;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -137,6 +139,31 @@ impl DockerController {
         container_name: &str,
     ) -> anyhow::Result<String> {
         debug!("Creating container {} with image {} on port {}", container_name, image_tag, host_port);
+
+        // Pull the image first (required for digest references and ensures latest version)
+        info!("Pulling image: {}", image_tag);
+        let options = CreateImageOptions {
+            from_image: image_tag,
+            ..Default::default()
+        };
+
+        let mut stream = self.docker.create_image(Some(options), None, None);
+        while let Some(result) = stream.next().await {
+            match result {
+                Ok(info) => {
+                    if let Some(status) = info.status {
+                        debug!("Pull status: {}", status);
+                    }
+                    if let Some(error) = info.error {
+                        return Err(anyhow::anyhow!("Failed to pull image: {}", error));
+                    }
+                }
+                Err(e) => {
+                    return Err(anyhow::anyhow!("Failed to pull image '{}': {}", image_tag, e));
+                }
+            }
+        }
+        info!("Successfully pulled image: {}", image_tag);
 
         // Container port (default 8080)
         let container_port = 8080;
