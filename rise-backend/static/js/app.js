@@ -71,21 +71,27 @@ async function loadProjects() {
                     <tr>
                         <th>Name</th>
                         <th>Status</th>
+                        <th>Owner</th>
                         <th>Visibility</th>
                         <th>URL</th>
                         <th>Actions</th>
                     </tr>
                 </thead>
                 <tbody>
-                    ${projects.map(p => `
+                    ${projects.map(p => {
+                        const owner = p.owner_user ? `user:${p.owner_user}` :
+                                     p.owner_team ? `team:${p.owner_team}` : '-';
+                        return `
                         <tr>
                             <td>${escapeHtml(p.name)}</td>
                             <td><span class="status-badge status-${p.status.toLowerCase()}">${p.status}</span></td>
+                            <td>${escapeHtml(owner)}</td>
                             <td>${p.visibility}</td>
                             <td>${p.project_url ? `<a href="${p.project_url}" target="_blank">${p.project_url}</a>` : '-'}</td>
                             <td><a href="#" onclick="showProject('${escapeHtml(p.name)}'); return false;">View</a></td>
                         </tr>
-                    `).join('')}
+                        `;
+                    }).join('')}
                 </tbody>
             </table>
         `;
@@ -202,6 +208,8 @@ async function loadDeployments(projectName) {
                         <th>Status</th>
                         <th>Image</th>
                         <th>Group</th>
+                        <th>URL</th>
+                        <th>Expires</th>
                         <th>Created</th>
                         <th>Actions</th>
                     </tr>
@@ -209,10 +217,12 @@ async function loadDeployments(projectName) {
                 <tbody>
                     ${deployments.map(d => `
                         <tr>
-                            <td><code>${d.deployment_id.substring(0, 8)}</code></td>
+                            <td><code>${escapeHtml(d.deployment_id)}</code></td>
                             <td><span class="status-badge status-${d.status.toLowerCase()}">${d.status}</span></td>
                             <td><small>${d.image ? escapeHtml(d.image.split('/').pop()) : '-'}</small></td>
                             <td>${escapeHtml(d.deployment_group)}</td>
+                            <td>${d.deployment_url ? `<a href="${d.deployment_url}" target="_blank">Link</a>` : '-'}</td>
+                            <td>${d.expires_at ? formatDate(d.expires_at) : '-'}</td>
                             <td>${formatDate(d.created)}</td>
                             <td><a href="#" onclick="showDeployment('${escapeHtml(projectName)}', '${escapeHtml(d.deployment_id)}'); return false;">View</a></td>
                         </tr>
