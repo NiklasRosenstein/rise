@@ -5,7 +5,6 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod backend;
 mod config;
-mod deploy;
 mod deployment;
 mod login;
 mod project;
@@ -37,36 +36,23 @@ enum Commands {
     Backend(backend::BackendCommands),
     /// Project management commands
     #[command(subcommand)]
+    #[command(visible_alias = "p")]
     Project(ProjectCommands),
-    /// Deploy a project
-    Deploy {
-        /// Project name to deploy to
-        #[arg(long, short)]
-        project: String,
-        /// Path to the directory containing the application (defaults to current directory)
-        #[arg(default_value = ".")]
-        path: String,
-        /// Pre-built image to deploy (e.g., nginx:latest). Skips build if provided.
-        #[arg(long, short)]
-        image: Option<String>,
-        /// Deployment group (e.g., 'default', 'mr/27'). Defaults to 'default' if not specified.
-        #[arg(long, short)]
-        group: Option<String>,
-        /// Expiration duration (e.g., '7d', '2h', '30m'). Deployment will be automatically cleaned up after this period.
-        #[arg(long)]
-        expire: Option<String>,
-    },
     /// Team management commands
     #[command(subcommand)]
+    #[command(visible_alias = "t")]
     Team(TeamCommands),
     /// Deployment management commands
     #[command(subcommand)]
+    #[command(visible_alias = "d")]
     Deployment(DeploymentCommands),
 }
 
 #[derive(Subcommand, Debug)]
 enum ProjectCommands {
     /// Create a new project
+    #[command(visible_alias = "c")]
+    #[command(visible_alias = "new")]
     Create {
         /// Project name
         name: String,
@@ -78,8 +64,11 @@ enum ProjectCommands {
         owner: Option<String>,
     },
     /// List all projects
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
     List {},
     /// Show project details
+    #[command(visible_alias = "s")]
     Show {
         /// Project name or ID
         project: String,
@@ -88,6 +77,8 @@ enum ProjectCommands {
         by_id: bool,
     },
     /// Update project
+    #[command(visible_alias = "u")]
+    #[command(visible_alias = "edit")]
     Update {
         /// Project name or ID
         project: String,
@@ -105,6 +96,8 @@ enum ProjectCommands {
         owner: Option<String>,
     },
     /// Delete a project
+    #[command(visible_alias = "del")]
+    #[command(visible_alias = "rm")]
     Delete {
         /// Project name or ID
         project: String,
@@ -117,6 +110,8 @@ enum ProjectCommands {
 #[derive(Subcommand, Debug)]
 enum TeamCommands {
     /// Create a new team
+    #[command(visible_alias = "c")]
+    #[command(visible_alias = "new")]
     Create {
         /// Team name
         name: String,
@@ -128,8 +123,11 @@ enum TeamCommands {
         members: String,
     },
     /// List all teams
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
     List {},
     /// Show team details
+    #[command(visible_alias = "s")]
     Show {
         /// Team name or ID
         team: String,
@@ -138,6 +136,8 @@ enum TeamCommands {
         by_id: bool,
     },
     /// Update team
+    #[command(visible_alias = "u")]
+    #[command(visible_alias = "edit")]
     Update {
         /// Team name or ID
         team: String,
@@ -161,6 +161,8 @@ enum TeamCommands {
         remove_members: Option<String>,
     },
     /// Delete a team
+    #[command(visible_alias = "del")]
+    #[command(visible_alias = "rm")]
     Delete {
         /// Team name or ID
         team: String,
@@ -172,7 +174,28 @@ enum TeamCommands {
 
 #[derive(Subcommand, Debug)]
 enum DeploymentCommands {
+    /// Create a new deployment
+    #[command(visible_alias = "c")]
+    #[command(visible_alias = "new")]
+    Create {
+        /// Project name to deploy to
+        project: String,
+        /// Path to the directory containing the application (defaults to current directory)
+        #[arg(default_value = ".")]
+        path: String,
+        /// Pre-built image to deploy (e.g., nginx:latest). Skips build if provided.
+        #[arg(long, short)]
+        image: Option<String>,
+        /// Deployment group (e.g., 'default', 'mr/27'). Defaults to 'default' if not specified.
+        #[arg(long, short)]
+        group: Option<String>,
+        /// Expiration duration (e.g., '7d', '2h', '30m'). Deployment will be automatically cleaned up after this period.
+        #[arg(long)]
+        expire: Option<String>,
+    },
     /// List deployments for a project
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
     List {
         /// Project name
         project: String,
@@ -184,6 +207,7 @@ enum DeploymentCommands {
         limit: usize,
     },
     /// Show deployment details (format: project:deployment_id)
+    #[command(visible_alias = "s")]
     Show {
         /// Deployment reference (format: project:deployment_id)
         deployment: String,
@@ -260,25 +284,6 @@ async fn main() -> Result<()> {
         }
         Commands::Backend(backend_cmd) => {
             backend::handle_backend_command(backend_cmd.clone()).await?;
-        }
-        Commands::Deploy {
-            project,
-            path,
-            image,
-            group,
-            expire,
-        } => {
-            deploy::handle_deploy(
-                &http_client,
-                &backend_url,
-                &config,
-                project,
-                path,
-                image.as_deref(),
-                group.as_deref(),
-                expire.as_deref(),
-            )
-            .await?;
         }
         Commands::Project(project_cmd) => match project_cmd {
             ProjectCommands::Create {
@@ -440,6 +445,25 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Deployment(deployment_cmd) => match deployment_cmd {
+            DeploymentCommands::Create {
+                project,
+                path,
+                image,
+                group,
+                expire,
+            } => {
+                deployment::create_deployment(
+                    &http_client,
+                    &backend_url,
+                    &config,
+                    project,
+                    path,
+                    image.as_deref(),
+                    group.as_deref(),
+                    expire.as_deref(),
+                )
+                .await?;
+            }
             DeploymentCommands::List {
                 project,
                 group,
