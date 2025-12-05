@@ -572,6 +572,8 @@ pub async fn update_deployment_status(
 pub struct ListDeploymentsQuery {
     #[serde(rename = "group")]
     pub deployment_group: Option<String>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
 }
 
 /// List deployments for a project
@@ -625,11 +627,13 @@ pub async fn list_deployments(
         ));
     }
 
-    // Get deployments from database (optionally filtered by group)
+    // Get deployments from database (optionally filtered by group, with pagination)
     let db_deployments = db_deployments::list_for_project_and_group(
         &state.db_pool,
         project.id,
         query.deployment_group.as_deref(),
+        query.limit,
+        query.offset,
     )
     .await
     .map_err(|e| {

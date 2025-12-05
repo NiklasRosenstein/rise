@@ -63,8 +63,11 @@ class RiseAPI {
     }
 
     // Deployment endpoints
-    async getProjectDeployments(projectName) {
-        return this.request(`/projects/${projectName}/deployments`);
+    async getProjectDeployments(projectName, params = {}) {
+        const queryString = new URLSearchParams(
+            Object.entries(params).filter(([_, v]) => v !== null && v !== undefined && v !== '')
+        ).toString();
+        return this.request(`/projects/${projectName}/deployments${queryString ? '?' + queryString : ''}`);
     }
 
     async getDeployment(projectName, deploymentId) {

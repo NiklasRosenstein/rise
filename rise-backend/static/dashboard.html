@@ -47,7 +47,20 @@
             <a href="#" class="back-button" onclick="showView('projects'); return false;">Back to Projects</a>
             <div id="project-detail"></div>
             <h3>Deployments</h3>
+            <div id="deployment-filters" style="margin-bottom: 1rem;">
+                <label for="deployment-group-filter">
+                    Filter by group:
+                    <input type="text" id="deployment-group-filter" placeholder="Leave empty for all groups" style="display: inline-block; width: auto; margin-left: 0.5rem;">
+                </label>
+                <button onclick="applyDeploymentFilter()" style="margin-left: 0.5rem;">Apply</button>
+                <button onclick="clearDeploymentFilter()" style="margin-left: 0.5rem;" class="secondary">Clear</button>
+            </div>
             <div id="deployment-list"></div>
+            <div id="deployment-pagination" style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                <button id="prev-page" onclick="prevPage()" disabled>Previous</button>
+                <span id="page-info"></span>
+                <button id="next-page" onclick="nextPage()">Next</button>
+            </div>
         </section>
 
         <!-- Team Detail View -->

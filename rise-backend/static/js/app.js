@@ -4,6 +4,11 @@ let currentView = 'projects';
 let currentProject = null;
 let refreshInterval = null;
 
+// Pagination state
+let currentPage = 0;
+let pageSize = 10;
+let deploymentGroupFilter = '';
+
 // Initialize app
 async function init() {
     if (!isAuthenticated()) {
@@ -231,6 +236,14 @@ async function showProject(projectName) {
     detailEl.innerHTML = '<p aria-busy="true">Loading project...</p>';
     deploymentListEl.innerHTML = '';
 
+    // Reset pagination and filter state
+    currentPage = 0;
+    deploymentGroupFilter = '';
+    const filterInput = document.getElementById('deployment-group-filter');
+    if (filterInput) {
+        filterInput.value = '';
+    }
+
     try {
         const project = await api.getProject(projectName, { expand: 'owner' });
 
@@ -251,24 +264,40 @@ async function showProject(projectName) {
         `;
 
         // Load deployments
-        await loadDeployments(projectName);
+        await loadDeployments(projectName, 0);
 
-        // Start auto-refresh for deployment status
-        startAutoRefresh(() => loadDeployments(projectName), 5000);
+        // Start auto-refresh for deployment status (maintain current page)
+        startAutoRefresh(() => loadDeployments(projectName, currentPage), 5000);
     } catch (error) {
         detailEl.innerHTML = `<p>Error loading project: ${escapeHtml(error.message)}</p>`;
     }
 }
 
 // Load deployments for a project
-async function loadDeployments(projectName) {
+async function loadDeployments(projectName, page = 0) {
     const listEl = document.getElementById('deployment-list');
+    const pageInfoEl = document.getElementById('page-info');
+    const prevBtn = document.getElementById('prev-page');
+    const nextBtn = document.getElementById('next-page');
 
     try {
-        const deployments = await api.getProjectDeployments(projectName);
+        const params = {
+            limit: pageSize,
+            offset: page * pageSize,
+        };
 
-        if (deployments.length === 0) {
+        // Add group filter if set
+        if (deploymentGroupFilter) {
+            params.group = deploymentGroupFilter;
+        }
+
+        const deployments = await api.getProjectDeployments(projectName, params);
+
+        if (deployments.length === 0 && page === 0) {
             listEl.innerHTML = '<p>No deployments found.</p>';
+            pageInfoEl.textContent = '';
+            prevBtn.disabled = true;
+            nextBtn.disabled = true;
             return;
         }
 
@@ -302,8 +331,15 @@ async function loadDeployments(projectName) {
                 </tbody>
             </table>
         `;
+
+        // Update pagination controls
+        currentPage = page;
+        pageInfoEl.textContent = `Page ${page + 1} (showing ${deployments.length} deployments)`;
+        prevBtn.disabled = page === 0;
+        nextBtn.disabled = deployments.length < pageSize;
     } catch (error) {
         listEl.innerHTML = `<p>Error loading deployments: ${escapeHtml(error.message)}</p>`;
+        pageInfoEl.textContent = '';
     }
 }
 
@@ -399,6 +435,37 @@ function escapeHtml(text) {
 function formatDate(dateString) {
     const date = new Date(dateString);
     return date.toLocaleString();
+}
+
+// Pagination functions
+function nextPage() {
+    if (currentProject) {
+        loadDeployments(currentProject, currentPage + 1);
+    }
+}
+
+function prevPage() {
+    if (currentProject && currentPage > 0) {
+        loadDeployments(currentProject, currentPage - 1);
+    }
+}
+
+// Filter functions
+function applyDeploymentFilter() {
+    const filterInput = document.getElementById('deployment-group-filter');
+    deploymentGroupFilter = filterInput.value.trim();
+    if (currentProject) {
+        loadDeployments(currentProject, 0); // Reset to first page when filtering
+    }
+}
+
+function clearDeploymentFilter() {
+    const filterInput = document.getElementById('deployment-group-filter');
+    filterInput.value = '';
+    deploymentGroupFilter = '';
+    if (currentProject) {
+        loadDeployments(currentProject, 0); // Reset to first page
+    }
 }
 
 // Initialize on load

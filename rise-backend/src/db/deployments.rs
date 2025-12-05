@@ -865,7 +865,12 @@ pub async fn list_for_project_and_group(
     pool: &PgPool,
     project_id: Uuid,
     group: Option<&str>,
+    limit: Option<i64>,
+    offset: Option<i64>,
 ) -> Result<Vec<Deployment>> {
+    let limit_value = limit.unwrap_or(10);
+    let offset_value = offset.unwrap_or(0);
+
     let deployments = if let Some(g) = group {
         sqlx::query_as!(
             Deployment,
@@ -873,7 +878,7 @@ pub async fn list_for_project_and_group(
             SELECT
                 id, deployment_id, project_id, created_by_id,
                 status as "status: DeploymentStatus",
-                            deployment_group, expires_at,
+                deployment_group, expires_at,
                 termination_reason as "termination_reason: _",
                 completed_at, error_message, build_logs,
                 controller_metadata as "controller_metadata: serde_json::Value",
@@ -884,15 +889,42 @@ pub async fn list_for_project_and_group(
             FROM deployments
             WHERE project_id = $1 AND deployment_group = $2
             ORDER BY created_at DESC
+            LIMIT $3 OFFSET $4
             "#,
             project_id,
-            g
+            g,
+            limit_value,
+            offset_value
         )
         .fetch_all(pool)
         .await?
     } else {
-        // No group filter - return all
-        list_for_project(pool, project_id).await?
+        // No group filter - return all for project with pagination
+        sqlx::query_as!(
+            Deployment,
+            r#"
+            SELECT
+                id, deployment_id, project_id, created_by_id,
+                status as "status: DeploymentStatus",
+                deployment_group, expires_at,
+                termination_reason as "termination_reason: _",
+                completed_at, error_message, build_logs,
+                controller_metadata as "controller_metadata: serde_json::Value",
+                deployment_url,
+                image, image_digest,
+                http_port,
+                created_at, updated_at
+            FROM deployments
+            WHERE project_id = $1
+            ORDER BY created_at DESC
+            LIMIT $2 OFFSET $3
+            "#,
+            project_id,
+            limit_value,
+            offset_value
+        )
+        .fetch_all(pool)
+        .await?
     };
 
     Ok(deployments)
