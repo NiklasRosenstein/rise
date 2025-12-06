@@ -25,7 +25,7 @@ alias = "r"
 [tasks."backend:reload"]
 description = "Reload the backend services with overmind."
 depends = ["backend:deps", "db:migrate"]
-run = "overmind reload -f Procfile.dev"
+run = "overmind restart"
 alias = "rr"
 
 [tasks."minikube:launch"]
