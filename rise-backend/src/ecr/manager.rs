@@ -6,6 +6,38 @@ use std::collections::HashMap;
 
 use crate::registry::models::EcrConfig;
 
+/// Extract a clean error message from an AWS SDK error's Debug output
+///
+/// The AWS SDK errors have verbose Debug output, but we can extract just the
+/// meaningful message by parsing for the `message: Some("...")` pattern.
+fn format_sdk_error<E: std::fmt::Debug>(err: &E) -> String {
+    let debug_str = format!("{:?}", err);
+
+    // Try to extract the message field from the debug output
+    // Pattern: message: Some("actual error message")
+    if let Some(start) = debug_str.find("message: Some(\"") {
+        let start = start + 15; // length of 'message: Some("'
+        if let Some(end) = debug_str[start..].find("\")") {
+            return debug_str[start..start + end].to_string();
+        }
+    }
+
+    // Fallback: try to find just a Message field (as in JSON response)
+    if let Some(start) = debug_str.find("\"Message\":\"") {
+        let start = start + 11; // length of '"Message":"'
+        if let Some(end) = debug_str[start..].find("\"") {
+            return debug_str[start..start + end].to_string();
+        }
+    }
+
+    // Last resort: return a truncated debug string
+    if debug_str.len() > 200 {
+        format!("{}...", &debug_str[..200])
+    } else {
+        debug_str
+    }
+}
+
 /// Manages ECR repository lifecycle operations
 ///
 /// This manager handles creating, deleting, and tagging ECR repositories.
@@ -88,11 +120,10 @@ impl EcrRepoManager {
                         return Ok(false);
                     }
                 }
-                // Use Debug format to get full error details from AWS SDK
                 Err(anyhow::anyhow!(
-                    "Failed to check ECR repository existence for '{}': {:?}",
+                    "Failed to check ECR repository existence for '{}': {}",
                     repo_name,
-                    err
+                    format_sdk_error(&err)
                 ))
             }
         }
@@ -143,7 +174,11 @@ impl EcrRepoManager {
             .send()
             .await
             .map_err(|e| {
-                anyhow::anyhow!("Failed to create ECR repository '{}': {:?}", repo_name, e)
+                anyhow::anyhow!(
+                    "Failed to create ECR repository '{}': {}",
+                    repo_name,
+                    format_sdk_error(&e)
+                )
             })?;
 
         tracing::info!("Created ECR repository: {}", repo_name);
@@ -176,7 +211,11 @@ impl EcrRepoManager {
             .send()
             .await
             .map_err(|e| {
-                anyhow::anyhow!("Failed to delete ECR repository '{}': {:?}", repo_name, e)
+                anyhow::anyhow!(
+                    "Failed to delete ECR repository '{}': {}",
+                    repo_name,
+                    format_sdk_error(&e)
+                )
             })?;
 
         tracing::info!("Deleted ECR repository: {}", repo_name);
@@ -209,9 +248,9 @@ impl EcrRepoManager {
             .await
             .map_err(|e| {
                 anyhow::anyhow!(
-                    "Failed to tag ECR repository '{}' as orphaned: {:?}",
+                    "Failed to tag ECR repository '{}' as orphaned: {}",
                     self.repo_name(project),
-                    e
+                    format_sdk_error(&e)
                 )
             })?;
 
@@ -231,10 +270,9 @@ impl EcrRepoManager {
                 request = request.next_token(token);
             }
 
-            let response = request
-                .send()
-                .await
-                .map_err(|e| anyhow::anyhow!("Failed to list ECR repositories: {:?}", e))?;
+            let response = request.send().await.map_err(|e| {
+                anyhow::anyhow!("Failed to list ECR repositories: {}", format_sdk_error(&e))
+            })?;
 
             for repo in response.repositories() {
                 // Check if this repo has our prefix
