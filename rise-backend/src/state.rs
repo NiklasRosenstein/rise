@@ -1,7 +1,4 @@
-use crate::auth::{
-    jwt::{ExternalJwtValidator, JwtValidator},
-    oauth::DexOAuthClient,
-};
+use crate::auth::{jwt::JwtValidator, oauth::DexOAuthClient};
 use crate::registry::{
     models::{EcrConfig, OciClientAuthConfig},
     providers::{EcrProvider, OciClientAuthProvider},
@@ -24,7 +21,6 @@ pub struct ControllerState {
 pub struct AppState {
     pub db_pool: PgPool,
     pub jwt_validator: Arc<JwtValidator>,
-    pub external_jwt_validator: Arc<ExternalJwtValidator>,
     pub oauth_client: Arc<DexOAuthClient>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub oci_client: Arc<crate::oci::OciClient>,
@@ -79,17 +75,8 @@ impl AppState {
         // Run migrations (server-only)
         Self::run_migrations(&db_pool).await?;
 
-        // Initialize JWT validator
-        let jwt_validator = Arc::new(JwtValidator::new(
-            settings.auth.issuer.clone(),
-            settings.auth.client_id.clone(),
-        ));
-
-        // Fetch JWKS on startup
-        jwt_validator
-            .init()
-            .await
-            .context("Failed to initialize JWT validator")?;
+        // Initialize JWT validator (JWKS is fetched on-demand)
+        let jwt_validator = Arc::new(JwtValidator::new());
 
         // Initialize OAuth2 client
         let oauth_client = Arc::new(DexOAuthClient::new(
@@ -169,17 +156,12 @@ impl AppState {
             tracing::info!("Configured {} admin user(s)", admin_users.len());
         }
 
-        // Initialize external JWT validator for service accounts
-        let external_jwt_validator = Arc::new(ExternalJwtValidator::new());
-        tracing::info!("Initialized external JWT validator for service accounts");
-
         // Store auth settings for issuer comparison
         let auth_settings = Arc::new(settings.auth.clone());
 
         Ok(Self {
             db_pool,
             jwt_validator,
-            external_jwt_validator,
             oauth_client,
             registry_provider,
             oci_client,
@@ -267,11 +249,7 @@ impl AppState {
             Arc::new(crate::oci::OciClient::new().context("Failed to initialize OCI client")?);
 
         // Dummy auth components (not used by controller)
-        let jwt_validator = Arc::new(JwtValidator::new(
-            settings.auth.issuer.clone(),
-            settings.auth.client_id.clone(),
-        ));
-        let external_jwt_validator = Arc::new(ExternalJwtValidator::new());
+        let jwt_validator = Arc::new(JwtValidator::new());
         let oauth_client = Arc::new(DexOAuthClient::new(
             settings.auth.issuer.clone(),
             settings.auth.client_id.clone(),
@@ -283,7 +261,6 @@ impl AppState {
         Ok(Self {
             db_pool,
             jwt_validator,
-            external_jwt_validator,
             oauth_client,
             registry_provider,
             oci_client,

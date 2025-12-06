@@ -33,113 +33,10 @@ struct Jwk {
     key_use: String,
     kty: String,
     kid: String,
+    #[allow(dead_code)]
     alg: String,
     n: String,
     e: String,
-}
-
-/// JWT validator that fetches and caches JWKS from OIDC provider
-pub struct JwtValidator {
-    issuer: String,
-    jwks_uri: String,
-    client_id: String,
-    keys: Arc<RwLock<HashMap<String, DecodingKey>>>,
-    http_client: reqwest::Client,
-}
-
-impl JwtValidator {
-    /// Create a new JWT validator
-    pub fn new(issuer: String, client_id: String) -> Self {
-        let jwks_uri = format!("{}/keys", issuer);
-
-        Self {
-            issuer,
-            jwks_uri,
-            client_id,
-            keys: Arc::new(RwLock::new(HashMap::new())),
-            http_client: reqwest::Client::new(),
-        }
-    }
-
-    /// Fetch JWKS from OIDC provider and cache the keys
-    async fn fetch_jwks(&self) -> Result<()> {
-        tracing::debug!("Fetching JWKS from {}", self.jwks_uri);
-
-        let response = self
-            .http_client
-            .get(&self.jwks_uri)
-            .send()
-            .await
-            .context("Failed to fetch JWKS")?;
-
-        let jwks: JwksResponse = response
-            .json()
-            .await
-            .context("Failed to parse JWKS response")?;
-
-        let mut keys = self.keys.write().await;
-        keys.clear();
-
-        for jwk in jwks.keys {
-            if jwk.kty == "RSA" && jwk.key_use == "sig" {
-                let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)
-                    .context("Failed to create decoding key from JWK")?;
-                keys.insert(jwk.kid.clone(), decoding_key);
-                tracing::debug!("Loaded JWK with kid: {}", jwk.kid);
-            }
-        }
-
-        tracing::info!("Loaded {} signing keys from JWKS", keys.len());
-        Ok(())
-    }
-
-    /// Get decoding key for a specific key ID
-    async fn get_key(&self, kid: &str) -> Result<DecodingKey> {
-        // Try to get from cache first
-        {
-            let keys = self.keys.read().await;
-            if let Some(key) = keys.get(kid) {
-                return Ok(key.clone());
-            }
-        }
-
-        // Key not found, refresh JWKS and try again
-        tracing::info!("Key {} not found in cache, refreshing JWKS", kid);
-        self.fetch_jwks().await?;
-
-        let keys = self.keys.read().await;
-        keys.get(kid)
-            .cloned()
-            .ok_or_else(|| anyhow!("Key {} not found in JWKS", kid))
-    }
-
-    /// Validate a JWT token and extract claims
-    pub async fn validate(&self, token: &str) -> Result<Claims> {
-        // Decode header to get key ID
-        let header = decode_header(token).context("Failed to decode JWT header")?;
-        let kid = header
-            .kid
-            .ok_or_else(|| anyhow!("JWT header missing kid"))?;
-
-        // Get the decoding key
-        let key = self.get_key(&kid).await?;
-
-        // Set up validation parameters
-        let mut validation = Validation::new(Algorithm::RS256);
-        validation.set_audience(&[&self.client_id]);
-        validation.set_issuer(&[&self.issuer]);
-
-        // Validate and decode the token
-        let token_data =
-            decode::<Claims>(token, &key, &validation).context("Failed to validate JWT token")?;
-
-        Ok(token_data.claims)
-    }
-
-    /// Initialize by fetching JWKS on startup
-    pub async fn init(&self) -> Result<()> {
-        self.fetch_jwks().await
-    }
 }
 
 /// OIDC Discovery document
@@ -148,7 +45,7 @@ struct OidcDiscovery {
     jwks_uri: String,
 }
 
-/// JWKS cache entry for external issuers
+/// JWKS cache entry with TTL
 #[derive(Clone)]
 struct JwksCache {
     keys: HashMap<String, DecodingKey>,
@@ -170,14 +67,17 @@ impl JwksCache {
     }
 }
 
-/// JWT validator for external OIDC providers (GitLab, GitHub, etc.)
-/// Supports multiple issuers with per-issuer JWKS caching
-pub struct ExternalJwtValidator {
+/// Unified JWT validator supporting multiple OIDC issuers with caching
+///
+/// Uses OIDC discovery to find JWKS endpoints, caches keys per issuer,
+/// and validates tokens with custom claim requirements.
+pub struct JwtValidator {
     jwks_cache: Arc<RwLock<HashMap<String, JwksCache>>>,
     http_client: reqwest::Client,
 }
 
-impl ExternalJwtValidator {
+impl JwtValidator {
+    /// Create a new JWT validator
     pub fn new() -> Self {
         Self {
             jwks_cache: Arc::new(RwLock::new(HashMap::new())),
@@ -185,7 +85,7 @@ impl ExternalJwtValidator {
         }
     }
 
-    /// Discover JWKS URI from OIDC issuer
+    /// Discover JWKS URI from OIDC issuer via .well-known/openid-configuration
     async fn discover_jwks_uri(&self, issuer_url: &str) -> Result<String> {
         let discovery_url = format!("{}/.well-known/openid-configuration", issuer_url);
 
@@ -206,7 +106,7 @@ impl ExternalJwtValidator {
         Ok(discovery.jwks_uri)
     }
 
-    /// Fetch JWKS from issuer
+    /// Fetch JWKS from a JWKS URI
     async fn fetch_jwks(&self, jwks_uri: &str) -> Result<HashMap<String, DecodingKey>> {
         tracing::debug!("Fetching JWKS from {}", jwks_uri);
 
@@ -298,7 +198,15 @@ impl ExternalJwtValidator {
         Ok(())
     }
 
-    /// Validate a JWT token from an external OIDC provider
+    /// Validate a JWT token against an issuer with expected claims
+    ///
+    /// # Arguments
+    /// * `token` - The JWT token string
+    /// * `issuer_url` - The OIDC issuer URL (used for JWKS discovery and iss validation)
+    /// * `expected_claims` - Claims that must match exactly (including "aud" if required)
+    ///
+    /// # Returns
+    /// The full JWT claims as a `serde_json::Value` on success
     pub async fn validate(
         &self,
         token: &str,
@@ -322,7 +230,7 @@ impl ExternalJwtValidator {
         // Set up validation parameters
         let mut validation = Validation::new(Algorithm::RS256);
         validation.set_issuer(&[issuer_url]);
-        // Disable audience validation as different providers use different audiences
+        // Disable built-in audience validation - we'll validate it ourselves in expected_claims
         validation.validate_aud = false;
 
         // Validate and decode the token
@@ -340,14 +248,14 @@ impl ExternalJwtValidator {
             }
         }
 
-        // Validate custom claims (exact matching)
+        // Validate expected claims (exact matching)
         Self::validate_custom_claims(&token_data.claims, expected_claims)?;
 
         Ok(token_data.claims)
     }
 }
 
-impl Default for ExternalJwtValidator {
+impl Default for JwtValidator {
     fn default() -> Self {
         Self::new()
     }
@@ -357,14 +265,76 @@ impl Default for ExternalJwtValidator {
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn test_jwt_validator_creation() {
-        let validator = JwtValidator::new(
-            "http://localhost:5556/dex".to_string(),
-            "rise-backend".to_string(),
-        );
-        assert_eq!(validator.issuer, "http://localhost:5556/dex");
-        assert_eq!(validator.jwks_uri, "http://localhost:5556/dex/keys");
-        assert_eq!(validator.client_id, "rise-backend");
+    #[test]
+    fn test_jwt_validator_creation() {
+        let validator = JwtValidator::new();
+        // Validator should be created with empty cache
+        assert!(validator.jwks_cache.try_read().is_ok());
+    }
+
+    #[test]
+    fn test_claims_deserialization() {
+        let json = r#"{
+            "sub": "user123",
+            "email": "test@example.com",
+            "email_verified": true,
+            "iss": "https://issuer.example.com",
+            "aud": "my-client-id",
+            "exp": 1234567890,
+            "iat": 1234567800
+        }"#;
+
+        let claims: Claims = serde_json::from_str(json).unwrap();
+        assert_eq!(claims.sub, "user123");
+        assert_eq!(claims.email, "test@example.com");
+        assert!(claims.email_verified);
+        assert_eq!(claims.iss, "https://issuer.example.com");
+        assert_eq!(claims.aud, "my-client-id");
+    }
+
+    #[test]
+    fn test_validate_custom_claims_success() {
+        let jwt_claims = serde_json::json!({
+            "aud": "my-audience",
+            "project_path": "myorg/myrepo",
+            "extra": "value"
+        });
+
+        let mut expected = HashMap::new();
+        expected.insert("aud".to_string(), "my-audience".to_string());
+        expected.insert("project_path".to_string(), "myorg/myrepo".to_string());
+
+        let result = JwtValidator::validate_custom_claims(&jwt_claims, &expected);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_custom_claims_missing() {
+        let jwt_claims = serde_json::json!({
+            "aud": "my-audience"
+        });
+
+        let mut expected = HashMap::new();
+        expected.insert("aud".to_string(), "my-audience".to_string());
+        expected.insert("project_path".to_string(), "myorg/myrepo".to_string());
+
+        let result = JwtValidator::validate_custom_claims(&jwt_claims, &expected);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("project_path"));
+    }
+
+    #[test]
+    fn test_validate_custom_claims_mismatch() {
+        let jwt_claims = serde_json::json!({
+            "aud": "wrong-audience",
+            "project_path": "myorg/myrepo"
+        });
+
+        let mut expected = HashMap::new();
+        expected.insert("aud".to_string(), "my-audience".to_string());
+
+        let result = JwtValidator::validate_custom_claims(&jwt_claims, &expected);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("mismatch"));
     }
 }

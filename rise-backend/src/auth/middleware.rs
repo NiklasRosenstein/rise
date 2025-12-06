@@ -85,7 +85,7 @@ async fn authenticate_service_account(
 
         // Try to validate with this service account's claims
         if state
-            .external_jwt_validator
+            .jwt_validator
             .validate(token, issuer, &claims)
             .await
             .is_ok()
@@ -201,10 +201,28 @@ pub async fn auth_middleware(
         // User authentication via configured OIDC provider
         tracing::debug!("Authenticating as user via configured OIDC provider");
 
-        let claims = state.jwt_validator.validate(&token).await.map_err(|e| {
-            tracing::warn!("JWT validation failed: {}", e);
-            (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
-        })?;
+        // Build expected claims for user auth (just validate aud matches client_id)
+        let mut expected_claims = HashMap::new();
+        expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+
+        let claims_value = state
+            .jwt_validator
+            .validate(&token, &state.auth_settings.issuer, &expected_claims)
+            .await
+            .map_err(|e| {
+                tracing::warn!("JWT validation failed: {}", e);
+                (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+            })?;
+
+        // Deserialize to typed Claims to get email
+        let claims: crate::auth::jwt::Claims =
+            serde_json::from_value(claims_value).map_err(|e| {
+                tracing::warn!("Failed to parse user claims: {}", e);
+                (
+                    StatusCode::UNAUTHORIZED,
+                    format!("Invalid token claims: {}", e),
+                )
+            })?;
 
         tracing::debug!("JWT validated for user: {}", claims.email);
 
@@ -240,10 +258,20 @@ pub async fn optional_auth_middleware(
 ) -> Response {
     // Try to extract token
     if let Ok(token) = extract_bearer_token(&headers) {
+        // Build expected claims for user auth
+        let mut expected_claims = HashMap::new();
+        expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+
         // Try to validate token and find/create user
-        if let Ok(claims) = state.jwt_validator.validate(&token).await {
-            if let Ok(user) = users::find_or_create(&state.db_pool, &claims.email).await {
-                req.extensions_mut().insert(user);
+        if let Ok(claims_value) = state
+            .jwt_validator
+            .validate(&token, &state.auth_settings.issuer, &expected_claims)
+            .await
+        {
+            if let Ok(claims) = serde_json::from_value::<crate::auth::jwt::Claims>(claims_value) {
+                if let Ok(user) = users::find_or_create(&state.db_pool, &claims.email).await {
+                    req.extensions_mut().insert(user);
+                }
             }
         }
     }
