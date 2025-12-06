@@ -307,6 +307,7 @@ async function loadDeployments(projectName, page = 0) {
                     <tr>
                         <th>ID</th>
                         <th>Status</th>
+                        <th>Created by</th>
                         <th>Image</th>
                         <th>Group</th>
                         <th>URL</th>
@@ -320,6 +321,7 @@ async function loadDeployments(projectName, page = 0) {
                         <tr>
                             <td><code>${escapeHtml(d.deployment_id)}</code></td>
                             <td><span class="status-badge status-${d.status.toLowerCase()}">${d.status}</span></td>
+                            <td>${escapeHtml(d.created_by_email || '-')}</td>
                             <td><small>${d.image ? escapeHtml(d.image.split('/').pop()) : '-'}</small></td>
                             <td>${escapeHtml(d.deployment_group)}</td>
                             <td>${d.deployment_url ? `<a href="${d.deployment_url}" target="_blank">Link</a>` : '-'}</td>
@@ -369,6 +371,8 @@ async function showDeployment(projectName, deploymentId) {
                 <dl>
                     <dt>Project</dt>
                     <dd>${escapeHtml(deployment.project)}</dd>
+                    <dt>Created by</dt>
+                    <dd>${escapeHtml(deployment.created_by_email || '-')}</dd>
                     <dt>Image</dt>
                     <dd><code>${deployment.image ? escapeHtml(deployment.image) : '-'}</code></dd>
                     <dt>Image Digest</dt>
