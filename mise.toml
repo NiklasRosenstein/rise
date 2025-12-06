@@ -3,6 +3,10 @@ minikube = "1.37.0"
 overmind = "2.5.1"
 pack = "0.39.0"
 
+[tasks."docs:serve"]
+description = "Serve documentation with live reload in port 3001."
+run = "mdbook serve -p 3001 --open"
+
 [tasks.migrate]
 description = "Run database migrations. Run before building the backend."
 dir = "rise-backend"
