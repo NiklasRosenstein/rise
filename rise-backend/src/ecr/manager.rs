@@ -88,7 +88,11 @@ impl EcrRepoManager {
                         return Ok(false);
                     }
                 }
-                Err(err).context("Failed to check ECR repository existence")
+                Err(anyhow::anyhow!(
+                    "Failed to check ECR repository existence for '{}': {}",
+                    repo_name,
+                    err
+                ))
             }
         }
     }
@@ -137,7 +141,9 @@ impl EcrRepoManager {
             )
             .send()
             .await
-            .context("Failed to create ECR repository")?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to create ECR repository '{}': {}", repo_name, e)
+            })?;
 
         tracing::info!("Created ECR repository: {}", repo_name);
         Ok(true)
@@ -168,7 +174,9 @@ impl EcrRepoManager {
             .force(true)
             .send()
             .await
-            .context("Failed to delete ECR repository")?;
+            .map_err(|e| {
+                anyhow::anyhow!("Failed to delete ECR repository '{}': {}", repo_name, e)
+            })?;
 
         tracing::info!("Deleted ECR repository: {}", repo_name);
         Ok(true)
@@ -198,7 +206,13 @@ impl EcrRepoManager {
             .tags(orphaned_tag)
             .send()
             .await
-            .context("Failed to tag ECR repository as orphaned")?;
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to tag ECR repository '{}' as orphaned: {}",
+                    self.repo_name(project),
+                    e
+                )
+            })?;
 
         Ok(())
     }
@@ -219,7 +233,7 @@ impl EcrRepoManager {
             let response = request
                 .send()
                 .await
-                .context("Failed to list ECR repositories")?;
+                .map_err(|e| anyhow::anyhow!("Failed to list ECR repositories: {}", e))?;
 
             for repo in response.repositories() {
                 // Check if this repo has our prefix
