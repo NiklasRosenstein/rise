@@ -54,8 +54,9 @@ pub struct Deployment {
     #[serde(default)]
     pub id: String,
     pub deployment_id: String,
-    pub project: String,    // Project ID
-    pub created_by: String, // User ID
+    pub project: String,          // Project ID
+    pub created_by: String,       // User ID
+    pub created_by_email: String, // User email for display
     #[serde(default)]
     pub status: DeploymentStatus,
     #[serde(default = "default_group")]

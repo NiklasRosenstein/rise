@@ -12,7 +12,9 @@ use super::models::*;
 use super::state_machine;
 use super::utils::generate_deployment_id;
 use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
-use crate::db::{deployments as db_deployments, projects, service_accounts, teams as db_teams};
+use crate::db::{
+    deployments as db_deployments, projects, service_accounts, teams as db_teams, users,
+};
 use crate::state::AppState;
 
 /// Check if a user is an admin (based on email in config)
@@ -216,13 +218,25 @@ fn convert_status_from_db(status: DbDeploymentStatus) -> DeploymentStatus {
     }
 }
 
+/// Fetch the creator email for a deployment
+async fn get_creator_email(pool: &sqlx::PgPool, created_by_id: uuid::Uuid) -> String {
+    match users::find_by_id(pool, created_by_id).await {
+        Ok(Some(user)) => user.email,
+        _ => "unknown".to_string(),
+    }
+}
+
 /// Convert DB Deployment to API Deployment
-fn convert_deployment(deployment: crate::db::models::Deployment) -> Deployment {
+fn convert_deployment(
+    deployment: crate::db::models::Deployment,
+    created_by_email: String,
+) -> Deployment {
     Deployment {
         id: deployment.id.to_string(),
         deployment_id: deployment.deployment_id,
         project: deployment.project_id.to_string(),
         created_by: deployment.created_by_id.to_string(),
+        created_by_email,
         status: convert_status_from_db(deployment.status),
         deployment_group: deployment.deployment_group,
         expires_at: deployment.expires_at.map(|dt| dt.to_rfc3339()),
@@ -586,7 +600,12 @@ pub async fn update_deployment_status(
         deployment_id, status_copy
     );
 
-    Ok(Json(convert_deployment(updated_deployment)))
+    let created_by_email =
+        get_creator_email(&state.db_pool, updated_deployment.created_by_id).await;
+    Ok(Json(convert_deployment(
+        updated_deployment,
+        created_by_email,
+    )))
 }
 
 /// Query parameters for listing deployments
@@ -653,8 +672,12 @@ pub async fn list_deployments(
         )
     })?;
 
-    // Convert to API models
-    let deployments: Vec<Deployment> = db_deployments.into_iter().map(convert_deployment).collect();
+    // Convert to API models (fetch creator emails)
+    let mut deployments = Vec::with_capacity(db_deployments.len());
+    for db_deployment in db_deployments {
+        let created_by_email = get_creator_email(&state.db_pool, db_deployment.created_by_id).await;
+        deployments.push(convert_deployment(db_deployment, created_by_email));
+    }
 
     Ok(Json(deployments))
 }
@@ -847,7 +870,8 @@ pub async fn get_deployment_by_project(
         )
     })?;
 
-    Ok(Json(convert_deployment(deployment)))
+    let created_by_email = get_creator_email(&state.db_pool, deployment.created_by_id).await;
+    Ok(Json(convert_deployment(deployment, created_by_email)))
 }
 
 /// POST /projects/{project_name}/deployments/{deployment_id}/rollback - Rollback to a previous deployment

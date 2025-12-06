@@ -341,6 +341,9 @@ pub fn print_deployment_snapshot(deployment: &Deployment) {
         ansi::RESET
     );
 
+    // Created by
+    println!("   Created by: {}", deployment.created_by_email);
+
     // URL if available
     if let Some(ref url) = deployment.deployment_url {
         println!("   URL:       {}", url);

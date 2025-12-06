@@ -167,6 +167,7 @@ pub async fn list_deployments(
         .set_header(vec![
             Cell::new("DEPLOYMENT").add_attribute(Attribute::Bold),
             Cell::new("STATUS").add_attribute(Attribute::Bold),
+            Cell::new("CREATED BY").add_attribute(Attribute::Bold),
             Cell::new("IMAGE").add_attribute(Attribute::Bold),
             Cell::new("GROUP").add_attribute(Attribute::Bold),
             Cell::new("EXPIRY").add_attribute(Attribute::Bold),
@@ -211,6 +212,7 @@ pub async fn list_deployments(
         // Create cells with appropriate styling
         let mut deployment_cell = Cell::new(&deployment_display);
         let mut status_cell = Cell::new(deployment.status.to_string());
+        let mut created_by_cell = Cell::new(&deployment.created_by_email);
         let mut image_cell = Cell::new(image_display);
         let mut group_cell = Cell::new(&deployment.deployment_group);
         let mut expiry_cell = Cell::new(&expiry);
@@ -221,6 +223,7 @@ pub async fn list_deployments(
         if is_default_active {
             deployment_cell = deployment_cell.add_attribute(Attribute::Bold);
             status_cell = status_cell.add_attribute(Attribute::Bold);
+            created_by_cell = created_by_cell.add_attribute(Attribute::Bold);
             image_cell = image_cell.add_attribute(Attribute::Bold);
             group_cell = group_cell.add_attribute(Attribute::Bold);
             expiry_cell = expiry_cell.add_attribute(Attribute::Bold);
@@ -249,6 +252,7 @@ pub async fn list_deployments(
         table.add_row(vec![
             deployment_cell,
             status_cell,
+            created_by_cell,
             image_cell,
             group_cell,
             expiry_cell,
