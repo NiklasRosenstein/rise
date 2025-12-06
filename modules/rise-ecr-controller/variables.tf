@@ -54,6 +54,20 @@ variable "irsa_service_account" {
   default     = "rise-ecr-controller"
 }
 
+# Push role settings
+
+variable "create_push_role" {
+  description = "Create a separate IAM role for push operations. The backend assumes this role to generate scoped credentials for clients."
+  type        = bool
+  default     = true
+}
+
+variable "push_role_assume_principals" {
+  description = "Additional AWS principal ARNs allowed to assume the push role (e.g., for the HTTP server if separate from controller)"
+  type        = list(string)
+  default     = null
+}
+
 # ECR settings
 
 variable "auto_remove" {

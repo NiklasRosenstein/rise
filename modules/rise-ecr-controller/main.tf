@@ -217,3 +217,147 @@ resource "aws_iam_access_key" "ecr_controller" {
 
   user = aws_iam_user.ecr_controller[0].name
 }
+
+# -----------------------------------------------------------------------------
+# Push Role - for scoped image push credentials
+# -----------------------------------------------------------------------------
+# This role is assumed by the Rise backend to generate temporary credentials
+# for clients to push images. The credentials are scoped per-repository using
+# an inline session policy during AssumeRole.
+
+data "aws_iam_policy_document" "push_role" {
+  # Allow getting authorization tokens (required for docker login)
+  statement {
+    sid    = "GetAuthorizationToken"
+    effect = "Allow"
+    actions = [
+      "ecr:GetAuthorizationToken"
+    ]
+    resources = ["*"]
+  }
+
+  # Allow all image push operations on repositories with our prefix
+  # The actual scoping to specific repos happens via session policy during AssumeRole
+  statement {
+    sid    = "PushImages"
+    effect = "Allow"
+    actions = [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+      "ecr:PutImage",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer"
+    ]
+    resources = [
+      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${var.repo_prefix}*"
+    ]
+  }
+}
+
+resource "aws_iam_policy" "push_role" {
+  count = var.create_push_role ? 1 : 0
+
+  name        = "${var.name_prefix}-ecr-push"
+  description = "IAM policy for Rise ECR push operations"
+  policy      = data.aws_iam_policy_document.push_role.json
+  tags        = local.tags
+}
+
+# The push role needs to be assumable by the controller role/user
+data "aws_iam_policy_document" "push_role_assume" {
+  count = var.create_push_role ? 1 : 0
+
+  # Allow the controller role to assume the push role
+  dynamic "statement" {
+    for_each = var.create_iam_role ? [1] : []
+    content {
+      effect = "Allow"
+      principals {
+        type        = "AWS"
+        identifiers = [aws_iam_role.ecr_controller[0].arn]
+      }
+      actions = ["sts:AssumeRole"]
+    }
+  }
+
+  # Allow the controller user to assume the push role
+  dynamic "statement" {
+    for_each = var.create_iam_user ? [1] : []
+    content {
+      effect = "Allow"
+      principals {
+        type        = "AWS"
+        identifiers = [aws_iam_user.ecr_controller[0].arn]
+      }
+      actions = ["sts:AssumeRole"]
+    }
+  }
+
+  # Allow custom principals if specified
+  dynamic "statement" {
+    for_each = var.push_role_assume_principals != null ? [1] : []
+    content {
+      effect = "Allow"
+      principals {
+        type        = "AWS"
+        identifiers = var.push_role_assume_principals
+      }
+      actions = ["sts:AssumeRole"]
+    }
+  }
+}
+
+resource "aws_iam_role" "push_role" {
+  count = var.create_push_role ? 1 : 0
+
+  name               = "${var.name_prefix}-ecr-push"
+  description        = "IAM role for Rise ECR push operations (assumed to generate scoped credentials)"
+  assume_role_policy = data.aws_iam_policy_document.push_role_assume[0].json
+  tags               = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "push_role" {
+  count = var.create_push_role ? 1 : 0
+
+  role       = aws_iam_role.push_role[0].name
+  policy_arn = aws_iam_policy.push_role[0].arn
+}
+
+# The controller also needs permission to assume the push role
+data "aws_iam_policy_document" "assume_push_role" {
+  count = var.create_push_role ? 1 : 0
+
+  statement {
+    sid    = "AssumePushRole"
+    effect = "Allow"
+    actions = [
+      "sts:AssumeRole"
+    ]
+    resources = [aws_iam_role.push_role[0].arn]
+  }
+}
+
+resource "aws_iam_policy" "assume_push_role" {
+  count = var.create_push_role ? 1 : 0
+
+  name        = "${var.name_prefix}-ecr-assume-push"
+  description = "Allow assuming the ECR push role"
+  policy      = data.aws_iam_policy_document.assume_push_role[0].json
+  tags        = local.tags
+}
+
+resource "aws_iam_role_policy_attachment" "controller_assume_push" {
+  count = var.create_push_role && var.create_iam_role ? 1 : 0
+
+  role       = aws_iam_role.ecr_controller[0].name
+  policy_arn = aws_iam_policy.assume_push_role[0].arn
+}
+
+resource "aws_iam_user_policy_attachment" "controller_assume_push" {
+  count = var.create_push_role && var.create_iam_user ? 1 : 0
+
+  user       = aws_iam_user.ecr_controller[0].name
+  policy_arn = aws_iam_policy.assume_push_role[0].arn
+}

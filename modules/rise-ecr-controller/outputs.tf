@@ -39,16 +39,35 @@ output "secret_access_key" {
 }
 
 # -----------------------------------------------------------------------------
+# Push Role outputs
+# -----------------------------------------------------------------------------
+
+output "push_role_arn" {
+  description = "ARN of the IAM role for push operations"
+  value       = var.create_push_role ? aws_iam_role.push_role[0].arn : null
+}
+
+output "push_role_name" {
+  description = "Name of the IAM role for push operations"
+  value       = var.create_push_role ? aws_iam_role.push_role[0].name : null
+}
+
+# -----------------------------------------------------------------------------
 # Policy outputs
 # -----------------------------------------------------------------------------
 
-output "policy_arn" {
+output "controller_policy_arn" {
   description = "ARN of the IAM policy for the ECR controller"
   value       = aws_iam_policy.ecr_controller.arn
 }
 
+output "push_policy_arn" {
+  description = "ARN of the IAM policy for push operations"
+  value       = var.create_push_role ? aws_iam_policy.push_role[0].arn : null
+}
+
 output "policy_document" {
-  description = "The IAM policy document JSON"
+  description = "The IAM policy document JSON for the controller"
   value       = data.aws_iam_policy_document.ecr_controller.json
 }
 
@@ -59,11 +78,12 @@ output "policy_document" {
 output "rise_config" {
   description = "Configuration values for the Rise backend ECR settings"
   value = {
-    region      = local.region
-    account_id  = local.account_id
-    repo_prefix = var.repo_prefix
-    role_arn    = var.create_iam_role ? aws_iam_role.ecr_controller[0].arn : null
-    auto_remove = var.auto_remove
+    region        = local.region
+    account_id    = local.account_id
+    repo_prefix   = var.repo_prefix
+    role_arn      = var.create_iam_role ? aws_iam_role.ecr_controller[0].arn : null
+    push_role_arn = var.create_push_role ? aws_iam_role.push_role[0].arn : null
+    auto_remove   = var.auto_remove
   }
 }
 

@@ -114,7 +114,7 @@ impl RegistryProvider for EcrProvider {
 
         // Generate scoped credentials via AssumeRole with inline session policy
         let repo_arn = format!(
-            "arn:aws:ecr:{}:{}:repository/{}*",
+            "arn:aws:ecr:{}:{}:repository/{}",
             self.config.region, self.config.account_id, repo_name
         );
 
@@ -143,15 +143,21 @@ impl RegistryProvider for EcrProvider {
             }]
         });
 
+        tracing::debug!(
+            "Assuming push role {} with scoped policy for repository {}",
+            self.config.push_role_arn,
+            repo_name
+        );
+
         let assumed_role = self
             .sts_client
             .assume_role()
-            .role_arn(&self.config.role_arn)
+            .role_arn(&self.config.push_role_arn)
             .role_session_name(format!("rise-push-{}", repository))
             .policy(inline_policy.to_string())
             .send()
             .await
-            .context("Failed to assume ECR role")?;
+            .context("Failed to assume ECR push role")?;
 
         let creds = assumed_role
             .credentials()
