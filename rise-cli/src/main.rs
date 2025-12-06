@@ -7,6 +7,7 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 mod backend;
 mod config;
 mod deployment;
+mod dev_oidc_issuer;
 mod login;
 mod project;
 mod service_account;
