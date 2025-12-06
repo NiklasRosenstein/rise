@@ -15,11 +15,22 @@ use crate::registry::{
 pub struct OciClientAuthProvider {
     config: OciClientAuthConfig,
     registry_url: String,
+    registry_host: String,
 }
 
 impl OciClientAuthProvider {
     /// Create a new OCI client-auth registry provider
     pub fn new(config: OciClientAuthConfig) -> Result<Self> {
+        // Extract host from registry_url (remove protocol and path)
+        let registry_host = config
+            .registry_url
+            .trim_start_matches("https://")
+            .trim_start_matches("http://")
+            .split('/')
+            .next()
+            .unwrap_or(&config.registry_url)
+            .to_string();
+
         let registry_url = format!(
             "{}/{}",
             config.registry_url.trim_end_matches('/'),
@@ -28,6 +39,7 @@ impl OciClientAuthProvider {
         Ok(Self {
             config,
             registry_url,
+            registry_host,
         })
     }
 }
@@ -44,6 +56,16 @@ impl RegistryProvider for OciClientAuthProvider {
             password: String::new(), // Empty - docker CLI uses stored credentials
             expires_in: None,
         })
+    }
+
+    async fn get_pull_credentials(&self) -> Result<(String, String)> {
+        // Client-auth provider assumes docker login was used
+        // Return empty credentials - the docker CLI will use stored credentials
+        Ok((String::new(), String::new()))
+    }
+
+    fn registry_host(&self) -> &str {
+        &self.registry_host
     }
 
     fn registry_type(&self) -> &str {

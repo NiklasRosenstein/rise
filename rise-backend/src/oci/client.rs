@@ -5,7 +5,11 @@ use oci_distribution::{
     secrets::RegistryAuth,
     Client, Reference,
 };
+use std::collections::HashMap;
 use tracing::{debug, info, warn};
+
+/// Map of registry host -> (username, password)
+pub type RegistryCredentialsMap = HashMap<String, (String, String)>;
 
 pub struct OciClient {
     client: Client,
@@ -32,7 +36,15 @@ impl OciClient {
 
     /// Resolve image reference to digest-pinned reference
     /// Uses OCI Distribution API to fetch manifest only (~2-10KB)
-    pub async fn resolve_image_digest(&self, image_ref: &str) -> Result<String, OciError> {
+    ///
+    /// # Arguments
+    /// * `image_ref` - Image reference to resolve (e.g., "docker.io/library/nginx:latest")
+    /// * `credentials` - Map of registry host -> (username, password) for authentication
+    pub async fn resolve_image_digest(
+        &self,
+        image_ref: &str,
+        credentials: &RegistryCredentialsMap,
+    ) -> Result<String, OciError> {
         debug!("Attempting to resolve image reference: {}", image_ref);
 
         // Parse image reference
@@ -48,9 +60,21 @@ impl OciClient {
             reference.tag()
         );
 
-        // Fetch manifest (anonymous access for public images)
-        let auth = RegistryAuth::Anonymous;
-        debug!("Fetching manifest for {} using anonymous auth", image_ref);
+        // Look up credentials for this registry host
+        let auth = if let Some((username, password)) = credentials.get(reference.registry()) {
+            debug!(
+                "Using credentials for registry {} (user: {})",
+                reference.registry(),
+                username
+            );
+            RegistryAuth::Basic(username.clone(), password.clone())
+        } else {
+            debug!(
+                "No credentials for {}, using anonymous auth",
+                reference.registry()
+            );
+            RegistryAuth::Anonymous
+        };
 
         let (_manifest, digest) =
             self.client

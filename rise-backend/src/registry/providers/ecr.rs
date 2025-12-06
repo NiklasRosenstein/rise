@@ -4,6 +4,8 @@ use aws_config::BehaviorVersion;
 use aws_sdk_ecr::Client as EcrClient;
 use aws_sdk_sts::Client as StsClient;
 use base64::Engine;
+use std::sync::RwLock;
+use std::time::Instant;
 
 use crate::registry::{
     models::{EcrConfig, RegistryCredentials},
@@ -15,6 +17,10 @@ pub struct EcrProvider {
     config: EcrConfig,
     sts_client: StsClient,
     registry_url: String,
+    /// Registry host without path (e.g., "459109751375.dkr.ecr.eu-west-1.amazonaws.com")
+    registry_host: String,
+    /// Cache for pull credentials (ECR tokens valid for 12 hours)
+    cached_pull_creds: RwLock<Option<(String, String, Instant)>>,
 }
 
 impl EcrProvider {
@@ -42,18 +48,46 @@ impl EcrProvider {
 
         let sts_client = StsClient::new(&aws_config);
 
-        // Build registry_url: {account}.dkr.ecr.{region}.amazonaws.com/{repo_prefix}
-        // repo_prefix is literal (e.g., "rise/" → "rise/hello")
-        let registry_url = format!(
-            "{}.dkr.ecr.{}.amazonaws.com/{}",
-            config.account_id, config.region, config.repo_prefix
+        // Build registry_host: {account}.dkr.ecr.{region}.amazonaws.com
+        let registry_host = format!(
+            "{}.dkr.ecr.{}.amazonaws.com",
+            config.account_id, config.region
         );
+
+        // Build registry_url: {registry_host}/{repo_prefix}
+        // repo_prefix is literal (e.g., "rise/" → "rise/hello")
+        let registry_url = format!("{}/{}", registry_host, config.repo_prefix);
 
         Ok(Self {
             config,
             sts_client,
             registry_url,
+            registry_host,
+            cached_pull_creds: RwLock::new(None),
         })
+    }
+
+    /// Cache TTL for pull credentials (11 hours, 1 hour buffer before 12h expiry)
+    const CACHE_TTL_SECS: u64 = 11 * 60 * 60;
+
+    /// Build base AWS config using configured credentials
+    async fn build_base_aws_config(&self) -> aws_config::SdkConfig {
+        if let (Some(access_key), Some(secret_key)) =
+            (&self.config.access_key_id, &self.config.secret_access_key)
+        {
+            let creds =
+                aws_sdk_ecr::config::Credentials::new(access_key, secret_key, None, None, "static");
+            aws_config::defaults(BehaviorVersion::latest())
+                .credentials_provider(creds)
+                .region(aws_config::Region::new(self.config.region.clone()))
+                .load()
+                .await
+        } else {
+            aws_config::defaults(BehaviorVersion::latest())
+                .region(aws_config::Region::new(self.config.region.clone()))
+                .load()
+                .await
+        }
     }
 
     /// Get ECR authorization token using the provided ECR client
@@ -186,6 +220,38 @@ impl RegistryProvider for EcrProvider {
 
         // Get ECR auth token with scoped credentials
         self.get_ecr_auth_token(&scoped_ecr_client).await
+    }
+
+    async fn get_pull_credentials(&self) -> Result<(String, String)> {
+        // Check cache first
+        {
+            let cache = self.cached_pull_creds.read().unwrap();
+            if let Some((user, pass, created)) = cache.as_ref() {
+                if created.elapsed().as_secs() < Self::CACHE_TTL_SECS {
+                    tracing::debug!("Using cached ECR pull credentials");
+                    return Ok((user.clone(), pass.clone()));
+                }
+            }
+        }
+
+        tracing::info!("Fetching fresh ECR pull credentials");
+
+        // Fetch fresh credentials using base AWS credentials
+        let aws_config = self.build_base_aws_config().await;
+        let ecr_client = EcrClient::new(&aws_config);
+        let creds = self.get_ecr_auth_token(&ecr_client).await?;
+
+        // Update cache
+        {
+            let mut cache = self.cached_pull_creds.write().unwrap();
+            *cache = Some((creds.username.clone(), creds.password.clone(), Instant::now()));
+        }
+
+        Ok((creds.username, creds.password))
+    }
+
+    fn registry_host(&self) -> &str {
+        &self.registry_host
     }
 
     fn registry_type(&self) -> &str {

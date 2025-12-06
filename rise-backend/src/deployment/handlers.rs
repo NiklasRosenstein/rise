@@ -158,6 +158,7 @@ fn normalize_image_reference(image: &str) -> String {
 ///
 /// # Arguments
 /// * `oci_client` - OCI client for registry interaction
+/// * `registry_provider` - Optional registry provider for credentials
 /// * `normalized_image` - Normalized image reference (e.g., "docker.io/library/nginx:latest")
 ///
 /// # Returns
@@ -167,10 +168,33 @@ fn normalize_image_reference(image: &str) -> String {
 /// Returns error if image doesn't exist, requires authentication, or registry is unreachable
 async fn resolve_image_digest(
     oci_client: &crate::oci::OciClient,
+    registry_provider: Option<&std::sync::Arc<dyn crate::registry::RegistryProvider>>,
     normalized_image: &str,
 ) -> anyhow::Result<String> {
+    // Build credentials map from registry provider
+    let mut credentials = crate::oci::RegistryCredentialsMap::new();
+
+    if let Some(provider) = registry_provider {
+        match provider.get_pull_credentials().await {
+            Ok((user, pass)) if !user.is_empty() => {
+                debug!(
+                    "Adding credentials for registry host: {}",
+                    provider.registry_host()
+                );
+                credentials.insert(provider.registry_host().to_string(), (user, pass));
+            }
+            Ok(_) => {
+                debug!("Registry provider returned empty credentials, using anonymous auth");
+            }
+            Err(e) => {
+                error!("Failed to get pull credentials from registry provider: {}", e);
+                // Continue with anonymous auth
+            }
+        }
+    }
+
     let digest_ref = oci_client
-        .resolve_image_digest(normalized_image)
+        .resolve_image_digest(normalized_image, &credentials)
         .await
         .context(format!("Failed to resolve image '{}'", normalized_image))?;
 
@@ -351,10 +375,14 @@ pub async fn create_deployment(
 
         // Resolve image to digest
         info!("Resolving image '{}' to digest...", normalized_image);
-        let image_digest = resolve_image_digest(&state.oci_client, &normalized_image)
-            .await
-            .map_err(|e| {
-                error!(
+        let image_digest = resolve_image_digest(
+            &state.oci_client,
+            state.registry_provider.as_ref(),
+            &normalized_image,
+        )
+        .await
+        .map_err(|e| {
+            error!(
                     "Failed to resolve image '{}' (normalized from '{}'): {}",
                     normalized_image, user_image, e
                 );
