@@ -96,9 +96,8 @@ pub async fn list_deployments(
     limit: usize,
 ) -> Result<()> {
     let token = config
-        .token
-        .as_ref()
-        .context("Not logged in. Please run 'rise login' first.")?;
+        .get_token()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     if let Some(g) = group {
         info!(
@@ -336,9 +335,8 @@ pub async fn rollback_deployment(
     deployment_id: &str,
 ) -> Result<()> {
     let token = config
-        .token
-        .as_ref()
-        .context("Not logged in. Please run 'rise login' first.")?;
+        .get_token()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     info!(
         "Rolling back project '{}' to deployment '{}'",
@@ -443,9 +441,8 @@ pub async fn stop_deployments_by_group(
     group: &str,
 ) -> Result<()> {
     let token = config
-        .token
-        .as_ref()
-        .context("Not logged in. Please run 'rise login' first.")?;
+        .get_token()
+        .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     info!(
         "Stopping deployments in group '{}' for project '{}'",
