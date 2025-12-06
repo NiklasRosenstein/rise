@@ -70,26 +70,6 @@ impl EcrProvider {
     /// Cache TTL for pull credentials (11 hours, 1 hour buffer before 12h expiry)
     const CACHE_TTL_SECS: u64 = 11 * 60 * 60;
 
-    /// Build base AWS config using configured credentials
-    async fn build_base_aws_config(&self) -> aws_config::SdkConfig {
-        if let (Some(access_key), Some(secret_key)) =
-            (&self.config.access_key_id, &self.config.secret_access_key)
-        {
-            let creds =
-                aws_sdk_ecr::config::Credentials::new(access_key, secret_key, None, None, "static");
-            aws_config::defaults(BehaviorVersion::latest())
-                .credentials_provider(creds)
-                .region(aws_config::Region::new(self.config.region.clone()))
-                .load()
-                .await
-        } else {
-            aws_config::defaults(BehaviorVersion::latest())
-                .region(aws_config::Region::new(self.config.region.clone()))
-                .load()
-                .await
-        }
-    }
-
     /// Get ECR authorization token using the provided ECR client
     async fn get_ecr_auth_token(&self, client: &EcrClient) -> Result<RegistryCredentials> {
         let response = client
@@ -234,20 +214,54 @@ impl RegistryProvider for EcrProvider {
             }
         }
 
-        tracing::info!("Fetching fresh ECR pull credentials");
+        tracing::info!("Fetching fresh ECR pull credentials via push role");
 
-        // Fetch fresh credentials using base AWS credentials
-        let aws_config = self.build_base_aws_config().await;
-        let ecr_client = EcrClient::new(&aws_config);
-        let creds = self.get_ecr_auth_token(&ecr_client).await?;
+        // Assume the push role (which has BatchGetImage permission)
+        let assumed_role = self
+            .sts_client
+            .assume_role()
+            .role_arn(&self.config.push_role_arn)
+            .role_session_name("rise-pull-credentials")
+            .send()
+            .await
+            .context("Failed to assume ECR push role for pull credentials")?;
+
+        let creds = assumed_role
+            .credentials()
+            .context("No credentials in AssumeRole response")?;
+
+        // Create ECR client with assumed role credentials
+        let expiration: Option<std::time::SystemTime> =
+            std::time::SystemTime::try_from(creds.expiration().clone()).ok();
+
+        let assumed_creds = aws_sdk_ecr::config::Credentials::new(
+            creds.access_key_id(),
+            creds.secret_access_key(),
+            Some(creds.session_token().to_string()),
+            expiration,
+            "assume_role",
+        );
+
+        let assumed_aws_config = aws_config::defaults(BehaviorVersion::latest())
+            .credentials_provider(assumed_creds)
+            .region(aws_config::Region::new(self.config.region.clone()))
+            .load()
+            .await;
+
+        let ecr_client = EcrClient::new(&assumed_aws_config);
+        let ecr_creds = self.get_ecr_auth_token(&ecr_client).await?;
 
         // Update cache
         {
             let mut cache = self.cached_pull_creds.write().unwrap();
-            *cache = Some((creds.username.clone(), creds.password.clone(), Instant::now()));
+            *cache = Some((
+                ecr_creds.username.clone(),
+                ecr_creds.password.clone(),
+                Instant::now(),
+            ));
         }
 
-        Ok((creds.username, creds.password))
+        Ok((ecr_creds.username, ecr_creds.password))
     }
 
     fn registry_host(&self) -> &str {
