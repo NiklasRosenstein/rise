@@ -628,6 +628,23 @@ async fn main() -> Result<()> {
                 let claims_map: std::collections::HashMap<String, String> =
                     claims.iter().cloned().collect();
 
+                // Validate aud claim requirement
+                if !claims_map.contains_key("aud") {
+                    eprintln!(
+                        "Error: The 'aud' (audience) claim is required for service accounts."
+                    );
+                    eprintln!("       Recommended format: rise-project-{{project-name}}");
+                    eprintln!("       Example: --claim aud=rise-project-{}", project);
+                    std::process::exit(1);
+                }
+
+                // Validate at least one additional claim
+                if claims_map.len() < 2 {
+                    eprintln!("Error: At least one claim in addition to 'aud' is required.");
+                    eprintln!("       Example: --claim aud=... --claim project_path=myorg/myrepo");
+                    std::process::exit(1);
+                }
+
                 service_account::create_service_account(
                     &http_client,
                     &backend_url,

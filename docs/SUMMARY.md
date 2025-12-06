@@ -6,6 +6,7 @@
 
 - [Getting Started](./getting-started.md)
 - [Authentication](./authentication.md)
+- [Service Accounts (Workload Identity)](./service-accounts.md)
 - [Projects & Teams](./projects-teams.md)
 
 # Architecture

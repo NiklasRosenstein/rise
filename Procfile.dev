@@ -1,7 +1,3 @@
-registry: docker-compose up registry
-registry-ui: docker-compose up registry-ui
-postgres: docker-compose up postgres
-dex: docker-compose up dex
-backend-server: sleep 2 && cargo run --bin rise -- backend server
-backend-deployment: sleep 3 && cargo run --bin rise -- backend controller deployment-docker
-backend-project: sleep 3 && cargo run --bin rise -- backend controller project
+backend-server: cargo run --bin rise -- backend server
+backend-deployment: cargo run --bin rise -- backend controller deployment-docker
+backend-project: cargo run --bin rise -- backend controller project

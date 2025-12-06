@@ -55,11 +55,27 @@ pub async fn create_workload_identity(
         ));
     }
 
-    // Validate claims (not empty)
+    // Validate claims requirements
     if req.claims.is_empty() {
         return Err((
             StatusCode::BAD_REQUEST,
             "At least one claim is required".to_string(),
+        ));
+    }
+
+    // Require 'aud' claim
+    if !req.claims.contains_key("aud") {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "The 'aud' (audience) claim is required for service accounts".to_string(),
+        ));
+    }
+
+    // Require at least one additional claim besides 'aud'
+    if req.claims.len() < 2 {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "At least one claim in addition to 'aud' is required (e.g., project_path, ref_protected)".to_string(),
         ));
     }
 

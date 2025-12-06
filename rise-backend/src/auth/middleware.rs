@@ -69,8 +69,10 @@ async fn authenticate_service_account(
         ));
     }
 
-    // Try to validate against each service account's claims
-    for sa in service_accounts {
+    // Validate all service accounts and collect matches
+    let mut matching_accounts = Vec::new();
+
+    for sa in &service_accounts {
         // Convert JSONB claims to HashMap
         let claims: HashMap<String, String> =
             serde_json::from_value(sa.claims.clone()).map_err(|e| {
@@ -82,51 +84,70 @@ async fn authenticate_service_account(
             })?;
 
         // Try to validate with this service account's claims
-        match state
+        if state
             .external_jwt_validator
             .validate(token, issuer, &claims)
             .await
+            .is_ok()
         {
-            Ok(_jwt_claims) => {
-                // Valid! Return the service account's user
-                tracing::info!(
-                    "Service account authenticated: {} for project {}",
-                    sa.id,
-                    sa.project_id
-                );
-
-                let user = users::find_by_id(&state.db_pool, sa.user_id)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!("Failed to find user for service account: {}", e);
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Database error".to_string(),
-                        )
-                    })?
-                    .ok_or_else(|| {
-                        tracing::error!("Service account user not found: {}", sa.user_id);
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Service account user not found".to_string(),
-                        )
-                    })?;
-
-                return Ok(user);
-            }
-            Err(e) => {
-                // This service account's claims didn't match, try next one
-                tracing::debug!("Service account {} claim validation failed: {}", sa.id, e);
-                continue;
-            }
+            matching_accounts.push(sa);
         }
     }
 
-    // No service account matched
-    Err((
-        StatusCode::UNAUTHORIZED,
-        "No service account matched the provided token claims".to_string(),
-    ))
+    // Check for collisions
+    if matching_accounts.is_empty() {
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "No service account matched the provided token claims".to_string(),
+        ));
+    }
+
+    if matching_accounts.len() > 1 {
+        let sa_ids: Vec<String> = matching_accounts
+            .iter()
+            .map(|sa| sa.id.to_string())
+            .collect();
+        tracing::error!(
+            "Multiple service accounts matched JWT: {:?}. This indicates ambiguous claim configuration.",
+            sa_ids
+        );
+        return Err((
+            StatusCode::CONFLICT,
+            format!(
+                "Multiple service accounts ({}) matched this token. \
+                 This indicates ambiguous claim configuration. \
+                 Each service account must have unique claim requirements.",
+                matching_accounts.len()
+            ),
+        ));
+    }
+
+    // Exactly one match - authenticate
+    let sa = matching_accounts[0];
+    tracing::info!(
+        "Service account authenticated: {} for project {}",
+        sa.id,
+        sa.project_id
+    );
+
+    let user = users::find_by_id(&state.db_pool, sa.user_id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find user for service account: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?
+        .ok_or_else(|| {
+            tracing::error!("Service account user not found: {}", sa.user_id);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Service account user not found".to_string(),
+            )
+        })?;
+
+    Ok(user)
 }
 
 /// Authentication middleware that validates JWT and injects User into request extensions
