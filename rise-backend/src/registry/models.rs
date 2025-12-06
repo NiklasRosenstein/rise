@@ -39,6 +39,15 @@ pub struct EcrConfig {
     pub access_key_id: Option<String>,
     /// Optional: AWS secret access key (if not using IAM role)
     pub secret_access_key: Option<String>,
+    /// ECR repository name (e.g., "rise-apps")
+    pub repository: String,
+    /// Optional prefix within the repository for further organization
+    /// Final image path: {repository}/{prefix}/{project}:{tag}
+    #[serde(default)]
+    pub prefix: String,
+    /// IAM role ARN to assume for scoped credentials
+    /// Backend assumes this role with inline policy restricting to specific repos
+    pub push_role_arn: String,
 }
 
 /// Configuration for OCI registry with client-side authentication

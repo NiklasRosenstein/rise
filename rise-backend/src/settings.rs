@@ -40,6 +40,10 @@ pub enum RegistrySettings {
     Ecr {
         region: String,
         account_id: String,
+        repository: String,
+        push_role_arn: String,
+        #[serde(default)]
+        prefix: String,
         #[serde(default)]
         access_key_id: Option<String>,
         #[serde(default)]

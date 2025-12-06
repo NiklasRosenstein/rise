@@ -6,7 +6,7 @@ Rise generates temporary credentials for pushing container images to registries.
 
 ### AWS ECR
 
-Amazon Elastic Container Registry with automatic token generation.
+Amazon Elastic Container Registry with scoped credentials via STS AssumeRole.
 
 **Configuration:**
 ```toml
@@ -14,15 +14,70 @@ Amazon Elastic Container Registry with automatic token generation.
 type = "ecr"
 region = "us-east-1"
 account_id = "123456789012"
-# Optional: static credentials (use IAM role in production)
-access_key_id = "AKIA..."
-secret_access_key = "..."
+repository = "rise-apps"  # Required: ECR repository name
+push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"  # Required: IAM role for scoped credentials
+# prefix = "production"  # Optional: prefix within repository
+# access_key_id = "AKIA..."  # Optional: static credentials (use IAM role in production)
+# secret_access_key = "..."
 ```
 
+**Image path structure:**
+```
+{account}.dkr.ecr.{region}.amazonaws.com/{repository}/{prefix}/{project}:{tag}
+```
+
+Example: `123456789012.dkr.ecr.us-east-1.amazonaws.com/rise-apps/production/my-app:latest`
+
 **How it works:**
-1. Backend calls AWS `GetAuthorizationToken` API
-2. Returns base64-encoded credentials valid for 12 hours
-3. CLI uses credentials to `docker login` and push images
+1. Backend assumes the configured IAM role with an inline session policy
+2. The inline policy restricts ECR actions to the specific project's repository pattern
+3. Backend calls AWS `GetAuthorizationToken` API with scoped credentials
+4. Returns base64-encoded credentials valid for 12 hours (scoped to the project)
+5. CLI uses credentials to `docker login` and push images
+
+**IAM Role Setup:**
+
+The `push_role_arn` role needs:
+1. A trust policy allowing the Rise backend to assume it
+2. ECR permissions (the inline session policy will further restrict these)
+
+Example trust policy:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {
+      "AWS": "arn:aws:iam::123456789012:role/rise-backend-role"
+    },
+    "Action": "sts:AssumeRole"
+  }]
+}
+```
+
+Example permissions policy for the role:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Action": "ecr:GetAuthorizationToken",
+    "Resource": "*"
+  }, {
+    "Effect": "Allow",
+    "Action": [
+      "ecr:BatchCheckLayerAvailability",
+      "ecr:InitiateLayerUpload",
+      "ecr:UploadLayerPart",
+      "ecr:CompleteLayerUpload",
+      "ecr:PutImage",
+      "ecr:BatchGetImage",
+      "ecr:GetDownloadUrlForLayer"
+    ],
+    "Resource": "arn:aws:ecr:us-east-1:123456789012:repository/rise-apps/*"
+  }]
+}
+```
 
 ### Generic Docker Registry
 
@@ -129,19 +184,13 @@ Response:
 
 ## Security Considerations
 
-### ⚠️ Current Implementation Limitations
+### Credential Scope
 
-**1. Credential Scope**
+**ECR:** Credentials are scoped to specific projects using STS AssumeRole with inline session policies. When you request credentials for `project=my-app`, you receive credentials that can **only** push to repositories matching `{repository}/{prefix}/my-app*`.
 
-The current implementation does **not** scope credentials to specific projects. When you request credentials for `project=my-app`, you receive credentials that can push to **any** repository in the configured registry.
+**Docker:** No credential scoping - relies on pre-authentication via `docker login`. Use registry-specific access controls and namespacing for security.
 
-**Risk:** A compromised token allows pushing to any repository.
-
-**Mitigation (future):**
-- ECR: Use resource tags and IAM policies to scope tokens per-project
-- Docker: Use registry-specific access controls and namespacing
-
-**2. Credential Lifespan**
+### Credential Lifespan
 
 - **ECR**: 12-hour tokens (AWS enforced)
 - **Docker**: No credential generation - uses existing Docker auth
@@ -153,7 +202,7 @@ The current implementation does **not** scope credentials to specific projects. 
 - For Docker: Rotate registry credentials regularly
 - Monitor registry push logs for unauthorized activity
 
-**3. Credential Storage in Transit**
+### Credential Storage in Transit
 
 Credentials are returned over HTTPS (in production). In development (localhost), they're transmitted over HTTP.
 
@@ -163,20 +212,19 @@ Credentials are returned over HTTPS (in production). In development (localhost),
 - Always use HTTPS in production
 - Consider using TLS even in local development
 
-**4. Backend Permissions**
+### Backend Permissions
 
 The backend needs access to generate or provide credentials.
 
-- **ECR**: Backend's IAM role needs `ecr:GetAuthorizationToken`
+- **ECR**: Backend's IAM role needs `sts:AssumeRole` on the configured `push_role_arn`
 - **Docker**: Backend only provides registry URL (no credentials)
 
 **Risk:** Backend compromise exposes registry access (ECR only).
 
 **Mitigation:**
-- For ECR: Use least-privilege IAM policies, rotate credentials regularly
+- For ECR: Use least-privilege IAM policies on the push role, use trust policies to restrict who can assume the role
 - For Docker: Users must authenticate separately via `docker login`
-- Audit backend access logs
-- Consider credential vaulting for ECR credentials (HashiCorp Vault, AWS Secrets Manager)
+- Audit backend access logs and CloudTrail for AssumeRole events
 
 ### 🔒 Recommended Production Setup
 
@@ -186,15 +234,18 @@ The backend needs access to generate or provide credentials.
 type = "ecr"
 region = "us-east-1"
 account_id = "123456789012"
+repository = "rise-apps"
+push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"
+# prefix = "production"  # Optional
 # No static credentials - use IAM role attached to ECS task/EC2 instance
 ```
 
-Backend runs with IAM role having:
+Backend runs with IAM role having permission to assume the push role:
 ```json
 {
   "Effect": "Allow",
-  "Action": "ecr:GetAuthorizationToken",
-  "Resource": "*"
+  "Action": "sts:AssumeRole",
+  "Resource": "arn:aws:iam::123456789012:role/rise-ecr-push"
 }
 ```
 
@@ -216,11 +267,10 @@ Backend provides registry URL; users bring their own credentials.
 ### 🚀 Future Improvements
 
 **Planned:**
-1. **Repository-scoped tokens** - Credentials limited to specific repositories
-2. **Short-lived tokens** - 1-hour expiry with automatic refresh
-3. **Audit logging** - Track who requested credentials and when
-4. **Rate limiting** - Prevent credential enumeration attacks
-5. **Project-based policies** - "Project X can only push to registry Y"
+1. **Short-lived tokens** - 1-hour expiry with automatic refresh
+2. **Audit logging** - Track who requested credentials and when
+3. **Rate limiting** - Prevent credential enumeration attacks
+4. **Project-based policies** - "Project X can only push to registry Y"
 
 **Extending to other providers:**
 - Google Container Registry (GCR)

@@ -2,6 +2,7 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use aws_config::BehaviorVersion;
 use aws_sdk_ecr::Client as EcrClient;
+use aws_sdk_sts::Client as StsClient;
 use base64::Engine;
 
 use crate::registry::{
@@ -9,10 +10,10 @@ use crate::registry::{
     RegistryProvider,
 };
 
-/// AWS ECR registry provider
+/// AWS ECR registry provider with scoped credentials via STS AssumeRole
 pub struct EcrProvider {
     config: EcrConfig,
-    client: EcrClient,
+    sts_client: StsClient,
     registry_url: String,
 }
 
@@ -39,29 +40,29 @@ impl EcrProvider {
                 .await
         };
 
-        let client = EcrClient::new(&aws_config);
+        let sts_client = StsClient::new(&aws_config);
 
-        let registry_url = format!(
-            "{}.dkr.ecr.{}.amazonaws.com",
-            config.account_id, config.region
+        // Build registry_url: {account}.dkr.ecr.{region}.amazonaws.com/{repository}[/{prefix}]
+        let base_url = format!(
+            "{}.dkr.ecr.{}.amazonaws.com/{}",
+            config.account_id, config.region, config.repository
         );
+        let registry_url = if config.prefix.is_empty() {
+            base_url
+        } else {
+            format!("{}/{}", base_url, config.prefix)
+        };
 
         Ok(Self {
             config,
-            client,
+            sts_client,
             registry_url,
         })
     }
-}
 
-#[async_trait]
-impl RegistryProvider for EcrProvider {
-    async fn get_credentials(&self, repository: &str) -> Result<RegistryCredentials> {
-        tracing::info!("Getting ECR credentials for repository: {}", repository);
-
-        // Get authorization token from ECR
-        let response = self
-            .client
+    /// Get ECR authorization token using the provided ECR client
+    async fn get_ecr_auth_token(&self, client: &EcrClient) -> Result<RegistryCredentials> {
+        let response = client
             .get_authorization_token()
             .send()
             .await
@@ -100,6 +101,93 @@ impl RegistryProvider for EcrProvider {
             password,
             expires_in,
         })
+    }
+}
+
+#[async_trait]
+impl RegistryProvider for EcrProvider {
+    async fn get_credentials(&self, repository: &str) -> Result<RegistryCredentials> {
+        tracing::info!(
+            "Getting scoped ECR credentials for repository: {}",
+            repository
+        );
+
+        // Determine the full image path: {repository}/{prefix}/{project} or {repository}/{project}
+        let full_path = if self.config.prefix.is_empty() {
+            format!("{}/{}", self.config.repository, repository)
+        } else {
+            format!(
+                "{}/{}/{}",
+                self.config.repository, self.config.prefix, repository
+            )
+        };
+
+        // Generate scoped credentials via AssumeRole with inline session policy
+        let repo_arn = format!(
+            "arn:aws:ecr:{}:{}:repository/{}*",
+            self.config.region, self.config.account_id, full_path
+        );
+
+        let inline_policy = serde_json::json!({
+            "Version": "2012-10-17",
+            "Statement": [{
+                "Effect": "Allow",
+                "Action": [
+                    "ecr:GetAuthorizationToken"
+                ],
+                "Resource": "*"
+            }, {
+                "Effect": "Allow",
+                "Action": [
+                    "ecr:BatchCheckLayerAvailability",
+                    "ecr:InitiateLayerUpload",
+                    "ecr:UploadLayerPart",
+                    "ecr:CompleteLayerUpload",
+                    "ecr:PutImage",
+                    "ecr:BatchGetImage",
+                    "ecr:GetDownloadUrlForLayer"
+                ],
+                "Resource": repo_arn
+            }]
+        });
+
+        let assumed_role = self
+            .sts_client
+            .assume_role()
+            .role_arn(&self.config.push_role_arn)
+            .role_session_name(format!("rise-push-{}", repository))
+            .policy(inline_policy.to_string())
+            .send()
+            .await
+            .context("Failed to assume ECR push role")?;
+
+        let creds = assumed_role
+            .credentials()
+            .context("No credentials in AssumeRole response")?;
+
+        // Create ECR client with scoped credentials
+        // Convert AWS DateTime to SystemTime
+        let expiration: Option<std::time::SystemTime> =
+            std::time::SystemTime::try_from(creds.expiration().clone()).ok();
+
+        let scoped_creds = aws_sdk_ecr::config::Credentials::new(
+            creds.access_key_id(),
+            creds.secret_access_key(),
+            Some(creds.session_token().to_string()),
+            expiration,
+            "assume_role",
+        );
+
+        let scoped_aws_config = aws_config::defaults(BehaviorVersion::latest())
+            .credentials_provider(scoped_creds)
+            .region(aws_config::Region::new(self.config.region.clone()))
+            .load()
+            .await;
+
+        let scoped_ecr_client = EcrClient::new(&scoped_aws_config);
+
+        // Get ECR auth token with scoped credentials
+        self.get_ecr_auth_token(&scoped_ecr_client).await
     }
 
     fn registry_type(&self) -> &str {
