@@ -48,7 +48,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
     Ok(projects)
 }
 
-/// List all projects accessible by a user (owned directly or via team membership)
+/// List all projects accessible by a user (owned directly, via team membership, or via service account)
 pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<Project>> {
     let projects = sqlx::query_as!(
         Project,
@@ -67,6 +67,12 @@ pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
                 SELECT 1 FROM team_members tm
                 WHERE tm.team_id = p.owner_team_id
                 AND tm.user_id = $1
+            )
+            OR EXISTS(
+                SELECT 1 FROM service_accounts sa
+                WHERE sa.project_id = p.id
+                AND sa.user_id = $1
+                AND sa.deleted_at IS NULL
             )
         ORDER BY p.created_at DESC
         "#,
