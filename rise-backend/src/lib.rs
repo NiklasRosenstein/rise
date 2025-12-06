@@ -1,6 +1,7 @@
 pub mod auth;
 pub mod db;
 pub mod deployment;
+pub mod ecr;
 pub mod frontend;
 pub mod oci;
 pub mod project;
@@ -88,6 +89,51 @@ pub async fn run_project_controller(settings: settings::Settings) -> Result<()> 
     let controller = Arc::new(project::ProjectController::new(Arc::new(state)));
     controller.start();
     info!("Project controller started");
+
+    // Block forever
+    std::future::pending::<()>().await;
+    Ok(())
+}
+
+/// Run the ECR controller process
+///
+/// Manages ECR repository lifecycle:
+/// - Creates repositories for new projects
+/// - Cleans up repositories when projects are deleted
+pub async fn run_ecr_controller(settings: settings::Settings) -> Result<()> {
+    use crate::registry::models::EcrConfig;
+    use crate::settings::RegistrySettings;
+
+    // Extract ECR config from registry settings
+    let ecr_config = match &settings.registry {
+        Some(RegistrySettings::Ecr {
+            region,
+            account_id,
+            repo_prefix,
+            role_arn,
+            auto_remove,
+            access_key_id,
+            secret_access_key,
+        }) => EcrConfig {
+            region: region.clone(),
+            account_id: account_id.clone(),
+            repo_prefix: repo_prefix.clone(),
+            role_arn: role_arn.clone(),
+            auto_remove: *auto_remove,
+            access_key_id: access_key_id.clone(),
+            secret_access_key: secret_access_key.clone(),
+        },
+        _ => {
+            anyhow::bail!("ECR controller requires ECR registry configuration");
+        }
+    };
+
+    let state = ControllerState::new(&settings.database.url, 2).await?;
+    let manager = Arc::new(ecr::EcrRepoManager::new(ecr_config).await?);
+
+    let controller = Arc::new(ecr::EcrController::new(Arc::new(state), manager));
+    controller.start();
+    info!("ECR controller started");
 
     // Block forever
     std::future::pending::<()>().await;

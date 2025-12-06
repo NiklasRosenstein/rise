@@ -92,18 +92,18 @@ impl AppState {
                     RegistrySettings::Ecr {
                         region,
                         account_id,
-                        repository,
-                        push_role_arn,
-                        prefix,
+                        repo_prefix,
+                        role_arn,
+                        auto_remove,
                         access_key_id,
                         secret_access_key,
                     } => {
                         let ecr_config = EcrConfig {
                             region: region.clone(),
                             account_id: account_id.clone(),
-                            repository: repository.clone(),
-                            push_role_arn: push_role_arn.clone(),
-                            prefix: prefix.clone(),
+                            repo_prefix: repo_prefix.clone(),
+                            role_arn: role_arn.clone(),
+                            auto_remove: *auto_remove,
                             access_key_id: access_key_id.clone(),
                             secret_access_key: secret_access_key.clone(),
                         };
@@ -199,18 +199,18 @@ impl AppState {
                     RegistrySettings::Ecr {
                         region,
                         account_id,
-                        repository,
-                        push_role_arn,
-                        prefix,
+                        repo_prefix,
+                        role_arn,
+                        auto_remove,
                         access_key_id,
                         secret_access_key,
                     } => {
                         let ecr_config = EcrConfig {
                             region: region.clone(),
                             account_id: account_id.clone(),
-                            repository: repository.clone(),
-                            push_role_arn: push_role_arn.clone(),
-                            prefix: prefix.clone(),
+                            repo_prefix: repo_prefix.clone(),
+                            role_arn: role_arn.clone(),
+                            auto_remove: *auto_remove,
                             access_key_id: access_key_id.clone(),
                             secret_access_key: secret_access_key.clone(),
                         };

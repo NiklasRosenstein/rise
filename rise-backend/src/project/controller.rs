@@ -110,10 +110,19 @@ impl ProjectController {
                 }
             }
 
-            // If all deployments are terminal, transition to Terminated then delete
+            // If all deployments are terminal, check finalizers before deleting
             if !has_non_terminal {
+                // Check if any finalizers remain (e.g., ECR cleanup pending)
+                if db_projects::has_finalizers(&self.state.db_pool, project.id).await? {
+                    debug!(
+                        "Project {} has finalizers remaining, waiting for cleanup controllers",
+                        project.name
+                    );
+                    continue;
+                }
+
                 info!(
-                    "All deployments for project {} are terminated, marking as Terminated",
+                    "All deployments for project {} are terminated and no finalizers remain, marking as Terminated",
                     project.name
                 );
 

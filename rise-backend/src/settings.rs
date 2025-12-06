@@ -33,6 +33,10 @@ pub struct DatabaseSettings {
     pub url: String,
 }
 
+fn default_repo_prefix() -> String {
+    "rise/".to_string()
+}
+
 /// Registry provider configuration
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -40,10 +44,14 @@ pub enum RegistrySettings {
     Ecr {
         region: String,
         account_id: String,
-        repository: String,
-        push_role_arn: String,
+        /// Literal prefix for ECR repository names (e.g., "rise/" → repos named "rise/{project}")
+        #[serde(default = "default_repo_prefix")]
+        repo_prefix: String,
+        /// IAM role ARN to assume for all ECR operations (create/delete/tag/push)
+        role_arn: String,
+        /// Whether to automatically delete ECR repos when projects are deleted
         #[serde(default)]
-        prefix: String,
+        auto_remove: bool,
         #[serde(default)]
         access_key_id: Option<String>,
         #[serde(default)]

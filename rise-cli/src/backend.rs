@@ -27,6 +27,8 @@ pub enum ControllerCommands {
     DeploymentDocker,
     /// Start the project controller
     Project,
+    /// Start the ECR controller (requires ECR registry configuration)
+    Ecr,
 }
 
 pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
@@ -44,6 +46,7 @@ pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
                     ControllerCommands::Project => {
                         rise_backend::run_project_controller(settings).await
                     }
+                    ControllerCommands::Ecr => rise_backend::run_ecr_controller(settings).await,
                 },
                 BackendCommands::DevOidcIssuer { .. } => unreachable!(),
             }

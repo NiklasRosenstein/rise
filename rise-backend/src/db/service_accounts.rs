@@ -19,7 +19,7 @@ pub async fn create(
         Project,
         r#"
         SELECT id, name, status as "status: _", visibility as "visibility: _",
-               owner_user_id, owner_team_id, active_deployment_id, project_url,
+               owner_user_id, owner_team_id, active_deployment_id, project_url, finalizers,
                created_at, updated_at
         FROM projects
         WHERE id = $1

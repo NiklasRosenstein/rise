@@ -42,16 +42,12 @@ impl EcrProvider {
 
         let sts_client = StsClient::new(&aws_config);
 
-        // Build registry_url: {account}.dkr.ecr.{region}.amazonaws.com/{repository}[/{prefix}]
-        let base_url = format!(
+        // Build registry_url: {account}.dkr.ecr.{region}.amazonaws.com/{repo_prefix}
+        // repo_prefix is literal (e.g., "rise/" → "rise/hello")
+        let registry_url = format!(
             "{}.dkr.ecr.{}.amazonaws.com/{}",
-            config.account_id, config.region, config.repository
+            config.account_id, config.region, config.repo_prefix
         );
-        let registry_url = if config.prefix.is_empty() {
-            base_url
-        } else {
-            format!("{}/{}", base_url, config.prefix)
-        };
 
         Ok(Self {
             config,
@@ -112,21 +108,17 @@ impl RegistryProvider for EcrProvider {
             repository
         );
 
-        // Determine the full image path: {repository}/{prefix}/{project} or {repository}/{project}
-        let full_path = if self.config.prefix.is_empty() {
-            format!("{}/{}", self.config.repository, repository)
-        } else {
-            format!(
-                "{}/{}/{}",
-                self.config.repository, self.config.prefix, repository
-            )
-        };
+        // Full ECR repository name: {repo_prefix}{project}
+        // repo_prefix is literal, e.g., "rise/" + "hello" = "rise/hello"
+        let repo_name = format!("{}{}", self.config.repo_prefix, repository);
 
         // Generate scoped credentials via AssumeRole with inline session policy
         let repo_arn = format!(
             "arn:aws:ecr:{}:{}:repository/{}*",
-            self.config.region, self.config.account_id, full_path
+            self.config.region, self.config.account_id, repo_name
         );
+
+        tracing::debug!("ECR repository ARN for policy: {}", repo_arn);
 
         let inline_policy = serde_json::json!({
             "Version": "2012-10-17",
@@ -154,12 +146,12 @@ impl RegistryProvider for EcrProvider {
         let assumed_role = self
             .sts_client
             .assume_role()
-            .role_arn(&self.config.push_role_arn)
+            .role_arn(&self.config.role_arn)
             .role_session_name(format!("rise-push-{}", repository))
             .policy(inline_policy.to_string())
             .send()
             .await
-            .context("Failed to assume ECR push role")?;
+            .context("Failed to assume ECR role")?;
 
         let creds = assumed_role
             .credentials()

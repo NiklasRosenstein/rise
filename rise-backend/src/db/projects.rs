@@ -16,7 +16,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
                 owner_user_id, owner_team_id, active_deployment_id,
-            project_url,
+                project_url, finalizers,
                 created_at, updated_at
             FROM projects
             WHERE owner_user_id = $1
@@ -35,7 +35,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
                 owner_user_id, owner_team_id, active_deployment_id,
-            project_url,
+                project_url, finalizers,
                 created_at, updated_at
             FROM projects
             ORDER BY created_at DESC
@@ -58,7 +58,7 @@ pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
             p.status as "status: ProjectStatus",
             p.visibility as "visibility: ProjectVisibility",
             p.owner_user_id, p.owner_team_id, p.active_deployment_id,
-            p.project_url,
+            p.project_url, p.finalizers,
             p.created_at, p.updated_at
         FROM projects p
         WHERE
@@ -95,7 +95,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         FROM projects
         WHERE name = $1
@@ -119,7 +119,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         FROM projects
         WHERE id = $1
@@ -155,7 +155,7 @@ pub async fn create(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         "#,
         name,
@@ -186,7 +186,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         "#,
         id,
@@ -218,7 +218,7 @@ pub async fn update_visibility(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         "#,
         id,
@@ -249,7 +249,7 @@ pub async fn update_owner(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         "#,
         id,
@@ -316,7 +316,7 @@ pub async fn set_active_deployment(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         "#,
         project_id,
@@ -600,7 +600,7 @@ pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         "#,
         id
@@ -623,7 +623,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting'
@@ -653,7 +653,7 @@ pub async fn update_project_url(pool: &PgPool, project_id: Uuid, url: &str) -> R
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url,
+            project_url, finalizers,
             created_at, updated_at
         "#,
         project_id,
@@ -664,4 +664,121 @@ pub async fn update_project_url(pool: &PgPool, project_id: Uuid, url: &str) -> R
     .context("Failed to update project URL")?;
 
     Ok(project)
+}
+
+// ==================== Finalizer Operations ====================
+
+/// Add a finalizer to a project (idempotent - won't add if already exists)
+pub async fn add_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE projects
+        SET finalizers = array_append(
+            CASE WHEN $2 = ANY(finalizers) THEN finalizers
+            ELSE finalizers END,
+            CASE WHEN $2 = ANY(finalizers) THEN NULL
+            ELSE $2 END
+        )
+        WHERE id = $1
+        "#,
+        id,
+        finalizer
+    )
+    .execute(pool)
+    .await
+    .context("Failed to add finalizer")?;
+
+    Ok(())
+}
+
+/// Remove a finalizer from a project
+pub async fn remove_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE projects
+        SET finalizers = array_remove(finalizers, $2)
+        WHERE id = $1
+        "#,
+        id,
+        finalizer
+    )
+    .execute(pool)
+    .await
+    .context("Failed to remove finalizer")?;
+
+    Ok(())
+}
+
+/// Find projects in Deleting status that have a specific finalizer
+pub async fn find_deleting_with_finalizer(
+    pool: &PgPool,
+    finalizer: &str,
+    limit: i64,
+) -> Result<Vec<Project>> {
+    let projects = sqlx::query_as!(
+        Project,
+        r#"
+        SELECT
+            id, name,
+            status as "status: ProjectStatus",
+            visibility as "visibility: ProjectVisibility",
+            owner_user_id, owner_team_id,
+            active_deployment_id,
+            project_url, finalizers,
+            created_at, updated_at
+        FROM projects
+        WHERE status = 'Deleting' AND $1 = ANY(finalizers)
+        ORDER BY updated_at ASC
+        LIMIT $2
+        "#,
+        finalizer,
+        limit
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to find deleting projects with finalizer")?;
+
+    Ok(projects)
+}
+
+/// Check if a project has any finalizers remaining
+pub async fn has_finalizers(pool: &PgPool, id: Uuid) -> Result<bool> {
+    let result = sqlx::query!(
+        r#"
+        SELECT cardinality(finalizers) > 0 as "has_finalizers!"
+        FROM projects
+        WHERE id = $1
+        "#,
+        id
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to check project finalizers")?;
+
+    Ok(result.has_finalizers)
+}
+
+/// List all active projects (not in Deleting or Terminated status)
+pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
+    let projects = sqlx::query_as!(
+        Project,
+        r#"
+        SELECT
+            id, name,
+            status as "status: ProjectStatus",
+            visibility as "visibility: ProjectVisibility",
+            owner_user_id, owner_team_id,
+            active_deployment_id,
+            project_url, finalizers,
+            created_at, updated_at
+        FROM projects
+        WHERE status NOT IN ('Deleting', 'Terminated')
+        ORDER BY created_at DESC
+        "#
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to list active projects")?;
+
+    Ok(projects)
 }
