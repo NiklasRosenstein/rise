@@ -3,7 +3,7 @@ use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-/// OAuth2 token response from Dex
+/// OAuth2 token response from OIDC provider
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TokenInfo {
     pub access_token: String,
@@ -12,7 +12,7 @@ pub struct TokenInfo {
     pub expires_in: u64,
 }
 
-/// Raw token response from Dex (includes id_token)
+/// Raw token response from OIDC provider (includes id_token)
 #[derive(Debug, Deserialize)]
 struct DexTokenResponse {
     access_token: String,
@@ -22,7 +22,7 @@ struct DexTokenResponse {
     refresh_token: Option<String>,
 }
 
-/// Device authorization response from Dex
+/// Device authorization response from OIDC provider
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct DeviceAuthResponse {
     pub device_code: String,
@@ -33,7 +33,7 @@ pub struct DeviceAuthResponse {
     pub interval: u64,
 }
 
-/// Raw device auth response from Dex
+/// Raw device auth response from OIDC provider
 #[derive(Debug, Deserialize)]
 struct DexDeviceAuthResponse {
     device_code: String,
@@ -44,7 +44,8 @@ struct DexDeviceAuthResponse {
     interval: Option<u64>,
 }
 
-/// OAuth2 client wrapper for Dex
+/// OAuth2 client for OIDC provider
+/// Note: Named DexOAuthClient for historical reasons, works with any OIDC provider
 pub struct DexOAuthClient {
     issuer: String,
     client_id: String,
@@ -53,7 +54,7 @@ pub struct DexOAuthClient {
 }
 
 impl DexOAuthClient {
-    /// Create a new Dex OAuth2 client
+    /// Create a new OAuth2 client for the configured OIDC provider
     pub fn new(issuer: String, client_id: String, client_secret: String) -> Result<Self> {
         Ok(Self {
             issuer,

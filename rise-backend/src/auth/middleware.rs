@@ -151,7 +151,7 @@ async fn authenticate_service_account(
 }
 
 /// Authentication middleware that validates JWT and injects User into request extensions
-/// Supports both Dex (user) authentication and external OIDC (service account) authentication
+/// Supports both user authentication (via configured OIDC provider) and service account authentication (via external OIDC providers)
 pub async fn auth_middleware(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -198,8 +198,8 @@ pub async fn auth_middleware(
     };
 
     let user = if issuer == state.auth_settings.issuer {
-        // Dex user authentication (existing flow)
-        tracing::debug!("Authenticating as Dex user");
+        // User authentication via configured OIDC provider
+        tracing::debug!("Authenticating as user via configured OIDC provider");
 
         let claims = state.jwt_validator.validate(&token).await.map_err(|e| {
             tracing::warn!("JWT validation failed: {}", e);

@@ -6,21 +6,21 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
-/// JWT claims from Dex ID token
+/// JWT claims from OIDC provider ID token
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,          // Subject (user ID from Dex)
+    pub sub: String,          // Subject (user ID from OIDC provider)
     pub email: String,        // User email
     pub email_verified: bool, // Email verification status
-    pub iss: String,          // Issuer (Dex URL)
-    pub aud: String,          // Audience (client ID)
+    pub iss: String,          // Issuer (OIDC provider URL)
+    pub aud: String,          // Audience (client ID) - validated to match configured client_id
     pub exp: usize,           // Expiration time
     pub iat: usize,           // Issued at
     #[serde(default)]
     pub name: Option<String>, // User's full name
 }
 
-/// JWKS (JSON Web Key Set) response from Dex
+/// JWKS (JSON Web Key Set) response from OIDC provider
 #[derive(Debug, Deserialize)]
 struct JwksResponse {
     keys: Vec<Jwk>,
@@ -38,7 +38,7 @@ struct Jwk {
     e: String,
 }
 
-/// JWT validator that fetches and caches JWKS from Dex
+/// JWT validator that fetches and caches JWKS from OIDC provider
 pub struct JwtValidator {
     issuer: String,
     jwks_uri: String,
@@ -61,7 +61,7 @@ impl JwtValidator {
         }
     }
 
-    /// Fetch JWKS from Dex and cache the keys
+    /// Fetch JWKS from OIDC provider and cache the keys
     async fn fetch_jwks(&self) -> Result<()> {
         tracing::debug!("Fetching JWKS from {}", self.jwks_uri);
 
