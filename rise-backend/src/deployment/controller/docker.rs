@@ -1,4 +1,6 @@
+use anyhow::Context;
 use async_trait::async_trait;
+use bollard::auth::DockerCredentials;
 use bollard::container::{Config, CreateContainerOptions, StartContainerOptions};
 use bollard::image::CreateImageOptions;
 use bollard::models::{HostConfig, PortBinding};
@@ -11,7 +13,8 @@ use tracing::{debug, error, info, warn};
 
 use super::{DeploymentBackend, HealthStatus, ReconcileResult};
 use crate::db::models::{Deployment, DeploymentStatus, Project};
-use crate::state::AppState;
+use crate::registry::OptionalCredentialsProvider;
+use crate::state::ControllerState;
 
 /// Docker-specific metadata stored in deployment.controller_metadata
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -59,14 +62,20 @@ impl PortAllocator {
 
 /// Docker controller implementation
 pub struct DockerController {
-    state: AppState,
+    state: ControllerState,
     docker: Docker,
     port_allocator: PortAllocator,
+    credentials_provider: OptionalCredentialsProvider,
+    registry_url: Option<String>,
 }
 
 impl DockerController {
     /// Create a new Docker controller
-    pub fn new(state: AppState) -> anyhow::Result<Self> {
+    pub fn new(
+        state: ControllerState,
+        credentials_provider: OptionalCredentialsProvider,
+        registry_url: Option<String>,
+    ) -> anyhow::Result<Self> {
         // Connect to local Docker daemon
         let docker = Docker::connect_with_local_defaults()?;
 
@@ -74,6 +83,8 @@ impl DockerController {
             state,
             docker,
             port_allocator: PortAllocator::new(),
+            credentials_provider,
+            registry_url,
         })
     }
 
@@ -113,6 +124,49 @@ impl DockerController {
         None
     }
 
+    /// Get pull credentials for an image if available
+    async fn get_pull_credentials(
+        &self,
+        image_tag: &str,
+    ) -> anyhow::Result<Option<DockerCredentials>> {
+        // Check if we have a credentials provider
+        let Some(ref provider) = self.credentials_provider else {
+            debug!("No credentials provider configured, pulling without authentication");
+            return Ok(None);
+        };
+
+        // Extract registry host from image tag
+        // Format: registry.example.com/namespace/image:tag
+        let registry_host = if let Some(slash_pos) = image_tag.find('/') {
+            &image_tag[..slash_pos]
+        } else {
+            // No slash means Docker Hub format (e.g., "ubuntu:latest")
+            debug!("Image appears to be from Docker Hub, pulling without authentication");
+            return Ok(None);
+        };
+
+        // Get credentials from provider
+        match provider.get_credentials(registry_host).await {
+            Ok(Some((username, password))) => {
+                info!("Using authenticated pull for registry: {}", registry_host);
+                Ok(Some(DockerCredentials {
+                    username: Some(username),
+                    password: Some(password),
+                    ..Default::default()
+                }))
+            }
+            Ok(None) => {
+                debug!("No credentials available for registry: {}", registry_host);
+                Ok(None)
+            }
+            Err(e) => {
+                warn!("Failed to get credentials for {}: {}", registry_host, e);
+                // Fall back to anonymous pull rather than failing
+                Ok(None)
+            }
+        }
+    }
+
     /// Create a Docker container
     async fn create_container(
         &self,
@@ -128,12 +182,25 @@ impl DockerController {
 
         // Pull the image first (required for digest references and ensures latest version)
         info!("Pulling image: {}", image_tag);
+
+        // Get authentication credentials if available
+        let credentials = self
+            .get_pull_credentials(image_tag)
+            .await
+            .context("Failed to prepare pull credentials")?;
+
+        if credentials.is_some() {
+            debug!("Using authenticated pull for image: {}", image_tag);
+        } else {
+            debug!("Using anonymous pull for image: {}", image_tag);
+        }
+
         let options = CreateImageOptions {
             from_image: image_tag,
             ..Default::default()
         };
 
-        let mut stream = self.docker.create_image(Some(options), None, None);
+        let mut stream = self.docker.create_image(Some(options), None, credentials);
         while let Some(result) = stream.next().await {
             match result {
                 Ok(info) => {
@@ -401,11 +468,21 @@ impl DeploymentBackend for DockerController {
                 metadata.assigned_port = Some(port);
 
                 // Determine image to use
-                let image_tag = crate::deployment::utils::get_deployment_image_tag(
-                    &self.state,
-                    deployment,
-                    project,
-                );
+                let image_tag = if let Some(ref digest) = deployment.image_digest {
+                    // Pre-built images use the pinned digest
+                    digest.clone()
+                } else if let Some(ref registry_url) = self.registry_url {
+                    // Build-from-source: construct from registry config
+                    format!(
+                        "{}/{}:{}",
+                        registry_url.trim_end_matches('/'),
+                        project.name,
+                        deployment.deployment_id
+                    )
+                } else {
+                    // Fallback if no registry configured (shouldn't happen in practice)
+                    format!("{}:{}", project.name, deployment.deployment_id)
+                };
                 debug!("Using image tag: {}", image_tag);
                 metadata.image_tag = Some(image_tag.clone());
 

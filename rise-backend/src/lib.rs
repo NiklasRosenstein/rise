@@ -61,14 +61,28 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 pub async fn run_deployment_controller(settings: settings::Settings) -> Result<()> {
     let app_state = state::AppState::new_for_controller(&settings).await?;
 
-    let backend = Arc::new(deployment::controller::DockerController::new(
-        app_state.clone(),
-    )?);
-
     // Create minimal controller state for the base controller
     let controller_state = ControllerState {
         db_pool: app_state.db_pool.clone(),
     };
+
+    // Wrap registry provider in credentials adapter
+    let credentials_provider = app_state.registry_provider.as_ref().map(|p| {
+        std::sync::Arc::new(registry::RegistryCredentialsAdapter::new(p.clone()))
+            as std::sync::Arc<dyn registry::CredentialsProvider>
+    });
+
+    // Extract registry URL for image tag construction
+    let registry_url = app_state
+        .registry_provider
+        .as_ref()
+        .map(|p| p.registry_url().to_string());
+
+    let backend = Arc::new(deployment::controller::DockerController::new(
+        controller_state.clone(),
+        credentials_provider,
+        registry_url,
+    )?);
 
     let controller = Arc::new(deployment::controller::DeploymentController::new(
         Arc::new(controller_state),

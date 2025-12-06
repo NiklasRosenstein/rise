@@ -1,7 +1,12 @@
+pub mod credentials;
 pub mod handlers;
 pub mod models;
 pub mod providers;
 pub mod routes;
+
+pub use credentials::{
+    CredentialsProvider, OptionalCredentialsProvider, RegistryCredentialsAdapter,
+};
 
 use crate::registry::models::RegistryCredentials;
 use anyhow::Result;
