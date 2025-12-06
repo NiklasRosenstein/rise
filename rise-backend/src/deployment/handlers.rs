@@ -309,9 +309,15 @@ pub async fn create_deployment(
     }
 
     // Check deployment permissions
+    // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", payload.project),
+            )
+        })?;
 
     // Generate deployment ID
     let deployment_id = generate_deployment_id();
@@ -499,9 +505,15 @@ pub async fn update_deployment_status(
     ))?;
 
     // Check if user has permission (owns the project)
+    // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Deployment '{}' not found", deployment_id),
+            )
+        })?;
 
     // Update status in database
     let status_copy = payload.status.clone();
@@ -614,28 +626,16 @@ pub async fn list_deployments(
             )
         })?;
 
-    // Check if user has permission to view deployments (owns the project or is team member)
-    let has_permission = if let Some(owner_user_id) = project.owner_user_id {
-        owner_user_id == user.id
-    } else if let Some(team_id) = project.owner_team_id {
-        db_teams::is_member(&state.db_pool, team_id, user.id)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to check team membership: {}", e),
-                )
-            })?
-    } else {
-        false
-    };
-
-    if !has_permission {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have permission to view deployments for this project".to_string(),
-        ));
-    }
+    // Check if user has permission to view deployments
+    // Return 404 instead of 403 to avoid revealing project existence
+    check_deploy_permission(&state, &project, &user)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
 
     // Get deployments from database (optionally filtered by group, with pagination)
     let db_deployments = db_deployments::list_for_project_and_group(
@@ -712,9 +712,15 @@ pub async fn stop_deployments_by_group(
         })?;
 
     // Check if user has permission to stop deployments (owns the project)
+    // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
 
     // Find all non-terminal deployments in this group
     let deployments = db_deployments::find_non_terminal_for_project_and_group(
@@ -807,28 +813,16 @@ pub async fn get_deployment_by_project(
             )
         })?;
 
-    // Check if user has permission to view deployments (owns the project or is team member)
-    let has_permission = if let Some(owner_user_id) = project.owner_user_id {
-        owner_user_id == user.id
-    } else if let Some(team_id) = project.owner_team_id {
-        db_teams::is_member(&state.db_pool, team_id, user.id)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to check team membership: {}", e),
-                )
-            })?
-    } else {
-        false
-    };
-
-    if !has_permission {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have permission to view deployments for this project".to_string(),
-        ));
-    }
+    // Check if user has permission to view deployments
+    // Return 404 instead of 403 to avoid revealing project existence
+    check_deploy_permission(&state, &project, &user)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
 
     // Find deployment by project_id and deployment_id
     let deployment = db_deployments::find_by_project_and_deployment_id(
@@ -884,9 +878,15 @@ pub async fn rollback_deployment(
         })?;
 
     // Check deployment permissions
+    // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
 
     // Find the source deployment (the one we're rolling back to)
     let source_deployment = db_deployments::find_by_project_and_deployment_id(
