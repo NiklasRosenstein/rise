@@ -375,8 +375,22 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
             Some(deployment) => match deployment.status {
                 DeploymentStatus::Healthy => ProjectStatus::Running,
                 DeploymentStatus::Unhealthy => ProjectStatus::Failed,
-                // Active deployment in transition - should not happen normally
-                _ => ProjectStatus::Failed,
+                // Termination/cancellation in progress - show as Deploying (transitional)
+                DeploymentStatus::Terminating | DeploymentStatus::Cancelling => {
+                    ProjectStatus::Deploying
+                }
+                // Other in-progress states
+                DeploymentStatus::Pending
+                | DeploymentStatus::Building
+                | DeploymentStatus::Pushing
+                | DeploymentStatus::Pushed
+                | DeploymentStatus::Deploying => ProjectStatus::Deploying,
+                // Terminal states shouldn't be active, but handle gracefully
+                DeploymentStatus::Stopped
+                | DeploymentStatus::Cancelled
+                | DeploymentStatus::Superseded
+                | DeploymentStatus::Failed
+                | DeploymentStatus::Expired => ProjectStatus::Stopped,
             },
             None => ProjectStatus::Stopped, // Active deployment was deleted
         }
