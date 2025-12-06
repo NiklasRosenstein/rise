@@ -88,8 +88,9 @@ impl EcrRepoManager {
                         return Ok(false);
                     }
                 }
+                // Use Debug format to get full error details from AWS SDK
                 Err(anyhow::anyhow!(
-                    "Failed to check ECR repository existence for '{}': {}",
+                    "Failed to check ECR repository existence for '{}': {:?}",
                     repo_name,
                     err
                 ))
@@ -142,7 +143,7 @@ impl EcrRepoManager {
             .send()
             .await
             .map_err(|e| {
-                anyhow::anyhow!("Failed to create ECR repository '{}': {}", repo_name, e)
+                anyhow::anyhow!("Failed to create ECR repository '{}': {:?}", repo_name, e)
             })?;
 
         tracing::info!("Created ECR repository: {}", repo_name);
@@ -175,7 +176,7 @@ impl EcrRepoManager {
             .send()
             .await
             .map_err(|e| {
-                anyhow::anyhow!("Failed to delete ECR repository '{}': {}", repo_name, e)
+                anyhow::anyhow!("Failed to delete ECR repository '{}': {:?}", repo_name, e)
             })?;
 
         tracing::info!("Deleted ECR repository: {}", repo_name);
@@ -208,7 +209,7 @@ impl EcrRepoManager {
             .await
             .map_err(|e| {
                 anyhow::anyhow!(
-                    "Failed to tag ECR repository '{}' as orphaned: {}",
+                    "Failed to tag ECR repository '{}' as orphaned: {:?}",
                     self.repo_name(project),
                     e
                 )
@@ -233,7 +234,7 @@ impl EcrRepoManager {
             let response = request
                 .send()
                 .await
-                .map_err(|e| anyhow::anyhow!("Failed to list ECR repositories: {}", e))?;
+                .map_err(|e| anyhow::anyhow!("Failed to list ECR repositories: {:?}", e))?;
 
             for repo in response.repositories() {
                 // Check if this repo has our prefix
