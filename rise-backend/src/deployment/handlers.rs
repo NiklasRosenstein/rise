@@ -8,7 +8,7 @@ use chrono::{DateTime, Utc};
 use regex::Regex;
 use tracing::{debug, error, info};
 
-use super::models::*;
+use super::models::{self, *};
 use super::state_machine;
 use super::utils::generate_deployment_id;
 use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
@@ -76,7 +76,7 @@ async fn check_deploy_permission(
 
 /// Validate group name format: must be 'default' or match [a-z0-9][a-z0-9/-]*[a-z0-9]
 fn is_valid_group_name(name: &str) -> bool {
-    if name == "default" {
+    if name == models::DEFAULT_DEPLOYMENT_GROUP {
         return true;
     }
 
@@ -187,7 +187,10 @@ async fn resolve_image_digest(
                 debug!("Registry provider returned empty credentials, using anonymous auth");
             }
             Err(e) => {
-                error!("Failed to get pull credentials from registry provider: {}", e);
+                error!(
+                    "Failed to get pull credentials from registry provider: {}",
+                    e
+                );
                 // Continue with anonymous auth
             }
         }
@@ -383,14 +386,14 @@ pub async fn create_deployment(
         .await
         .map_err(|e| {
             error!(
-                    "Failed to resolve image '{}' (normalized from '{}'): {}",
-                    normalized_image, user_image, e
-                );
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("Failed to resolve image '{}': {}", user_image, e),
-                )
-            })?;
+                "Failed to resolve image '{}' (normalized from '{}'): {}",
+                normalized_image, user_image, e
+            );
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Failed to resolve image '{}': {}", user_image, e),
+            )
+        })?;
 
         info!("Successfully resolved image to digest: {}", image_digest);
 

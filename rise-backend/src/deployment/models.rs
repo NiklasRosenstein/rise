@@ -84,8 +84,12 @@ pub struct Deployment {
 }
 
 fn default_group() -> String {
-    "default".to_string()
+    DEFAULT_DEPLOYMENT_GROUP.to_string()
 }
+
+/// The default deployment group name
+/// This group drives the overall project status and is used for primary deployments
+pub const DEFAULT_DEPLOYMENT_GROUP: &str = "default";
 
 // Request to create a deployment
 #[derive(Debug, Deserialize)]

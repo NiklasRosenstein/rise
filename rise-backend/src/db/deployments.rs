@@ -832,6 +832,43 @@ pub async fn find_non_terminal_for_project_and_group(
     Ok(deployments)
 }
 
+/// Find last deployment for a project in a specific group
+/// Returns the most recent deployment regardless of status
+pub async fn find_last_for_project_and_group(
+    pool: &PgPool,
+    project_id: Uuid,
+    group: &str,
+) -> Result<Option<Deployment>> {
+    let deployment = sqlx::query_as!(
+        Deployment,
+        r#"
+        SELECT
+            id, deployment_id, project_id, created_by_id,
+            status as "status: DeploymentStatus",
+            deployment_group, expires_at,
+            termination_reason as "termination_reason: _",
+            completed_at, error_message, build_logs,
+            controller_metadata as "controller_metadata: serde_json::Value",
+            deployment_url,
+            image, image_digest,
+            http_port,
+            created_at, updated_at
+        FROM deployments
+        WHERE project_id = $1
+          AND deployment_group = $2
+        ORDER BY created_at DESC
+        LIMIT 1
+        "#,
+        project_id,
+        group
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to find last deployment for project and group")?;
+
+    Ok(deployment)
+}
+
 /// Find expired deployments that need cleanup
 pub async fn find_expired(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(

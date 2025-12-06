@@ -3,6 +3,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
+use crate::db::deployments;
 use crate::db::models::{Deployment, Project, ProjectStatus, ProjectVisibility};
 
 /// List all projects (optionally filtered by owner)
@@ -347,24 +348,18 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
         return Ok(project);
     }
 
-    // Get last deployment
-    let last_deployment = sqlx::query!(
-        r#"
-        SELECT id, status as "status: DeploymentStatus"
-        FROM deployments
-        WHERE project_id = $1
-        ORDER BY created_at DESC
-        LIMIT 1
-        "#,
-        project_id
+    // Get last deployment from the "default" group only
+    // Other deployment groups (e.g., for merge requests) don't affect project status
+    let last_deployment = deployments::find_last_for_project_and_group(
+        pool,
+        project_id,
+        crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP,
     )
-    .fetch_optional(pool)
-    .await
-    .context("Failed to get last deployment")?;
+    .await?;
 
-    // Determine status based on active deployment and last deployment
+    // Determine status based on active deployment and last deployment in "default" group
     let status = if let Some(active_id) = project.active_deployment_id {
-        // Get active deployment to check its status
+        // Get active deployment to check its status and group
         let active_deployment =
             sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE id = $1")
                 .bind(active_id)
@@ -372,61 +367,99 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
                 .await?;
 
         match active_deployment {
-            Some(deployment) => match deployment.status {
-                DeploymentStatus::Healthy => ProjectStatus::Running,
-                DeploymentStatus::Unhealthy => ProjectStatus::Failed,
-                // Termination/cancellation in progress - show as Deploying (transitional)
-                DeploymentStatus::Terminating | DeploymentStatus::Cancelling => {
-                    ProjectStatus::Deploying
+            Some(deployment)
+                if deployment.deployment_group
+                    == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP =>
+            {
+                // Only use active deployment status if it's in the "default" group
+                match deployment.status {
+                    DeploymentStatus::Healthy => ProjectStatus::Running,
+                    DeploymentStatus::Unhealthy => ProjectStatus::Failed,
+                    // Termination/cancellation in progress - show as Deploying (transitional)
+                    DeploymentStatus::Terminating | DeploymentStatus::Cancelling => {
+                        ProjectStatus::Deploying
+                    }
+                    // Other in-progress states
+                    DeploymentStatus::Pending
+                    | DeploymentStatus::Building
+                    | DeploymentStatus::Pushing
+                    | DeploymentStatus::Pushed
+                    | DeploymentStatus::Deploying => ProjectStatus::Deploying,
+                    // Terminal states shouldn't be active, but handle gracefully
+                    DeploymentStatus::Stopped
+                    | DeploymentStatus::Cancelled
+                    | DeploymentStatus::Superseded
+                    | DeploymentStatus::Failed
+                    | DeploymentStatus::Expired => ProjectStatus::Stopped,
                 }
-                // Other in-progress states
+            }
+            Some(_) | None => {
+                // Active deployment is not in "default" group or was deleted
+                // Fall through to use last_deployment from default group
+                if let Some(last) = last_deployment.as_ref() {
+                    match last.status {
+                        DeploymentStatus::Failed => ProjectStatus::Failed,
+
+                        // In-progress states
+                        DeploymentStatus::Pending
+                        | DeploymentStatus::Building
+                        | DeploymentStatus::Pushing
+                        | DeploymentStatus::Pushed
+                        | DeploymentStatus::Deploying => ProjectStatus::Deploying,
+
+                        // Cancellation/Termination in progress
+                        DeploymentStatus::Cancelling | DeploymentStatus::Terminating => {
+                            ProjectStatus::Deploying
+                        }
+
+                        // Terminal states (no active deployment)
+                        DeploymentStatus::Cancelled
+                        | DeploymentStatus::Stopped
+                        | DeploymentStatus::Superseded
+                        | DeploymentStatus::Expired => ProjectStatus::Stopped,
+
+                        // Running states without being active (shouldn't happen)
+                        DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => {
+                            ProjectStatus::Stopped
+                        }
+                    }
+                } else {
+                    // No deployments in default group at all
+                    ProjectStatus::Stopped
+                }
+            }
+        }
+    } else {
+        // No active_deployment_id, use last deployment from default group
+        if let Some(last) = last_deployment.as_ref() {
+            match last.status {
+                DeploymentStatus::Failed => ProjectStatus::Failed,
+
+                // In-progress states
                 DeploymentStatus::Pending
                 | DeploymentStatus::Building
                 | DeploymentStatus::Pushing
                 | DeploymentStatus::Pushed
                 | DeploymentStatus::Deploying => ProjectStatus::Deploying,
-                // Terminal states shouldn't be active, but handle gracefully
-                DeploymentStatus::Stopped
-                | DeploymentStatus::Cancelled
+
+                // Cancellation/Termination in progress
+                DeploymentStatus::Cancelling | DeploymentStatus::Terminating => {
+                    ProjectStatus::Deploying
+                }
+
+                // Terminal states (no active deployment)
+                DeploymentStatus::Cancelled
+                | DeploymentStatus::Stopped
                 | DeploymentStatus::Superseded
-                | DeploymentStatus::Failed
                 | DeploymentStatus::Expired => ProjectStatus::Stopped,
-            },
-            None => ProjectStatus::Stopped, // Active deployment was deleted
-        }
-    } else if let Some(last) = last_deployment {
-        // No active deployment, check last deployment status
-        match last.status {
-            DeploymentStatus::Failed => ProjectStatus::Failed,
 
-            // In-progress states
-            DeploymentStatus::Pending
-            | DeploymentStatus::Building
-            | DeploymentStatus::Pushing
-            | DeploymentStatus::Pushed
-            | DeploymentStatus::Deploying => ProjectStatus::Deploying,
-
-            // Cancellation/Termination in progress
-            DeploymentStatus::Cancelling | DeploymentStatus::Terminating => {
-                ProjectStatus::Deploying
+                // Running states without being active (shouldn't happen)
+                DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => ProjectStatus::Stopped,
             }
-
-            // Terminal states (no active deployment)
-            DeploymentStatus::Cancelled
-            | DeploymentStatus::Stopped
-            | DeploymentStatus::Superseded
-            | DeploymentStatus::Expired => ProjectStatus::Stopped,
-
-            // Running states without being active (shouldn't happen)
-            DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => {
-                // This shouldn't happen (running deployment should be active)
-                // but treat as Running anyway
-                ProjectStatus::Running
-            }
+        } else {
+            // No deployments in default group at all
+            ProjectStatus::Stopped
         }
-    } else {
-        // No deployments at all -> Stopped
-        ProjectStatus::Stopped
     };
 
     update_status(pool, project_id, status).await
