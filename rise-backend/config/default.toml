@@ -42,7 +42,7 @@ namespace = "rise-apps"
 
 # Kubernetes configuration (optional)
 # Uncomment to enable Kubernetes deployment controller
-# [kubernetes]
-# ingress_class = "nginx"
-# domain_suffix = "apps.rise.net"
-# # kubeconfig = "/path/to/kubeconfig"  # Optional: explicit kubeconfig path
+[kubernetes]
+ingress_class = "nginx"
+domain_suffix = "apps.rise.net"
+# kubeconfig = "/path/to/kubeconfig"  # Optional: explicit kubeconfig path

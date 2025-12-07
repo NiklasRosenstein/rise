@@ -14,8 +14,8 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 use super::{DeploymentBackend, HealthStatus, ReconcileHint, ReconcileResult};
-use crate::db::models::{Deployment, DeploymentStatus, Project};
 use crate::db::deployments as db_deployments;
+use crate::db::models::{Deployment, DeploymentStatus, Project};
 use crate::registry::RegistryProvider;
 use crate::state::ControllerState;
 
@@ -52,9 +52,12 @@ enum ReconcilePhase {
 pub struct KubernetesController {
     state: ControllerState,
     kube_client: Client,
+    #[allow(dead_code)] // Will be used in reconciliation implementation
     ingress_class: String,
+    #[allow(dead_code)] // Will be used in reconciliation implementation
     domain_suffix: String,
     registry_provider: Option<Arc<dyn RegistryProvider>>,
+    #[allow(dead_code)] // Will be used in reconciliation implementation
     registry_url: Option<String>,
 }
 
@@ -101,8 +104,11 @@ impl KubernetesController {
 
         // Find all projects that have active Kubernetes deployments
         // We'll refresh the secret for each namespace (one per project)
-        let healthy_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Healthy).await?;
-        let unhealthy_deployments = db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Unhealthy).await?;
+        let healthy_deployments =
+            db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Healthy).await?;
+        let unhealthy_deployments =
+            db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Unhealthy)
+                .await?;
         let deployments = [healthy_deployments, unhealthy_deployments].concat();
 
         // Group deployments by namespace to avoid refreshing the same secret multiple times
@@ -126,7 +132,10 @@ impl KubernetesController {
 
         // Refresh secret for each namespace
         for namespace in namespaces_to_refresh {
-            if let Err(e) = self.refresh_namespace_pull_secret(&namespace, provider).await {
+            if let Err(e) = self
+                .refresh_namespace_pull_secret(&namespace, provider)
+                .await
+            {
                 warn!(
                     "Failed to refresh pull secret for namespace {}: {}",
                     namespace, e
@@ -151,7 +160,7 @@ impl KubernetesController {
 
         let secret = self.create_dockerconfigjson_secret(
             "rise-registry-creds",
-            &provider.registry_host(),
+            provider.registry_host(),
             &username,
             &password,
         )?;
@@ -178,7 +187,8 @@ impl KubernetesController {
         use base64::Engine;
 
         // Create docker config JSON
-        let auth = base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
+        let auth =
+            base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
         let docker_config = serde_json::json!({
             "auths": {
                 registry_host: {
@@ -209,11 +219,13 @@ impl KubernetesController {
     }
 
     /// Get namespace name for a project
+    #[allow(dead_code)] // Will be used in reconciliation implementation
     fn namespace_name(project: &Project) -> String {
         format!("rise-{}", project.name)
     }
 
     /// Create common labels for all resources
+    #[allow(dead_code)] // Will be used in reconciliation implementation
     fn common_labels(project: &Project) -> BTreeMap<String, String> {
         let mut labels = BTreeMap::new();
         labels.insert("rise.dev/managed-by".to_string(), "rise".to_string());
@@ -222,10 +234,8 @@ impl KubernetesController {
     }
 
     /// Create deployment-specific labels
-    fn deployment_labels(
-        project: &Project,
-        deployment: &Deployment,
-    ) -> BTreeMap<String, String> {
+    #[allow(dead_code)] // Will be used in reconciliation implementation
+    fn deployment_labels(project: &Project, deployment: &Deployment) -> BTreeMap<String, String> {
         let mut labels = Self::common_labels(project);
         labels.insert(
             "rise.dev/deployment-group".to_string(),
@@ -326,9 +336,7 @@ impl DeploymentBackend for KubernetesController {
         );
 
         // Clean up any partially created ReplicaSet
-        if let (Some(rs_name), Some(namespace)) =
-            (metadata.replicaset_name, metadata.namespace)
-        {
+        if let (Some(rs_name), Some(namespace)) = (metadata.replicaset_name, metadata.namespace) {
             let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
             if let Err(e) = rs_api.delete(&rs_name, &DeleteParams::default()).await {
                 // Ignore 404 errors (already deleted)
@@ -352,9 +360,7 @@ impl DeploymentBackend for KubernetesController {
         );
 
         // Delete ONLY the ReplicaSet (cascading deletes pods)
-        if let (Some(rs_name), Some(namespace)) =
-            (metadata.replicaset_name, metadata.namespace)
-        {
+        if let (Some(rs_name), Some(namespace)) = (metadata.replicaset_name, metadata.namespace) {
             let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
             if let Err(e) = rs_api.delete(&rs_name, &DeleteParams::default()).await {
                 // Ignore 404 errors (already deleted)

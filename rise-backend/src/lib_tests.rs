@@ -24,6 +24,7 @@ mod tests {
                 url: "postgres://rise:rise123@localhost:5432/rise".to_string(),
             },
             registry: None,
+            kubernetes: None,
         };
 
         // This test requires PostgreSQL and Dex to be running

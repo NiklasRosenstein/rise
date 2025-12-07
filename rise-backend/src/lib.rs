@@ -158,6 +158,11 @@ pub async fn run_ecr_controller(settings: settings::Settings) -> Result<()> {
 
 /// Run the Kubernetes deployment controller process
 pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<()> {
+    // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+
     let k8s_settings = settings
         .kubernetes
         .clone()
