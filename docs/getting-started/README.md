@@ -19,15 +19,17 @@ This starts:
 ## Build CLI
 
 ```bash
-cargo build --bin rise-cli
+cargo build --bin rise
 ```
+
+**Note**: If using `direnv`, the CLI is available as `rise` directly. Otherwise, use `./target/debug/rise`.
 
 ## First Steps
 
 ### 1. Login
 
 ```bash
-./target/debug/rise login
+rise login
 ```
 
 This will:
@@ -36,27 +38,27 @@ This will:
 3. Redirect back to CLI after successful authentication
 
 **Default Dex credentials:**
-- Email: `admin@example.com`
-- Password: `admin`
+- Email: `admin@example.com` or `test@example.com`
+- Password: `password`
 
-See [Authentication](./authentication.md) for more details on authentication flows.
+See [Authentication](../core-concepts/authentication.md) for more details on authentication flows.
 
 ### 2. Create a Project
 
 ```bash
-./target/debug/rise project create my-app --visibility public
+rise project create my-app --visibility public
 ```
 
 ### 3. Create a Team
 
 ```bash
-./target/debug/rise team create devops
+rise team create devops
 ```
 
 ### 4. Transfer Ownership
 
 ```bash
-./target/debug/rise project update my-app --owner team:devops
+rise project update my-app --owner team:devops
 ```
 
 ## Development Database
