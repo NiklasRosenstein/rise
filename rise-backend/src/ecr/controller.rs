@@ -146,7 +146,10 @@ impl EcrController {
                         if deleted {
                             info!("Deleted ECR repository for project: {}", project.name);
                         } else {
-                            debug!("ECR repository did not exist for project: {}", project.name);
+                            info!(
+                                "ECR repository did not exist for project: {} (already deleted)",
+                                project.name
+                            );
                         }
                         Ok(())
                     }
@@ -155,22 +158,21 @@ impl EcrController {
             } else {
                 // Tag as orphaned instead of deleting
                 match self.manager.tag_as_orphaned(&project.name).await {
-                    Ok(()) => {
-                        info!(
-                            "Tagged ECR repository as orphaned for project: {}",
-                            project.name
-                        );
+                    Ok(tagged) => {
+                        if tagged {
+                            info!(
+                                "Tagged ECR repository as orphaned for project: {}",
+                                project.name
+                            );
+                        } else {
+                            info!(
+                                "ECR repository did not exist for project: {} (already deleted)",
+                                project.name
+                            );
+                        }
                         Ok(())
                     }
-                    Err(e) => {
-                        // If tagging fails because repo doesn't exist, that's fine
-                        if e.to_string().contains("RepositoryNotFoundException") {
-                            debug!("ECR repository did not exist for project: {}", project.name);
-                            Ok(())
-                        } else {
-                            Err(e)
-                        }
-                    }
+                    Err(e) => Err(e),
                 }
             };
 

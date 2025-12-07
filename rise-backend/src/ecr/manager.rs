@@ -226,7 +226,18 @@ impl EcrRepoManager {
     ///
     /// Adds the tag rise:orphaned = "true" to the repository.
     /// This marks the repository for manual cleanup instead of automatic deletion.
-    pub async fn tag_as_orphaned(&self, project: &str) -> Result<()> {
+    ///
+    /// Returns true if tagged, false if repository doesn't exist.
+    pub async fn tag_as_orphaned(&self, project: &str) -> Result<bool> {
+        // Check if repository exists first
+        if !self.repository_exists(project).await? {
+            tracing::debug!(
+                "ECR repository {} does not exist, nothing to tag",
+                self.repo_name(project)
+            );
+            return Ok(false);
+        }
+
         let repo_arn = self.repo_arn(project);
 
         tracing::info!(
@@ -254,7 +265,7 @@ impl EcrRepoManager {
                 )
             })?;
 
-        Ok(())
+        Ok(true)
     }
 
     /// List all Rise-managed ECR repositories
