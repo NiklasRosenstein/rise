@@ -681,17 +681,10 @@ impl KubernetesController {
                 name: Some(Self::ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
-                annotations: Some({
-                    let mut annotations = BTreeMap::new();
-                    annotations.insert(
-                        "kubernetes.io/ingress.class".to_string(),
-                        self.ingress_class.clone(),
-                    );
-                    annotations
-                }),
                 ..Default::default()
             },
             spec: Some(IngressSpec {
+                ingress_class_name: Some(self.ingress_class.clone()),
                 rules: Some(vec![IngressRule {
                     host: Some(host),
                     http: Some(HTTPIngressRuleValue {
