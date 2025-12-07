@@ -360,6 +360,94 @@ impl KubernetesController {
         }
     }
 
+    /// Clean up deployment group resources (Service and Ingress) if no other deployments exist in the group
+    async fn cleanup_group_resources_if_empty(
+        &self,
+        deployment: &Deployment,
+        metadata: &KubernetesMetadata,
+    ) -> Result<()> {
+        let namespace = metadata
+            .namespace
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+
+        // Check if there are other active deployments in this group
+        use crate::db::deployments as db_deployments;
+        let other_in_group = db_deployments::list_for_project_and_group(
+            &self.state.db_pool,
+            deployment.project_id,
+            Some(&deployment.deployment_group),
+            Some(100), // Get up to 100 deployments to check
+            None,
+        )
+        .await?;
+
+        // Count deployments that aren't this one and aren't in terminal/cleanup states
+        let active_count = other_in_group
+            .iter()
+            .filter(|d| {
+                d.id != deployment.id
+                    && !matches!(
+                        d.status,
+                        DeploymentStatus::Terminating
+                            | DeploymentStatus::Cancelled
+                            | DeploymentStatus::Stopped
+                            | DeploymentStatus::Failed
+                            | DeploymentStatus::Superseded
+                            | DeploymentStatus::Expired
+                    )
+            })
+            .count();
+
+        if active_count == 0 {
+            info!(
+                "Last deployment in group '{}', cleaning up Service and Ingress",
+                deployment.deployment_group
+            );
+
+            // Get project info to construct resource names
+            use crate::db::projects as db_projects;
+            let project = db_projects::find_by_id(&self.state.db_pool, deployment.project_id)
+                .await?
+                .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
+
+            // Delete Service
+            let service_name = Self::service_name(&project, deployment);
+            let svc_api: Api<Service> = Api::namespaced(self.kube_client.clone(), namespace);
+            if let Err(e) = svc_api
+                .delete(&service_name, &DeleteParams::default())
+                .await
+            {
+                if !e.to_string().contains("404") {
+                    warn!("Error deleting Service {}: {}", service_name, e);
+                }
+            } else {
+                info!("Deleted Service {} for empty group", service_name);
+            }
+
+            // Delete Ingress
+            let ingress_name = Self::ingress_name(&project, deployment);
+            let ingress_api: Api<Ingress> = Api::namespaced(self.kube_client.clone(), namespace);
+            if let Err(e) = ingress_api
+                .delete(&ingress_name, &DeleteParams::default())
+                .await
+            {
+                if !e.to_string().contains("404") {
+                    warn!("Error deleting Ingress {}: {}", ingress_name, e);
+                }
+            } else {
+                info!("Deleted Ingress {} for empty group", ingress_name);
+            }
+        } else {
+            debug!(
+                "Group '{}' still has {} active deployment(s), keeping resources",
+                deployment.deployment_group, active_count
+            );
+        }
+
+        Ok(())
+    }
+
     /// Check pods for irrecoverable errors (e.g., InvalidImageName, ImagePullBackOff)
     /// Returns (is_failed, error_message) tuple
     async fn check_pod_errors(
@@ -1088,7 +1176,8 @@ impl DeploymentBackend for KubernetesController {
 
         if let Some(metadata) = metadata {
             // Delete ONLY the ReplicaSet (cascading deletes pods)
-            if let (Some(rs_name), Some(namespace)) = (metadata.replicaset_name, metadata.namespace)
+            if let (Some(rs_name), Some(namespace)) =
+                (metadata.replicaset_name.clone(), metadata.namespace.clone())
             {
                 let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
                 if let Err(e) = rs_api.delete(&rs_name, &DeleteParams::default()).await {
@@ -1098,6 +1187,20 @@ impl DeploymentBackend for KubernetesController {
                     }
                 }
             }
+
+            // For non-default deployment groups, check if we should clean up group-specific resources
+            if deployment.deployment_group != crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+                // Check if there are any other active deployments in this group
+                if let Err(e) = self
+                    .cleanup_group_resources_if_empty(deployment, &metadata)
+                    .await
+                {
+                    warn!(
+                        "Error cleaning up group resources for deployment {}: {}",
+                        deployment.deployment_id, e
+                    );
+                }
+            }
         } else {
             debug!(
                 "No metadata found for deployment {}, nothing to terminate",
@@ -1105,7 +1208,7 @@ impl DeploymentBackend for KubernetesController {
             );
         }
 
-        // DO NOT delete Service, Ingress, Secret, or Namespace (shared by other deployments)
+        // DO NOT delete Secret or Namespace (shared across all groups in the project)
         Ok(())
     }
 }
