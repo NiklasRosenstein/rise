@@ -1,13 +1,17 @@
 # Stage 1: Generate recipe file for dependencies
 FROM rust:1.91-slim AS planner
-WORKDIR /usr/src/rise-backend
+WORKDIR /usr/src
 RUN cargo install cargo-chef
-COPY Cargo.lock rise-backend/Cargo.toml ./
+
+# Copy workspace files
+COPY Cargo.toml Cargo.lock ./
+COPY rise-backend/Cargo.toml ./rise-backend/
+
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Stage 2: Build dependencies (cached separately from source code)
 FROM rust:1.91-slim AS cacher
-WORKDIR /usr/src/rise-backend
+WORKDIR /usr/src
 
 # Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
 RUN apt-get update && apt-get install -y \
@@ -18,14 +22,14 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 RUN cargo install cargo-chef
-COPY --from=planner /usr/src/rise-backend/recipe.json recipe.json
+COPY --from=planner /usr/src/recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo chef cook --release --recipe-path recipe.json
 
 # Stage 3: Build the application
 FROM rust:1.91-slim AS builder
-WORKDIR /usr/src/rise-backend
+WORKDIR /usr/src
 
 # Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
 RUN apt-get update && apt-get install -y \
@@ -37,14 +41,15 @@ RUN apt-get update && apt-get install -y \
 
 # Copy cached dependencies from cacher stage
 COPY --from=cacher /usr/local/cargo /usr/local/cargo
-COPY --from=cacher /usr/src/rise-backend/target target
+COPY --from=cacher /usr/src/target target
 
-# Copy the source code and build the application
-COPY Cargo.lock rise-backend/Cargo.toml ./
-COPY rise-backend/src ./src
+# Copy workspace and package files
+COPY Cargo.toml Cargo.lock ./
+COPY rise-backend ./rise-backend
+
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release && \
+    cargo build --release --bin rise-backend && \
     cp target/release/rise-backend /usr/local/bin/rise-backend-binary
 
 # Stage 4: Create the final, smaller image (match builder's Debian version)
