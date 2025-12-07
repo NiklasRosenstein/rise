@@ -59,6 +59,7 @@ enum ReconcilePhase {
     WaitingForReplicaSet,
     UpdatingIngress,
     WaitingForHealth,
+    SwitchingTraffic,
     Completed,
 }
 
@@ -681,23 +682,6 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
-                    // BLUE/GREEN TRAFFIC SWITCH: Update Service selector to point to new deployment
-                    let service_name = format!("{}-svc", project.name);
-                    let svc_api: Api<Service> =
-                        Api::namespaced(self.kube_client.clone(), namespace);
-
-                    // Create updated service with selector pointing to this deployment
-                    let svc = self.create_service(project, deployment, &metadata);
-
-                    // Use server-side apply with force to update the service selector
-                    let patch_params = PatchParams::apply("rise").force();
-                    let patch = Patch::Apply(&svc);
-                    svc_api.patch(&service_name, &patch_params, &patch).await?;
-                    info!(
-                        "Updated Service {} selector to deployment {}",
-                        service_name, deployment.deployment_id
-                    );
-
                     // Only create Ingress for default deployment group
                     if deployment.deployment_group
                         == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP
@@ -723,21 +707,19 @@ impl DeploymentBackend for KubernetesController {
                 }
 
                 ReconcilePhase::WaitingForHealth => {
-                    // Use health_check to verify deployment is healthy
+                    // Use health_check to verify deployment is healthy before switching traffic
                     let health = self.health_check(deployment).await?;
                     let deployment_url = format!("https://{}.{}", project.name, self.domain_suffix);
 
                     if health.healthy {
-                        info!("Deployment {} is healthy", deployment.deployment_id);
-                        metadata.reconcile_phase = ReconcilePhase::Completed;
+                        info!(
+                            "Deployment {} is healthy, ready for traffic switch",
+                            deployment.deployment_id
+                        );
+                        metadata.reconcile_phase = ReconcilePhase::SwitchingTraffic;
 
-                        return Ok(ReconcileResult {
-                            status: DeploymentStatus::Healthy,
-                            deployment_url: Some(deployment_url),
-                            controller_metadata: serde_json::to_value(&metadata)?,
-                            error_message: None,
-                            next_reconcile: ReconcileHint::Default,
-                        });
+                        // Continue to traffic switching
+                        continue;
                     } else {
                         debug!(
                             "Waiting for deployment {} to become healthy",
@@ -752,6 +734,41 @@ impl DeploymentBackend for KubernetesController {
                             next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
                         });
                     }
+                }
+
+                ReconcilePhase::SwitchingTraffic => {
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+
+                    // BLUE/GREEN TRAFFIC SWITCH: Update Service selector to point to new deployment
+                    let service_name = format!("{}-svc", project.name);
+                    let svc_api: Api<Service> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+
+                    // Create updated service with selector pointing to this deployment
+                    let svc = self.create_service(project, deployment, &metadata);
+
+                    // Use server-side apply with force to update the service selector
+                    let patch_params = PatchParams::apply("rise").force();
+                    let patch = Patch::Apply(&svc);
+                    svc_api.patch(&service_name, &patch_params, &patch).await?;
+                    info!(
+                        "Switched traffic: Service {} selector now points to deployment {}",
+                        service_name, deployment.deployment_id
+                    );
+
+                    metadata.reconcile_phase = ReconcilePhase::Completed;
+                    let deployment_url = format!("https://{}.{}", project.name, self.domain_suffix);
+
+                    return Ok(ReconcileResult {
+                        status: DeploymentStatus::Healthy,
+                        deployment_url: Some(deployment_url),
+                        controller_metadata: serde_json::to_value(&metadata)?,
+                        error_message: None,
+                        next_reconcile: ReconcileHint::Default,
+                    });
                 }
 
                 ReconcilePhase::Completed => {
