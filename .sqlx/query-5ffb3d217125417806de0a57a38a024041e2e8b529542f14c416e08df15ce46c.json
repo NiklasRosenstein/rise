@@ -1,0 +1,34 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            p.id as project_id,\n            d.deployment_id as \"deployment_id?\",\n            d.status as \"status?: crate::db::models::DeploymentStatus\"\n        FROM unnest($1::uuid[]) AS p(id)\n        LEFT JOIN deployments d ON d.id = (\n            SELECT active_deployment_id FROM projects WHERE id = p.id\n        )\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "deployment_id?",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status?: crate::db::models::DeploymentStatus",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "UuidArray"
+      ]
+    },
+    "nullable": [
+      null,
+      true,
+      true
+    ]
+  },
+  "hash": "5ffb3d217125417806de0a57a38a024041e2e8b529542f14c416e08df15ce46c"
+}

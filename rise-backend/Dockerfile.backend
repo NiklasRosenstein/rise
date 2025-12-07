@@ -3,9 +3,15 @@ FROM rust:1.91-slim AS planner
 WORKDIR /usr/src
 RUN cargo install cargo-chef
 
-# Copy workspace files
+# Copy workspace files (need all members for cargo metadata to work)
 COPY Cargo.toml Cargo.lock ./
 COPY rise-backend/Cargo.toml ./rise-backend/
+COPY rise-cli/Cargo.toml ./rise-cli/
+
+# Create dummy src/main.rs files for cargo to be happy
+RUN mkdir -p rise-backend/src rise-cli/src && \
+    echo "fn main() {}" > rise-backend/src/main.rs && \
+    echo "fn main() {}" > rise-cli/src/main.rs
 
 RUN cargo chef prepare --recipe-path recipe.json
 
@@ -45,12 +51,14 @@ COPY --from=cacher /usr/src/target target
 
 # Copy workspace and package files
 COPY Cargo.toml Cargo.lock ./
+COPY .sqlx ./.sqlx
 COPY rise-backend ./rise-backend
+COPY rise-cli ./rise-cli
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo build --release --bin rise-backend && \
-    cp target/release/rise-backend /usr/local/bin/rise-backend-binary
+    SQLX_OFFLINE=true cargo build --release --bin rise && \
+    cp target/release/rise /usr/local/bin/rise
 
 # Stage 4: Create the final, smaller image (match builder's Debian version)
 FROM debian:trixie-slim
@@ -62,7 +70,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the compiled binary from the builder stage
-COPY --from=builder /usr/local/bin/rise-backend-binary /usr/local/bin/rise-backend
+COPY --from=builder /usr/local/bin/rise /usr/local/bin/rise
 
 # Copy the configuration files
 COPY rise-backend/config /config
@@ -71,4 +79,4 @@ COPY rise-backend/config /config
 EXPOSE 3000
 
 # Set the entrypoint
-ENTRYPOINT ["/usr/local/bin/rise-backend"]
+ENTRYPOINT ["/usr/local/bin/rise"]

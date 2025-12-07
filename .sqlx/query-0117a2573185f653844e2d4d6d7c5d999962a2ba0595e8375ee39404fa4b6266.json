@@ -1,0 +1,83 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            active_deployment_id,\n            project_url, finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE status = 'Deleting' AND $1 = ANY(finalizers)\n        ORDER BY updated_at ASC\n        LIMIT $2\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 2,
+        "name": "status: ProjectStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "visibility: ProjectVisibility",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "owner_user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 5,
+        "name": "owner_team_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 6,
+        "name": "active_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "project_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "finalizers",
+        "type_info": "TextArray"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Int8"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "0117a2573185f653844e2d4d6d7c5d999962a2ba0595e8375ee39404fa4b6266"
+}
