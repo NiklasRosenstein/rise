@@ -646,7 +646,18 @@ pub async fn create_deployment(
             return Err(e);
         }
 
-        // Step 5: Mark as pushed (controller will take over deployment)
+        // Step 5: Mark as pushing (buildpacks --publish already pushed, but state machine requires this transition)
+        update_deployment_status(
+            http_client,
+            backend_url,
+            &token,
+            &deployment_info.deployment_id,
+            "Pushing",
+            None,
+        )
+        .await?;
+
+        // Step 6: Mark as pushed (controller will take over deployment)
         update_deployment_status(
             http_client,
             backend_url,
@@ -665,7 +676,7 @@ pub async fn create_deployment(
     info!("  Deployment ID: {}", deployment_info.deployment_id);
     println!();
 
-    // Step 6: Follow deployment until completion
+    // Step 7: Follow deployment until completion
     show_deployment(
         http_client,
         backend_url,
