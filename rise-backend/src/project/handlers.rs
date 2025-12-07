@@ -623,6 +623,7 @@ async fn expand_project_with_owner(
         active_deployment_id: project.active_deployment_id.map(|id| id.to_string()),
         deployment_url: None, // Will be populated by caller
         project_url: project.project_url,
+        finalizers: project.finalizers.clone(),
         created: project.created_at.to_rfc3339(),
         updated: project.updated_at.to_rfc3339(),
     })

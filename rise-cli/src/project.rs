@@ -143,6 +143,8 @@ struct ProjectWithOwnerInfo {
     owner: Option<OwnerInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deployment_url: Option<String>,
+    #[serde(default)]
+    finalizers: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -413,6 +415,16 @@ pub async fn show_project(
             }
         } else {
             println!("  (none)");
+        }
+
+        // Display finalizers if any exist
+        if !project.finalizers.is_empty() {
+            println!("\nFinalizers:");
+            for finalizer in &project.finalizers {
+                println!("  - {}", finalizer);
+            }
+        } else if project.status == ProjectStatus::Deleting {
+            println!("\nFinalizers: (none - ready for deletion)");
         }
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         // Handle 404 with potential fuzzy match suggestions

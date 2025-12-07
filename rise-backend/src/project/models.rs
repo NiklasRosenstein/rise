@@ -183,6 +183,7 @@ pub struct ProjectWithOwnerInfo {
     pub deployment_url: Option<String>, // DEPRECATED: use project_url
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_url: Option<String>,
+    pub finalizers: Vec<String>,
     pub created: String,
     pub updated: String,
 }
