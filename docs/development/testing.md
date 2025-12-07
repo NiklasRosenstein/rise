@@ -1,0 +1,341 @@
+# Testing
+
+Guidelines for testing Rise components.
+
+## Overview
+
+Rise uses multiple testing strategies:
+
+- **Unit tests**: Test individual functions and modules
+- **Integration tests**: Test API endpoints and database interactions
+- **End-to-end tests**: Test full workflows via CLI
+
+## Running Tests
+
+### All Tests
+
+Run the full test suite:
+
+```bash
+cargo test
+```
+
+### Specific Tests
+
+Run tests for a specific package:
+
+```bash
+# Backend tests only
+cargo test --package rise-backend
+
+# CLI tests only
+cargo test --package rise-cli
+```
+
+Run a specific test:
+
+```bash
+cargo test test_create_project
+```
+
+### With Output
+
+Show println output from tests:
+
+```bash
+cargo test -- --nocapture
+```
+
+## Unit Tests
+
+Unit tests are co-located with source code using `#[cfg(test)]` modules.
+
+### Example
+
+```rust
+// src/projects.rs
+pub fn validate_project_name(name: &str) -> Result<(), String> {
+    if name.is_empty() {
+        return Err("Project name cannot be empty".to_string());
+    }
+    if name.len() > 255 {
+        return Err("Project name too long".to_string());
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_project_name_valid() {
+        assert!(validate_project_name("my-app").is_ok());
+    }
+
+    #[test]
+    fn test_validate_project_name_empty() {
+        assert!(validate_project_name("").is_err());
+    }
+
+    #[test]
+    fn test_validate_project_name_too_long() {
+        let long_name = "a".repeat(256);
+        assert!(validate_project_name(&long_name).is_err());
+    }
+}
+```
+
+### Best Practices
+
+- **Test edge cases**: Empty strings, nulls, boundary values
+- **Test error conditions**: Invalid input, missing data
+- **Keep tests fast**: Avoid I/O, use mocks for external dependencies
+- **Use descriptive names**: `test_validate_project_name_empty` not `test1`
+
+## Integration Tests
+
+Integration tests are in the `tests/` directory and test API endpoints with a real database.
+
+### Setup
+
+Integration tests use a test database:
+
+```rust
+// tests/common.rs
+pub async fn setup_test_db() -> PgPool {
+    let database_url = std::env::var("DATABASE_URL")
+        .unwrap_or_else(|_| "postgres://rise:rise123@localhost:5432/rise_test".to_string());
+
+    let pool = PgPool::connect(&database_url).await.unwrap();
+
+    // Run migrations
+    sqlx::migrate!("../migrations")
+        .run(&pool)
+        .await
+        .unwrap();
+
+    pool
+}
+
+pub async fn cleanup_test_db(pool: &PgPool) {
+    sqlx::query("TRUNCATE projects, deployments, teams, users CASCADE")
+        .execute(pool)
+        .await
+        .unwrap();
+}
+```
+
+### Example Integration Test
+
+```rust
+// tests/projects_api.rs
+use rise_backend::app;
+use axum::http::StatusCode;
+
+#[tokio::test]
+async fn test_create_project() {
+    let pool = common::setup_test_db().await;
+    let app = app(pool.clone()).await;
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/api/projects")
+                .header("content-type", "application/json")
+                .body(r#"{"name": "test-app", "visibility": "public"}"#)
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    common::cleanup_test_db(&pool).await;
+}
+```
+
+### Best Practices
+
+- **Use test database**: Never test against production or development databases
+- **Clean up after tests**: Truncate tables or use transactions
+- **Test authentication**: Mock JWT tokens for protected endpoints
+- **Test error responses**: Verify 400, 401, 404 responses
+
+## End-to-End Tests
+
+Test full workflows using the CLI:
+
+```bash
+#!/bin/bash
+# tests/e2e/deploy_workflow.sh
+
+# Login
+rise login --email test@example.com --password password
+
+# Create project
+rise project create e2e-test --visibility public
+
+# Deploy
+rise deployment create e2e-test --image nginx:latest
+
+# Verify deployment
+STATUS=$(rise deployment show e2e-test:latest --format json | jq -r '.status')
+if [ "$STATUS" != "running" ]; then
+  echo "Deployment failed"
+  exit 1
+fi
+
+# Cleanup
+rise project delete e2e-test
+```
+
+## Test Data
+
+### Development Accounts
+
+Use these pre-configured accounts for testing:
+
+**Admin user**:
+- Email: `admin@example.com`
+- Password: `password`
+
+**Test user**:
+- Email: `test@example.com`
+- Password: `password`
+
+### Creating Test Projects
+
+```bash
+# Create test projects
+rise project create test-app-1 --visibility public
+rise project create test-app-2 --visibility private
+```
+
+### Mock Data
+
+For unit tests, create mock data:
+
+```rust
+fn mock_project() -> Project {
+    Project {
+        id: Uuid::new_v4(),
+        name: "test-app".to_string(),
+        owner_type: OwnerType::User,
+        owner_id: Uuid::new_v4(),
+        visibility: Visibility::Public,
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
+    }
+}
+```
+
+## Continuous Integration
+
+### GitHub Actions Example
+
+```yaml
+name: Tests
+
+on: [push, pull_request]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: rise
+          POSTGRES_PASSWORD: rise123
+          POSTGRES_DB: rise_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Run migrations
+        run: |
+          cd rise-backend
+          sqlx migrate run
+        env:
+          DATABASE_URL: postgres://rise:rise123@localhost:5432/rise_test
+
+      - name: Run tests
+        run: cargo test --all-features
+        env:
+          DATABASE_URL: postgres://rise:rise123@localhost:5432/rise_test
+```
+
+## Troubleshooting
+
+### "Database connection failed"
+
+Ensure PostgreSQL is running:
+
+```bash
+docker-compose up -d postgres
+```
+
+Set `DATABASE_URL`:
+
+```bash
+export DATABASE_URL="postgres://rise:rise123@localhost:5432/rise_test"
+```
+
+### "Migration not found"
+
+Run migrations before tests:
+
+```bash
+cd rise-backend
+sqlx migrate run
+```
+
+### Tests are slow
+
+Use `cargo test --release` for faster execution (but slower compilation).
+
+Run specific tests instead of the full suite:
+
+```bash
+cargo test test_projects
+```
+
+## Test Coverage
+
+### Measuring Coverage
+
+Use `cargo-tarpaulin` for code coverage:
+
+```bash
+# Install tarpaulin
+cargo install cargo-tarpaulin
+
+# Run coverage
+cargo tarpaulin --out Html --output-dir coverage
+```
+
+Open `coverage/index.html` to view results.
+
+### Coverage Goals
+
+- **Critical paths**: 90%+ coverage (authentication, deployments)
+- **Utility functions**: 80%+ coverage
+- **Overall**: 70%+ coverage
+
+## Next Steps
+
+- **Set up development environment**: See [Local Development](../getting-started/local-development.md)
+- **Contributing guidelines**: See [Contributing](./contributing.md)
+- **Database testing**: See [Database](./database.md)
