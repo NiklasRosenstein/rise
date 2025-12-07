@@ -649,6 +649,28 @@ impl DeploymentBackend for KubernetesController {
         deployment: &Deployment,
         project: &Project,
     ) -> Result<ReconcileResult> {
+        // Wait for image to be pushed before starting Kubernetes deployment
+        // The image must be available in the registry before we can create pods
+        if !matches!(
+            deployment.status,
+            DeploymentStatus::Pushed
+                | DeploymentStatus::Deploying
+                | DeploymentStatus::Unhealthy
+                | DeploymentStatus::Healthy
+        ) {
+            debug!(
+                "Deployment {} not yet pushed (status={:?}), skipping Kubernetes reconciliation",
+                deployment.deployment_id, deployment.status
+            );
+            return Ok(ReconcileResult {
+                status: deployment.status.clone(),
+                deployment_url: None,
+                controller_metadata: deployment.controller_metadata.clone(),
+                error_message: None,
+                next_reconcile: ReconcileHint::Default,
+            });
+        }
+
         // Parse existing metadata (or create default)
         let mut metadata: KubernetesMetadata =
             serde_json::from_value(deployment.controller_metadata.clone()).unwrap_or_default();
