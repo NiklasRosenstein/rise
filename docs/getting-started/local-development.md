@@ -92,7 +92,7 @@ mise db:migrate
 mise backend:run
 
 # Or use the alias
-mise r
+mise rr
 ```
 
 This command:
@@ -235,11 +235,11 @@ The development environment includes pre-configured accounts for testing:
 
 ### Dex Users
 
-**Admin User** (for Dex web interface):
+**Admin User**
 - **Email**: `admin@example.com`
 - **Password**: `password`
 
-**Test User** (for OAuth2 authentication):
+**Test User**
 - **Email**: `test@example.com`
 - **Password**: `password`
 
