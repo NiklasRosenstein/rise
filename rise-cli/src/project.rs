@@ -68,7 +68,7 @@ impl std::str::FromStr for ProjectVisibility {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
+#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "PascalCase")]
 enum ProjectStatus {
     Running,

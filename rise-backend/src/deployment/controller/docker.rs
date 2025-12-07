@@ -62,6 +62,7 @@ impl PortAllocator {
 
 /// Docker controller implementation
 pub struct DockerController {
+    #[allow(dead_code)]
     state: ControllerState,
     docker: Docker,
     port_allocator: PortAllocator,

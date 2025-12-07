@@ -13,6 +13,7 @@ use crate::registry::{
 ///
 /// Works with any OCI-compliant registry (Docker Hub, Harbor, Quay, etc.)
 pub struct OciClientAuthProvider {
+    #[allow(dead_code)]
     config: OciClientAuthConfig,
     registry_url: String,
     registry_host: String,

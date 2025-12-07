@@ -19,6 +19,7 @@ struct DexTokenResponse {
     token_type: String,
     expires_in: Option<u64>,
     id_token: Option<String>,
+    #[allow(dead_code)]
     refresh_token: Option<String>,
 }
 
