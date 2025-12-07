@@ -8,8 +8,6 @@ keywords:
   - kubernetes
   - deployment
   - paas
-maintainers:
-  - name: Rise Team
 home: https://github.com/niklasrosenstein/rise
 sources:
   - https://github.com/niklasrosenstein/rise

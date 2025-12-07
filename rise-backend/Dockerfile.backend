@@ -1,6 +1,12 @@
-# Stage 1: Build the application
-FROM rust:1.91-slim as builder
+# Stage 1: Generate recipe file for dependencies
+FROM rust:1.91-slim as planner
+WORKDIR /usr/src/rise-backend
+RUN cargo install cargo-chef
+COPY Cargo.toml Cargo.lock ./
+RUN cargo chef prepare --recipe-path recipe.json
 
+# Stage 2: Build dependencies (cached separately from source code)
+FROM rust:1.91-slim as cacher
 WORKDIR /usr/src/rise-backend
 
 # Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
@@ -11,25 +17,37 @@ RUN apt-get update && apt-get install -y \
     make \
     && rm -rf /var/lib/apt/lists/*
 
-# Create a dummy main.rs to build only dependencies
-RUN mkdir src && echo "fn main() {}" > src/main.rs
-
-# Copy the Cargo.toml and generate Cargo.lock
-COPY Cargo.toml ./
+RUN cargo install cargo-chef
+COPY --from=planner /usr/src/rise-backend/recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/src/rise-backend/target \
-    cargo check
+    cargo chef cook --release --recipe-path recipe.json
 
-# Copy the actual source code and build the application
+# Stage 3: Build the application
+FROM rust:1.91-slim as builder
+WORKDIR /usr/src/rise-backend
+
+# Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    perl \
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy cached dependencies from cacher stage
+COPY --from=cacher /usr/local/cargo /usr/local/cargo
+COPY --from=cacher /usr/src/rise-backend/target target
+
+# Copy the source code and build the application
+COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/usr/src/rise-backend/target \
     cargo build --release && \
     cp target/release/rise-backend /usr/local/bin/rise-backend-binary
 
-# Stage 2: Create the final, smaller image (match builder's Debian version)
+# Stage 4: Create the final, smaller image (match builder's Debian version)
 FROM debian:trixie-slim
 
 # Install runtime dependencies

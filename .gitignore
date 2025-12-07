@@ -14,3 +14,6 @@ example/**/node_modules
 
 # Helm packages
 .helm-packages/
+
+# Cargo chef recipe (generated during Docker builds)
+**/recipe.json
