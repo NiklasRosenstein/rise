@@ -11,3 +11,6 @@ pb_data
 
 # Example app dependencies
 example/**/node_modules
+
+# Helm packages
+.helm-packages/

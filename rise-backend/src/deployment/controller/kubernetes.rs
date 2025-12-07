@@ -787,7 +787,10 @@ impl DeploymentBackend for KubernetesController {
                 match rs_api.get(rs_name).await {
                     Ok(_) => {
                         // ReplicaSet exists, continue normal reconciliation
-                        debug!("ReplicaSet {} exists, continuing normal reconciliation", rs_name);
+                        debug!(
+                            "ReplicaSet {} exists, continuing normal reconciliation",
+                            rs_name
+                        );
                     }
                     Err(kube::Error::Api(ae)) if ae.code == 404 => {
                         // ReplicaSet is missing - reset to recreate it
