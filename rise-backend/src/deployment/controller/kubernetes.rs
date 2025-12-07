@@ -67,12 +67,10 @@ enum ReconcilePhase {
 pub struct KubernetesController {
     state: ControllerState,
     kube_client: Client,
-    #[allow(dead_code)] // Will be used in reconciliation implementation
     ingress_class: String,
-    #[allow(dead_code)] // Will be used in reconciliation implementation
     domain_suffix: String,
+    non_default_domain_suffix: Option<String>,
     registry_provider: Option<Arc<dyn RegistryProvider>>,
-    #[allow(dead_code)] // Will be used in reconciliation implementation
     registry_url: Option<String>,
 }
 
@@ -83,6 +81,7 @@ impl KubernetesController {
         kube_client: Client,
         ingress_class: String,
         domain_suffix: String,
+        non_default_domain_suffix: Option<String>,
         registry_provider: Option<Arc<dyn RegistryProvider>>,
         registry_url: Option<String>,
     ) -> Result<Self> {
@@ -91,6 +90,7 @@ impl KubernetesController {
             kube_client,
             ingress_class,
             domain_suffix,
+            non_default_domain_suffix,
             registry_provider,
             registry_url,
         })
@@ -282,16 +282,82 @@ impl KubernetesController {
     }
 
     /// Get namespace name for a project
-    #[allow(dead_code)] // Will be used in reconciliation implementation
     fn namespace_name(project: &Project) -> String {
         format!("rise-{}", project.name)
     }
 
     /// Sanitize a string to be a valid Kubernetes label value
-    /// Replaces invalid characters with '-' and ensures it matches the regex:
-    /// (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+    /// Replaces sequences of invalid characters with '--' to avoid collisions
+    /// (e.g., "mr/26" → "mr--26", "mr-26" → "mr-26")
+    /// Ensures it matches the regex: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
     fn sanitize_label_value(value: &str) -> String {
-        value.replace('/', "-").replace(':', "-")
+        let mut result = String::new();
+        let mut last_was_invalid = false;
+
+        for ch in value.chars() {
+            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+                result.push(ch);
+                last_was_invalid = false;
+            } else {
+                // Replace invalid character(s) with '--' (only once per sequence)
+                if !last_was_invalid {
+                    result.push_str("--");
+                    last_was_invalid = true;
+                }
+            }
+        }
+
+        // Ensure it doesn't start or end with invalid characters
+        result.trim_matches('-').to_string()
+    }
+
+    /// Get the escaped deployment group name for use in resource names
+    fn escaped_group_name(deployment_group: &str) -> String {
+        Self::sanitize_label_value(deployment_group)
+    }
+
+    /// Get Service name for a deployment group
+    fn service_name(project: &Project, deployment: &Deployment) -> String {
+        if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            format!("{}-svc", project.name)
+        } else {
+            format!(
+                "{}-{}-svc",
+                project.name,
+                Self::escaped_group_name(&deployment.deployment_group)
+            )
+        }
+    }
+
+    /// Get Ingress name for a deployment group
+    fn ingress_name(project: &Project, deployment: &Deployment) -> String {
+        if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            format!("{}-ingress", project.name)
+        } else {
+            format!(
+                "{}-{}-ingress",
+                project.name,
+                Self::escaped_group_name(&deployment.deployment_group)
+            )
+        }
+    }
+
+    /// Get hostname for a deployment group
+    fn hostname(&self, project: &Project, deployment: &Deployment) -> String {
+        if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            format!("{}.{}", project.name, self.domain_suffix)
+        } else {
+            let suffix = self
+                .non_default_domain_suffix
+                .as_ref()
+                .unwrap_or(&self.domain_suffix);
+            format!(
+                "{}-{}.{}",
+                project.name,
+                Self::escaped_group_name(&deployment.deployment_group),
+                suffix
+            )
+        }
     }
 
     /// Create common labels for all resources
@@ -339,7 +405,7 @@ impl KubernetesController {
     ) -> Service {
         Service {
             metadata: ObjectMeta {
-                name: Some(format!("{}-svc", project.name)),
+                name: Some(Self::service_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
                 ..Default::default()
@@ -429,12 +495,17 @@ impl KubernetesController {
     }
 
     /// Create or update Ingress resource
-    fn create_ingress(&self, project: &Project, metadata: &KubernetesMetadata) -> Ingress {
-        let host = format!("{}.{}", project.name, self.domain_suffix);
+    fn create_ingress(
+        &self,
+        project: &Project,
+        deployment: &Deployment,
+        metadata: &KubernetesMetadata,
+    ) -> Ingress {
+        let host = self.hostname(project, deployment);
 
         Ingress {
             metadata: ObjectMeta {
-                name: Some(format!("{}-ingress", project.name)),
+                name: Some(Self::ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
                 annotations: Some({
@@ -456,7 +527,7 @@ impl KubernetesController {
                             path_type: "Prefix".to_string(),
                             backend: IngressBackend {
                                 service: Some(IngressServiceBackend {
-                                    name: format!("{}-svc", project.name),
+                                    name: Self::service_name(project, deployment),
                                     port: Some(ServiceBackendPort {
                                         number: Some(80),
                                         ..Default::default()
@@ -508,8 +579,8 @@ impl DeploymentBackend for KubernetesController {
                 ReconcilePhase::NotStarted => {
                     // Initialize metadata and continue immediately
                     metadata.namespace = Some(Self::namespace_name(project));
-                    metadata.service_name = Some(format!("{}-svc", project.name));
-                    metadata.ingress_name = Some(format!("{}-ingress", project.name));
+                    metadata.service_name = Some(Self::service_name(project, deployment));
+                    metadata.ingress_name = Some(Self::ingress_name(project, deployment));
                     metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
                     // Continue to next phase
                     continue;
@@ -588,7 +659,7 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
-                    let service_name = format!("{}-svc", project.name);
+                    let service_name = Self::service_name(project, deployment);
                     let svc_api: Api<Service> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
@@ -689,24 +760,20 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
-                    // Only create Ingress for default deployment group
-                    if deployment.deployment_group
-                        == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP
-                    {
-                        let ingress_name = format!("{}-ingress", project.name);
-                        let ingress_api: Api<Ingress> =
-                            Api::namespaced(self.kube_client.clone(), namespace);
+                    // Create Ingress for all deployment groups (each group gets its own hostname)
+                    let ingress_name = Self::ingress_name(project, deployment);
+                    let ingress_api: Api<Ingress> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
 
-                        let ingress = self.create_ingress(project, &metadata);
+                    let ingress = self.create_ingress(project, deployment, &metadata);
 
-                        // Use server-side apply with force for idempotent ingress updates
-                        let patch_params = PatchParams::apply("rise").force();
-                        let patch = Patch::Apply(&ingress);
-                        ingress_api
-                            .patch(&ingress_name, &patch_params, &patch)
-                            .await?;
-                        info!("Created/updated Ingress {}", ingress_name);
-                    }
+                    // Use server-side apply with force for idempotent ingress updates
+                    let patch_params = PatchParams::apply("rise").force();
+                    let patch = Patch::Apply(&ingress);
+                    ingress_api
+                        .patch(&ingress_name, &patch_params, &patch)
+                        .await?;
+                    info!("Created/updated Ingress {}", ingress_name);
 
                     metadata.reconcile_phase = ReconcilePhase::WaitingForHealth;
                     // Continue to health check
@@ -716,7 +783,7 @@ impl DeploymentBackend for KubernetesController {
                 ReconcilePhase::WaitingForHealth => {
                     // Use health_check to verify deployment is healthy before switching traffic
                     let health = self.health_check(deployment).await?;
-                    let deployment_url = format!("https://{}.{}", project.name, self.domain_suffix);
+                    let deployment_url = format!("https://{}", self.hostname(project, deployment));
 
                     if health.healthy {
                         info!(
@@ -750,7 +817,7 @@ impl DeploymentBackend for KubernetesController {
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
                     // BLUE/GREEN TRAFFIC SWITCH: Update Service selector to point to new deployment
-                    let service_name = format!("{}-svc", project.name);
+                    let service_name = Self::service_name(project, deployment);
                     let svc_api: Api<Service> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
@@ -767,7 +834,7 @@ impl DeploymentBackend for KubernetesController {
                     );
 
                     metadata.reconcile_phase = ReconcilePhase::Completed;
-                    let deployment_url = format!("https://{}.{}", project.name, self.domain_suffix);
+                    let deployment_url = format!("https://{}", self.hostname(project, deployment));
 
                     return Ok(ReconcileResult {
                         status: DeploymentStatus::Healthy,
@@ -780,7 +847,7 @@ impl DeploymentBackend for KubernetesController {
 
                 ReconcilePhase::Completed => {
                     // No-op, deployment is healthy
-                    let deployment_url = format!("https://{}.{}", project.name, self.domain_suffix);
+                    let deployment_url = format!("https://{}", self.hostname(project, deployment));
 
                     return Ok(ReconcileResult {
                         status: DeploymentStatus::Healthy,

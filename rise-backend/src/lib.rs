@@ -199,6 +199,7 @@ pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<(
         kube_client,
         k8s_settings.ingress_class,
         k8s_settings.domain_suffix,
+        k8s_settings.non_default_domain_suffix,
         registry_provider,
         registry_url,
     )?);

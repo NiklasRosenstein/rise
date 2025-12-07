@@ -53,8 +53,15 @@ pub struct KubernetesSettings {
     #[serde(default = "default_ingress_class")]
     pub ingress_class: String,
 
-    /// Domain suffix for project URLs (e.g., "apps.rise.net")
+    /// Domain suffix for default deployment group (e.g., "apps.rise.net")
+    /// Results in URLs like: https://{project}.apps.rise.net
     pub domain_suffix: String,
+
+    /// Optional domain suffix for non-default deployment groups
+    /// If not set, uses domain_suffix for all groups
+    /// Results in URLs like: https://{project}-{group}.preview.rise.net
+    #[serde(default)]
+    pub non_default_domain_suffix: Option<String>,
 }
 
 /// Registry provider configuration
