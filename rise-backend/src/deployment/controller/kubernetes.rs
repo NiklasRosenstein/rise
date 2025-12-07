@@ -313,33 +313,21 @@ impl KubernetesController {
 
     /// Get the escaped deployment group name for use in resource names
     fn escaped_group_name(deployment_group: &str) -> String {
-        Self::sanitize_label_value(deployment_group)
+        if deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            "default".to_string()
+        } else {
+            Self::sanitize_label_value(deployment_group)
+        }
     }
 
     /// Get Service name for a deployment group
-    fn service_name(project: &Project, deployment: &Deployment) -> String {
-        if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
-            format!("{}-svc", project.name)
-        } else {
-            format!(
-                "{}-{}-svc",
-                project.name,
-                Self::escaped_group_name(&deployment.deployment_group)
-            )
-        }
+    fn service_name(_project: &Project, deployment: &Deployment) -> String {
+        Self::escaped_group_name(&deployment.deployment_group)
     }
 
     /// Get Ingress name for a deployment group
-    fn ingress_name(project: &Project, deployment: &Deployment) -> String {
-        if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
-            format!("{}-ingress", project.name)
-        } else {
-            format!(
-                "{}-{}-ingress",
-                project.name,
-                Self::escaped_group_name(&deployment.deployment_group)
-            )
-        }
+    fn ingress_name(_project: &Project, deployment: &Deployment) -> String {
+        Self::escaped_group_name(&deployment.deployment_group)
     }
 
     /// Get hostname for a deployment group
