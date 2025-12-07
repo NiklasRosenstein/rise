@@ -21,12 +21,12 @@ url = "postgres://rise:rise123@localhost:5432/rise"
 # type = "ecr"
 # region = "us-east-1"
 # account_id = "123456789012"
-# repository = "rise-apps"  # Required: ECR repository name
-# push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"  # Required: IAM role for scoped credentials
-# # prefix = "production"  # Optional: prefix within repository
-# # access_key_id = "AKIAIOSFODNN7EXAMPLE"  # Optional: static credentials (use IAM role in production)
-# # secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-# # Image path: {account}.dkr.ecr.{region}.amazonaws.com/{repository}/{prefix}/{project}:{tag}
+# access_key_id = "AKIAIOSFODNN7EXAMPLE"  # Optional: static credentials (use IAM role in production)
+# secret_access_key = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+# repo_prefix = "rise/"
+# role_arn = "arn:aws:iam::123456789012:policy/rise-ecr-controller"
+# push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"
+# auto_remove = true
 
 # OCI registry for local development (client-side auth via docker login)
 [registry]
@@ -34,15 +34,9 @@ type = "oci-client-auth"
 registry_url = "localhost:5000"
 namespace = "rise-apps"
 
-# Docker Hub Example (using oci-client-auth):
-# [registry]
-# type = "oci-client-auth"
-# registry_url = "docker.io"
-# namespace = "myorg"
-
 # Kubernetes configuration (optional)
 # Uncomment to enable Kubernetes deployment controller
-[kubernetes]
-ingress_class = "nginx"
-domain_suffix = "apps.rise.net"
+# [kubernetes]
+# ingress_class = "nginx"
+# domain_suffix = "apps.rise.net"
 # kubeconfig = "/path/to/kubeconfig"  # Optional: explicit kubeconfig path
