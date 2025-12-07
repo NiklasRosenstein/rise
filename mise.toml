@@ -33,7 +33,7 @@ description = "Start minikube, preconfigured with access to the local Docker reg
 run = """
 set -x
 
-docker-compose up -d rise-registry
+docker-compose up -d registry
 NETWORK_NAME=rise_bridge
 REGISTRY_NAME=rise-registry
 REGISTRY_DIR="/etc/containerd/certs.d/localhost:5000"
