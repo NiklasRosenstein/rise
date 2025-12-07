@@ -26,6 +26,13 @@ use crate::db::models::{Deployment, DeploymentStatus, Project};
 use crate::registry::RegistryProvider;
 use crate::state::ControllerState;
 
+// Kubernetes label and annotation constants
+const LABEL_MANAGED_BY: &str = "rise.dev/managed-by";
+const LABEL_PROJECT: &str = "rise.dev/project";
+const LABEL_DEPLOYMENT_GROUP: &str = "rise.dev/deployment-group";
+const LABEL_DEPLOYMENT_ID: &str = "rise.dev/deployment-id";
+const ANNOTATION_LAST_REFRESH: &str = "rise.dev/last-refresh";
+
 /// Kubernetes-specific metadata stored in deployment.controller_metadata
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct KubernetesMetadata {
@@ -161,9 +168,52 @@ impl KubernetesController {
         namespace: &str,
         provider: &Arc<dyn RegistryProvider>,
     ) -> Result<()> {
-        let (username, password) = provider.get_pull_credentials().await?;
-
         let secret_api: Api<Secret> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        // Check if secret exists and get its last refresh time
+        match secret_api.get("rise-registry-creds").await {
+            Ok(existing_secret) => {
+                // Check annotation for last refresh time
+                if let Some(annotations) = &existing_secret.metadata.annotations {
+                    if let Some(last_refresh_str) = annotations.get(ANNOTATION_LAST_REFRESH) {
+                        // Parse the timestamp
+                        if let Ok(last_refresh) =
+                            chrono::DateTime::parse_from_rfc3339(last_refresh_str)
+                        {
+                            let age =
+                                Utc::now().signed_duration_since(last_refresh.with_timezone(&Utc));
+
+                            // Refresh if older than 6 hours (50% of 12-hour ECR token lifetime)
+                            if age.num_seconds() < 6 * 3600 {
+                                debug!(
+                                    "Secret in namespace {} is fresh (age: {}s), skipping refresh",
+                                    namespace,
+                                    age.num_seconds()
+                                );
+                                return Ok(());
+                            }
+                        }
+                    }
+                }
+
+                // If we get here, either annotation is missing or secret is old enough
+                debug!(
+                    "Secret in namespace {} needs refresh (missing annotation or expired)",
+                    namespace
+                );
+            }
+            Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                // Secret doesn't exist, we'll create it below
+                debug!(
+                    "Secret in namespace {} does not exist, will create",
+                    namespace
+                );
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        // Get fresh credentials and create/update secret
+        let (username, password) = provider.get_pull_credentials().await?;
 
         let secret = self.create_dockerconfigjson_secret(
             "rise-registry-creds",
@@ -214,9 +264,14 @@ impl KubernetesController {
             k8s_openapi::ByteString(docker_config_bytes),
         );
 
+        // Add annotation with current timestamp for tracking refresh time
+        let mut annotations = BTreeMap::new();
+        annotations.insert(ANNOTATION_LAST_REFRESH.to_string(), Utc::now().to_rfc3339());
+
         Ok(Secret {
             metadata: ObjectMeta {
                 name: Some(name.to_string()),
+                annotations: Some(annotations),
                 ..Default::default()
             },
             type_: Some("kubernetes.io/dockerconfigjson".to_string()),
@@ -235,8 +290,8 @@ impl KubernetesController {
     #[allow(dead_code)] // Will be used in reconciliation implementation
     fn common_labels(project: &Project) -> BTreeMap<String, String> {
         let mut labels = BTreeMap::new();
-        labels.insert("rise.dev/managed-by".to_string(), "rise".to_string());
-        labels.insert("rise.dev/project".to_string(), project.name.clone());
+        labels.insert(LABEL_MANAGED_BY.to_string(), "rise".to_string());
+        labels.insert(LABEL_PROJECT.to_string(), project.name.clone());
         labels
     }
 
@@ -245,11 +300,11 @@ impl KubernetesController {
     fn deployment_labels(project: &Project, deployment: &Deployment) -> BTreeMap<String, String> {
         let mut labels = Self::common_labels(project);
         labels.insert(
-            "rise.dev/deployment-group".to_string(),
+            LABEL_DEPLOYMENT_GROUP.to_string(),
             deployment.deployment_group.clone(),
         );
         labels.insert(
-            "rise.dev/deployment-id".to_string(),
+            LABEL_DEPLOYMENT_ID.to_string(),
             deployment.deployment_id.clone(),
         );
         labels
