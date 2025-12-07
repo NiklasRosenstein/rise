@@ -45,14 +45,14 @@ This multi-process architecture allows independent scaling and clearer separatio
 
 The `mise.toml` file defines convenient tasks for development:
 
-| Task | Command | Description |
-|------|---------|-------------|
-| `mise docs:serve` | - | Serve documentation with live reload on port 3001 |
-| `mise db:migrate` | - | Run database migrations (auto-run before backend starts) |
-| `mise backend:deps` | - | Start all docker-compose services |
-| `mise backend:run` (alias: `mise r`) | - | Start all backend processes with overmind |
-| `mise backend:reload` (alias: `mise rr`) | - | Restart backend processes after code changes |
-| `mise minikube:launch` | - | Start minikube with local registry access |
+| Task | Description |
+|------|-------------|
+| `mise docs:serve` | Serve documentation with live reload on port 3001 |
+| `mise db:migrate` | Run database migrations (auto-run before backend starts) |
+| `mise backend:deps` | Start all docker-compose services |
+| `mise backend:run` (alias: `mise rr`) | Start all backend processes with overmind |
+| `mise backend:reload` (alias: `mise re`) | Restart backend processes after code changes |
+| `mise minikube:launch` | Start minikube with local registry access |
 
 ## Getting Started
 

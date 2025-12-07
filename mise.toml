@@ -20,13 +20,13 @@ run = "docker-compose up -d"
 description = "Run the backend with overmind."
 depends = ["backend:deps", "db:migrate"]
 run = "overmind start -f Procfile.dev"
-alias = "r"
+alias = "rr"
 
 [tasks."backend:reload"]
 description = "Reload the backend services with overmind."
 depends = ["backend:deps", "db:migrate"]
 run = "overmind restart"
-alias = "rr"
+alias = "re"
 
 [tasks."minikube:launch"]
 description = "Start minikube, preconfigured with access to the local Docker registry (rise-registry)."
