@@ -3,7 +3,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::db::models::ServiceAccount;
+use crate::db::models::{Project, ServiceAccount, User};
 
 /// Create a new service account for a project
 pub async fn create(
