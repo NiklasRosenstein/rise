@@ -688,6 +688,23 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    // BLUE/GREEN TRAFFIC SWITCH: Update Service selector to point to new deployment
+                    let service_name = format!("{}-svc", project.name);
+                    let svc_api: Api<Service> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+
+                    // Create updated service with selector pointing to this deployment
+                    let svc = self.create_service(project, deployment, &metadata);
+
+                    // Use server-side apply to update the service selector
+                    let patch_params = PatchParams::apply("rise");
+                    let patch = Patch::Apply(&svc);
+                    svc_api.patch(&service_name, &patch_params, &patch).await?;
+                    info!(
+                        "Updated Service {} selector to deployment {}",
+                        service_name, deployment.deployment_id
+                    );
+
                     // Only create Ingress for default deployment group
                     if deployment.deployment_group
                         == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP
