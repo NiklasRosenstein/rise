@@ -54,14 +54,12 @@ Services will be available at:
 # Build the CLI
 cargo build --bin rise
 
-# Login
-./target/debug/rise login
+# The CLI is now available as 'rise' (if using direnv)
+# Or use the full path: ./target/debug/rise
 
-# Create a project
-./target/debug/rise project create my-app
-
-# Deploy (requires Dockerfile or --image flag)
-./target/debug/rise deployment create my-app --image nginx:latest
+rise login
+rise project create my-app
+rise deployment create my-app --image nginx:latest
 ```
 
 ## Documentation

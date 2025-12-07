@@ -12,7 +12,9 @@ cargo build --bin rise
 
 The binary will be located at `./target/debug/rise` (or `./target/release/rise` for optimized builds).
 
-For convenience, add the debug directory to your PATH (already done if using `direnv` with `.envrc`):
+**Using direnv** (recommended): The `.envrc` file automatically adds `./target/debug` to your `PATH`, so you can run `rise` directly.
+
+**Without direnv**: Either use the full path `./target/debug/rise` or manually add to your PATH:
 
 ```bash
 export PATH="$PATH:$PWD/target/debug"

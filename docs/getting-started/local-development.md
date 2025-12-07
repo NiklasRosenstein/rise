@@ -128,14 +128,17 @@ In a separate terminal:
 cargo build --bin rise
 
 # Login to the backend
-./target/debug/rise login
+# (if using direnv, 'rise' is available directly)
+rise login
 
 # Create a project
-./target/debug/rise project create my-first-app
+rise project create my-first-app
 
 # Deploy it (when you have a Dockerfile or image)
-./target/debug/rise deployment create my-first-app
+rise deployment create my-first-app
 ```
+
+**Note**: If you're using `direnv`, the `.envrc` file adds `./target/debug` to your `PATH`, so you can run `rise` directly instead of `./target/debug/rise`.
 
 ## Environment Variables
 
