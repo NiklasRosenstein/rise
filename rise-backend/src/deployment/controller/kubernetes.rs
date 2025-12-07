@@ -287,6 +287,13 @@ impl KubernetesController {
         format!("rise-{}", project.name)
     }
 
+    /// Sanitize a string to be a valid Kubernetes label value
+    /// Replaces invalid characters with '-' and ensures it matches the regex:
+    /// (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+    fn sanitize_label_value(value: &str) -> String {
+        value.replace('/', "-").replace(':', "-")
+    }
+
     /// Create common labels for all resources
     #[allow(dead_code)] // Will be used in reconciliation implementation
     fn common_labels(project: &Project) -> BTreeMap<String, String> {
@@ -302,7 +309,7 @@ impl KubernetesController {
         let mut labels = Self::common_labels(project);
         labels.insert(
             LABEL_DEPLOYMENT_GROUP.to_string(),
-            deployment.deployment_group.clone(),
+            Self::sanitize_label_value(&deployment.deployment_group),
         );
         labels.insert(
             LABEL_DEPLOYMENT_ID.to_string(),
@@ -832,23 +839,32 @@ impl DeploymentBackend for KubernetesController {
     }
 
     async fn cancel(&self, deployment: &Deployment) -> Result<()> {
-        let metadata: KubernetesMetadata =
-            serde_json::from_value(deployment.controller_metadata.clone())?;
-
         info!(
             "Cancelling deployment {} (pre-infrastructure)",
             deployment.deployment_id
         );
 
-        // Clean up any partially created ReplicaSet
-        if let (Some(rs_name), Some(namespace)) = (metadata.replicaset_name, metadata.namespace) {
-            let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
-            if let Err(e) = rs_api.delete(&rs_name, &DeleteParams::default()).await {
-                // Ignore 404 errors (already deleted)
-                if !e.to_string().contains("404") {
-                    warn!("Error deleting ReplicaSet during cancellation: {}", e);
+        // Parse metadata, but don't fail if it's missing or incomplete (deployment may not have started)
+        let metadata: Option<KubernetesMetadata> =
+            serde_json::from_value(deployment.controller_metadata.clone()).ok();
+
+        if let Some(metadata) = metadata {
+            // Clean up any partially created ReplicaSet
+            if let (Some(rs_name), Some(namespace)) = (metadata.replicaset_name, metadata.namespace)
+            {
+                let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
+                if let Err(e) = rs_api.delete(&rs_name, &DeleteParams::default()).await {
+                    // Ignore 404 errors (already deleted)
+                    if !e.to_string().contains("404") {
+                        warn!("Error deleting ReplicaSet during cancellation: {}", e);
+                    }
                 }
             }
+        } else {
+            debug!(
+                "No metadata found for deployment {}, nothing to clean up",
+                deployment.deployment_id
+            );
         }
 
         // Service and namespace are shared, don't delete
@@ -856,23 +872,32 @@ impl DeploymentBackend for KubernetesController {
     }
 
     async fn terminate(&self, deployment: &Deployment) -> Result<()> {
-        let metadata: KubernetesMetadata =
-            serde_json::from_value(deployment.controller_metadata.clone())?;
-
         info!(
             "Terminating deployment {} - deleting ReplicaSet",
             deployment.deployment_id
         );
 
-        // Delete ONLY the ReplicaSet (cascading deletes pods)
-        if let (Some(rs_name), Some(namespace)) = (metadata.replicaset_name, metadata.namespace) {
-            let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
-            if let Err(e) = rs_api.delete(&rs_name, &DeleteParams::default()).await {
-                // Ignore 404 errors (already deleted)
-                if !e.to_string().contains("404") {
-                    warn!("Error deleting ReplicaSet during termination: {}", e);
+        // Parse metadata, but don't fail if it's missing or incomplete
+        let metadata: Option<KubernetesMetadata> =
+            serde_json::from_value(deployment.controller_metadata.clone()).ok();
+
+        if let Some(metadata) = metadata {
+            // Delete ONLY the ReplicaSet (cascading deletes pods)
+            if let (Some(rs_name), Some(namespace)) = (metadata.replicaset_name, metadata.namespace)
+            {
+                let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
+                if let Err(e) = rs_api.delete(&rs_name, &DeleteParams::default()).await {
+                    // Ignore 404 errors (already deleted)
+                    if !e.to_string().contains("404") {
+                        warn!("Error deleting ReplicaSet during termination: {}", e);
+                    }
                 }
             }
+        } else {
+            debug!(
+                "No metadata found for deployment {}, nothing to terminate",
+                deployment.deployment_id
+            );
         }
 
         // DO NOT delete Service, Ingress, Secret, or Namespace (shared by other deployments)
