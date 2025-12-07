@@ -8,82 +8,34 @@ Rise generates temporary credentials for pushing container images to registries.
 
 Amazon Elastic Container Registry with scoped credentials via STS AssumeRole.
 
-**Configuration:**
+**Configuration** (`rise-backend/config/production.toml`):
 ```toml
 [registry]
 type = "ecr"
 region = "us-east-1"
 account_id = "123456789012"
-repository = "rise-apps"  # Required: ECR repository name
-push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"  # Required: IAM role for scoped credentials
-# prefix = "production"  # Optional: prefix within repository
-# access_key_id = "AKIA..."  # Optional: static credentials (use IAM role in production)
-# secret_access_key = "..."
+repo_prefix = "rise/"
+role_arn = "arn:aws:iam::123456789012:role/rise-ecr-controller"
+push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"
 ```
 
-**Image path structure:**
-```
-{account}.dkr.ecr.{region}.amazonaws.com/{repository}/{prefix}/{project}:{tag}
-```
+**How it works**:
+1. Backend assumes `push_role_arn` with inline session policy scoped to specific project
+2. Backend calls AWS `GetAuthorizationToken` API with scoped credentials
+3. Returns credentials valid for 12 hours, scoped to single project repository
+4. CLI uses credentials to push images
 
-Example: `123456789012.dkr.ecr.us-east-1.amazonaws.com/rise-apps/production/my-app:latest`
+**Image path**: `{account}.dkr.ecr.{region}.amazonaws.com/{repo_prefix}{project}:{tag}`
 
-**How it works:**
-1. Backend assumes the configured IAM role with an inline session policy
-2. The inline policy restricts ECR actions to the specific project's repository pattern
-3. Backend calls AWS `GetAuthorizationToken` API with scoped credentials
-4. Returns base64-encoded credentials valid for 12 hours (scoped to the project)
-5. CLI uses credentials to `docker login` and push images
+Example: `123456789012.dkr.ecr.us-east-1.amazonaws.com/rise/my-app:latest`
 
-**IAM Role Setup:**
+**Setup**: See [AWS ECR Deployment](../deployment/aws-ecr.md) for complete setup with Terraform module.
 
-The `push_role_arn` role needs:
-1. A trust policy allowing the Rise backend to assume it
-2. ECR permissions (the inline session policy will further restrict these)
+### Docker Registry
 
-Example trust policy:
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Principal": {
-      "AWS": "arn:aws:iam::123456789012:role/rise-backend-role"
-    },
-    "Action": "sts:AssumeRole"
-  }]
-}
-```
+Works with any Docker-compatible registry (Docker Hub, Harbor, Quay, local registries).
 
-Example permissions policy for the role:
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [{
-    "Effect": "Allow",
-    "Action": "ecr:GetAuthorizationToken",
-    "Resource": "*"
-  }, {
-    "Effect": "Allow",
-    "Action": [
-      "ecr:BatchCheckLayerAvailability",
-      "ecr:InitiateLayerUpload",
-      "ecr:UploadLayerPart",
-      "ecr:CompleteLayerUpload",
-      "ecr:PutImage",
-      "ecr:BatchGetImage",
-      "ecr:GetDownloadUrlForLayer"
-    ],
-    "Resource": "arn:aws:ecr:us-east-1:123456789012:repository/rise-apps/*"
-  }]
-}
-```
-
-### Generic Docker Registry
-
-Works with any Docker-compatible registry (Docker Hub, Harbor, Quay, local registries). Assumes user has authenticated via `docker login`.
-
-**Configuration:**
+**Configuration**:
 ```toml
 [registry]
 type = "docker"
@@ -91,85 +43,66 @@ registry_url = "localhost:5000"
 namespace = "rise-apps"
 ```
 
-**How it works:**
+**How it works**:
 1. Backend returns registry URL to CLI
-2. CLI uses existing Docker credentials (from `~/.docker/config.json`)
-3. No credential generation - relies on pre-authentication
+2. CLI uses existing Docker credentials from `~/.docker/config.json`
+3. No credential generation - relies on pre-authentication via `docker login`
 
-**Common use cases:**
-- **Local development**: Use docker-compose registry (see below)
+**Common use cases**:
+- **Local development**: docker-compose registry (see [Docker Local](../deployment/docker-local.md))
 - **Docker Hub**: `registry_url = "docker.io"`, `namespace = "myorg"`
 - **Harbor**: `registry_url = "harbor.company.com"`, `namespace = "project"`
 
-## Configuration
+### JFrog Artifactory
 
-Registry configuration is set in TOML files under `rise-backend/config/`:
+Container registry with scoped credentials via API keys.
 
-- **`default.toml`**: Default settings (includes commented examples)
-- **`production.toml`**: Production overrides (loaded when `RUN_MODE=production`)
-- **`local.toml`**: Local overrides (optional, gitignored)
-
-Configuration precedence (highest to lowest):
-1. Environment variables (`RISE_REGISTRY__TYPE=docker`)
-2. Local config file (`local.toml`)
-3. Environment-specific config (`production.toml`, `development.toml`)
-4. Default config (`default.toml`)
-
-For docker-compose development, registry is configured in `production.toml`.
-
-## Local Development with Docker Registry
-
-The project includes a local Docker registry for development testing.
-
-**1. Start services:**
-```bash
-docker-compose up -d
-```
-
-This starts:
-- PostgreSQL (port 5432)
-- Dex (port 5556)
-- Rise backend (port 3000)
-- Docker registry (port 5000)
-
-**2. Backend is configured via `rise-backend/config/production.toml`:**
+**Configuration**:
 ```toml
 [registry]
-type = "docker"
-registry_url = "registry:5000"
-namespace = "rise-apps"
+type = "artifactory"
+registry_url = "artifactory.company.com"
+repository = "docker-local"
+api_key = "..."  # Or use environment variable
 ```
 
-**3. Test pushing to local registry:**
+**How it works**:
+1. Backend uses configured API key to generate scoped tokens
+2. Returns temporary token scoped to specific repository path
+3. CLI uses token for Docker authentication
+
+## Configuration
+
+Registry configuration is in `rise-backend/config/`:
+
+- **`default.toml`**: Default settings
+- **`production.toml`**: Production overrides (loaded when `RUN_MODE=production`)
+- **`local.toml`**: Local overrides (gitignored)
+
+**Precedence** (highest to lowest):
+1. Environment variables (`RISE_REGISTRY__TYPE=docker`)
+2. Local config (`local.toml`)
+3. Environment-specific config (`production.toml`)
+4. Default config (`default.toml`)
+
+**Environment variables**:
 ```bash
-# Tag an image
-docker tag myapp:latest localhost:5000/rise-apps/myapp:latest
-
-# Push to local registry
-docker push localhost:5000/rise-apps/myapp:latest
-
-# Verify
-curl http://localhost:5000/v2/_catalog
+export RISE_REGISTRY__TYPE="ecr"
+export RISE_REGISTRY__REGION="us-east-1"
+export RISE_REGISTRY__ACCOUNT_ID="123456789012"
+export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-push"
 ```
-
-**4. CLI workflow:**
-```bash
-rise login
-rise deployment create my-app  # Fetches registry URL from backend, pushes to localhost:5000
-# Or using aliases:
-rise d c my-app
-```
-
-The local registry persists data in a Docker volume (`registry_data`), so images survive restarts.
 
 ## API Endpoint
+
+Request credentials for a project:
 
 ```bash
 GET /registry/credentials?project=my-app
 Authorization: Bearer <jwt-token>
 ```
 
-Response:
+**Response**:
 ```json
 {
   "credentials": {
@@ -182,100 +115,59 @@ Response:
 }
 ```
 
-## Security Considerations
+## Security
 
 ### Credential Scope
 
-**ECR:** Credentials are scoped to specific projects using STS AssumeRole with inline session policies. When you request credentials for `project=my-app`, you receive credentials that can **only** push to repositories matching `{repository}/{prefix}/my-app*`.
+**ECR**: Credentials scoped to specific project using STS AssumeRole with inline session policies. Credentials for `my-app` can **only** push to `{repo_prefix}my-app*`.
 
-**Docker:** No credential scoping - relies on pre-authentication via `docker login`. Use registry-specific access controls and namespacing for security.
+**Docker**: No credential scoping. Use registry-specific access controls.
+
+**Artifactory**: Tokens scoped to repository paths.
 
 ### Credential Lifespan
 
-- **ECR**: 12-hour tokens (AWS enforced)
-- **Docker**: No credential generation - uses existing Docker auth
+- **ECR**: 12 hours (AWS enforced)
+- **Docker**: No credential generation
+- **Artifactory**: Configurable (typically 1-24 hours)
 
-**Risk:** Stolen credentials remain valid for their full lifespan.
-
-**Mitigation:**
-- For ECR: Monitor for unusual push activity within 12-hour window
-- For Docker: Rotate registry credentials regularly
-- Monitor registry push logs for unauthorized activity
-
-### Credential Storage in Transit
-
-Credentials are returned over HTTPS (in production). In development (localhost), they're transmitted over HTTP.
-
-**Risk:** Local network interception in development.
-
-**Mitigation:**
-- Always use HTTPS in production
-- Consider using TLS even in local development
+**Mitigation**:
+- Monitor for unusual push activity
+- Use HTTPS in production
+- Audit backend access logs
 
 ### Backend Permissions
 
-The backend needs access to generate or provide credentials.
+**ECR**: Backend IAM role needs `sts:AssumeRole` on `push_role_arn`
 
-- **ECR**: Backend's IAM role needs `sts:AssumeRole` on the configured `push_role_arn`
-- **Docker**: Backend only provides registry URL (no credentials)
+**Docker**: Backend only provides registry URL
 
-**Risk:** Backend compromise exposes registry access (ECR only).
+**Artifactory**: Backend needs API key with token generation permissions
 
-**Mitigation:**
-- For ECR: Use least-privilege IAM policies on the push role, use trust policies to restrict who can assume the role
-- For Docker: Users must authenticate separately via `docker login`
-- Audit backend access logs and CloudTrail for AssumeRole events
+### Production Best Practices
 
-### 🔒 Recommended Production Setup
+1. **Use IAM roles** (ECR): Avoid static credentials
+2. **Enable HTTPS**: Always use TLS in production
+3. **Monitor access**: Track credential requests and usage
+4. **Rotate credentials**: For Docker/Artifactory, rotate regularly
+5. **Least privilege**: Scope credentials to minimum required permissions
 
-**AWS ECR:**
-```toml
-[registry]
-type = "ecr"
-region = "us-east-1"
-account_id = "123456789012"
-repository = "rise-apps"
-push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"
-# prefix = "production"  # Optional
-# No static credentials - use IAM role attached to ECS task/EC2 instance
-```
+## Extending Registry Support
 
-Backend runs with IAM role having permission to assume the push role:
-```json
-{
-  "Effect": "Allow",
-  "Action": "sts:AssumeRole",
-  "Resource": "arn:aws:iam::123456789012:role/rise-ecr-push"
-}
-```
+To add a new registry provider:
 
-**Docker Registry:**
-```toml
-[registry]
-type = "docker"
-registry_url = "registry.company.com"
-namespace = "production"
-```
+1. Implement `RegistryProvider` trait in `rise-backend/src/registry/providers/`
+2. Add provider to `RegistryConfig` enum
+3. Register provider in `create_registry_provider()`
 
-Users authenticate via:
-```bash
-docker login registry.company.com
-```
-
-Backend provides registry URL; users bring their own credentials.
-
-### 🚀 Future Improvements
-
-**Planned:**
-1. **Short-lived tokens** - 1-hour expiry with automatic refresh
-2. **Audit logging** - Track who requested credentials and when
-3. **Rate limiting** - Prevent credential enumeration attacks
-4. **Project-based policies** - "Project X can only push to registry Y"
-
-**Extending to other providers:**
+Example providers to consider:
 - Google Container Registry (GCR)
 - Azure Container Registry (ACR)
 - GitHub Container Registry (GHCR)
-- Harbor, Quay, Docker Hub
+- Quay.io
 
-Implement `RegistryProvider` trait in `rise-backend/src/registry/providers/`.
+## Next Steps
+
+- **Setup AWS ECR**: See [AWS ECR Deployment](../deployment/aws-ecr.md)
+- **Local development**: See [Docker (Local)](../deployment/docker-local.md)
+- **Deploy an app**: See [CLI Basics](../getting-started/cli-basics.md)
