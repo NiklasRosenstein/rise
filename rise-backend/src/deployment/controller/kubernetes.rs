@@ -312,8 +312,9 @@ impl KubernetesController {
             let base_image = deployment.image.as_deref().unwrap_or("unknown");
             format!("{}@{}", base_image, digest)
         } else if let Some(ref registry_url) = self.registry_url {
+            // registry_url should include trailing slash if needed (e.g., "host/prefix/")
             format!(
-                "{}/{}:{}",
+                "{}{}:{}",
                 registry_url, project.name, deployment.deployment_id
             )
         } else {
