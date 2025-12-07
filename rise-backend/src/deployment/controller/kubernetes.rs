@@ -584,19 +584,12 @@ impl DeploymentBackend for KubernetesController {
                     let svc_api: Api<Service> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
-                    // Check if service exists
-                    match svc_api.get(&service_name).await {
-                        Ok(_) => {
-                            debug!("Service {} already exists", service_name);
-                        }
-                        Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                            // Create service
-                            let svc = self.create_service(project, deployment, &metadata);
-                            svc_api.create(&PostParams::default(), &svc).await?;
-                            info!("Created service {}", service_name);
-                        }
-                        Err(e) => return Err(e.into()),
-                    }
+                    // Create service with server-side apply (allows future updates)
+                    let svc = self.create_service(project, deployment, &metadata);
+                    let patch_params = PatchParams::apply("rise").force();
+                    let patch = Patch::Apply(&svc);
+                    svc_api.patch(&service_name, &patch_params, &patch).await?;
+                    info!("Created/updated service {}", service_name);
 
                     metadata.reconcile_phase = ReconcilePhase::CreatingReplicaSet;
                     // Continue to next phase
@@ -696,8 +689,8 @@ impl DeploymentBackend for KubernetesController {
                     // Create updated service with selector pointing to this deployment
                     let svc = self.create_service(project, deployment, &metadata);
 
-                    // Use server-side apply to update the service selector
-                    let patch_params = PatchParams::apply("rise");
+                    // Use server-side apply with force to update the service selector
+                    let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&svc);
                     svc_api.patch(&service_name, &patch_params, &patch).await?;
                     info!(
@@ -715,8 +708,8 @@ impl DeploymentBackend for KubernetesController {
 
                         let ingress = self.create_ingress(project, &metadata);
 
-                        // Use server-side apply for idempotent ingress updates
-                        let patch_params = PatchParams::apply("rise");
+                        // Use server-side apply with force for idempotent ingress updates
+                        let patch_params = PatchParams::apply("rise").force();
                         let patch = Patch::Apply(&ingress);
                         ingress_api
                             .patch(&ingress_name, &patch_params, &patch)
