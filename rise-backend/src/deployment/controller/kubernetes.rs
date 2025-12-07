@@ -436,10 +436,11 @@ impl KubernetesController {
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
     ) -> ReplicaSet {
-        // Build image reference from deployment.image + digest or registry_url
-        let image = if let Some(ref digest) = deployment.image_digest {
-            let base_image = deployment.image.as_deref().unwrap_or("unknown");
-            format!("{}@{}", base_image, digest)
+        // Build image reference from deployment.image_digest or registry_url
+        let image = if let Some(ref image_digest) = deployment.image_digest {
+            // image_digest already contains the full reference with digest
+            // (e.g., "docker.io/library/nginx@sha256:...")
+            image_digest.clone()
         } else if let Some(ref registry_url) = self.registry_url {
             // registry_url should include trailing slash if needed (e.g., "host/prefix/")
             format!(
