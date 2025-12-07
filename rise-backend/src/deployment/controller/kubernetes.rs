@@ -768,6 +768,58 @@ impl DeploymentBackend for KubernetesController {
             DeploymentStatus::Deploying
         };
 
+        // Recovery logic: If deployment is Unhealthy and ReplicaSet is missing, reset to recreate it
+        if deployment.status == DeploymentStatus::Unhealthy
+            && matches!(
+                metadata.reconcile_phase,
+                ReconcilePhase::WaitingForReplicaSet
+                    | ReconcilePhase::UpdatingIngress
+                    | ReconcilePhase::WaitingForHealth
+                    | ReconcilePhase::SwitchingTraffic
+                    | ReconcilePhase::Completed
+            )
+        {
+            // Check if ReplicaSet still exists
+            if let (Some(ref rs_name), Some(ref namespace)) =
+                (&metadata.replicaset_name, &metadata.namespace)
+            {
+                let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), namespace);
+                match rs_api.get(rs_name).await {
+                    Ok(_) => {
+                        // ReplicaSet exists, continue normal reconciliation
+                        debug!("ReplicaSet {} exists, continuing normal reconciliation", rs_name);
+                    }
+                    Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                        // ReplicaSet is missing - reset to recreate it
+                        warn!(
+                            "Unhealthy deployment {} has missing ReplicaSet {} in phase {:?}, resetting to recreate",
+                            deployment.deployment_id, rs_name, metadata.reconcile_phase
+                        );
+
+                        // Reset to CreatingReplicaSet to recreate the ReplicaSet
+                        metadata.reconcile_phase = ReconcilePhase::CreatingReplicaSet;
+                        info!(
+                            "Reset reconciliation phase to CreatingReplicaSet for deployment {}",
+                            deployment.deployment_id
+                        );
+                    }
+                    Err(e) => {
+                        // Other errors, continue normal reconciliation (will likely fail and retry)
+                        warn!(
+                            "Error checking ReplicaSet {} for unhealthy deployment {}: {}",
+                            rs_name, deployment.deployment_id, e
+                        );
+                    }
+                }
+            } else {
+                // No ReplicaSet name in metadata - this shouldn't happen in these phases
+                warn!(
+                    "Unhealthy deployment {} in phase {:?} has no ReplicaSet name in metadata",
+                    deployment.deployment_id, metadata.reconcile_phase
+                );
+            }
+        }
+
         // Loop through phases until we hit one that requires waiting
         loop {
             match metadata.reconcile_phase {
@@ -1087,26 +1139,43 @@ impl DeploymentBackend for KubernetesController {
             .ok_or_else(|| anyhow::anyhow!("No namespace"))?;
 
         let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
-        let rs = rs_api.get(&rs_name).await?;
 
-        // Check ReplicaSet status
-        let spec_replicas = rs.spec.and_then(|s| s.replicas).unwrap_or(1);
-        let ready_replicas = rs.status.and_then(|s| s.ready_replicas).unwrap_or(0);
+        // Get ReplicaSet, handling 404 errors gracefully
+        match rs_api.get(&rs_name).await {
+            Ok(rs) => {
+                // Check ReplicaSet status
+                let spec_replicas = rs.spec.and_then(|s| s.replicas).unwrap_or(1);
+                let ready_replicas = rs.status.and_then(|s| s.ready_replicas).unwrap_or(0);
 
-        let healthy = ready_replicas >= spec_replicas;
+                let healthy = ready_replicas >= spec_replicas;
 
-        Ok(HealthStatus {
-            healthy,
-            message: if !healthy {
-                Some(format!(
-                    "ReplicaSet ready: {}/{}",
-                    ready_replicas, spec_replicas
-                ))
-            } else {
-                None
-            },
-            last_check: Utc::now(),
-        })
+                Ok(HealthStatus {
+                    healthy,
+                    message: if !healthy {
+                        Some(format!(
+                            "ReplicaSet ready: {}/{}",
+                            ready_replicas, spec_replicas
+                        ))
+                    } else {
+                        None
+                    },
+                    last_check: Utc::now(),
+                })
+            }
+            Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                // ReplicaSet doesn't exist - mark as unhealthy to trigger recreation
+                warn!(
+                    "ReplicaSet {} not found in namespace {}, marking deployment as unhealthy",
+                    rs_name, namespace
+                );
+                Ok(HealthStatus {
+                    healthy: false,
+                    message: Some(format!("ReplicaSet {} not found", rs_name)),
+                    last_check: Utc::now(),
+                })
+            }
+            Err(e) => Err(e.into()),
+        }
     }
 
     async fn stop(&self, deployment: &Deployment) -> Result<()> {
