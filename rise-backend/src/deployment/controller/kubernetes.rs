@@ -360,6 +360,102 @@ impl KubernetesController {
         }
     }
 
+    /// Check pods for irrecoverable errors (e.g., InvalidImageName, ImagePullBackOff)
+    /// Returns (is_failed, error_message) tuple
+    async fn check_pod_errors(
+        &self,
+        namespace: &str,
+        rs_name: &str,
+    ) -> Result<(bool, Option<String>)> {
+        use k8s_openapi::api::core::v1::Pod;
+
+        let pod_api: Api<Pod> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        // List pods owned by this ReplicaSet
+        let pods = pod_api
+            .list(&kube::api::ListParams::default().labels(&format!(
+                "rise.dev/deployment-id={}",
+                rs_name.rsplit_once('-').map(|(_, id)| id).unwrap_or(rs_name)
+            )))
+            .await?;
+
+        for pod in pods.items {
+            if let Some(status) = pod.status {
+                // Check container statuses for irrecoverable errors
+                if let Some(container_statuses) = status.container_statuses {
+                    for container_status in container_statuses {
+                        if let Some(waiting) = container_status
+                            .state
+                            .as_ref()
+                            .and_then(|s| s.waiting.as_ref())
+                        {
+                            let reason = waiting.reason.as_deref().unwrap_or("");
+
+                            // Check for irrecoverable errors
+                            let is_irrecoverable = matches!(
+                                reason,
+                                "InvalidImageName"
+                                    | "ErrImagePull"
+                                    | "ImageInspectError"
+                                    | "CrashLoopBackOff"
+                                    | "CreateContainerConfigError"
+                                    | "CreateContainerError"
+                                    | "RunContainerError"
+                            );
+
+                            if is_irrecoverable {
+                                let message = waiting.message.as_deref().unwrap_or(reason);
+                                warn!(
+                                    "Pod {} has irrecoverable error: {} - {}",
+                                    pod.metadata.name.as_deref().unwrap_or("unknown"),
+                                    reason,
+                                    message
+                                );
+                                return Ok((true, Some(format!("{}: {}", reason, message))));
+                            }
+                        }
+
+                        // Check for terminated containers with non-zero exit codes
+                        if let Some(terminated) = container_status
+                            .state
+                            .as_ref()
+                            .and_then(|s| s.terminated.as_ref())
+                        {
+                            if terminated.exit_code != 0 {
+                                let reason =
+                                    terminated.reason.as_deref().unwrap_or("ContainerFailed");
+                                let default_message =
+                                    format!("Exit code: {}", terminated.exit_code);
+                                let message =
+                                    terminated.message.as_deref().unwrap_or(&default_message);
+
+                                // Only fail if container has restarted multiple times
+                                if container_status.restart_count >= 3 {
+                                    warn!(
+                                        "Pod {} container has failed {} times: {} - {}",
+                                        pod.metadata.name.as_deref().unwrap_or("unknown"),
+                                        container_status.restart_count,
+                                        reason,
+                                        message
+                                    );
+                                    return Ok((
+                                        true,
+                                        Some(format!(
+                                            "{}: {} (restarts: {})",
+                                            reason, message, container_status.restart_count
+                                        )),
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok((false, None))
+    }
+
     /// Create common labels for all resources
     #[allow(dead_code)] // Will be used in reconciliation implementation
     fn common_labels(project: &Project) -> BTreeMap<String, String> {
@@ -722,6 +818,25 @@ impl DeploymentBackend for KubernetesController {
                         .replicaset_name
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name in metadata"))?;
+
+                    // Check for irrecoverable pod errors first
+                    let (has_errors, error_msg) = self.check_pod_errors(namespace, rs_name).await?;
+                    if has_errors {
+                        error!(
+                            "Deployment {} has irrecoverable pod errors: {}",
+                            deployment.deployment_id,
+                            error_msg.as_ref().unwrap_or(&"Unknown error".to_string())
+                        );
+
+                        // Mark deployment as Failed
+                        return Ok(ReconcileResult {
+                            status: DeploymentStatus::Failed,
+                            deployment_url: None,
+                            controller_metadata: serde_json::to_value(&metadata)?,
+                            error_message: error_msg,
+                            next_reconcile: ReconcileHint::Default,
+                        });
+                    }
 
                     let rs_api: Api<ReplicaSet> =
                         Api::namespaced(self.kube_client.clone(), namespace);
