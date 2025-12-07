@@ -54,7 +54,7 @@ jobs:
         id: build
         uses: docker/build-push-action@v5
         with:
-          context: ./rise-backend
+          context: .
           file: ./rise-backend/Dockerfile.backend
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}

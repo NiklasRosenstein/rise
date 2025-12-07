@@ -1,12 +1,12 @@
 # Stage 1: Generate recipe file for dependencies
-FROM rust:1.91-slim as planner
+FROM rust:1.91-slim AS planner
 WORKDIR /usr/src/rise-backend
 RUN cargo install cargo-chef
-COPY Cargo.toml Cargo.lock ./
+COPY Cargo.lock rise-backend/Cargo.toml ./
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Stage 2: Build dependencies (cached separately from source code)
-FROM rust:1.91-slim as cacher
+FROM rust:1.91-slim AS cacher
 WORKDIR /usr/src/rise-backend
 
 # Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
@@ -24,7 +24,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cargo chef cook --release --recipe-path recipe.json
 
 # Stage 3: Build the application
-FROM rust:1.91-slim as builder
+FROM rust:1.91-slim AS builder
 WORKDIR /usr/src/rise-backend
 
 # Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
@@ -40,8 +40,8 @@ COPY --from=cacher /usr/local/cargo /usr/local/cargo
 COPY --from=cacher /usr/src/rise-backend/target target
 
 # Copy the source code and build the application
-COPY Cargo.toml Cargo.lock ./
-COPY src ./src
+COPY Cargo.lock rise-backend/Cargo.toml ./
+COPY rise-backend/src ./src
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo build --release && \
@@ -60,7 +60,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /usr/local/bin/rise-backend-binary /usr/local/bin/rise-backend
 
 # Copy the configuration files
-COPY config /config
+COPY rise-backend/config /config
 
 # Expose the application port
 EXPOSE 3000
