@@ -22,7 +22,7 @@ Create a `values-prod.yaml` file:
 
 ```yaml
 image:
-  repository: ghcr.io/yourusername/rise-backend
+  repository: ghcr.io/niklasrosenstein/rise-backend
   tag: "v0.1.0"
   pullPolicy: IfNotPresent
 
@@ -101,7 +101,7 @@ The following table lists the configurable parameters of the Rise Backend chart 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `replicaCount` | Number of server replicas | `1` |
-| `image.repository` | Image repository | `ghcr.io/yourusername/rise-backend` |
+| `image.repository` | Image repository | `ghcr.io/niklasrosenstein/rise-backend` |
 | `image.tag` | Image tag | `""` (uses Chart appVersion) |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `config.server.publicUrl` | Public URL for the backend | `http://rise.example.com` |
