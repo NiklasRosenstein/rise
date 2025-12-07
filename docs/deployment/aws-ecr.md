@@ -17,7 +17,7 @@ Rise includes a Terraform module (`modules/rise-ecr-controller`) that provisions
 
 The Rise ECR integration uses a two-role architecture for security and least privilege:
 
-### Controller Role (`rise-prod-ecr-controller`)
+### Controller Role (`rise-ecr-controller`)
 
 **Purpose**: Allows the Rise ECR controller to manage repository lifecycle.
 
@@ -30,7 +30,7 @@ The Rise ECR integration uses a two-role architecture for security and least pri
 
 **Used by**: The `backend-ecr` controller process
 
-### Push Role (`rise-prod-ecr-push`)
+### Push Role (`rise-ecr-push`)
 
 **Purpose**: Provides scoped credentials for pushing images to specific repositories.
 
@@ -96,7 +96,7 @@ Create a `terraform/rise-ecr.tf` file:
 module "rise_ecr" {
   source = "../modules/rise-ecr-controller"
 
-  name_prefix = "rise-prod"
+  name_prefix = "rise"
   repo_prefix = "rise/"
   auto_remove = false  # Tag as orphaned instead of deleting
 
@@ -130,7 +130,7 @@ If you plan to run the Rise backend on EKS:
 module "rise_ecr" {
   source = "../modules/rise-ecr-controller"
 
-  name_prefix            = "rise-prod"
+  name_prefix            = "rise"
   repo_prefix            = "rise/"
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
   irsa_namespace         = "rise-system"
@@ -148,7 +148,7 @@ If running Rise outside AWS (e.g., on-premises, other cloud):
 module "rise_ecr" {
   source = "../modules/rise-ecr-controller"
 
-  name_prefix     = "rise-prod"
+  name_prefix     = "rise"
   repo_prefix     = "rise/"
   create_iam_role = false
   create_iam_user = true
@@ -202,8 +202,8 @@ type = "ecr"
 region = "us-east-1"                    # From Terraform output
 account_id = "123456789012"              # From Terraform output
 repo_prefix = "rise/"                    # From Terraform output
-role_arn = "arn:aws:iam::123456789012:role/rise-prod-ecr-controller"      # From module.rise_ecr.role_arn
-push_role_arn = "arn:aws:iam::123456789012:role/rise-prod-ecr-push"       # From module.rise_ecr.push_role_arn
+role_arn = "arn:aws:iam::123456789012:role/rise-ecr-controller"      # From module.rise_ecr.role_arn
+push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"       # From module.rise_ecr.push_role_arn
 auto_remove = false                      # From Terraform output
 
 # Optional: If using IAM user instead of role
@@ -220,8 +220,8 @@ export RISE_REGISTRY__TYPE="ecr"
 export RISE_REGISTRY__REGION="us-east-1"
 export RISE_REGISTRY__ACCOUNT_ID="123456789012"
 export RISE_REGISTRY__REPO_PREFIX="rise/"
-export RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-prod-ecr-controller"
-export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-prod-ecr-push"
+export RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-controller"
+export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-push"
 ```
 
 ## Credential Flow
@@ -259,15 +259,15 @@ Here's how credentials work in the ECR integration:
 **Solution**:
 1. Verify trust policy on push role allows controller role:
    ```bash
-   aws iam get-role --role-name rise-prod-ecr-push --query 'Role.AssumeRolePolicyDocument'
+   aws iam get-role --role-name rise-ecr-push --query 'Role.AssumeRolePolicyDocument'
    ```
 
 2. Verify controller role has `sts:AssumeRole` on push role:
    ```bash
    aws iam simulate-principal-policy \
-     --policy-source-arn arn:aws:iam::123456789012:role/rise-prod-ecr-controller \
+     --policy-source-arn arn:aws:iam::123456789012:role/rise-ecr-controller \
      --action-names sts:AssumeRole \
-     --resource-arns arn:aws:iam::123456789012:role/rise-prod-ecr-push
+     --resource-arns arn:aws:iam::123456789012:role/rise-ecr-push
    ```
 
 ### "Repository does not exist"

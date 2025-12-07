@@ -33,7 +33,7 @@ The module creates two separate IAM roles with distinct permissions:
 module "rise_ecr" {
   source = "./modules/rise-ecr-controller"
 
-  name_prefix = "rise-prod"
+  name_prefix = "rise"
   repo_prefix = "rise/"
   auto_remove = false  # Tag as orphaned instead of deleting
 
@@ -49,7 +49,7 @@ module "rise_ecr" {
 module "rise_ecr" {
   source = "./modules/rise-ecr-controller"
 
-  name_prefix            = "rise-prod"
+  name_prefix            = "rise"
   repo_prefix            = "rise/"
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
   irsa_namespace         = "rise-system"
@@ -63,7 +63,7 @@ module "rise_ecr" {
 module "rise_ecr" {
   source = "./modules/rise-ecr-controller"
 
-  name_prefix     = "rise-prod"
+  name_prefix     = "rise"
   repo_prefix     = "rise/"
   create_iam_role = false
   create_iam_user = true
@@ -94,8 +94,8 @@ type = "ecr"
 region = "eu-west-1"  # From module.rise_ecr.rise_config.region
 account_id = "123456789012"  # From module.rise_ecr.rise_config.account_id
 repo_prefix = "rise/"  # From module.rise_ecr.rise_config.repo_prefix
-role_arn = "arn:aws:iam::123456789012:role/rise-prod-ecr-controller"  # From module.rise_ecr.role_arn
-push_role_arn = "arn:aws:iam::123456789012:role/rise-prod-ecr-push"  # From module.rise_ecr.push_role_arn
+role_arn = "arn:aws:iam::123456789012:role/rise-ecr-controller"  # From module.rise_ecr.role_arn
+push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"  # From module.rise_ecr.push_role_arn
 auto_remove = false  # From module.rise_ecr.rise_config.auto_remove
 
 # If using IAM user instead of role:
