@@ -512,14 +512,22 @@ impl DeploymentBackend for KubernetesController {
                     &password,
                 )?;
 
-                // Replace secret (idempotent)
-                secret_api
-                    .replace("rise-registry-creds", &PostParams::default(), &secret)
-                    .await?;
-                info!(
-                    "Created/updated image pull secret in namespace {}",
-                    namespace
-                );
+                // Check if secret exists, create or replace accordingly
+                match secret_api.get("rise-registry-creds").await {
+                    Ok(_) => {
+                        // Secret exists, replace it
+                        secret_api
+                            .replace("rise-registry-creds", &PostParams::default(), &secret)
+                            .await?;
+                        info!("Updated image pull secret in namespace {}", namespace);
+                    }
+                    Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                        // Secret doesn't exist, create it
+                        secret_api.create(&PostParams::default(), &secret).await?;
+                        info!("Created image pull secret in namespace {}", namespace);
+                    }
+                    Err(e) => return Err(e.into()),
+                }
 
                 metadata.reconcile_phase = ReconcilePhase::CreatingService;
 

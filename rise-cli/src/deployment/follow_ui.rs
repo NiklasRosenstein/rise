@@ -3,7 +3,7 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::io::{self, IsTerminal, Write as _};
 use std::time::{Duration, Instant};
-use tracing::{info, warn};
+use tracing::info;
 
 use crate::config::Config;
 use rise_backend::deployment::models::{Deployment, DeploymentStatus};
@@ -265,13 +265,9 @@ fn parse_controller_metadata(metadata: &serde_json::Value) -> Option<DockerMetad
         return None;
     }
 
-    match serde_json::from_value::<DockerMetadata>(metadata.clone()) {
-        Ok(docker_metadata) => Some(docker_metadata),
-        Err(e) => {
-            warn!("Failed to parse controller metadata: {}", e);
-            None
-        }
-    }
+    // Try to parse as Docker metadata - if it fails, it's likely a different controller
+    // (e.g., Kubernetes) which is fine, we just won't show Docker-specific details
+    serde_json::from_value::<DockerMetadata>(metadata.clone()).ok()
 }
 
 /// Extract container ID from metadata for display
