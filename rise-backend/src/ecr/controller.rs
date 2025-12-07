@@ -12,6 +12,7 @@ use crate::state::ControllerState;
 /// Responsibilities:
 /// 1. **Provision loop**: Creates ECR repos for projects that don't have them yet
 /// 2. **Cleanup loop**: Handles ECR repo deletion/orphaning when projects are deleted
+/// 3. **Drift detection loop**: Detects and fixes missing ECR repositories
 ///
 /// The controller uses the finalizer pattern to coordinate with project deletion:
 /// - When a repo is created, the finalizer is added to the project
@@ -23,6 +24,7 @@ pub struct EcrController {
     manager: Arc<EcrRepoManager>,
     provision_interval: Duration,
     cleanup_interval: Duration,
+    drift_interval: Duration,
 }
 
 impl EcrController {
@@ -33,10 +35,11 @@ impl EcrController {
             manager,
             provision_interval: Duration::from_secs(10),
             cleanup_interval: Duration::from_secs(5),
+            drift_interval: Duration::from_secs(60),
         }
     }
 
-    /// Start both provision and cleanup loops
+    /// Start provision, cleanup, and drift detection loops
     pub fn start(self: Arc<Self>) {
         let provision_self = Arc::clone(&self);
         tokio::spawn(async move {
@@ -46,6 +49,11 @@ impl EcrController {
         let cleanup_self = Arc::clone(&self);
         tokio::spawn(async move {
             cleanup_self.cleanup_loop().await;
+        });
+
+        let drift_self = Arc::clone(&self);
+        tokio::spawn(async move {
+            drift_self.drift_detection_loop().await;
         });
     }
 
@@ -192,6 +200,71 @@ impl EcrController {
                         project.name, e
                     );
                     // Continue to next project, will retry on next loop
+                }
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Drift detection loop - checks for missing ECR repositories
+    ///
+    /// Runs every 60 seconds and:
+    /// 1. Lists all active projects WITH the ECR finalizer
+    /// 2. Checks if the ECR repository actually exists
+    /// 3. If missing, removes finalizer so provision loop can recreate it
+    async fn drift_detection_loop(&self) {
+        info!("ECR drift detection loop started");
+        let mut ticker = interval(self.drift_interval);
+
+        loop {
+            ticker.tick().await;
+            if let Err(e) = self.detect_repository_drift().await {
+                error!("Error in ECR drift detection loop: {}", e);
+            }
+        }
+    }
+
+    /// Detect and fix ECR repository drift
+    async fn detect_repository_drift(&self) -> anyhow::Result<()> {
+        // Get all active projects
+        let projects = db_projects::list_active(&self.state.db_pool).await?;
+
+        for project in projects {
+            // Only check projects that have the ECR finalizer
+            if !project.finalizers.contains(&ECR_FINALIZER.to_string()) {
+                continue;
+            }
+
+            // Check if repository actually exists
+            match self.manager.repository_exists(&project.name).await {
+                Ok(exists) => {
+                    if !exists {
+                        warn!(
+                            "ECR repository drift detected for project {}: repository missing but finalizer present",
+                            project.name
+                        );
+
+                        // Remove finalizer so provision loop will recreate the repository
+                        db_projects::remove_finalizer(
+                            &self.state.db_pool,
+                            project.id,
+                            ECR_FINALIZER,
+                        )
+                        .await?;
+
+                        info!(
+                            "Removed ECR finalizer from project {} to trigger repository recreation",
+                            project.name
+                        );
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to check ECR repository existence for project {}: {}",
+                        project.name, e
+                    );
+                    // Continue to next project
                 }
             }
         }
