@@ -27,10 +27,13 @@ fn default_interval() -> u64 {
 
 #[derive(Debug, Deserialize)]
 struct TokenResponse {
+    #[allow(dead_code)]
     access_token: String,
     id_token: String,
+    #[allow(dead_code)]
     token_type: String,
     #[serde(default = "default_token_expires_in")]
+    #[allow(dead_code)]
     expires_in: u64,
 }
 

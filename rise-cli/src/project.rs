@@ -6,7 +6,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 struct MeResponse {
+    #[allow(dead_code)]
     id: String,
+    #[allow(dead_code)]
     email: String,
 }
 
@@ -138,6 +140,7 @@ struct ProjectWithOwnerInfo {
     id: String,
     name: String,
     status: ProjectStatus,
+    #[allow(dead_code)]
     visibility: ProjectVisibility,
     #[serde(skip_serializing_if = "Option::is_none")]
     owner: Option<OwnerInfo>,

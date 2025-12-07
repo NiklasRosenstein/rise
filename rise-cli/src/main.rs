@@ -325,7 +325,7 @@ async fn main() -> Result<()> {
     match &cli.command {
         Commands::Login {
             url,
-            browser,
+            browser: _,
             device,
         } => {
             // Use provided URL or fall back to config default

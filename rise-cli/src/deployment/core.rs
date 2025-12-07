@@ -501,6 +501,7 @@ struct RegistryCredentials {
     registry_url: String,
     username: String,
     password: String,
+    #[allow(dead_code)]
     expires_in: Option<u64>,
 }
 

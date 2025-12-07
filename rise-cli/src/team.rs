@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize)]
 struct MeResponse {
+    #[allow(dead_code)]
     id: String,
     email: String,
 }
