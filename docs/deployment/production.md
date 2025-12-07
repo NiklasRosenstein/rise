@@ -6,6 +6,21 @@ Guidelines for deploying Rise in production environments.
 
 This guide covers security, configuration, database setup, monitoring, and operational considerations for running Rise in production.
 
+## Deployment Backend
+
+Rise supports multiple deployment backends for running applications:
+
+| Backend | Description | Use Case |
+|---------|-------------|----------|
+| **Docker** | Deploys to local Docker daemon | Development, single-server deployments |
+| **Kubernetes** | Deploys to Kubernetes clusters | Production, multi-server, cloud deployments |
+
+**Choosing a backend**:
+- Use **Docker** for simple, single-server deployments or development
+- Use **Kubernetes** for production environments requiring scalability, high availability, and cloud integration
+
+See [Kubernetes Backend](./kubernetes.md) for Kubernetes-specific configuration and operation.
+
 ## Security Best Practices
 
 ### Registry Credentials
@@ -96,7 +111,13 @@ RISE_REGISTRY__REPO_PREFIX="rise/"
 RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-controller"
 RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-push"
 
-# Docker API version
+# Kubernetes (if using Kubernetes backend)
+RISE_KUBERNETES__INGRESS_CLASS="nginx"
+RISE_KUBERNETES__DOMAIN_SUFFIX="apps.rise.net"
+RISE_KUBERNETES__NON_DEFAULT_DOMAIN_SUFFIX="preview.rise.net"
+# RISE_KUBERNETES__KUBECONFIG="/path/to/kubeconfig"  # Optional, defaults to in-cluster
+
+# Docker API version (if using Docker backend)
 DOCKER_API_VERSION=1.44
 ```
 

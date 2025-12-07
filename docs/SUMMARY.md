@@ -27,6 +27,7 @@
 
 - [AWS ECR](./deployment/aws-ecr.md)
 - [Docker (Local)](./deployment/docker-local.md)
+- [Kubernetes](./deployment/kubernetes.md)
 - [Production Setup](./deployment/production.md)
 
 # Development
