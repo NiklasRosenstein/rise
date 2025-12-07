@@ -53,24 +53,6 @@ namespace = "rise-apps"
 - **Docker Hub**: `registry_url = "docker.io"`, `namespace = "myorg"`
 - **Harbor**: `registry_url = "harbor.company.com"`, `namespace = "project"`
 
-### JFrog Artifactory
-
-Container registry with scoped credentials via API keys.
-
-**Configuration**:
-```toml
-[registry]
-type = "artifactory"
-registry_url = "artifactory.company.com"
-repository = "docker-local"
-api_key = "..."  # Or use environment variable
-```
-
-**How it works**:
-1. Backend uses configured API key to generate scoped tokens
-2. Returns temporary token scoped to specific repository path
-3. CLI uses token for Docker authentication
-
 ## Configuration
 
 Registry configuration is in `rise-backend/config/`:
@@ -123,13 +105,10 @@ Authorization: Bearer <jwt-token>
 
 **Docker**: No credential scoping. Use registry-specific access controls.
 
-**Artifactory**: Tokens scoped to repository paths.
-
 ### Credential Lifespan
 
 - **ECR**: 12 hours (AWS enforced)
-- **Docker**: No credential generation
-- **Artifactory**: Configurable (typically 1-24 hours)
+- **Docker**: No credential generation (uses existing Docker auth)
 
 **Mitigation**:
 - Monitor for unusual push activity
@@ -142,14 +121,12 @@ Authorization: Bearer <jwt-token>
 
 **Docker**: Backend only provides registry URL
 
-**Artifactory**: Backend needs API key with token generation permissions
-
 ### Production Best Practices
 
 1. **Use IAM roles** (ECR): Avoid static credentials
 2. **Enable HTTPS**: Always use TLS in production
 3. **Monitor access**: Track credential requests and usage
-4. **Rotate credentials**: For Docker/Artifactory, rotate regularly
+4. **Rotate credentials**: For Docker registries requiring auth, rotate regularly
 5. **Least privilege**: Scope credentials to minimum required permissions
 
 ## Extending Registry Support
@@ -160,7 +137,8 @@ To add a new registry provider:
 2. Add provider to `RegistryConfig` enum
 3. Register provider in `create_registry_provider()`
 
-Example providers to consider:
+Potential future providers:
+- JFrog Artifactory
 - Google Container Registry (GCR)
 - Azure Container Registry (ACR)
 - GitHub Container Registry (GHCR)

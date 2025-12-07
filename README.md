@@ -8,7 +8,7 @@ Rise simplifies container deployment by providing:
 - **Simple CLI** for building and deploying apps
 - **Multi-tenant projects** with team collaboration
 - **OAuth2 authentication** via Dex
-- **Multiple registry backends** (AWS ECR, Docker, JFrog)
+- **Multiple registry backends** (AWS ECR, Docker)
 - **Service accounts** for CI/CD integration
 - **Web dashboard** for monitoring deployments
 
@@ -16,7 +16,7 @@ Rise simplifies container deployment by providing:
 
 - **Project & Team Management**: Organize apps and collaborate with teams
 - **OAuth2/OIDC Authentication**: Secure authentication via Dex
-- **Multi-Registry Support**: AWS ECR, JFrog Artifactory, Docker Registry
+- **Multi-Registry Support**: AWS ECR, Docker Registry (Harbor, Quay, etc.)
 - **Service Accounts**: Workload identity for GitHub Actions, GitLab CI
 - **Multi-Process Architecture**: Separate controllers for deployments, projects, ECR
 - **Embedded Web Frontend**: Single-binary deployment with built-in UI
