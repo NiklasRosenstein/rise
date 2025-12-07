@@ -494,306 +494,268 @@ impl DeploymentBackend for KubernetesController {
             DeploymentStatus::Deploying
         };
 
-        match metadata.reconcile_phase {
-            ReconcilePhase::NotStarted => {
-                // Initialize metadata
-                metadata.namespace = Some(Self::namespace_name(project));
-                metadata.service_name = Some(format!("{}-svc", project.name));
-                metadata.ingress_name = Some(format!("{}-ingress", project.name));
-                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
-
-                Ok(ReconcileResult {
-                    status,
-                    deployment_url: None,
-                    controller_metadata: serde_json::to_value(&metadata)?,
-                    error_message: None,
-                    next_reconcile: ReconcileHint::Immediate,
-                })
-            }
-
-            ReconcilePhase::CreatingNamespace => {
-                let namespace = Self::namespace_name(project);
-                let ns_api: Api<Namespace> = Api::all(self.kube_client.clone());
-
-                // Check if namespace exists
-                match ns_api.get(&namespace).await {
-                    Ok(_) => {
-                        debug!("Namespace {} already exists", namespace);
-                    }
-                    Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                        // Create namespace
-                        let ns = self.create_namespace(project);
-                        ns_api.create(&PostParams::default(), &ns).await?;
-                        info!("Created namespace {}", namespace);
-                    }
-                    Err(e) => return Err(e.into()),
+        // Loop through phases until we hit one that requires waiting
+        loop {
+            match metadata.reconcile_phase {
+                ReconcilePhase::NotStarted => {
+                    // Initialize metadata and continue immediately
+                    metadata.namespace = Some(Self::namespace_name(project));
+                    metadata.service_name = Some(format!("{}-svc", project.name));
+                    metadata.ingress_name = Some(format!("{}-ingress", project.name));
+                    metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                    // Continue to next phase
+                    continue;
                 }
 
-                metadata.reconcile_phase = ReconcilePhase::CreatingImagePullSecret;
+                ReconcilePhase::CreatingNamespace => {
+                    let namespace = Self::namespace_name(project);
+                    let ns_api: Api<Namespace> = Api::all(self.kube_client.clone());
 
-                Ok(ReconcileResult {
-                    status,
-                    deployment_url: None,
-                    controller_metadata: serde_json::to_value(&metadata)?,
-                    error_message: None,
-                    next_reconcile: ReconcileHint::Immediate,
-                })
-            }
+                    // Check if namespace exists
+                    match ns_api.get(&namespace).await {
+                        Ok(_) => {
+                            debug!("Namespace {} already exists", namespace);
+                        }
+                        Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                            // Create namespace
+                            let ns = self.create_namespace(project);
+                            ns_api.create(&PostParams::default(), &ns).await?;
+                            info!("Created namespace {}", namespace);
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
 
-            ReconcilePhase::CreatingImagePullSecret => {
-                let namespace = metadata
-                    .namespace
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+                    metadata.reconcile_phase = ReconcilePhase::CreatingImagePullSecret;
+                    // Continue to next phase
+                    continue;
+                }
 
-                let Some(ref provider) = self.registry_provider else {
-                    // No registry provider, skip secret creation
+                ReconcilePhase::CreatingImagePullSecret => {
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+
+                    if let Some(ref provider) = self.registry_provider {
+                        let (username, password) = provider.get_pull_credentials().await?;
+                        let secret_api: Api<Secret> =
+                            Api::namespaced(self.kube_client.clone(), namespace);
+
+                        let secret = self.create_dockerconfigjson_secret(
+                            "rise-registry-creds",
+                            provider.registry_host(),
+                            &username,
+                            &password,
+                        )?;
+
+                        // Check if secret exists, create or replace accordingly
+                        match secret_api.get("rise-registry-creds").await {
+                            Ok(_) => {
+                                // Secret exists, replace it
+                                secret_api
+                                    .replace("rise-registry-creds", &PostParams::default(), &secret)
+                                    .await?;
+                                info!("Updated image pull secret in namespace {}", namespace);
+                            }
+                            Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                                // Secret doesn't exist, create it
+                                secret_api.create(&PostParams::default(), &secret).await?;
+                                info!("Created image pull secret in namespace {}", namespace);
+                            }
+                            Err(e) => return Err(e.into()),
+                        }
+                    } else {
+                        // No registry provider, skip secret creation
+                        debug!("No registry provider, skipping secret creation");
+                    }
+
                     metadata.reconcile_phase = ReconcilePhase::CreatingService;
+                    // Continue to next phase
+                    continue;
+                }
+
+                ReconcilePhase::CreatingService => {
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+
+                    let service_name = format!("{}-svc", project.name);
+                    let svc_api: Api<Service> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+
+                    // Check if service exists
+                    match svc_api.get(&service_name).await {
+                        Ok(_) => {
+                            debug!("Service {} already exists", service_name);
+                        }
+                        Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                            // Create service
+                            let svc = self.create_service(project, deployment, &metadata);
+                            svc_api.create(&PostParams::default(), &svc).await?;
+                            info!("Created service {}", service_name);
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+
+                    metadata.reconcile_phase = ReconcilePhase::CreatingReplicaSet;
+                    // Continue to next phase
+                    continue;
+                }
+
+                ReconcilePhase::CreatingReplicaSet => {
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+
+                    let rs_name = format!("{}-{}", project.name, deployment.deployment_id);
+                    let rs_api: Api<ReplicaSet> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+
+                    // Check if ReplicaSet exists
+                    match rs_api.get(&rs_name).await {
+                        Ok(_) => {
+                            debug!("ReplicaSet {} already exists", rs_name);
+                        }
+                        Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                            // Create ReplicaSet
+                            let rs = self.create_replicaset(project, deployment, &metadata);
+                            rs_api.create(&PostParams::default(), &rs).await?;
+                            info!("Created ReplicaSet {}", rs_name);
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+
+                    metadata.replicaset_name = Some(rs_name);
+                    metadata.reconcile_phase = ReconcilePhase::WaitingForReplicaSet;
+
+                    // Return here - need to wait for pods to become ready
                     return Ok(ReconcileResult {
                         status,
                         deployment_url: None,
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
-                        next_reconcile: ReconcileHint::Immediate,
-                    });
-                };
-
-                let (username, password) = provider.get_pull_credentials().await?;
-                let secret_api: Api<Secret> = Api::namespaced(self.kube_client.clone(), namespace);
-
-                let secret = self.create_dockerconfigjson_secret(
-                    "rise-registry-creds",
-                    provider.registry_host(),
-                    &username,
-                    &password,
-                )?;
-
-                // Check if secret exists, create or replace accordingly
-                match secret_api.get("rise-registry-creds").await {
-                    Ok(_) => {
-                        // Secret exists, replace it
-                        secret_api
-                            .replace("rise-registry-creds", &PostParams::default(), &secret)
-                            .await?;
-                        info!("Updated image pull secret in namespace {}", namespace);
-                    }
-                    Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                        // Secret doesn't exist, create it
-                        secret_api.create(&PostParams::default(), &secret).await?;
-                        info!("Created image pull secret in namespace {}", namespace);
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-
-                metadata.reconcile_phase = ReconcilePhase::CreatingService;
-
-                Ok(ReconcileResult {
-                    status,
-                    deployment_url: None,
-                    controller_metadata: serde_json::to_value(&metadata)?,
-                    error_message: None,
-                    next_reconcile: ReconcileHint::Immediate,
-                })
-            }
-
-            ReconcilePhase::CreatingService => {
-                let namespace = metadata
-                    .namespace
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
-
-                let service_name = format!("{}-svc", project.name);
-                let svc_api: Api<Service> = Api::namespaced(self.kube_client.clone(), namespace);
-
-                // Check if service exists
-                match svc_api.get(&service_name).await {
-                    Ok(_) => {
-                        debug!("Service {} already exists", service_name);
-                    }
-                    Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                        // Create service
-                        let svc = self.create_service(project, deployment, &metadata);
-                        svc_api.create(&PostParams::default(), &svc).await?;
-                        info!("Created service {}", service_name);
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-
-                metadata.reconcile_phase = ReconcilePhase::CreatingReplicaSet;
-
-                Ok(ReconcileResult {
-                    status,
-                    deployment_url: None,
-                    controller_metadata: serde_json::to_value(&metadata)?,
-                    error_message: None,
-                    next_reconcile: ReconcileHint::Immediate,
-                })
-            }
-
-            ReconcilePhase::CreatingReplicaSet => {
-                let namespace = metadata
-                    .namespace
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
-
-                let rs_name = format!("{}-{}", project.name, deployment.deployment_id);
-                let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), namespace);
-
-                // Check if ReplicaSet exists
-                match rs_api.get(&rs_name).await {
-                    Ok(_) => {
-                        debug!("ReplicaSet {} already exists", rs_name);
-                    }
-                    Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                        // Create ReplicaSet
-                        let rs = self.create_replicaset(project, deployment, &metadata);
-                        rs_api.create(&PostParams::default(), &rs).await?;
-                        info!("Created ReplicaSet {}", rs_name);
-                    }
-                    Err(e) => return Err(e.into()),
-                }
-
-                metadata.replicaset_name = Some(rs_name);
-                metadata.reconcile_phase = ReconcilePhase::WaitingForReplicaSet;
-
-                Ok(ReconcileResult {
-                    status,
-                    deployment_url: None,
-                    controller_metadata: serde_json::to_value(&metadata)?,
-                    error_message: None,
-                    next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
-                })
-            }
-
-            ReconcilePhase::WaitingForReplicaSet => {
-                let namespace = metadata
-                    .namespace
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
-                let rs_name = metadata
-                    .replicaset_name
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name in metadata"))?;
-
-                let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), namespace);
-                let rs = rs_api.get(rs_name).await?;
-
-                let spec_replicas = rs.spec.and_then(|s| s.replicas).unwrap_or(1);
-                let ready_replicas = rs.status.and_then(|s| s.ready_replicas).unwrap_or(0);
-
-                if ready_replicas >= spec_replicas {
-                    info!(
-                        "ReplicaSet {} is ready ({}/{})",
-                        rs_name, ready_replicas, spec_replicas
-                    );
-                    metadata.reconcile_phase = ReconcilePhase::UpdatingIngress;
-
-                    Ok(ReconcileResult {
-                        status,
-                        deployment_url: None,
-                        controller_metadata: serde_json::to_value(&metadata)?,
-                        error_message: None,
-                        next_reconcile: ReconcileHint::Immediate,
-                    })
-                } else {
-                    debug!(
-                        "Waiting for ReplicaSet {} ({}/{})",
-                        rs_name, ready_replicas, spec_replicas
-                    );
-
-                    Ok(ReconcileResult {
-                        status,
-                        deployment_url: None,
-                        controller_metadata: serde_json::to_value(&metadata)?,
-                        error_message: None,
                         next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
-                    })
+                    });
                 }
-            }
 
-            ReconcilePhase::UpdatingIngress => {
-                let namespace = metadata
-                    .namespace
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+                ReconcilePhase::WaitingForReplicaSet => {
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+                    let rs_name = metadata
+                        .replicaset_name
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name in metadata"))?;
 
-                // Only create Ingress for default deployment group
-                if deployment.deployment_group
-                    == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP
-                {
-                    let ingress_name = format!("{}-ingress", project.name);
-                    let ingress_api: Api<Ingress> =
+                    let rs_api: Api<ReplicaSet> =
                         Api::namespaced(self.kube_client.clone(), namespace);
+                    let rs = rs_api.get(rs_name).await?;
 
-                    let ingress = self.create_ingress(project, &metadata);
+                    let spec_replicas = rs.spec.and_then(|s| s.replicas).unwrap_or(1);
+                    let ready_replicas = rs.status.and_then(|s| s.ready_replicas).unwrap_or(0);
 
-                    // Use server-side apply for idempotent ingress updates
-                    let patch_params = PatchParams::apply("rise");
-                    let patch = Patch::Apply(&ingress);
-                    ingress_api
-                        .patch(&ingress_name, &patch_params, &patch)
-                        .await?;
-                    info!("Created/updated Ingress {}", ingress_name);
+                    if ready_replicas >= spec_replicas {
+                        info!(
+                            "ReplicaSet {} is ready ({}/{})",
+                            rs_name, ready_replicas, spec_replicas
+                        );
+                        metadata.reconcile_phase = ReconcilePhase::UpdatingIngress;
+                        // Continue to updating ingress
+                        continue;
+                    } else {
+                        debug!(
+                            "Waiting for ReplicaSet {} ({}/{})",
+                            rs_name, ready_replicas, spec_replicas
+                        );
+
+                        // Return here - still waiting for pods
+                        return Ok(ReconcileResult {
+                            status,
+                            deployment_url: None,
+                            controller_metadata: serde_json::to_value(&metadata)?,
+                            error_message: None,
+                            next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
+                        });
+                    }
                 }
 
-                // Generate deployment URL
-                let deployment_url = format!("https://{}.{}", project.name, self.domain_suffix);
+                ReconcilePhase::UpdatingIngress => {
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
-                metadata.reconcile_phase = ReconcilePhase::WaitingForHealth;
+                    // Only create Ingress for default deployment group
+                    if deployment.deployment_group
+                        == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP
+                    {
+                        let ingress_name = format!("{}-ingress", project.name);
+                        let ingress_api: Api<Ingress> =
+                            Api::namespaced(self.kube_client.clone(), namespace);
 
-                Ok(ReconcileResult {
-                    status,
-                    deployment_url: Some(deployment_url),
-                    controller_metadata: serde_json::to_value(&metadata)?,
-                    error_message: None,
-                    next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
-                })
-            }
+                        let ingress = self.create_ingress(project, &metadata);
 
-            ReconcilePhase::WaitingForHealth => {
-                // Use health_check to verify deployment is healthy
-                let health = self.health_check(deployment).await?;
+                        // Use server-side apply for idempotent ingress updates
+                        let patch_params = PatchParams::apply("rise");
+                        let patch = Patch::Apply(&ingress);
+                        ingress_api
+                            .patch(&ingress_name, &patch_params, &patch)
+                            .await?;
+                        info!("Created/updated Ingress {}", ingress_name);
+                    }
 
-                if health.healthy {
-                    info!("Deployment {} is healthy", deployment.deployment_id);
-                    metadata.reconcile_phase = ReconcilePhase::Completed;
+                    metadata.reconcile_phase = ReconcilePhase::WaitingForHealth;
+                    // Continue to health check
+                    continue;
+                }
 
+                ReconcilePhase::WaitingForHealth => {
+                    // Use health_check to verify deployment is healthy
+                    let health = self.health_check(deployment).await?;
                     let deployment_url = format!("https://{}.{}", project.name, self.domain_suffix);
 
-                    Ok(ReconcileResult {
+                    if health.healthy {
+                        info!("Deployment {} is healthy", deployment.deployment_id);
+                        metadata.reconcile_phase = ReconcilePhase::Completed;
+
+                        return Ok(ReconcileResult {
+                            status: DeploymentStatus::Healthy,
+                            deployment_url: Some(deployment_url),
+                            controller_metadata: serde_json::to_value(&metadata)?,
+                            error_message: None,
+                            next_reconcile: ReconcileHint::Default,
+                        });
+                    } else {
+                        debug!(
+                            "Waiting for deployment {} to become healthy",
+                            deployment.deployment_id
+                        );
+
+                        return Ok(ReconcileResult {
+                            status,
+                            deployment_url: Some(deployment_url),
+                            controller_metadata: serde_json::to_value(&metadata)?,
+                            error_message: health.message,
+                            next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
+                        });
+                    }
+                }
+
+                ReconcilePhase::Completed => {
+                    // No-op, deployment is healthy
+                    let deployment_url = format!("https://{}.{}", project.name, self.domain_suffix);
+
+                    return Ok(ReconcileResult {
                         status: DeploymentStatus::Healthy,
                         deployment_url: Some(deployment_url),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
                         next_reconcile: ReconcileHint::Default,
-                    })
-                } else {
-                    debug!(
-                        "Waiting for deployment {} to become healthy",
-                        deployment.deployment_id
-                    );
-
-                    Ok(ReconcileResult {
-                        status,
-                        deployment_url: None,
-                        controller_metadata: serde_json::to_value(&metadata)?,
-                        error_message: health.message,
-                        next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
-                    })
+                    });
                 }
-            }
-
-            ReconcilePhase::Completed => {
-                // No-op, deployment is healthy
-                let deployment_url = format!("https://{}.{}", project.name, self.domain_suffix);
-
-                Ok(ReconcileResult {
-                    status: DeploymentStatus::Healthy,
-                    deployment_url: Some(deployment_url),
-                    controller_metadata: serde_json::to_value(&metadata)?,
-                    error_message: None,
-                    next_reconcile: ReconcileHint::Default,
-                })
             }
         }
     }
