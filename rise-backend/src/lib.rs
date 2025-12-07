@@ -156,6 +156,64 @@ pub async fn run_ecr_controller(settings: settings::Settings) -> Result<()> {
     Ok(())
 }
 
+/// Run the Kubernetes deployment controller process
+pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<()> {
+    let k8s_settings = settings
+        .kubernetes
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("Kubernetes settings required"))?;
+
+    let app_state = state::AppState::new_for_controller(&settings).await?;
+    let controller_state = ControllerState {
+        db_pool: app_state.db_pool.clone(),
+    };
+
+    // Create kube client
+    let kube_config = if k8s_settings.kubeconfig.is_some() {
+        // Use explicit kubeconfig if provided
+        kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
+            context: None,
+            cluster: None,
+            user: None,
+        })
+        .await?
+    } else {
+        kube::Config::infer().await? // In-cluster or ~/.kube/config
+    };
+    let kube_client = kube::Client::try_from(kube_config)?;
+
+    // Get registry provider
+    let registry_provider = app_state.registry_provider.clone();
+
+    let registry_url = registry_provider
+        .as_ref()
+        .map(|p| p.registry_url().to_string());
+
+    let backend = Arc::new(deployment::controller::KubernetesController::new(
+        controller_state.clone(),
+        kube_client,
+        k8s_settings.ingress_class,
+        k8s_settings.domain_suffix,
+        registry_provider,
+        registry_url,
+    )?);
+
+    let controller = Arc::new(deployment::controller::DeploymentController::new(
+        Arc::new(controller_state),
+        backend.clone(),
+    )?);
+    controller.start();
+    info!("Kubernetes deployment controller started");
+
+    // Start Kubernetes-specific secret refresh loop
+    backend.start_secret_refresh_loop();
+    info!("Kubernetes secret refresh loop started");
+
+    // Block forever
+    std::future::pending::<()>().await;
+    Ok(())
+}
+
 async fn health_check() -> &'static str {
     "OK"
 }

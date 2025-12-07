@@ -1,6 +1,8 @@
 mod docker;
+mod kubernetes;
 
 pub use docker::DockerController;
+pub use kubernetes::KubernetesController;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};

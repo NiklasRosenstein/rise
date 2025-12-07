@@ -4,3 +4,6 @@ backend-project: cargo run --bin rise -- backend controller project
 
 # Enable only if the chosen registry type is "ecr"
 # backend-ecr: cargo run --bin rise -- backend controller ecr
+
+# Enable when using Kubernetes runtime (comment out backend-deployment above)
+# backend-kubernetes: cargo run --bin rise -- backend controller deployment-kubernetes

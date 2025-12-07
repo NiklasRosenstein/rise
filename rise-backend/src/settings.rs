@@ -9,6 +9,8 @@ pub struct Settings {
     pub database: DatabaseSettings,
     #[serde(default)]
     pub registry: Option<RegistrySettings>,
+    #[serde(default)]
+    pub kubernetes: Option<KubernetesSettings>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -35,6 +37,24 @@ pub struct DatabaseSettings {
 
 fn default_repo_prefix() -> String {
     "rise/".to_string()
+}
+
+fn default_ingress_class() -> String {
+    "nginx".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct KubernetesSettings {
+    /// Optional kubeconfig path (defaults to in-cluster or ~/.kube/config)
+    #[serde(default)]
+    pub kubeconfig: Option<String>,
+
+    /// Ingress class to use (e.g., "nginx")
+    #[serde(default = "default_ingress_class")]
+    pub ingress_class: String,
+
+    /// Domain suffix for project URLs (e.g., "apps.rise.net")
+    pub domain_suffix: String,
 }
 
 /// Registry provider configuration

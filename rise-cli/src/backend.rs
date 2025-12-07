@@ -25,6 +25,8 @@ pub enum BackendCommands {
 pub enum ControllerCommands {
     /// Start the deployment controller (Docker backend)
     DeploymentDocker,
+    /// Start the deployment controller (Kubernetes backend)
+    DeploymentKubernetes,
     /// Start the project controller
     Project,
     /// Start the ECR controller (requires ECR registry configuration)
@@ -42,6 +44,9 @@ pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
                 BackendCommands::Controller(controller_cmd) => match controller_cmd {
                     ControllerCommands::DeploymentDocker => {
                         rise_backend::run_deployment_controller(settings).await
+                    }
+                    ControllerCommands::DeploymentKubernetes => {
+                        rise_backend::run_kubernetes_controller(settings).await
                     }
                     ControllerCommands::Project => {
                         rise_backend::run_project_controller(settings).await

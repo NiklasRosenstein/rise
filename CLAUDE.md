@@ -198,3 +198,4 @@ The project `visibility` field (Public/Private) is currently stored but not enfo
 - The authentication layer will validate both user identity AND project access permissions before proxying requests to the application
 
 This feature is specifically for the Kubernetes controller and will not be implemented for the Docker controller.
+- Keep the ECR controller disabled by default in Procfile.dev, we only currently have it enabled for development
