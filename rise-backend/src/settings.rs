@@ -38,7 +38,7 @@ fn default_cookie_secure() -> bool {
 }
 
 fn default_reconcile_interval() -> u64 {
-    15
+    5
 }
 
 fn default_health_check_interval() -> u64 {
@@ -63,7 +63,7 @@ fn default_secret_refresh_interval() -> u64 {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct ControllerSettings {
-    /// Interval in seconds for checking deployments to reconcile (default: 15)
+    /// Interval in seconds for checking deployments to reconcile (default: 5)
     #[serde(default = "default_reconcile_interval")]
     pub reconcile_interval_secs: u64,
 

@@ -18,8 +18,8 @@ url = "postgres://rise:rise123@localhost:5432/rise"
 
 # Controller loop intervals (in seconds) - optional, all have defaults
 [controller]
-# How often to check for deployments to reconcile (default: 15)
-# reconcile_interval_secs = 15
+# How often to check for deployments to reconcile (default: 5)
+# reconcile_interval_secs = 5
 # How often to perform health checks on active deployments (default: 5)
 # health_check_interval_secs = 5
 # How often to process terminating deployments (default: 5)
