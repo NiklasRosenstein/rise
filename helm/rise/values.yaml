@@ -231,7 +231,7 @@ dex:
   issuerUrl: "http://dex:5556/dex"
 
   # Dex configuration (YAML format)
-  # If empty, uses the default config from files/dex-config.yaml
+# If empty, uses the default config from files/dex-config.yaml
   # If provided, this overrides the default config entirely
   # See https://dexidp.io/docs/
   config: ""

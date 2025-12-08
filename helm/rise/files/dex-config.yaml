@@ -16,6 +16,10 @@ staticClients:
   # Frontend (update these based on your actual public_url)
   - http://rise.example.com/
   - http://rise.example.com/auth/callback
+  # CLI
+  - http://localhost:8765/callback
+  - http://localhost:8766/callback
+  - http://localhost:8767/callback
   name: 'Rise Backend'
   secret: rise-backend-secret
 

@@ -230,7 +230,7 @@ pub async fn run(port: u16, token_claims: Option<String>) -> Result<()> {
     println!("  JWKS:      {}/keys", issuer_url);
     println!("  Token:     {}/token?aud=...&sub=...", issuer_url);
 
-    let listener = tokio::net::TcpListener::bind(format!("127.0.0.1:{}", port))
+    let listener = tokio::net::TcpListener::bind(format!("localhost:{}", port))
         .await
         .context("Failed to bind to port")?;
 

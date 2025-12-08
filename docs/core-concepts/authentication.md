@@ -56,7 +56,7 @@ Tokens are stored in `~/.config/rise/config.json`:
 
 ```json
 {
-  "backend_url": "http://127.0.0.1:3000",
+  "backend_url": "http://localhost:3000",
   "token": "eyJhbG..."
 }
 ```
@@ -130,7 +130,7 @@ curl http://localhost:3000/projects \
 ## Local Development
 
 The default configuration assumes:
-- Backend: `http://127.0.0.1:3000`
+- Backend: `http://localhost:3000`
 - Dex: `http://localhost:5556/dex`
 - Local callback ports: 8765, 8766, 8767 (tries in order)
 

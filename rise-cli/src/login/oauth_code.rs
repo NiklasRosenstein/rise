@@ -75,7 +75,7 @@ async fn start_callback_server() -> Result<(String, tokio::sync::oneshot::Receiv
         }));
 
         // Try to bind to this port
-        let addr = format!("127.0.0.1:{}", port);
+        let addr = format!("localhost:{}", port);
         match tokio::net::TcpListener::bind(&addr).await {
             Ok(listener) => {
                 // Successfully bound, start the server in the background

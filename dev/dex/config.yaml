@@ -11,17 +11,12 @@ staticClients:
   redirectURIs:
   # Frontend
   - http://localhost:3000/
-  - http://127.0.0.1:3000/
   # Oauth2 Proxy Callbacks
   - http://localhost:3000/auth/callback
-  - http://127.0.0.1:3000/auth/callback
   # CLI Auth
   - http://localhost:8765/callback
   - http://localhost:8766/callback
   - http://localhost:8767/callback
-  - http://127.0.0.1:8765/callback
-  - http://127.0.0.1:8766/callback
-  - http://127.0.0.1:8767/callback
   name: 'Rise Backend'
   secret: rise-backend-secret
 

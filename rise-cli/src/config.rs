@@ -84,7 +84,7 @@ impl Config {
     pub fn get_backend_url(&self) -> String {
         self.backend_url
             .clone()
-            .unwrap_or_else(|| "http://127.0.0.1:3000".to_string())
+            .unwrap_or_else(|| "http://localhost:3000".to_string())
     }
 
     /// Get the Dex OAuth2 URL (for local development)
