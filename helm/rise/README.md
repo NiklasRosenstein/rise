@@ -204,6 +204,46 @@ The chart also supports deploying these components separately:
 
 - **Dex**: OIDC provider for authentication (optional, disabled by default, runs as a separate deployment)
 
+## Security Considerations
+
+### RBAC and Namespace Management
+
+When the Kubernetes deployment controller is enabled (`controllers.deployment.type: deployment-kubernetes`), Rise requires cluster-wide permissions via ClusterRole and ClusterRoleBinding to:
+
+- Create, manage, and delete namespaces
+- Deploy applications (Deployments, Services, Ingresses) within those namespaces
+
+**Important Security Notes:**
+
+1. **Namespace Isolation**: Kubernetes RBAC does not support wildcard patterns for namespace names in ClusterRoles. Rise requires cluster-wide permissions to manage namespaces dynamically.
+
+2. **Recommended Practices**:
+   - Configure `namespace_format` with a consistent prefix (e.g., `rise-{project_name}`)
+   - Use admission controllers (OPA/Gatekeeper) to enforce namespace naming policies
+   - Implement network policies to isolate Rise-managed namespaces
+   - Enable audit logging to monitor namespace creation and resource access
+   - Consider using namespace quotas to limit resource consumption
+
+3. **Example Enforcement with OPA Gatekeeper**:
+   ```yaml
+   # Ensure all Rise-created namespaces follow the naming pattern
+   apiVersion: constraints.gatekeeper.sh/v1beta1
+   kind: K8sRequiredLabels
+   metadata:
+     name: rise-namespace-naming
+   spec:
+     match:
+       kinds:
+       - apiGroups: [""]
+         kinds: ["Namespace"]
+     parameters:
+       labels:
+         - key: "app.kubernetes.io/managed-by"
+           allowedRegex: "^rise$"
+   ```
+
+4. **Namespace Format Configuration**: Always align your `namespace_format` configuration in the Rise config with your organization's namespace policies.
+
 ## Configuration Format
 
 ### Rise Configuration

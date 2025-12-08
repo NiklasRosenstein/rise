@@ -5,6 +5,18 @@ metadata:
   name: {{ include "rise.fullname" . }}
   labels:
     {{- include "rise.labels" . | nindent 4 }}
+  annotations:
+    description: |
+      ClusterRole for Rise deployment controller.
+
+      SECURITY NOTE: This grants cluster-wide permissions to manage namespaces and
+      deploy applications. Kubernetes RBAC does not support namespace wildcard patterns.
+
+      To limit scope:
+      1. Configure namespace_format with a consistent prefix (e.g., "rise-{project_name}")
+      2. Use admission controllers (OPA/Gatekeeper) to enforce namespace naming policies
+      3. Monitor namespace creation via audit logs
+      4. Consider network policies to isolate Rise-managed namespaces
 rules:
 # Namespace management
 - apiGroups: [""]

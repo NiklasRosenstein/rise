@@ -94,10 +94,18 @@ config: |
   namespace = "rise-apps"
 
   # Uncomment to enable Kubernetes controller
+  #
+  # IMPORTANT: namespace_format should use a consistent prefix for security.
+  # Rise requires ClusterRole permissions (Kubernetes RBAC doesn't support namespace wildcards).
+  # Use a consistent prefix (e.g., "rise-") and enforce it with:
+  #   - Admission controllers (OPA/Gatekeeper)
+  #   - Namespace naming policies
+  #   - Audit logging
+  #
   # [kubernetes]
   # ingress_class = "nginx"
   # domain_suffix = "apps.rise.net"
-  # namespace_format = "rise-{project_name}"
+  # namespace_format = "rise-{project_name}"  # MUST use consistent prefix for security
 
 # Existing secret containing sensitive configuration
 # Required for production deployments
