@@ -113,8 +113,9 @@ RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-push"
 
 # Kubernetes (if using Kubernetes backend)
 RISE_KUBERNETES__INGRESS_CLASS="nginx"
-RISE_KUBERNETES__DOMAIN_SUFFIX="apps.rise.dev"
-RISE_KUBERNETES__NON_DEFAULT_DOMAIN_SUFFIX="preview.rise.dev"
+RISE_KUBERNETES__HOSTNAME_FORMAT="{project_name}.apps.rise.dev"
+RISE_KUBERNETES__NONDEFAULT_HOSTNAME_FORMAT="{project_name}-{deployment_group}.preview.rise.dev"
+RISE_KUBERNETES__NAMESPACE_FORMAT="rise-{project_name}"
 # RISE_KUBERNETES__KUBECONFIG="/path/to/kubeconfig"  # Optional, defaults to in-cluster
 
 # Docker API version (if using Docker backend)
