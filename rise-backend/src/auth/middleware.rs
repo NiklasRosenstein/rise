@@ -158,8 +158,17 @@ pub async fn auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, String)> {
+    tracing::debug!(
+        "Auth middleware: validating request to {}",
+        req.uri().path()
+    );
+
     // Extract token from Authorization header
     let token = extract_bearer_token(&headers)?;
+    tracing::debug!(
+        "Auth middleware: extracted bearer token (length={})",
+        token.len()
+    );
 
     // Peek at the issuer to determine authentication method
     let issuer = {
@@ -197,22 +206,36 @@ pub async fn auth_middleware(
         claims.iss
     };
 
+    tracing::debug!(
+        "Auth middleware: token issuer='{}', configured issuer='{}'",
+        issuer,
+        state.auth_settings.issuer
+    );
+
     let user = if issuer == state.auth_settings.issuer {
         // User authentication via configured OIDC provider
-        tracing::debug!("Authenticating as user via configured OIDC provider");
+        tracing::debug!("Auth middleware: authenticating as user via configured OIDC provider");
 
         // Build expected claims for user auth (just validate aud matches client_id)
         let mut expected_claims = HashMap::new();
         expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+
+        tracing::debug!(
+            "Auth middleware: validating JWT with issuer='{}', expected aud='{}'",
+            state.auth_settings.issuer,
+            state.auth_settings.client_id
+        );
 
         let claims_value = state
             .jwt_validator
             .validate(&token, &state.auth_settings.issuer, &expected_claims)
             .await
             .map_err(|e| {
-                tracing::warn!("JWT validation failed: {}", e);
+                tracing::warn!("Auth middleware: JWT validation failed: {}", e);
                 (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
             })?;
+
+        tracing::debug!("Auth middleware: JWT validation successful");
 
         // Deserialize to typed Claims to get email
         let claims: crate::auth::jwt::Claims =

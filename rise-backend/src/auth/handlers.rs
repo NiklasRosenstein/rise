@@ -15,6 +15,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     Json,
 };
+use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::instrument;
@@ -37,6 +38,11 @@ pub async fn code_exchange(
     State(state): State<AppState>,
     Json(payload): Json<CodeExchangeRequest>,
 ) -> Result<Json<LoginResponse>, (StatusCode, String)> {
+    tracing::debug!(
+        "Code exchange request: redirect_uri={}",
+        payload.redirect_uri
+    );
+
     // Exchange authorization code for tokens using PKCE
     let token_info = state
         .oauth_client
@@ -50,7 +56,26 @@ pub async fn code_exchange(
             )
         })?;
 
-    tracing::info!("Code exchange successful");
+    tracing::info!(
+        "Code exchange successful, token_type={}, expires_in={}",
+        token_info.token_type,
+        token_info.expires_in
+    );
+
+    // Decode and log token claims for debugging (without validating yet)
+    if let Ok(header) = jsonwebtoken::decode_header(&token_info.id_token) {
+        tracing::debug!("ID token header: {:?}", header);
+    }
+
+    // Try to decode payload for logging (this doesn't validate signature)
+    let parts: Vec<&str> = token_info.id_token.split('.').collect();
+    if parts.len() == 3 {
+        if let Ok(decoded) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
+            if let Ok(claims_str) = String::from_utf8(decoded) {
+                tracing::debug!("ID token claims: {}", claims_str);
+            }
+        }
+    }
 
     // Return the ID token (which contains user claims)
     Ok(Json(LoginResponse {
@@ -71,6 +96,7 @@ pub async fn me(
     Extension(user): Extension<User>,
 ) -> Result<Json<MeResponse>, (StatusCode, String)> {
     // User is injected by auth middleware
+    tracing::debug!("GET /me: user_id={}, email={}", user.id, user.email);
     Ok(Json(MeResponse {
         id: user.id.to_string(),
         email: user.email,
