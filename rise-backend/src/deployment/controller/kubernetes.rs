@@ -73,8 +73,8 @@ pub struct KubernetesController {
     state: ControllerState,
     kube_client: Client,
     ingress_class: String,
-    domain_suffix: String,
-    non_default_domain_suffix: Option<String>,
+    hostname_format: String,
+    nondefault_hostname_format: Option<String>,
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     registry_url: Option<String>,
     auth_backend_url: String,
@@ -89,8 +89,8 @@ impl KubernetesController {
         state: ControllerState,
         kube_client: Client,
         ingress_class: String,
-        domain_suffix: String,
-        non_default_domain_suffix: Option<String>,
+        hostname_format: String,
+        nondefault_hostname_format: Option<String>,
         registry_provider: Option<Arc<dyn RegistryProvider>>,
         registry_url: Option<String>,
         auth_backend_url: String,
@@ -102,8 +102,8 @@ impl KubernetesController {
             state,
             kube_client,
             ingress_class,
-            domain_suffix,
-            non_default_domain_suffix,
+            hostname_format,
+            nondefault_hostname_format,
             registry_provider,
             registry_url,
             auth_backend_url,
@@ -442,18 +442,40 @@ impl KubernetesController {
     /// Get hostname for a deployment group
     fn hostname(&self, project: &Project, deployment: &Deployment) -> String {
         if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
-            format!("{}.{}", project.name, self.domain_suffix)
+            // Use hostname_format for default deployment group
+            self.hostname_format
+                .replace("{project_name}", &project.name)
         } else {
-            let suffix = self
-                .non_default_domain_suffix
-                .as_ref()
-                .unwrap_or(&self.domain_suffix);
-            format!(
-                "{}-{}.{}",
-                project.name,
-                Self::escaped_group_name(&deployment.deployment_group),
-                suffix
-            )
+            // Use nondefault_hostname_format if set, otherwise derive from hostname_format
+            if let Some(ref nondefault_format) = self.nondefault_hostname_format {
+                nondefault_format
+                    .replace("{project_name}", &project.name)
+                    .replace(
+                        "{deployment_group}",
+                        &Self::escaped_group_name(&deployment.deployment_group),
+                    )
+            } else {
+                // Fallback: insert "-{group}" before the first dot in hostname_format
+                // e.g., "{project_name}.apps.rise.dev" → "{project_name}-{group}.apps.rise.dev"
+                let hostname = self
+                    .hostname_format
+                    .replace("{project_name}", &project.name);
+                if let Some(dot_pos) = hostname.find('.') {
+                    format!(
+                        "{}-{}{}",
+                        &hostname[..dot_pos],
+                        Self::escaped_group_name(&deployment.deployment_group),
+                        &hostname[dot_pos..]
+                    )
+                } else {
+                    // No dot found, just append the group
+                    format!(
+                        "{}-{}",
+                        hostname,
+                        Self::escaped_group_name(&deployment.deployment_group)
+                    )
+                }
+            }
         }
     }
 
@@ -1844,8 +1866,8 @@ mod tests {
             state,
             kube_client,
             ingress_class: "nginx".to_string(),
-            domain_suffix: "test.local".to_string(),
-            non_default_domain_suffix: None,
+            hostname_format: "{project_name}.test.local".to_string(),
+            nondefault_hostname_format: None,
             registry_provider: None,
             registry_url: None,
             auth_backend_url: "http://localhost:3000".to_string(),

@@ -175,15 +175,19 @@ pub struct KubernetesSettings {
     #[serde(default = "default_ingress_class")]
     pub ingress_class: String,
 
-    /// Domain suffix for default deployment group (e.g., "apps.rise.dev")
-    /// Results in URLs like: https://{project}.apps.rise.dev
-    pub domain_suffix: String,
+    /// Hostname format for default deployment group
+    /// Template variables: {project_name}
+    /// Example: "{project_name}.apps.rise.dev" → hostname "myapp.apps.rise.dev" for project "myapp"
+    /// Must contain {project_name} placeholder
+    pub hostname_format: String,
 
-    /// Optional domain suffix for non-default deployment groups
-    /// If not set, uses domain_suffix for all groups
-    /// Results in URLs like: https://{project}-{group}.preview.rise.dev
+    /// Hostname format for non-default deployment groups
+    /// Template variables: {project_name}, {deployment_group}
+    /// Example: "{project_name}-{deployment_group}.preview.rise.dev"
+    /// If not set, uses hostname_format with "-{deployment_group}" suffix before domain
+    /// Must contain {project_name} placeholder
     #[serde(default)]
-    pub non_default_domain_suffix: Option<String>,
+    pub nondefault_hostname_format: Option<String>,
 
     /// Backend URL for Nginx auth subrequests (internal cluster URL)
     /// Example: "http://rise-backend.default.svc.cluster.local:3000"
@@ -282,6 +286,31 @@ impl Settings {
             ));
         }
 
+        // Validate Kubernetes settings if configured
+        if let Some(ref k8s) = settings.kubernetes {
+            Self::validate_format_string(&k8s.namespace_format, "namespace_format", "{project_name}")?;
+            Self::validate_format_string(&k8s.hostname_format, "hostname_format", "{project_name}")?;
+
+            if let Some(ref nondefault_format) = k8s.nondefault_hostname_format {
+                Self::validate_format_string(nondefault_format, "nondefault_hostname_format", "{project_name}")?;
+            }
+        }
+
         Ok(settings)
+    }
+
+    /// Validate that a format string contains the required placeholder
+    fn validate_format_string(
+        format_str: &str,
+        field_name: &str,
+        required_placeholder: &str,
+    ) -> Result<(), ConfigError> {
+        if !format_str.contains(required_placeholder) {
+            return Err(ConfigError::Message(format!(
+                "Kubernetes configuration error: '{}' must contain '{}' placeholder. Got: '{}'",
+                field_name, required_placeholder, format_str
+            )));
+        }
+        Ok(())
     }
 }

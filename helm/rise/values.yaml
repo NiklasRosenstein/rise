@@ -113,8 +113,9 @@ config: |
   #
   # [kubernetes]
   # ingress_class = "nginx"
-  # domain_suffix = "apps.rise.dev"
-  # namespace_format = "rise-{project_name}"  # MUST use consistent prefix for security
+  # hostname_format = "{project_name}.apps.rise.dev"  # Must contain {project_name}
+  # nondefault_hostname_format = "{project_name}-{deployment_group}.preview.rise.dev"  # Optional, must contain {project_name}
+  # namespace_format = "rise-{project_name}"  # MUST use consistent prefix for security and contain {project_name}
 
 # PostgreSQL (optional, can use external database)
 # When enabled, DATABASE_URL is automatically injected into all containers

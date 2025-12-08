@@ -45,7 +45,8 @@ config: |
 
   [kubernetes]
   ingress_class = "nginx"
-  domain_suffix = "apps.example.com"
+  hostname_format = "{project_name}.apps.example.com"
+  nondefault_hostname_format = "{project_name}-{deployment_group}.preview.example.com"
 
 ingress:
   enabled: true
