@@ -3,7 +3,6 @@
 {{- if not $config }}
 {{- $config = .Files.Get "files/dex-config.yaml" }}
 {{- end }}
-{{- $config = regexReplaceAll "issuer:.*" $config (printf "issuer: %s" .Values.dex.issuerUrl) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
