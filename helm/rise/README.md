@@ -65,13 +65,25 @@ ingress:
 # Create a secret with sensitive values
 existingSecret: "rise-secrets"
 
-resources:
-  limits:
-    cpu: 2000m
-    memory: 1Gi
-  requests:
-    cpu: 500m
-    memory: 256Mi
+# Server container resources
+server:
+  resources:
+    limits:
+      cpu: 2000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 256Mi
+
+# Controllers run as sidecar containers
+controllers:
+  deployment:
+    enabled: true
+    type: "deployment-kubernetes"
+  project:
+    enabled: true
+  ecr:
+    enabled: true
 
 # Optional: Enable Dex for OIDC authentication
 dex:
@@ -135,14 +147,25 @@ The following table lists the configurable parameters of the Rise chart and thei
 | `existingSecret` | Name of existing secret with sensitive values | `""` |
 | `ingress.enabled` | Enable ingress | `false` |
 
+### Server
+
+| Parameter | Description | Default |
+|-----------|-------------|---------|
+| `server.resources` | Server container resource requests/limits | See values.yaml |
+
 ### Controllers
+
+All controllers run as sidecar containers in the main deployment pod.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `controllers.deployment.enabled` | Enable deployment controller | `true` |
-| `controllers.deployment.replicaCount` | Number of deployment controller replicas | `1` |
+| `controllers.deployment.type` | Controller type (`deployment-kubernetes` or `deployment-docker`) | `deployment-kubernetes` |
+| `controllers.deployment.resources` | Deployment controller container resources | See values.yaml |
 | `controllers.project.enabled` | Enable project controller | `true` |
-| `controllers.project.replicaCount` | Number of project controller replicas | `1` |
+| `controllers.project.resources` | Project controller container resources | See values.yaml |
+| `controllers.ecr.enabled` | Enable ECR controller | `true` |
+| `controllers.ecr.resources` | ECR controller container resources | See values.yaml |
 
 ### Dex (Optional OIDC Provider)
 
@@ -164,14 +187,22 @@ The following table lists the configurable parameters of the Rise chart and thei
 | `postgresql.auth.username` | PostgreSQL username | `rise` |
 | `postgresql.auth.database` | PostgreSQL database | `rise` |
 
-## Components
+## Architecture
 
-The chart can deploy the following components:
+The chart uses a multi-container pod architecture where all Rise components run as containers in a single deployment:
 
-1. **Server Deployment**: Handles API requests and user interactions (always deployed)
-2. **Deployment Controller**: Manages application deployments (enabled by default)
-3. **Project Controller**: Handles project lifecycle management (enabled by default)
-4. **Dex**: OIDC provider for authentication (optional, disabled by default)
+1. **Server Container**: Handles API requests and user interactions (always present)
+2. **Project Controller Container**: Handles project lifecycle management (optional, enabled by default)
+3. **ECR Controller Container**: Manages ECR repository credentials (optional, enabled by default)
+4. **Deployment Controller Container**: Manages application deployments to Kubernetes or Docker (optional, enabled by default)
+
+All containers share the same configuration and secrets, reducing resource overhead and simplifying management.
+
+### Separate Deployments
+
+The chart also supports deploying these components separately:
+
+- **Dex**: OIDC provider for authentication (optional, disabled by default, runs as a separate deployment)
 
 ## Configuration Format
 

@@ -1,10 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "rise.fullname" . }}-server
+  name: {{ include "rise.fullname" . }}
   labels:
     {{- include "rise.labels" . | nindent 4 }}
-    app.kubernetes.io/component: server
 spec:
   {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
@@ -12,7 +11,6 @@ spec:
   selector:
     matchLabels:
       {{- include "rise.selectorLabels" . | nindent 6 }}
-      app.kubernetes.io/component: server
   template:
     metadata:
       annotations:
@@ -23,7 +21,6 @@ spec:
         {{- end }}
       labels:
         {{- include "rise.selectorLabels" . | nindent 8 }}
-        app.kubernetes.io/component: server
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
@@ -33,6 +30,7 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
+      # Server container (always present)
       - name: server
         securityContext:
           {{- toYaml .Values.securityContext | nindent 12 }}
@@ -51,12 +49,12 @@ spec:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.existingSecret | default (printf "%s-secret" (include "rise.fullname" .)) }}
+              name: {{ .Values.existingSecret }}
               key: database-url
         - name: RISE_AUTH__CLIENT_SECRET
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.existingSecret | default (printf "%s-secret" (include "rise.fullname" .)) }}
+              name: {{ .Values.existingSecret }}
               key: auth-client-secret
         livenessProbe:
           httpGet:
@@ -75,13 +73,97 @@ spec:
           timeoutSeconds: 3
           failureThreshold: 2
         resources:
-          {{- toYaml .Values.resources | nindent 12 }}
+          {{- toYaml .Values.server.resources | nindent 12 }}
         volumeMounts:
         - name: config
           mountPath: /config
           readOnly: true
         - name: tmp
           mountPath: /tmp
+      {{- if .Values.controllers.project.enabled }}
+      # Project controller container
+      - name: project-controller
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: {{ include "rise.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+          - "backend"
+          - "controller"
+          - "project"
+        env:
+        - name: RISE_CONFIG_DIR
+          value: "/config"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.existingSecret }}
+              key: database-url
+        resources:
+          {{- toYaml .Values.controllers.project.resources | nindent 12 }}
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      {{- end }}
+      {{- if .Values.controllers.ecr.enabled }}
+      # ECR controller container
+      - name: ecr-controller
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: {{ include "rise.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+          - "backend"
+          - "controller"
+          - "ecr"
+        env:
+        - name: RISE_CONFIG_DIR
+          value: "/config"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.existingSecret }}
+              key: database-url
+        resources:
+          {{- toYaml .Values.controllers.ecr.resources | nindent 12 }}
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      {{- end }}
+      {{- if .Values.controllers.deployment.enabled }}
+      # Deployment controller container
+      - name: deployment-controller
+        securityContext:
+          {{- toYaml .Values.securityContext | nindent 12 }}
+        image: {{ include "rise.image" . }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args:
+          - "backend"
+          - "controller"
+          - {{ .Values.controllers.deployment.type | quote }}
+        env:
+        - name: RISE_CONFIG_DIR
+          value: "/config"
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.existingSecret }}
+              key: database-url
+        resources:
+          {{- toYaml .Values.controllers.deployment.resources | nindent 12 }}
+        volumeMounts:
+        - name: config
+          mountPath: /config
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      {{- end }}
       volumes:
       - name: config
         configMap:

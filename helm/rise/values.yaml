@@ -49,13 +49,15 @@ ingress:
   #    hosts:
   #      - rise.example.com
 
-resources:
-  limits:
-    cpu: 1000m
-    memory: 512Mi
-  requests:
-    cpu: 100m
-    memory: 128Mi
+# Server container resources
+server:
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
 
 autoscaling:
   enabled: false
@@ -123,14 +125,42 @@ postgresql:
       size: 8Gi
 
 # Controllers configuration
+# All controllers run as sidecar containers in the main deployment pod
 controllers:
+  # Deployment controller - manages application deployments
   deployment:
     enabled: true
-    replicaCount: 1
+    # Type can be "deployment-kubernetes" or "deployment-docker"
+    type: "deployment-kubernetes"
+    resources:
+      limits:
+        cpu: 500m
+        memory: 256Mi
+      requests:
+        cpu: 50m
+        memory: 64Mi
 
+  # Project controller - handles project lifecycle
   project:
     enabled: true
-    replicaCount: 1
+    resources:
+      limits:
+        cpu: 200m
+        memory: 128Mi
+      requests:
+        cpu: 20m
+        memory: 32Mi
+
+  # ECR controller - manages ECR repository credentials
+  ecr:
+    enabled: true
+    resources:
+      limits:
+        cpu: 200m
+        memory: 128Mi
+      requests:
+        cpu: 20m
+        memory: 32Mi
 
 # Dex OIDC provider (optional)
 dex:
