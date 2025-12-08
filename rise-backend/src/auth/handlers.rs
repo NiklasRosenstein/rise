@@ -115,8 +115,6 @@ pub async fn authorize(
                 )
             })?;
 
-            let auth_url_base = &state.oauth_client.authorize_url();
-
             // Build query parameters
             let params = vec![
                 ("client_id", state.auth_settings.client_id.as_str()),
@@ -127,17 +125,7 @@ pub async fn authorize(
                 ("code_challenge_method", code_challenge_method.as_str()),
             ];
 
-            let query_string: String = params
-                .into_iter()
-                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
-                .collect::<Vec<_>>()
-                .join("&");
-
-            let authorization_url = if auth_url_base.contains('?') {
-                format!("{}&{}", auth_url_base, query_string)
-            } else {
-                format!("{}?{}", auth_url_base, query_string)
-            };
+            let authorization_url = state.oauth_client.build_authorize_url(&params);
 
             Ok(Json(AuthorizeResponse {
                 authorization_url: Some(authorization_url),
@@ -395,14 +383,17 @@ pub async fn oauth_signin(
     // Build OAuth2 authorization URL
     let callback_url = format!("{}/auth/callback", state.public_url.trim_end_matches('/'));
 
-    let auth_url = format!(
-        "{}/auth?client_id={}&redirect_uri={}&response_type=code&scope=openid+email+profile&code_challenge={}&code_challenge_method=S256&state={}",
-        state.auth_settings.issuer,
-        state.auth_settings.client_id,
-        urlencoding::encode(&callback_url),
-        code_challenge,
-        state_token
-    );
+    let params = vec![
+        ("client_id", state.auth_settings.client_id.as_str()),
+        ("redirect_uri", callback_url.as_str()),
+        ("response_type", "code"),
+        ("scope", "openid email profile"),
+        ("code_challenge", code_challenge.as_str()),
+        ("code_challenge_method", "S256"),
+        ("state", state_token.as_str()),
+    ];
+
+    let auth_url = state.oauth_client.build_authorize_url(&params);
 
     tracing::debug!("Redirecting to OIDC provider for authentication");
     Ok(Redirect::to(&auth_url))

@@ -383,4 +383,27 @@ impl OAuthClient {
     pub fn token_url(&self) -> &str {
         &self.token_url
     }
+
+    /// Build authorization URL with query parameters
+    ///
+    /// Takes the discovered authorize_url and appends query parameters.
+    /// Handles existing query parameters correctly (using ? or &).
+    /// URL-encodes parameter values for safety.
+    ///
+    /// This method serves as the single source of truth for constructing
+    /// OAuth2 authorization URLs, ensuring all flows use the correctly
+    /// discovered endpoint from OIDC.
+    pub fn build_authorize_url(&self, params: &[(&str, &str)]) -> String {
+        let query_string: String = params
+            .iter()
+            .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+            .collect::<Vec<_>>()
+            .join("&");
+
+        if self.authorize_url.contains('?') {
+            format!("{}&{}", self.authorize_url, query_string)
+        } else {
+            format!("{}?{}", self.authorize_url, query_string)
+        }
+    }
 }
