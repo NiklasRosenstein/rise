@@ -1,6 +1,6 @@
 use crate::config::Config;
 use anyhow::{Context, Result};
-use comfy_table::{Attribute, Cell, Table, modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL};
+use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, Table};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

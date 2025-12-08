@@ -1,4 +1,4 @@
-use anyhow::{Result, bail};
+use anyhow::{bail, Result};
 use reqwest::Client;
 use serde::Deserialize;
 use std::io::{self, IsTerminal, Write as _};

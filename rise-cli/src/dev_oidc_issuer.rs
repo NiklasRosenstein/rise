@@ -3,16 +3,16 @@
 //! This module provides a simple OIDC-compliant token issuer that can be used
 //! to test service account authentication without needing GitLab CI or GitHub Actions.
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{anyhow, Context, Result};
 use axum::{
-    Router,
     extract::{Query, State},
     response::Json,
     routing::get,
+    Router,
 };
-use base64::{Engine, engine::general_purpose::URL_SAFE_NO_PAD};
-use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
-use rsa::{RsaPrivateKey, RsaPublicKey, pkcs1::EncodeRsaPrivateKey};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine};
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+use rsa::{pkcs1::EncodeRsaPrivateKey, RsaPrivateKey, RsaPublicKey};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, sync::Arc, time::SystemTime};
 

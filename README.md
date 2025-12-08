@@ -100,7 +100,7 @@ Rise uses a multi-process architecture:
 |-----------|---------|
 | **rise-backend (server)** | HTTP API with embedded web frontend |
 | **rise-backend (controllers)** | Deployment, project, and ECR reconciliation |
-| **rise-cli** | Command-line interface |
+| **rise (CLI)** | Command-line interface |
 | **PostgreSQL** | Database for projects, teams, deployments |
 | **Dex** | OAuth2/OIDC provider for authentication |
 

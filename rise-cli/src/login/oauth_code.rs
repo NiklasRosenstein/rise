@@ -1,7 +1,7 @@
 use crate::config::Config;
 use anyhow::{Context, Result};
-use axum::{Router, extract::Query, response::Html, routing::get};
-use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use axum::{extract::Query, response::Html, routing::get, Router};
+use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};

@@ -1,7 +1,10 @@
 [package]
-name = "rise-cli"
-version = "0.1.0"
-edition = "2024"
+name = "rise"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "A simple and powerful CLI for deploying containerized applications"
 
 [[bin]]
 name = "rise"

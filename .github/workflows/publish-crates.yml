@@ -1,0 +1,79 @@
+name: Publish to crates.io
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+# Required for OIDC token requests
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Verify version matches tag
+        run: |
+          TAG_VERSION=${GITHUB_REF#refs/tags/v}
+          CARGO_VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.workspace_members[0]' | sed 's/.*#//')
+          echo "Tag version: $TAG_VERSION"
+          echo "Cargo version: $CARGO_VERSION"
+          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
+            echo "::error::Tag version ($TAG_VERSION) doesn't match Cargo version ($CARGO_VERSION)"
+            exit 1
+          fi
+
+      - name: Publish rise-backend
+        run: |
+          cd rise-backend
+          # Try trusted publishing first (if configured on crates.io)
+          # Falls back to token-based auth if CARGO_REGISTRY_TOKEN is set
+          cargo publish --no-verify
+        env:
+          # For future trusted publishing support
+          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ secrets.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+          # Fallback to classic token (comment out once trusted publishing works)
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Wait for crates.io index update
+        run: |
+          echo "Waiting for crates.io to update index..."
+          sleep 60
+
+      - name: Publish rise
+        run: |
+          cd rise-cli
+          cargo publish --no-verify
+        env:
+          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ secrets.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          generate_release_notes: true
+          body: |
+            Published to crates.io:
+            - [rise-backend v${{ github.ref_name }}](https://crates.io/crates/rise-backend)
+            - [rise v${{ github.ref_name }}](https://crates.io/crates/rise)
