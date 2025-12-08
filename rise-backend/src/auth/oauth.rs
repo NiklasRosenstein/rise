@@ -54,6 +54,21 @@ struct OidcDeviceAuthResponse {
     interval: Option<u64>,
 }
 
+/// Parameters for building OAuth2 authorization URLs
+///
+/// Represents the parameters needed to construct an OAuth2 authorization URL.
+/// Used by `OAuthClient::build_authorize_url()` to ensure type-safe parameter passing.
+#[derive(Debug)]
+pub struct AuthorizeParams<'a> {
+    pub client_id: &'a str,
+    pub redirect_uri: &'a str,
+    pub response_type: &'a str,
+    pub scope: &'a str,
+    pub code_challenge: &'a str,
+    pub code_challenge_method: &'a str,
+    pub state: Option<&'a str>,
+}
+
 /// OAuth2 client for OIDC provider
 pub struct OAuthClient {
     issuer: String,
@@ -384,17 +399,48 @@ impl OAuthClient {
         &self.token_url
     }
 
-    /// Build authorization URL with query parameters
+    /// Build authorization URL with typed parameters
     ///
-    /// Takes the discovered authorize_url and appends query parameters.
+    /// Takes the discovered authorize_url and appends OAuth2 authorization parameters.
     /// Handles existing query parameters correctly (using ? or &).
     /// URL-encodes parameter values for safety.
     ///
     /// This method serves as the single source of truth for constructing
     /// OAuth2 authorization URLs, ensuring all flows use the correctly
     /// discovered endpoint from OIDC.
-    pub fn build_authorize_url(&self, params: &[(&str, &str)]) -> String {
-        let query_string: String = params
+    ///
+    /// # Arguments
+    /// * `params` - Typed authorization parameters (client_id, redirect_uri, etc.)
+    ///
+    /// # Example
+    /// ```ignore
+    /// let params = AuthorizeParams {
+    ///     client_id: "my-client",
+    ///     redirect_uri: "https://example.com/callback",
+    ///     response_type: "code",
+    ///     scope: "openid email profile",
+    ///     code_challenge: "...",
+    ///     code_challenge_method: "S256",
+    ///     state: Some("random-state"),
+    /// };
+    /// let url = oauth_client.build_authorize_url(&params);
+    /// ```
+    pub fn build_authorize_url(&self, params: &AuthorizeParams) -> String {
+        let mut query_params = vec![
+            ("client_id", params.client_id),
+            ("redirect_uri", params.redirect_uri),
+            ("response_type", params.response_type),
+            ("scope", params.scope),
+            ("code_challenge", params.code_challenge),
+            ("code_challenge_method", params.code_challenge_method),
+        ];
+
+        // Add optional state parameter
+        if let Some(state) = params.state {
+            query_params.push(("state", state));
+        }
+
+        let query_string: String = query_params
             .iter()
             .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
             .collect::<Vec<_>>()

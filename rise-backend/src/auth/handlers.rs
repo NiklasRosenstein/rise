@@ -115,15 +115,16 @@ pub async fn authorize(
                 )
             })?;
 
-            // Build query parameters
-            let params = vec![
-                ("client_id", state.auth_settings.client_id.as_str()),
-                ("redirect_uri", redirect_uri.as_str()),
-                ("response_type", "code"),
-                ("scope", "openid email profile offline_access"),
-                ("code_challenge", code_challenge.as_str()),
-                ("code_challenge_method", code_challenge_method.as_str()),
-            ];
+            // Build authorization URL with typed parameters
+            let params = crate::auth::oauth::AuthorizeParams {
+                client_id: &state.auth_settings.client_id,
+                redirect_uri: &redirect_uri,
+                response_type: "code",
+                scope: "openid email profile offline_access",
+                code_challenge: &code_challenge,
+                code_challenge_method: &code_challenge_method,
+                state: None,
+            };
 
             let authorization_url = state.oauth_client.build_authorize_url(&params);
 
@@ -383,15 +384,15 @@ pub async fn oauth_signin(
     // Build OAuth2 authorization URL
     let callback_url = format!("{}/auth/callback", state.public_url.trim_end_matches('/'));
 
-    let params = vec![
-        ("client_id", state.auth_settings.client_id.as_str()),
-        ("redirect_uri", callback_url.as_str()),
-        ("response_type", "code"),
-        ("scope", "openid email profile"),
-        ("code_challenge", code_challenge.as_str()),
-        ("code_challenge_method", "S256"),
-        ("state", state_token.as_str()),
-    ];
+    let params = crate::auth::oauth::AuthorizeParams {
+        client_id: &state.auth_settings.client_id,
+        redirect_uri: &callback_url,
+        response_type: "code",
+        scope: "openid email profile",
+        code_challenge: &code_challenge,
+        code_challenge_method: "S256",
+        state: Some(&state_token),
+    };
 
     let auth_url = state.oauth_client.build_authorize_url(&params);
 
