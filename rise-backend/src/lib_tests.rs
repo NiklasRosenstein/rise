@@ -23,6 +23,8 @@ mod tests {
                 client_id: "rise-backend".to_string(),
                 client_secret: "test-secret".to_string(),
                 admin_users: vec![],
+                authorize_url: None,
+                token_url: None,
             },
             database: DatabaseSettings {
                 url: "postgres://rise:rise123@localhost:5432/rise".to_string(),

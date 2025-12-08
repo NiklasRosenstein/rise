@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
 
 /// JWT claims from OIDC provider ID token
+/// Note: Unknown fields (like email_verified) are ignored by default
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
     pub sub: String,          // Subject (user ID from OIDC provider)
     pub email: String,        // User email
-    pub email_verified: bool, // Email verification status
     pub iss: String,          // Issuer (OIDC provider URL)
     pub aud: String,          // Audience (client ID) - validated to match configured client_id
     pub exp: usize,           // Expiration time
@@ -30,11 +30,11 @@ struct JwksResponse {
 #[derive(Debug, Deserialize, Clone)]
 struct Jwk {
     #[serde(rename = "use")]
-    key_use: String,
+    key_use: Option<String>, // Optional: some providers (like Entra ID) don't include this
     kty: String,
     kid: String,
     #[allow(dead_code)]
-    alg: String,
+    alg: Option<String>, // Optional in some JWKS responses
     n: String,
     e: String,
 }
@@ -117,19 +117,27 @@ impl JwtValidator {
             .await
             .context("Failed to fetch JWKS")?;
 
-        let jwks: JwksResponse = response
-            .json()
+        // Get response text for better error logging
+        let response_text = response
+            .text()
             .await
-            .context("Failed to parse JWKS response")?;
+            .context("Failed to read JWKS response body")?;
+
+        tracing::debug!("JWKS response: {}", response_text);
+
+        let jwks: JwksResponse = serde_json::from_str(&response_text)
+            .map_err(|e| anyhow!("Failed to parse JWKS response: {}", e))?;
 
         let mut keys = HashMap::new();
 
         for jwk in jwks.keys {
-            if jwk.kty == "RSA" && jwk.key_use == "sig" {
+            // Accept RSA keys that either don't have a use field or have use="sig"
+            if jwk.kty == "RSA" && (jwk.key_use.is_none() || jwk.key_use.as_deref() == Some("sig")) {
                 let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)
                     .context("Failed to create decoding key from JWK")?;
                 keys.insert(jwk.kid.clone(), decoding_key);
-                tracing::debug!("Loaded JWK with kid: {}", jwk.kid);
+                tracing::debug!("Loaded JWK with kid: {}, use: {:?}, alg: {:?}",
+                    jwk.kid, jwk.key_use, jwk.alg);
             }
         }
 
@@ -277,7 +285,6 @@ mod tests {
         let json = r#"{
             "sub": "user123",
             "email": "test@example.com",
-            "email_verified": true,
             "iss": "https://issuer.example.com",
             "aud": "my-client-id",
             "exp": 1234567890,
@@ -287,7 +294,27 @@ mod tests {
         let claims: Claims = serde_json::from_str(json).unwrap();
         assert_eq!(claims.sub, "user123");
         assert_eq!(claims.email, "test@example.com");
-        assert!(claims.email_verified);
+        assert_eq!(claims.iss, "https://issuer.example.com");
+        assert_eq!(claims.aud, "my-client-id");
+    }
+
+    #[test]
+    fn test_claims_deserialization_with_unknown_fields() {
+        // Test that unknown fields like email_verified are ignored
+        let json = r#"{
+            "sub": "user123",
+            "email": "test@example.com",
+            "email_verified": true,
+            "iss": "https://issuer.example.com",
+            "aud": "my-client-id",
+            "exp": 1234567890,
+            "iat": 1234567800,
+            "unknown_field": "should be ignored"
+        }"#;
+
+        let claims: Claims = serde_json::from_str(json).unwrap();
+        assert_eq!(claims.sub, "user123");
+        assert_eq!(claims.email, "test@example.com");
         assert_eq!(claims.iss, "https://issuer.example.com");
         assert_eq!(claims.aud, "my-client-id");
     }
