@@ -1,7 +1,17 @@
-# Stage 1: Generate recipe file for dependencies
-FROM rust:1.91-slim AS planner
+# Stage 1: Use official cargo-chef image as base
+FROM lukemathwalker/cargo-chef:latest-rust-1.91 AS chef
 WORKDIR /usr/src
-RUN cargo install cargo-chef
+
+# Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
+RUN apt-get update && apt-get install -y \
+    pkg-config \
+    libssl-dev \
+    perl \
+    make \
+    && rm -rf /var/lib/apt/lists/*
+
+# Stage 2: Generate recipe file for dependencies
+FROM chef AS planner
 
 # Copy workspace files (need all members for cargo metadata to work)
 COPY Cargo.toml Cargo.lock ./
@@ -15,39 +25,13 @@ RUN mkdir -p rise-backend/src rise-cli/src && \
 
 RUN cargo chef prepare --recipe-path recipe.json
 
-# Stage 2: Build dependencies (cached separately from source code)
-FROM rust:1.91-slim AS cacher
-WORKDIR /usr/src
+# Stage 3: Build dependencies (cached separately from source code)
+FROM chef AS builder
 
-# Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    perl \
-    make \
-    && rm -rf /var/lib/apt/lists/*
-
-RUN cargo install cargo-chef
 COPY --from=planner /usr/src/recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     cargo chef cook --release --recipe-path recipe.json
-
-# Stage 3: Build the application
-FROM rust:1.91-slim AS builder
-WORKDIR /usr/src
-
-# Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
-RUN apt-get update && apt-get install -y \
-    pkg-config \
-    libssl-dev \
-    perl \
-    make \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy cached dependencies from cacher stage
-COPY --from=cacher /usr/local/cargo /usr/local/cargo
-COPY --from=cacher /usr/src/target target
 
 # Copy workspace and package files
 COPY Cargo.toml Cargo.lock ./
@@ -55,6 +39,7 @@ COPY .sqlx ./.sqlx
 COPY rise-backend ./rise-backend
 COPY rise-cli ./rise-cli
 
+# Build the application
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
     SQLX_OFFLINE=true cargo build --release --bin rise && \
