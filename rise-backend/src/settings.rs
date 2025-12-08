@@ -106,6 +106,16 @@ pub struct AuthSettings {
     /// List of admin user emails (have full permissions)
     #[serde(default)]
     pub admin_users: Vec<String>,
+    /// Optional custom authorize endpoint URL
+    /// If not set, will be discovered from issuer's .well-known/openid-configuration
+    /// or default to {issuer}/authorize
+    #[serde(default)]
+    pub authorize_url: Option<String>,
+    /// Optional custom token endpoint URL
+    /// If not set, will be discovered from issuer's .well-known/openid-configuration
+    /// or default to {issuer}/token
+    #[serde(default)]
+    pub token_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone)]

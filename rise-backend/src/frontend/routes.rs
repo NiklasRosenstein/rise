@@ -55,6 +55,7 @@ fn render_index(state: &AppState) -> Response {
     let config = json!({
         "backendUrl": state.server_settings.public_url.trim_end_matches('/'),
         "issuerUrl": state.auth_settings.issuer,
+        "authorizeUrl": state.oauth_client.authorize_url(),
         "clientId": state.auth_settings.client_id,
         "redirectUri": format!("{}/", state.server_settings.public_url.trim_end_matches('/')),
     });

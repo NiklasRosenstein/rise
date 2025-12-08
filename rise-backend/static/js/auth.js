@@ -51,7 +51,7 @@ async function login() {
         sessionStorage.setItem('pkce_code_verifier', codeVerifier);
 
         // Build authorization URL
-        const authUrl = new URL(`${CONFIG.issuerUrl}/auth`);
+        const authUrl = new URL(CONFIG.authorizeUrl);
         authUrl.searchParams.append('client_id', CONFIG.clientId);
         authUrl.searchParams.append('redirect_uri', CONFIG.redirectUri);
         authUrl.searchParams.append('response_type', 'code');

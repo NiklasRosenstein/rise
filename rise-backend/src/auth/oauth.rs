@@ -3,6 +3,13 @@ use reqwest::Client as HttpClient;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+/// OIDC Discovery Document
+#[derive(Debug, Deserialize)]
+struct OidcDiscovery {
+    authorization_endpoint: String,
+    token_endpoint: String,
+}
+
 /// OAuth2 token response from OIDC provider
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TokenInfo {
@@ -52,22 +59,91 @@ pub struct DexOAuthClient {
     client_id: String,
     client_secret: String,
     http_client: HttpClient,
+    authorize_url: String,
+    token_url: String,
 }
 
 impl DexOAuthClient {
+    /// Discover OIDC endpoints from the issuer's .well-known/openid-configuration
+    async fn discover_endpoints(http_client: &HttpClient, issuer: &str) -> Result<(String, String)> {
+        let discovery_url = format!("{}/.well-known/openid-configuration", issuer.trim_end_matches('/'));
+
+        tracing::debug!("Attempting OIDC discovery from: {}", discovery_url);
+
+        let response = http_client
+            .get(&discovery_url)
+            .send()
+            .await
+            .context("Failed to fetch OIDC discovery document")?;
+
+        if !response.status().is_success() {
+            tracing::warn!(
+                "OIDC discovery failed with status {}, falling back to default endpoints",
+                response.status()
+            );
+            let authorize_url = format!("{}/authorize", issuer.trim_end_matches('/'));
+            let token_url = format!("{}/token", issuer.trim_end_matches('/'));
+            return Ok((authorize_url, token_url));
+        }
+
+        let discovery: OidcDiscovery = response
+            .json()
+            .await
+            .context("Failed to parse OIDC discovery document")?;
+
+        tracing::info!(
+            "OIDC discovery successful: authorize_endpoint={}, token_endpoint={}",
+            discovery.authorization_endpoint,
+            discovery.token_endpoint
+        );
+
+        Ok((discovery.authorization_endpoint, discovery.token_endpoint))
+    }
+
     /// Create a new OAuth2 client for the configured OIDC provider
-    pub fn new(issuer: String, client_id: String, client_secret: String) -> Result<Self> {
+    /// If authorize_url or token_url are not provided, they will be discovered from
+    /// the issuer's .well-known/openid-configuration endpoint
+    pub async fn new(
+        issuer: String,
+        client_id: String,
+        client_secret: String,
+        authorize_url: Option<String>,
+        token_url: Option<String>,
+    ) -> Result<Self> {
+        let http_client = HttpClient::new();
+
+        // If either URL is missing, attempt OIDC discovery
+        let (final_authorize_url, final_token_url) = if authorize_url.is_none() || token_url.is_none() {
+            tracing::info!("One or both OAuth endpoints not configured, attempting OIDC discovery");
+            let (discovered_auth, discovered_token) = Self::discover_endpoints(&http_client, &issuer).await?;
+
+            (
+                authorize_url.unwrap_or(discovered_auth),
+                token_url.unwrap_or(discovered_token),
+            )
+        } else {
+            (authorize_url.unwrap(), token_url.unwrap())
+        };
+
+        tracing::info!(
+            "OAuth2 client initialized with authorize_url={}, token_url={}",
+            final_authorize_url,
+            final_token_url
+        );
+
         Ok(Self {
             issuer,
             client_id,
             client_secret,
-            http_client: HttpClient::new(),
+            http_client,
+            authorize_url: final_authorize_url,
+            token_url: final_token_url,
         })
     }
 
     /// Exchange username and password for tokens (Resource Owner Password Grant)
     pub async fn password_grant(&self, email: &str, password: &str) -> Result<TokenInfo> {
-        let token_url = format!("{}/token", self.issuer);
+        let token_url = &self.token_url;
 
         let mut params = HashMap::new();
         params.insert("grant_type", "password");
@@ -77,7 +153,7 @@ impl DexOAuthClient {
 
         let response = self
             .http_client
-            .post(&token_url)
+            .post(token_url)
             .basic_auth(&self.client_id, Some(&self.client_secret))
             .form(&params)
             .send()
@@ -162,7 +238,7 @@ impl DexOAuthClient {
 
     /// Poll for device authorization completion
     pub async fn device_flow_poll(&self, device_code: &str) -> Result<Option<TokenInfo>> {
-        let token_url = format!("{}/token", self.issuer);
+        let token_url = &self.token_url;
 
         let mut params = HashMap::new();
         params.insert("grant_type", "urn:ietf:params:oauth:grant-type:device_code");
@@ -170,7 +246,7 @@ impl DexOAuthClient {
 
         let response = self
             .http_client
-            .post(&token_url)
+            .post(token_url)
             .basic_auth(&self.client_id, Some(&self.client_secret))
             .form(&params)
             .send()
@@ -222,7 +298,7 @@ impl DexOAuthClient {
         code_verifier: &str,
         redirect_uri: &str,
     ) -> Result<TokenInfo> {
-        let token_url = format!("{}/token", self.issuer);
+        let token_url = &self.token_url;
 
         let mut params = HashMap::new();
         params.insert("grant_type", "authorization_code");
@@ -232,7 +308,7 @@ impl DexOAuthClient {
 
         let response = self
             .http_client
-            .post(&token_url)
+            .post(token_url)
             .basic_auth(&self.client_id, Some(&self.client_secret))
             .form(&params)
             .send()
@@ -271,5 +347,13 @@ impl DexOAuthClient {
 
     pub fn issuer(&self) -> &str {
         &self.issuer
+    }
+
+    pub fn authorize_url(&self) -> &str {
+        &self.authorize_url
+    }
+
+    pub fn token_url(&self) -> &str {
+        &self.token_url
     }
 }

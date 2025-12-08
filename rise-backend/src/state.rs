@@ -93,7 +93,9 @@ impl AppState {
             settings.auth.issuer.clone(),
             settings.auth.client_id.clone(),
             settings.auth.client_secret.clone(),
-        )?);
+            settings.auth.authorize_url.clone(),
+            settings.auth.token_url.clone(),
+        ).await?);
 
         // Initialize registry provider based on configuration
         let registry_provider: Option<Arc<dyn RegistryProvider>> =
@@ -310,7 +312,9 @@ impl AppState {
             settings.auth.issuer.clone(),
             settings.auth.client_id.clone(),
             settings.auth.client_secret.clone(),
-        )?);
+            settings.auth.authorize_url.clone(),
+            settings.auth.token_url.clone(),
+        ).await?);
         let admin_users = Arc::new(Vec::new());
         let auth_settings = Arc::new(settings.auth.clone());
         let server_settings = Arc::new(settings.server.clone());

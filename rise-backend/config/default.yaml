@@ -33,6 +33,10 @@ auth:
   # List of admin user emails (have full permissions on all resources)
   admin_users:
     - "admin@example.com"
+  # Optional: Custom OAuth2 endpoints (if not set, will be discovered from issuer/.well-known/openid-configuration)
+  # For Entra ID/Azure AD, use:
+  # authorize_url: "https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/authorize"
+  # token_url: "https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token"
 
 database:
   # DATABASE_URL environment variable is always used if set
