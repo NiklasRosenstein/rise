@@ -7,14 +7,22 @@ pack = "0.39.0"
 description = "Serve documentation with live reload in port 3001."
 run = "mdbook serve -p 3001 --open"
 
+[tasks."db:nuke"]
+description = "Drop and recreate the development database. USE WITH CAUTION."
+run = """
+set -x
+docker compose down -v postgres
+docker compose up postgres -d
+"""
+
 [tasks."db:migrate"]
 description = "Run database migrations. Run before building the backend."
 dir = "rise-backend"
-run = "docker-compose up postgres -d && sqlx migrate run"
+run = "docker compose up postgres -d && sqlx migrate run"
 
 [tasks."backend:deps"]
-description = "Start all backend dependencies with docker-compose."
-run = "docker-compose up -d"
+description = "Start all backend dependencies with docker compose."
+run = "docker compose up -d"
 
 [tasks."backend:run"]
 description = "Run the backend with overmind."
@@ -33,7 +41,7 @@ description = "Start minikube, preconfigured with access to the local Docker reg
 run = """
 set -x
 
-docker-compose up -d registry
+docker compose up -d registry
 NETWORK_NAME=rise_bridge
 REGISTRY_NAME=rise-registry
 REGISTRY_DIR="/etc/containerd/certs.d/localhost:5000"
