@@ -302,28 +302,76 @@ impl Settings {
         }
     }
 
+    /// Try to add a config file with multiple extension attempts (.toml, .yaml, .yml)
+    /// Returns Ok(true) if a file was loaded, Ok(false) if no file found (when not required)
+    fn try_add_config_file(
+        builder: &mut config::ConfigBuilder<config::builder::DefaultState>,
+        config_dir: &str,
+        name: &str,
+        required: bool,
+    ) -> Result<bool, ConfigError> {
+        // Try extensions in order of preference
+        let extensions = ["toml", "yaml", "yml"];
+
+        for ext in extensions {
+            let path = format!("{}/{}.{}", config_dir, name, ext);
+            if std::path::Path::new(&path).exists() {
+                tracing::debug!("Loading config file: {}", path);
+                *builder = builder
+                    .clone()
+                    .add_source(config::File::with_name(&format!("{}/{}", config_dir, name)));
+                return Ok(true);
+            }
+        }
+
+        if required {
+            Err(ConfigError::Message(format!(
+                "Required config file not found: {}/{}.{{toml,yaml,yml}}",
+                config_dir, name
+            )))
+        } else {
+            tracing::debug!("Optional config file not found: {}/{}.{{toml,yaml,yml}}", config_dir, name);
+            Ok(false)
+        }
+    }
+
     pub fn new() -> Result<Self, ConfigError> {
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
         let config_dir = env::var("RISE_CONFIG_DIR").unwrap_or_else(|_| "/config".into());
 
-        let builder = Config::builder()
-            // Start off by merging in the "default" configuration file
-            .add_source(config::File::with_name(&format!(
-                "{}/default.toml",
-                config_dir
-            )))
-            // Add in the current environment file
-            // Default to 'development' env
-            // Note that this file is optional
-            .add_source(
-                config::File::with_name(&format!("{}/{}.toml", config_dir, run_mode))
-                    .required(false),
-            )
-            // Add in a local configuration file
-            // This file shouldn't be checked in to git
-            .add_source(
-                config::File::with_name(&format!("{}/local.toml", config_dir)).required(false),
-            );
+        let mut builder = Config::builder();
+
+        // Load config files in order, trying both .toml and .yaml/.yml extensions
+        // TOML takes precedence if both exist
+
+        // 1. Load default config (required)
+        let default_loaded = Self::try_add_config_file(
+            &mut builder,
+            &config_dir,
+            "default",
+            true,
+        )?;
+        if !default_loaded {
+            return Err(ConfigError::Message(
+                format!("Required default config not found in {} (tried default.toml, default.yaml, default.yml)", config_dir)
+            ));
+        }
+
+        // 2. Load environment-specific config (optional)
+        Self::try_add_config_file(
+            &mut builder,
+            &config_dir,
+            &run_mode,
+            false,
+        )?;
+
+        // 3. Load local config (optional, not checked into git)
+        Self::try_add_config_file(
+            &mut builder,
+            &config_dir,
+            "local",
+            false,
+        )?;
 
         // Build config and substitute environment variables
         let config = builder.build()?;
@@ -404,6 +452,7 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::Path;
 
     #[test]
     fn test_substitute_env_vars_in_string_basic() {
@@ -442,5 +491,49 @@ mod tests {
     fn test_substitute_env_vars_in_string_no_substitution() {
         let result = Settings::substitute_env_vars_in_string("plain_value");
         assert_eq!(result, "plain_value");
+    }
+
+    #[test]
+    fn test_yaml_config_loading() {
+        // Verify test config directory exists
+        let test_config_dir = Path::new("config/test-yaml");
+        assert!(test_config_dir.exists(), "config/test-yaml directory should exist for testing");
+
+        // Set environment variables for the test config
+        env::set_var("RISE_CONFIG_DIR", "config/test-yaml");
+        env::set_var("RUN_MODE", "nonexistent"); // Don't load any environment-specific config
+        env::set_var("DATABASE_URL", "postgres://test:test@localhost/test");
+        env::set_var("TEST_CLIENT_SECRET", "yaml-test-secret");
+
+        // Load settings - should successfully load default.yaml from test-yaml directory
+        let settings = Settings::new();
+        assert!(settings.is_ok(), "Should load YAML config successfully: {:?}", settings.err());
+
+        let settings = settings.unwrap();
+
+        // Verify values from default.yaml
+        assert_eq!(settings.server.port, 4000, "Port should be 4000 from test YAML");
+        assert_eq!(settings.server.public_url, "http://test.example.com");
+        assert_eq!(settings.auth.issuer, "http://test-dex:5556/dex");
+        assert_eq!(settings.auth.client_id, "test-client");
+        assert_eq!(settings.auth.client_secret, "yaml-test-secret", "Should use env var substitution");
+
+        // Verify registry settings
+        assert!(settings.registry.is_some());
+        match settings.registry {
+            Some(RegistrySettings::OciClientAuth { registry_url, namespace }) => {
+                assert_eq!(registry_url, "test-registry:5000");
+                assert_eq!(namespace, "test-apps");
+            }
+            Some(ref other) => {
+                panic!("Registry should be OciClientAuth type, got: {:?}", other);
+            }
+            None => panic!("Registry should be configured"),
+        }
+
+        // Clean up
+        env::remove_var("RISE_CONFIG_DIR");
+        env::remove_var("RUN_MODE");
+        env::remove_var("TEST_CLIENT_SECRET");
     }
 }

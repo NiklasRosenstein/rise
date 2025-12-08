@@ -1,32 +1,40 @@
 # Configuration Guide
 
-Rise backend uses TOML configuration files with environment variable substitution support.
+Rise backend uses TOML or YAML configuration files with environment variable substitution support.
 
 ## Configuration Files
 
 Configuration files are located in `rise-backend/config/` and loaded in this order:
 
-1. `default.toml` - Base configuration with sensible defaults
-2. `{RUN_MODE}.toml` - Environment-specific config (optional)
-   - `development.toml` when `RUN_MODE=development`
-   - `production.toml` when `RUN_MODE=production`
-3. `local.toml` - Local overrides (not checked into git)
+1. `default.{toml,yaml,yml}` - Base configuration with sensible defaults
+2. `{RUN_MODE}.{toml,yaml,yml}` - Environment-specific config (optional)
+   - `development.toml` or `development.yaml` when `RUN_MODE=development`
+   - `production.toml` or `production.yaml` when `RUN_MODE=production`
+3. `local.{toml,yaml,yml}` - Local overrides (not checked into git)
 
 Later files override earlier ones.
+
+**File Format**: The backend supports both TOML and YAML formats. When multiple formats exist for the same config file (e.g., both `default.toml` and `default.yaml`), TOML takes precedence. For Kubernetes/Helm deployments, YAML format is recommended as it integrates seamlessly with Helm values.
 
 ## Environment Variable Substitution
 
 Configuration values can reference environment variables using the syntax:
 
 ```toml
-# Use environment variable, or default if not set
+# TOML example
 client_secret = "${RISE_AUTH_CLIENT_SECRET:-rise-backend-secret}"
-
-# Use environment variable, error if not set
 account_id = "${AWS_ACCOUNT_ID}"
-
-# Multiple variables in one value
 public_url = "https://${DOMAIN_NAME}:${PORT}"
+```
+
+```yaml
+# YAML example
+auth:
+  client_secret: "${RISE_AUTH_CLIENT_SECRET:-rise-backend-secret}"
+registry:
+  account_id: "${AWS_ACCOUNT_ID}"
+server:
+  public_url: "https://${DOMAIN_NAME}:${PORT}"
 ```
 
 ### Syntax
@@ -36,27 +44,29 @@ public_url = "https://${DOMAIN_NAME}:${PORT}"
 
 ### How It Works
 
-1. Configuration files are parsed as TOML
+1. Configuration files are parsed as TOML or YAML
 2. String values are scanned for `${...}` patterns
 3. Patterns are replaced with environment variable values
 4. Resulting configuration is deserialized into Settings struct
 
-This happens **after** TOML parsing but **before** deserialization, so:
-- ✅ Works in all string values (including nested tables and arrays)
-- ✅ Preserves TOML structure and types
+This happens **after** TOML/YAML parsing but **before** deserialization, so:
+- ✅ Works in all string values (including nested tables/maps and arrays)
+- ✅ Preserves structure and types
 - ✅ Clear error messages if required variables are missing
 
 ## Configuration Precedence
 
 Configuration is loaded in this order (later values override earlier ones):
 
-1. `default.toml` - Base configuration with defaults
-2. `{RUN_MODE}.toml` - Environment-specific (e.g., production.toml)
-3. `local.toml` - Local overrides (not in git)
+1. `default.{toml,yaml,yml}` - Base configuration with defaults
+2. `{RUN_MODE}.{toml,yaml,yml}` - Environment-specific (e.g., production.yaml)
+3. `local.{toml,yaml,yml}` - Local overrides (not in git)
 4. Environment variable substitution - `${VAR}` patterns are replaced
 5. DATABASE_URL special case - Overrides `[database] url` if set
 
-Example:
+**Note**: When multiple file formats exist for the same config file, TOML takes precedence over YAML.
+
+Example (TOML):
 ```toml
 # In default.toml
 client_secret = "${AUTH_SECRET:-default-secret}"
@@ -66,6 +76,17 @@ client_secret = "${AUTH_SECRET}"  # Override: no default, required
 
 # In local.toml
 client_secret = "my-local-secret"  # Override: hardcoded value
+```
+
+Example (YAML):
+```yaml
+# In default.yaml
+auth:
+  client_secret: "${AUTH_SECRET:-default-secret}"
+
+# In production.yaml (overrides default.yaml)
+auth:
+  client_secret: "${AUTH_SECRET}"  # No default, required
 ```
 
 ### Special Cases
@@ -100,7 +121,7 @@ client_id = "rise-backend"
 client_secret = "${RISE_AUTH_CLIENT_SECRET:-rise-backend-secret}"
 ```
 
-### Production with Environment Variables
+### Production with Environment Variables (TOML)
 
 ```toml
 # production.toml
@@ -122,6 +143,34 @@ region = "${AWS_REGION:-us-east-1}"
 account_id = "${AWS_ACCOUNT_ID}"
 role_arn = "${ECR_CONTROLLER_ROLE_ARN}"
 push_role_arn = "${ECR_PUSH_ROLE_ARN}"
+```
+
+### Production with Environment Variables (YAML)
+
+```yaml
+# production.yaml - ideal for Kubernetes/Helm deployments
+server:
+  host: "0.0.0.0"
+  port: "${PORT:-3000}"
+  public_url: "${PUBLIC_URL}"  # Required, no default
+  cookie_secure: true
+
+auth:
+  issuer: "${DEX_ISSUER}"
+  client_id: "${OIDC_CLIENT_ID}"
+  client_secret: "${OIDC_CLIENT_SECRET}"
+  admin_users:
+    - "${ADMIN_EMAIL}"
+
+database:
+  url: "${DATABASE_URL}"
+
+registry:
+  type: "ecr"
+  region: "${AWS_REGION:-us-east-1}"
+  account_id: "${AWS_ACCOUNT_ID}"
+  role_arn: "${ECR_CONTROLLER_ROLE_ARN}"
+  push_role_arn: "${ECR_PUSH_ROLE_ARN}"
 ```
 
 Environment file:

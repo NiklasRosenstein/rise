@@ -1,0 +1,22 @@
+# Test YAML configuration
+server:
+  host: "0.0.0.0"
+  port: 4000
+  public_url: "http://test.example.com"
+  cookie_domain: ""
+  cookie_secure: false
+
+auth:
+  issuer: "http://test-dex:5556/dex"
+  client_id: "test-client"
+  client_secret: "${TEST_CLIENT_SECRET:-test-secret}"
+  admin_users:
+    - "test@example.com"
+
+database:
+  url: "${DATABASE_URL}"
+
+registry:
+  type: "oci-client-auth"
+  registry_url: "test-registry:5000"
+  namespace: "test-apps"
