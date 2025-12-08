@@ -199,3 +199,4 @@ The project `visibility` field (Public/Private) is currently stored but not enfo
 
 This feature is specifically for the Kubernetes controller and will not be implemented for the Docker controller.
 - Keep the ECR controller disabled by default in Procfile.dev, we only currently have it enabled for development
+- When removing a feature, do a comprehensive check on the codebase to ensure any remaining references to that feature are removed or updated. This includes documentation files/READMEs, config files, code comments, etc.
