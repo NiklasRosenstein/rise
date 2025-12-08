@@ -48,22 +48,30 @@ spec:
           protocol: TCP
         livenessProbe:
           httpGet:
-            path: /healthz/live
+            path: /healthz
             port: http
+          initialDelaySeconds: 10
+          periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /healthz/ready
+            path: /healthz
             port: http
+          initialDelaySeconds: 5
+          periodSeconds: 5
         volumeMounts:
         - name: config
           mountPath: /etc/dex
           readOnly: true
+        - name: dex-data
+          mountPath: /var/dex
         resources:
           {{- toYaml .Values.dex.resources | nindent 12 }}
       volumes:
       - name: config
         configMap:
           name: {{ include "rise.fullname" . }}-dex-config
+      - name: dex-data
+        emptyDir: {}
       {{- with .Values.dex.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
