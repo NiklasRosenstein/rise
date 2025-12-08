@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET\n            status = 'Stopped',\n            termination_reason = 'UserStopped',\n            deployment_url = NULL,\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port,\n            created_at, updated_at\n        ",
+  "query": "\n        UPDATE deployments\n        SET\n            status = 'Cancelled',\n            termination_reason = 'Cancelled',\n            deployment_url = NULL,\n            controller_metadata = '{}',\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -133,5 +133,5 @@
       false
     ]
   },
-  "hash": "29edadde08784b5be789497f0ce464d2a7e3790ffcd1e61b85a67fbfeaca29b8"
+  "hash": "f3bdea65d118dc92786222bdf8fba943b429c3b16e65d63c96470e0d2116e6a4"
 }
