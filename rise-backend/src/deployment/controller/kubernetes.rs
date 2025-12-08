@@ -717,6 +717,7 @@ impl KubernetesController {
                 type_: Some("ClusterIP".to_string()),
                 selector: Some(Self::deployment_labels(project, deployment)),
                 ports: Some(vec![ServicePort {
+                    name: Some("http".to_string()),
                     port: 80,
                     target_port: Some(
                         k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(
@@ -870,7 +871,7 @@ impl KubernetesController {
                                 service: Some(IngressServiceBackend {
                                     name: Self::service_name(project, deployment),
                                     port: Some(ServiceBackendPort {
-                                        number: Some(80),
+                                        name: Some("http".to_string()),
                                         ..Default::default()
                                     }),
                                 }),
