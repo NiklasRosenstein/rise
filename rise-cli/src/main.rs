@@ -340,25 +340,16 @@ async fn main() -> Result<()> {
         } => {
             // Use provided URL or fall back to config default
             let login_url = url.as_deref().unwrap_or(&backend_url);
-            let dex_url = config.get_dex_url();
 
             if *device {
                 // Device flow (explicit)
-                login::handle_device_flow(
-                    &http_client,
-                    &dex_url,
-                    "rise-backend",
-                    &mut config,
-                    url.as_deref(),
-                )
-                .await?;
+                login::handle_device_flow(&http_client, login_url, &mut config, url.as_deref())
+                    .await?;
             } else {
                 // Authorization code flow with PKCE (default)
                 login::handle_authorization_code_flow(
                     &http_client,
                     login_url,
-                    &dex_url,
-                    "rise-backend",
                     &mut config,
                     url.as_deref(),
                 )

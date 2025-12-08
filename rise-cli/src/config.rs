@@ -86,11 +86,4 @@ impl Config {
             .clone()
             .unwrap_or_else(|| "http://localhost:3000".to_string())
     }
-
-    /// Get the Dex OAuth2 URL (for local development)
-    pub fn get_dex_url(&self) -> String {
-        // For now, hardcoded to local development Dex instance
-        // Could be made configurable in the future
-        "http://localhost:5556/dex".to_string()
-    }
 }

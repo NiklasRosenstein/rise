@@ -97,14 +97,18 @@ async fn start_callback_server() -> Result<(String, tokio::sync::oneshot::Receiv
 
 #[derive(Debug, Serialize)]
 struct AuthorizeRequest {
-    redirect_uri: String,
-    code_challenge: String,
-    code_challenge_method: String,
+    flow: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    redirect_uri: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code_challenge: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    code_challenge_method: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct AuthorizeResponse {
-    authorization_url: String,
+    authorization_url: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -123,8 +127,6 @@ struct CodeExchangeResponse {
 pub async fn handle_authorization_code_flow(
     http_client: &Client,
     backend_url: &str,
-    _dex_url: &str,
-    _client_id: &str,
     config: &mut Config,
     backend_url_to_save: Option<&str>,
 ) -> Result<()> {
@@ -140,9 +142,10 @@ pub async fn handle_authorization_code_flow(
     println!("Requesting authorization URL from backend...");
 
     let authorize_request = AuthorizeRequest {
-        redirect_uri: redirect_uri.clone(),
-        code_challenge: code_challenge.clone(),
-        code_challenge_method: "S256".to_string(),
+        flow: "code".to_string(),
+        redirect_uri: Some(redirect_uri.clone()),
+        code_challenge: Some(code_challenge.clone()),
+        code_challenge_method: Some("S256".to_string()),
     };
 
     let authorize_url = format!("{}/auth/authorize", backend_url);
@@ -172,7 +175,9 @@ pub async fn handle_authorization_code_flow(
         .await
         .context("Failed to parse authorization URL response")?;
 
-    let auth_url = authorize_response.authorization_url;
+    let auth_url = authorize_response
+        .authorization_url
+        .ok_or_else(|| anyhow::anyhow!("No authorization URL in response"))?;
 
     // Step 4: Open browser
     println!("Opening browser to authenticate...");

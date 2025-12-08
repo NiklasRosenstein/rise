@@ -10,12 +10,12 @@ use tokio::sync::RwLock;
 /// Note: Unknown fields (like email_verified) are ignored by default
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Claims {
-    pub sub: String,          // Subject (user ID from OIDC provider)
-    pub email: String,        // User email
-    pub iss: String,          // Issuer (OIDC provider URL)
-    pub aud: String,          // Audience (client ID) - validated to match configured client_id
-    pub exp: usize,           // Expiration time
-    pub iat: usize,           // Issued at
+    pub sub: String,   // Subject (user ID from OIDC provider)
+    pub email: String, // User email
+    pub iss: String,   // Issuer (OIDC provider URL)
+    pub aud: String,   // Audience (client ID) - validated to match configured client_id
+    pub exp: usize,    // Expiration time
+    pub iat: usize,    // Issued at
     #[serde(default)]
     pub name: Option<String>, // User's full name
 }
@@ -132,12 +132,17 @@ impl JwtValidator {
 
         for jwk in jwks.keys {
             // Accept RSA keys that either don't have a use field or have use="sig"
-            if jwk.kty == "RSA" && (jwk.key_use.is_none() || jwk.key_use.as_deref() == Some("sig")) {
+            if jwk.kty == "RSA" && (jwk.key_use.is_none() || jwk.key_use.as_deref() == Some("sig"))
+            {
                 let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)
                     .context("Failed to create decoding key from JWK")?;
                 keys.insert(jwk.kid.clone(), decoding_key);
-                tracing::debug!("Loaded JWK with kid: {}, use: {:?}, alg: {:?}",
-                    jwk.kid, jwk.key_use, jwk.alg);
+                tracing::debug!(
+                    "Loaded JWK with kid: {}, use: {:?}, alg: {:?}",
+                    jwk.kid,
+                    jwk.key_use,
+                    jwk.alg
+                );
             }
         }
 

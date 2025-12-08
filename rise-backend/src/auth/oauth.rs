@@ -21,7 +21,7 @@ pub struct TokenInfo {
 
 /// Raw token response from OIDC provider (includes id_token)
 #[derive(Debug, Deserialize)]
-struct DexTokenResponse {
+struct OidcTokenResponse {
     access_token: String,
     token_type: String,
     expires_in: Option<u64>,
@@ -43,7 +43,7 @@ pub struct DeviceAuthResponse {
 
 /// Raw device auth response from OIDC provider
 #[derive(Debug, Deserialize)]
-struct DexDeviceAuthResponse {
+struct OidcDeviceAuthResponse {
     device_code: String,
     user_code: String,
     verification_uri: String,
@@ -53,8 +53,7 @@ struct DexDeviceAuthResponse {
 }
 
 /// OAuth2 client for OIDC provider
-/// Note: Named DexOAuthClient for historical reasons, works with any OIDC provider
-pub struct DexOAuthClient {
+pub struct OAuthClient {
     issuer: String,
     client_id: String,
     client_secret: String,
@@ -63,10 +62,16 @@ pub struct DexOAuthClient {
     token_url: String,
 }
 
-impl DexOAuthClient {
+impl OAuthClient {
     /// Discover OIDC endpoints from the issuer's .well-known/openid-configuration
-    async fn discover_endpoints(http_client: &HttpClient, issuer: &str) -> Result<(String, String)> {
-        let discovery_url = format!("{}/.well-known/openid-configuration", issuer.trim_end_matches('/'));
+    async fn discover_endpoints(
+        http_client: &HttpClient,
+        issuer: &str,
+    ) -> Result<(String, String)> {
+        let discovery_url = format!(
+            "{}/.well-known/openid-configuration",
+            issuer.trim_end_matches('/')
+        );
 
         tracing::debug!("Attempting OIDC discovery from: {}", discovery_url);
 
@@ -113,9 +118,12 @@ impl DexOAuthClient {
         let http_client = HttpClient::new();
 
         // If either URL is missing, attempt OIDC discovery
-        let (final_authorize_url, final_token_url) = if authorize_url.is_none() || token_url.is_none() {
+        let (final_authorize_url, final_token_url) = if authorize_url.is_none()
+            || token_url.is_none()
+        {
             tracing::info!("One or both OAuth endpoints not configured, attempting OIDC discovery");
-            let (discovered_auth, discovered_token) = Self::discover_endpoints(&http_client, &issuer).await?;
+            let (discovered_auth, discovered_token) =
+                Self::discover_endpoints(&http_client, &issuer).await?;
 
             (
                 authorize_url.unwrap_or(discovered_auth),
@@ -173,7 +181,7 @@ impl DexOAuthClient {
             ));
         }
 
-        let token_response: DexTokenResponse = response
+        let token_response: OidcTokenResponse = response
             .json()
             .await
             .context("Failed to parse token response")?;
@@ -219,7 +227,7 @@ impl DexOAuthClient {
             ));
         }
 
-        let device_response: DexDeviceAuthResponse = response
+        let device_response: OidcDeviceAuthResponse = response
             .json()
             .await
             .context("Failed to parse device auth response")?;
@@ -254,7 +262,7 @@ impl DexOAuthClient {
             .context("Failed to poll device token")?;
 
         if response.status().is_success() {
-            let token_response: DexTokenResponse = response
+            let token_response: OidcTokenResponse = response
                 .json()
                 .await
                 .context("Failed to parse token response")?;
@@ -328,7 +336,7 @@ impl DexOAuthClient {
             ));
         }
 
-        let token_response: DexTokenResponse = response
+        let token_response: OidcTokenResponse = response
             .json()
             .await
             .context("Failed to parse token response")?;

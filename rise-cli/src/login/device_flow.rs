@@ -1,20 +1,28 @@
 use crate::config::Config;
 use anyhow::{Context, Result};
 use reqwest::Client;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+#[derive(Debug, Serialize)]
+struct AuthorizeRequest {
+    flow: String,
+}
+
 #[derive(Debug, Deserialize)]
-struct DeviceAuthResponse {
-    device_code: String,
-    user_code: String,
-    verification_uri: String,
+struct AuthorizeResponse {
+    #[serde(default)]
+    device_code: Option<String>,
+    #[serde(default)]
+    user_code: Option<String>,
+    #[serde(default)]
+    verification_uri: Option<String>,
     #[serde(default)]
     verification_uri_complete: Option<String>,
-    #[serde(default = "default_expires_in")]
-    expires_in: u64,
-    #[serde(default = "default_interval")]
-    interval: u64,
+    #[serde(default)]
+    expires_in: Option<u64>,
+    #[serde(default)]
+    interval: Option<u64>,
 }
 
 fn default_expires_in() -> u64 {
@@ -25,84 +33,100 @@ fn default_interval() -> u64 {
     5 // 5 seconds
 }
 
-#[derive(Debug, Deserialize)]
-struct TokenResponse {
-    #[allow(dead_code)]
-    access_token: String,
-    id_token: String,
-    #[allow(dead_code)]
-    token_type: String,
-    #[serde(default = "default_token_expires_in")]
-    #[allow(dead_code)]
-    expires_in: u64,
-}
-
-fn default_token_expires_in() -> u64 {
-    3600 // 1 hour
-}
-
-#[derive(Debug, Deserialize)]
-struct TokenErrorResponse {
-    error: String,
-    #[serde(default)]
-    error_description: Option<String>,
-}
-
-/// Handle device authorization flow by communicating directly with Dex
+/// Handle device authorization flow via backend
 ///
-/// NOTE: Dex's device flow implementation has known issues. It uses a hybrid
-/// approach that redirects the browser with an authorization code instead of
-/// returning the token via polling (RFC 8628). This means the device flow may
-/// not work reliably. Use the browser flow (default) instead: `rise login`
+/// NOTE: Device flow support depends on the OIDC provider. Some providers (like certain
+/// configurations) may not support device flow. Use the browser flow (default) as the
+/// recommended option: `rise login`
 pub async fn handle_device_flow(
     http_client: &Client,
-    dex_url: &str,
-    client_id: &str,
+    backend_url: &str,
     config: &mut Config,
     backend_url_to_save: Option<&str>,
 ) -> Result<()> {
-    eprintln!("⚠️  Warning: Device flow has known compatibility issues with Dex.");
+    eprintln!("⚠️  Warning: Device flow may not be supported by all identity providers.");
     eprintln!("   For best results, use the browser flow: rise login");
     eprintln!();
 
-    // Step 1: Initialize device flow with Dex
-    let device_auth_url = format!("{}/device/code", dex_url);
-
-    let mut params = std::collections::HashMap::new();
-    params.insert("client_id", client_id);
-    params.insert("scope", "openid email profile offline_access");
-
+    // Step 1: Initialize device flow via backend
     println!("Initializing device authorization flow...");
 
-    let device_response: DeviceAuthResponse = http_client
-        .post(&device_auth_url)
-        .form(&params)
+    let authorize_url = format!("{}/auth/authorize", backend_url);
+    let authorize_request = AuthorizeRequest {
+        flow: "device".to_string(),
+    };
+
+    let response = http_client
+        .post(&authorize_url)
+        .json(&authorize_request)
         .send()
         .await
-        .context("Failed to initialize device flow with Dex")?
+        .context("Failed to initialize device flow")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Device flow initialization failed (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    let device_response: AuthorizeResponse = response
         .json()
         .await
-        .context("Failed to parse device auth response")?;
+        .context("Failed to parse device flow response")?;
+
+    let device_code = device_response
+        .device_code
+        .ok_or_else(|| anyhow::anyhow!("No device_code in response"))?;
+    let user_code = device_response
+        .user_code
+        .ok_or_else(|| anyhow::anyhow!("No user_code in response"))?;
+    let verification_uri = device_response
+        .verification_uri
+        .ok_or_else(|| anyhow::anyhow!("No verification_uri in response"))?;
+    let expires_in = device_response.expires_in.unwrap_or(default_expires_in());
+    let interval = device_response.interval.unwrap_or(default_interval());
 
     // Step 2: Display user code and open browser
     let verification_url = device_response
         .verification_uri_complete
         .as_ref()
-        .unwrap_or(&device_response.verification_uri);
+        .unwrap_or(&verification_uri);
 
     println!("\nOpening browser to authenticate...");
     println!("If the browser doesn't open, visit: {}", verification_url);
-    println!("Enter code: {}", device_response.user_code);
+    println!("Enter code: {}", user_code);
 
     if let Err(e) = webbrowser::open(verification_url) {
         println!("Failed to open browser automatically: {}", e);
     }
 
-    // Step 3: Poll Dex for authorization
+    // Step 3: Poll backend for authorization via device code exchange
     println!("\nWaiting for authentication...");
-    let token_url = format!("{}/token", dex_url);
-    let poll_interval = Duration::from_secs(device_response.interval);
-    let timeout = Duration::from_secs(device_response.expires_in);
+
+    #[derive(Serialize)]
+    struct DeviceExchangeRequest {
+        device_code: String,
+    }
+
+    #[derive(Deserialize)]
+    struct DeviceExchangeResponse {
+        token: Option<String>,
+        #[serde(default)]
+        error: Option<String>,
+        #[serde(default)]
+        error_description: Option<String>,
+    }
+
+    let exchange_url = format!("{}/auth/device/exchange", backend_url);
+    let poll_interval = Duration::from_secs(interval);
+    let timeout = Duration::from_secs(expires_in);
     let start_time = std::time::Instant::now();
 
     loop {
@@ -112,63 +136,54 @@ pub async fn handle_device_flow(
 
         tokio::time::sleep(poll_interval).await;
 
-        let mut token_params = std::collections::HashMap::new();
-        token_params.insert("grant_type", "urn:ietf:params:oauth:grant-type:device_code");
-        token_params.insert("device_code", device_response.device_code.as_str());
-        token_params.insert("client_id", client_id);
+        let exchange_request = DeviceExchangeRequest {
+            device_code: device_code.clone(),
+        };
 
         let response = http_client
-            .post(&token_url)
-            .form(&token_params)
+            .post(&exchange_url)
+            .json(&exchange_request)
             .send()
             .await
-            .context("Failed to poll Dex token endpoint")?;
+            .context("Failed to poll for device authorization")?;
 
         let status = response.status();
 
         if status.is_success() {
             // Successfully got the token
-            let token_response: TokenResponse = response
+            let exchange_response: DeviceExchangeResponse = response
                 .json()
                 .await
-                .context("Failed to parse token response")?;
+                .context("Failed to parse device exchange response")?;
 
-            // Store the backend URL if provided
-            if let Some(url) = backend_url_to_save {
+            if let Some(token) = exchange_response.token {
+                // Store the backend URL if provided
+                if let Some(url) = backend_url_to_save {
+                    config
+                        .set_backend_url(url.to_string())
+                        .context("Failed to save backend URL")?;
+                }
+
+                // Store the token
                 config
-                    .set_backend_url(url.to_string())
-                    .context("Failed to save backend URL")?;
-            }
+                    .set_token(token)
+                    .context("Failed to save authentication token")?;
 
-            // Store the ID token
-            config
-                .set_token(token_response.id_token)
-                .context("Failed to save authentication token")?;
-
-            println!("\n✓ Login successful!");
-            println!("  Token saved to: {}", Config::config_path()?.display());
-            return Ok(());
-        } else if status == 400 || status == 401 {
-            // Check if it's authorization_pending or slow_down
-            // Dex may return either 400 or 401 for these cases
-            let error_response: Result<TokenErrorResponse, _> = response.json().await;
-
-            match error_response {
-                Ok(err) if err.error == "authorization_pending" || err.error == "slow_down" => {
+                println!("\n✓ Login successful!");
+                println!("  Token saved to: {}", Config::config_path()?.display());
+                return Ok(());
+            } else if let Some(error) = exchange_response.error {
+                if error == "authorization_pending" || error == "slow_down" {
                     // Continue polling
                     print!(".");
                     use std::io::Write;
                     std::io::stdout().flush()?;
-                }
-                Ok(err) => {
+                } else {
                     anyhow::bail!(
                         "Device authorization failed: {} - {}",
-                        err.error,
-                        err.error_description.unwrap_or_default()
+                        error,
+                        exchange_response.error_description.unwrap_or_default()
                     );
-                }
-                Err(_) => {
-                    anyhow::bail!("Device authorization failed with status {}", status);
                 }
             }
         } else {

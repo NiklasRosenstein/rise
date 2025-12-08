@@ -27,6 +27,21 @@ pub struct CodeExchangeRequest {
     pub redirect_uri: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct DeviceExchangeRequest {
+    pub device_code: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DeviceExchangeResponse {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_description: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct LoginResponse {
     pub token: String,
@@ -34,51 +49,131 @@ pub struct LoginResponse {
 
 #[derive(Debug, Deserialize)]
 pub struct AuthorizeRequest {
-    pub redirect_uri: String,
-    pub code_challenge: String,
-    pub code_challenge_method: String,
+    /// For authorization code flow: the redirect URI
+    #[serde(default)]
+    pub redirect_uri: Option<String>,
+    /// For authorization code flow: the PKCE code challenge
+    #[serde(default)]
+    pub code_challenge: Option<String>,
+    /// For authorization code flow: the PKCE code challenge method
+    #[serde(default)]
+    pub code_challenge_method: Option<String>,
+    /// Flow type: "code" for authorization code flow, "device" for device flow
+    pub flow: String,
 }
 
 #[derive(Debug, Serialize)]
 pub struct AuthorizeResponse {
-    pub authorization_url: String,
+    /// For authorization code flow: the full authorization URL to open in browser
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub authorization_url: Option<String>,
+    /// For device flow: the device code
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub device_code: Option<String>,
+    /// For device flow: the user code to display
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub user_code: Option<String>,
+    /// For device flow: the verification URI to display
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_uri: Option<String>,
+    /// For device flow: the complete verification URI (with user code embedded)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub verification_uri_complete: Option<String>,
+    /// For device flow: how long the device code is valid (seconds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_in: Option<u64>,
+    /// For device flow: how often to poll (seconds)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval: Option<u64>,
 }
 
-/// Build OAuth2 authorization URL with PKCE (for CLI)
+/// Build OAuth2 authorization URL or initiate device flow (for CLI)
 #[instrument(skip(state))]
 pub async fn authorize(
     State(state): State<AppState>,
     Json(payload): Json<AuthorizeRequest>,
 ) -> Result<Json<AuthorizeResponse>, (StatusCode, String)> {
-    // Build authorization URL
-    let auth_url_base = &state.oauth_client.authorize_url();
+    match payload.flow.as_str() {
+        "code" => {
+            // Authorization code flow with PKCE
+            let redirect_uri = payload.redirect_uri.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "redirect_uri required for code flow".to_string(),
+                )
+            })?;
+            let code_challenge = payload.code_challenge.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "code_challenge required for code flow".to_string(),
+                )
+            })?;
+            let code_challenge_method = payload.code_challenge_method.ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "code_challenge_method required for code flow".to_string(),
+                )
+            })?;
 
-    // Build query parameters
-    let params = vec![
-        ("client_id", state.auth_settings.client_id.as_str()),
-        ("redirect_uri", payload.redirect_uri.as_str()),
-        ("response_type", "code"),
-        ("scope", "openid email profile offline_access"),
-        ("code_challenge", payload.code_challenge.as_str()),
-        (
-            "code_challenge_method",
-            payload.code_challenge_method.as_str(),
-        ),
-    ];
+            let auth_url_base = &state.oauth_client.authorize_url();
 
-    let query_string: String = params
-        .into_iter()
-        .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
-        .collect::<Vec<_>>()
-        .join("&");
+            // Build query parameters
+            let params = vec![
+                ("client_id", state.auth_settings.client_id.as_str()),
+                ("redirect_uri", redirect_uri.as_str()),
+                ("response_type", "code"),
+                ("scope", "openid email profile offline_access"),
+                ("code_challenge", code_challenge.as_str()),
+                ("code_challenge_method", code_challenge_method.as_str()),
+            ];
 
-    let authorization_url = if auth_url_base.contains('?') {
-        format!("{}&{}", auth_url_base, query_string)
-    } else {
-        format!("{}?{}", auth_url_base, query_string)
-    };
+            let query_string: String = params
+                .into_iter()
+                .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
 
-    Ok(Json(AuthorizeResponse { authorization_url }))
+            let authorization_url = if auth_url_base.contains('?') {
+                format!("{}&{}", auth_url_base, query_string)
+            } else {
+                format!("{}?{}", auth_url_base, query_string)
+            };
+
+            Ok(Json(AuthorizeResponse {
+                authorization_url: Some(authorization_url),
+                device_code: None,
+                user_code: None,
+                verification_uri: None,
+                verification_uri_complete: None,
+                expires_in: None,
+                interval: None,
+            }))
+        }
+        "device" => {
+            // Device authorization flow
+            let device_response = state.oauth_client.device_flow_start().await.map_err(|e| {
+                tracing::error!("Failed to start device flow: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to start device flow: {}", e),
+                )
+            })?;
+
+            Ok(Json(AuthorizeResponse {
+                authorization_url: None,
+                device_code: Some(device_response.device_code),
+                user_code: Some(device_response.user_code),
+                verification_uri: Some(device_response.verification_uri.clone()),
+                verification_uri_complete: Some(device_response.verification_uri_complete),
+                expires_in: Some(device_response.expires_in),
+                interval: Some(device_response.interval),
+            }))
+        }
+        _ => Err((
+            StatusCode::BAD_REQUEST,
+            format!("Invalid flow type: {}", payload.flow),
+        )),
+    }
 }
 
 /// Exchange authorization code for token (OAuth2 PKCE flow)
@@ -130,6 +225,60 @@ pub async fn code_exchange(
     Ok(Json(LoginResponse {
         token: token_info.id_token,
     }))
+}
+
+/// Exchange device code for token (Device Flow)
+#[instrument(skip(state, payload))]
+pub async fn device_exchange(
+    State(state): State<AppState>,
+    Json(payload): Json<DeviceExchangeRequest>,
+) -> Json<DeviceExchangeResponse> {
+    tracing::debug!(
+        "Device exchange request: device_code={}...",
+        &payload.device_code[..8.min(payload.device_code.len())]
+    );
+
+    // Poll the identity provider's token endpoint with the device code
+    match state
+        .oauth_client
+        .device_flow_poll(&payload.device_code)
+        .await
+    {
+        Ok(Some(token_info)) => {
+            tracing::info!("Device authorization successful");
+            Json(DeviceExchangeResponse {
+                token: Some(token_info.id_token),
+                error: None,
+                error_description: None,
+            })
+        }
+        Ok(None) => {
+            // authorization_pending - user hasn't authorized yet
+            tracing::debug!("Device authorization pending");
+            Json(DeviceExchangeResponse {
+                token: None,
+                error: Some("authorization_pending".to_string()),
+                error_description: None,
+            })
+        }
+        Err(e) => {
+            let error_msg = e.to_string();
+            tracing::warn!("Device authorization error: {}", error_msg);
+
+            // Check for standard OAuth2 device flow errors
+            let (error, description) = if error_msg.contains("slow_down") {
+                ("slow_down".to_string(), None)
+            } else {
+                ("access_denied".to_string(), Some(error_msg))
+            };
+
+            Json(DeviceExchangeResponse {
+                token: None,
+                error: Some(error),
+                error_description: description,
+            })
+        }
+    }
 }
 
 #[derive(Debug, Serialize)]

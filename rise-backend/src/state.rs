@@ -1,7 +1,7 @@
 use crate::auth::{
     cookie_helpers::CookieSettings,
     jwt::JwtValidator,
-    oauth::DexOAuthClient,
+    oauth::OAuthClient,
     token_storage::{InMemoryTokenStore, TokenStore},
 };
 use crate::registry::{
@@ -27,7 +27,7 @@ pub struct ControllerState {
 pub struct AppState {
     pub db_pool: PgPool,
     pub jwt_validator: Arc<JwtValidator>,
-    pub oauth_client: Arc<DexOAuthClient>,
+    pub oauth_client: Arc<OAuthClient>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub oci_client: Arc<crate::oci::OciClient>,
     pub admin_users: Arc<Vec<String>>,
@@ -89,13 +89,16 @@ impl AppState {
         let jwt_validator = Arc::new(JwtValidator::new());
 
         // Initialize OAuth2 client
-        let oauth_client = Arc::new(DexOAuthClient::new(
-            settings.auth.issuer.clone(),
-            settings.auth.client_id.clone(),
-            settings.auth.client_secret.clone(),
-            settings.auth.authorize_url.clone(),
-            settings.auth.token_url.clone(),
-        ).await?);
+        let oauth_client = Arc::new(
+            OAuthClient::new(
+                settings.auth.issuer.clone(),
+                settings.auth.client_id.clone(),
+                settings.auth.client_secret.clone(),
+                settings.auth.authorize_url.clone(),
+                settings.auth.token_url.clone(),
+            )
+            .await?,
+        );
 
         // Initialize registry provider based on configuration
         let registry_provider: Option<Arc<dyn RegistryProvider>> =
@@ -308,13 +311,16 @@ impl AppState {
 
         // Dummy auth components (not used by controller)
         let jwt_validator = Arc::new(JwtValidator::new());
-        let oauth_client = Arc::new(DexOAuthClient::new(
-            settings.auth.issuer.clone(),
-            settings.auth.client_id.clone(),
-            settings.auth.client_secret.clone(),
-            settings.auth.authorize_url.clone(),
-            settings.auth.token_url.clone(),
-        ).await?);
+        let oauth_client = Arc::new(
+            OAuthClient::new(
+                settings.auth.issuer.clone(),
+                settings.auth.client_id.clone(),
+                settings.auth.client_secret.clone(),
+                settings.auth.authorize_url.clone(),
+                settings.auth.token_url.clone(),
+            )
+            .await?,
+        );
         let admin_users = Arc::new(Vec::new());
         let auth_settings = Arc::new(settings.auth.clone());
         let server_settings = Arc::new(settings.server.clone());

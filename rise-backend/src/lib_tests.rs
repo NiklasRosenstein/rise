@@ -19,7 +19,7 @@ mod tests {
                 cookie_secure: false,
             },
             auth: AuthSettings {
-                issuer: "http://localhost:5556/dex".to_string(),
+                issuer: "http://localhost:5556".to_string(),
                 client_id: "rise-backend".to_string(),
                 client_secret: "test-secret".to_string(),
                 admin_users: vec![],

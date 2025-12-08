@@ -340,7 +340,11 @@ impl Settings {
                 config_dir, name
             )))
         } else {
-            tracing::debug!("Optional config file not found: {}/{}.{{toml,yaml,yml}}", config_dir, name);
+            tracing::debug!(
+                "Optional config file not found: {}/{}.{{toml,yaml,yml}}",
+                config_dir,
+                name
+            );
             Ok(false)
         }
     }
@@ -355,12 +359,7 @@ impl Settings {
         // TOML takes precedence if both exist
 
         // 1. Load default config (required)
-        let default_loaded = Self::try_add_config_file(
-            &mut builder,
-            &config_dir,
-            "default",
-            true,
-        )?;
+        let default_loaded = Self::try_add_config_file(&mut builder, &config_dir, "default", true)?;
         if !default_loaded {
             return Err(ConfigError::Message(
                 format!("Required default config not found in {} (tried default.toml, default.yaml, default.yml)", config_dir)
@@ -368,20 +367,10 @@ impl Settings {
         }
 
         // 2. Load environment-specific config (optional)
-        Self::try_add_config_file(
-            &mut builder,
-            &config_dir,
-            &run_mode,
-            false,
-        )?;
+        Self::try_add_config_file(&mut builder, &config_dir, &run_mode, false)?;
 
         // 3. Load local config (optional, not checked into git)
-        Self::try_add_config_file(
-            &mut builder,
-            &config_dir,
-            "local",
-            false,
-        )?;
+        Self::try_add_config_file(&mut builder, &config_dir, "local", false)?;
 
         // Build config and substitute environment variables
         let config = builder.build()?;
@@ -501,5 +490,4 @@ mod tests {
         let result = Settings::substitute_env_vars_in_string("plain_value");
         assert_eq!(result, "plain_value");
     }
-
 }
