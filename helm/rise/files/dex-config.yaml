@@ -13,7 +13,9 @@ web:
 staticClients:
 - id: rise-backend
   redirectURIs:
-  # Frontend (update these based on your actual public_url)
+  # Frontend JavaScript OAuth flow (update based on your actual public_url)
+  - http://rise.example.com/
+  # Backend OAuth2 Proxy flow for ingress auth
   - http://rise.example.com/auth/callback
   # CLI
   - http://localhost:8765/callback

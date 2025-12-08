@@ -9,7 +9,9 @@ web:
 staticClients:
 - id: rise-backend
   redirectURIs:
-  # Frontend
+  # Frontend JavaScript OAuth flow
+  - http://localhost:3000/
+  # Backend OAuth2 Proxy flow (for ingress auth)
   - http://localhost:3000/auth/callback
   # CLI Auth
   - http://localhost:8765/callback

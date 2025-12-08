@@ -6,7 +6,7 @@ const CONFIG = window.RISE_CONFIG || {
     backendUrl: window.location.origin,
     issuerUrl: 'http://localhost:5556/dex',
     clientId: 'rise-backend',
-    redirectUri: window.location.origin + '/auth/callback',
+    redirectUri: window.location.origin + '/',
 };
 
 // Generate random string for PKCE

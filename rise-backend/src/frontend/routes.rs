@@ -56,7 +56,7 @@ fn render_index(state: &AppState) -> Response {
         "backendUrl": state.server_settings.public_url,
         "issuerUrl": state.auth_settings.issuer,
         "clientId": state.auth_settings.client_id,
-        "redirectUri": format!("{}/auth/callback", state.server_settings.public_url),
+        "redirectUri": format!("{}/", state.server_settings.public_url),
     });
 
     // Render template with config
