@@ -30,7 +30,7 @@ jobs:
         uses: helm/chart-testing-action@v2.6.1
 
       - name: Run chart-testing (lint)
-        run: ct lint --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise-backend
+        run: ct lint --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise
 
       - name: Create kind cluster
         uses: helm/kind-action@v1.10.0
@@ -38,7 +38,7 @@ jobs:
 
       - name: Run chart-testing (install)
         if: github.event_name == 'pull_request'
-        run: ct install --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise-backend
+        run: ct install --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise
 
   package:
     runs-on: ubuntu-latest
@@ -55,7 +55,7 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          helm package helm/rise-backend -d .helm-packages
+          helm package helm/rise -d .helm-packages
 
       - name: Upload Helm chart package
         uses: actions/upload-artifact@v4
