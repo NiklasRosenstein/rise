@@ -1196,7 +1196,134 @@ impl DeploymentBackend for KubernetesController {
                 }
 
                 ReconcilePhase::Completed => {
-                    // No-op, deployment is healthy
+                    // Check and correct drift on all resources
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+
+                    // 1. Re-apply Service to correct any drift
+                    let service_name = Self::service_name(project, deployment);
+                    let svc_api: Api<Service> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+                    let svc = self.create_service(project, deployment, &metadata);
+                    let patch_params = PatchParams::apply("rise").force();
+                    let patch = Patch::Apply(&svc);
+                    svc_api.patch(&service_name, &patch_params, &patch).await?;
+
+                    debug!(
+                        project = project.name,
+                        deployment_id = %deployment.id,
+                        "Service drift check completed"
+                    );
+
+                    // 2. Re-apply Ingress to correct any drift
+                    let ingress_name = Self::ingress_name(project, deployment);
+                    let ingress_api: Api<Ingress> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+                    let ingress = self.create_ingress(project, deployment, &metadata);
+                    let patch_params = PatchParams::apply("rise").force();
+                    let patch = Patch::Apply(&ingress);
+                    ingress_api
+                        .patch(&ingress_name, &patch_params, &patch)
+                        .await?;
+
+                    debug!(
+                        project = project.name,
+                        deployment_id = %deployment.id,
+                        "Ingress drift check completed"
+                    );
+
+                    // 3. Check ReplicaSet for drift
+                    let rs_name = metadata
+                        .replicaset_name
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name in metadata"))?;
+                    let rs_api: Api<ReplicaSet> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+
+                    match rs_api.get(rs_name).await {
+                        Ok(existing_rs) => {
+                            let desired_rs = self.create_replicaset(project, deployment, &metadata);
+
+                            if self.replicaset_has_drifted(&existing_rs, &desired_rs) {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    "ReplicaSet has drifted in Completed phase, recreating"
+                                );
+
+                                // Delete and wait for deletion to complete
+                                self.delete_and_wait_replicaset(&rs_api, rs_name).await?;
+
+                                // Create new ReplicaSet
+                                rs_api.create(&PostParams::default(), &desired_rs).await?;
+
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    "ReplicaSet recreated after drift detected in Completed phase"
+                                );
+
+                                // Move back to WaitingForReplicaSet to ensure it becomes ready
+                                metadata.reconcile_phase = ReconcilePhase::WaitingForReplicaSet;
+                                let metadata_json = serde_json::to_value(&metadata)?;
+                                db_deployments::update_controller_metadata(
+                                    &self.state.db_pool,
+                                    deployment.id,
+                                    &metadata_json,
+                                )
+                                .await?;
+
+                                return Ok(ReconcileResult {
+                                    status: DeploymentStatus::Deploying,
+                                    deployment_url: Some(format!(
+                                        "https://{}",
+                                        self.hostname(project, deployment)
+                                    )),
+                                    controller_metadata: serde_json::to_value(&metadata)?,
+                                    error_message: None,
+                                    next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
+                                });
+                            } else {
+                                debug!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    "ReplicaSet drift check completed - no drift detected"
+                                );
+                            }
+                        }
+                        Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                            // ReplicaSet is missing - recreate it
+                            warn!(
+                                project = project.name,
+                                deployment_id = %deployment.id,
+                                "ReplicaSet missing in Completed phase, recreating"
+                            );
+
+                            metadata.reconcile_phase = ReconcilePhase::CreatingReplicaSet;
+                            let metadata_json = serde_json::to_value(&metadata)?;
+                            db_deployments::update_controller_metadata(
+                                &self.state.db_pool,
+                                deployment.id,
+                                &metadata_json,
+                            )
+                            .await?;
+
+                            return Ok(ReconcileResult {
+                                status: DeploymentStatus::Deploying,
+                                deployment_url: Some(format!(
+                                    "https://{}",
+                                    self.hostname(project, deployment)
+                                )),
+                                controller_metadata: serde_json::to_value(&metadata)?,
+                                error_message: None,
+                                next_reconcile: ReconcileHint::After(Duration::from_secs(1)),
+                            });
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
+
                     let deployment_url = format!("https://{}", self.hostname(project, deployment));
 
                     return Ok(ReconcileResult {
