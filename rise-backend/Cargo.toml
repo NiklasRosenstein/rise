@@ -24,6 +24,7 @@ openssl = { version = "0.10.75", features = ["vendored"] }
 lazy_static = "1.5.0"
 rand = "0.8.5"
 regex = "1.11"
+urlencoding = "2.1"
 
 # Registry dependencies
 async-trait = "0.1"
@@ -31,6 +32,11 @@ base64 = "0.22"
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 aws-sdk-ecr = "1.80"
 aws-sdk-sts = "1.80"
+
+# OAuth2 proxy dependencies
+moka = { version = "0.12", features = ["sync"] }
+base64ct = { version = "1.6", features = ["alloc"] }
+sha2 = "0.10"
 
 # Deployment controller dependencies
 bollard = "0.17"

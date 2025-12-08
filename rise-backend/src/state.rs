@@ -1,4 +1,9 @@
-use crate::auth::{jwt::JwtValidator, oauth::DexOAuthClient};
+use crate::auth::{
+    cookie_helpers::CookieSettings,
+    jwt::JwtValidator,
+    oauth::DexOAuthClient,
+    token_storage::{InMemoryTokenStore, TokenStore},
+};
 use crate::registry::{
     models::{EcrConfig, OciClientAuthConfig},
     providers::{EcrProvider, OciClientAuthProvider},
@@ -9,6 +14,7 @@ use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
+use std::time::Duration;
 
 /// Minimal state for controllers - just database access
 #[derive(Clone)]
@@ -26,6 +32,9 @@ pub struct AppState {
     pub oci_client: Arc<crate::oci::OciClient>,
     pub admin_users: Arc<Vec<String>>,
     pub auth_settings: Arc<AuthSettings>,
+    pub token_store: Arc<dyn TokenStore>,
+    pub cookie_settings: CookieSettings,
+    pub api_domain: String,
 }
 
 impl ControllerState {
@@ -167,6 +176,29 @@ impl AppState {
         // Store auth settings for issuer comparison
         let auth_settings = Arc::new(settings.auth.clone());
 
+        // Initialize token store for OAuth2 PKCE flow (10 minute TTL)
+        let token_store: Arc<dyn TokenStore> =
+            Arc::new(InMemoryTokenStore::new(Duration::from_secs(600)));
+        tracing::info!("Initialized in-memory token store for OAuth2 state");
+
+        // Initialize cookie settings for session management
+        let cookie_settings = CookieSettings {
+            domain: settings.server.cookie_domain.clone(),
+            secure: settings.server.cookie_secure,
+        };
+        tracing::info!(
+            "Configured session cookies with domain={:?}, secure={}",
+            if cookie_settings.domain.is_empty() {
+                "current-host-only"
+            } else {
+                &cookie_settings.domain
+            },
+            cookie_settings.secure
+        );
+
+        let api_domain = settings.server.api_domain.clone();
+        tracing::info!("API domain: {}", api_domain);
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -175,6 +207,9 @@ impl AppState {
             oci_client,
             admin_users,
             auth_settings,
+            token_store,
+            cookie_settings,
+            api_domain,
         })
     }
 
@@ -274,6 +309,15 @@ impl AppState {
         let admin_users = Arc::new(Vec::new());
         let auth_settings = Arc::new(settings.auth.clone());
 
+        // Dummy OAuth proxy components (not used by controller)
+        let token_store: Arc<dyn TokenStore> =
+            Arc::new(InMemoryTokenStore::new(Duration::from_secs(600)));
+        let cookie_settings = CookieSettings {
+            domain: String::new(),
+            secure: true,
+        };
+        let api_domain = "localhost".to_string(); // Dummy value, not used by controller
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -282,6 +326,9 @@ impl AppState {
             oci_client,
             admin_users,
             auth_settings,
+            token_store,
+            cookie_settings,
+            api_domain,
         })
     }
 }

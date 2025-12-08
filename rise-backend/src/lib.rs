@@ -202,6 +202,8 @@ pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<(
         k8s_settings.non_default_domain_suffix,
         registry_provider,
         registry_url,
+        k8s_settings.auth_backend_url,
+        k8s_settings.api_domain,
     )?);
 
     let controller = Arc::new(deployment::controller::DeploymentController::new(

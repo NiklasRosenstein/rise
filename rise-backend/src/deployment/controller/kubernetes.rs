@@ -22,7 +22,7 @@ use tracing::{debug, error, info, warn};
 
 use super::{DeploymentBackend, HealthStatus, ReconcileHint, ReconcileResult};
 use crate::db::deployments as db_deployments;
-use crate::db::models::{Deployment, DeploymentStatus, Project};
+use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectVisibility};
 use crate::registry::RegistryProvider;
 use crate::state::ControllerState;
 
@@ -72,6 +72,8 @@ pub struct KubernetesController {
     non_default_domain_suffix: Option<String>,
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     registry_url: Option<String>,
+    auth_backend_url: String,
+    api_domain: String,
 }
 
 impl KubernetesController {
@@ -84,6 +86,8 @@ impl KubernetesController {
         non_default_domain_suffix: Option<String>,
         registry_provider: Option<Arc<dyn RegistryProvider>>,
         registry_url: Option<String>,
+        auth_backend_url: String,
+        api_domain: String,
     ) -> Result<Self> {
         Ok(Self {
             state,
@@ -93,6 +97,8 @@ impl KubernetesController {
             non_default_domain_suffix,
             registry_provider,
             registry_url,
+            auth_backend_url,
+            api_domain,
         })
     }
 
@@ -676,11 +682,42 @@ impl KubernetesController {
     ) -> Ingress {
         let host = self.hostname(project, deployment);
 
+        // Build annotations based on project visibility
+        let mut annotations = BTreeMap::new();
+
+        if matches!(project.visibility, ProjectVisibility::Private) {
+            // Add Nginx auth annotations for private projects
+            let auth_url = format!(
+                "{}/auth/ingress?project={}",
+                self.auth_backend_url, project.name
+            );
+            let signin_url = format!(
+                "https://{}/auth/signin?redirect=$escaped_request_uri",
+                self.api_domain
+            );
+
+            annotations.insert("nginx.ingress.kubernetes.io/auth-url".to_string(), auth_url);
+            annotations.insert(
+                "nginx.ingress.kubernetes.io/auth-signin".to_string(),
+                signin_url,
+            );
+            annotations.insert(
+                "nginx.ingress.kubernetes.io/auth-response-headers".to_string(),
+                "X-Auth-Request-Email,X-Auth-Request-User".to_string(),
+            );
+        }
+        // Public projects have no auth annotations
+
         Ingress {
             metadata: ObjectMeta {
                 name: Some(Self::ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
+                annotations: if !annotations.is_empty() {
+                    Some(annotations)
+                } else {
+                    None
+                },
                 ..Default::default()
             },
             spec: Some(IngressSpec {

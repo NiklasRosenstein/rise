@@ -14,7 +14,12 @@ pub fn routes() -> Router<AppState> {
 
 /// Public routes that don't require authentication
 pub fn public_routes() -> Router<AppState> {
-    Router::new().route("/auth/code/exchange", post(handlers::code_exchange))
+    Router::new()
+        .route("/auth/code/exchange", post(handlers::code_exchange))
+        .route("/auth/signin", get(handlers::oauth_signin))
+        .route("/auth/callback", get(handlers::oauth_callback))
+        .route("/auth/ingress", get(handlers::ingress_auth))
+        .route("/auth/logout", get(handlers::oauth_logout))
 }
 
 /// Protected routes that require authentication

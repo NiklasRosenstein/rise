@@ -18,6 +18,21 @@ pub struct ServerSettings {
     pub host: String,
     pub port: u16,
     pub public_url: String,
+
+    /// API domain for OAuth2 redirects (e.g., "api.rise.net")
+    pub api_domain: String,
+
+    /// Cookie domain for session cookies (e.g., ".rise.net" for all subdomains, "" for current host only)
+    #[serde(default)]
+    pub cookie_domain: String,
+
+    /// Whether to set Secure flag on cookies (true for HTTPS, false for HTTP development)
+    #[serde(default = "default_cookie_secure")]
+    pub cookie_secure: bool,
+}
+
+fn default_cookie_secure() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -62,6 +77,14 @@ pub struct KubernetesSettings {
     /// Results in URLs like: https://{project}-{group}.preview.rise.net
     #[serde(default)]
     pub non_default_domain_suffix: Option<String>,
+
+    /// Backend URL for Nginx auth subrequests (e.g., "https://api.rise.net" or "http://host.minikube.internal:3000")
+    /// This is the URL Nginx will use internally to validate authentication
+    pub auth_backend_url: String,
+
+    /// API domain for user-facing OAuth redirects (e.g., "api.rise.net")
+    /// Used in auth-signin annotation for redirecting users to login
+    pub api_domain: String,
 }
 
 /// Registry provider configuration
