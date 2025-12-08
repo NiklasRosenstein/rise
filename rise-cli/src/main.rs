@@ -318,6 +318,16 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // Backend commands don't need CLI config (they use Settings from TOML/env vars)
+    // Only client commands (login, project, team, deployment, service-account) need it
+    match &cli.command {
+        Commands::Backend(backend_cmd) => {
+            return backend::handle_backend_command(backend_cmd.clone()).await;
+        }
+        _ => {}
+    }
+
+    // Load CLI config for client commands
     let http_client = Client::new();
     let mut config = config::Config::load()?;
     let backend_url = config.get_backend_url();
@@ -355,8 +365,9 @@ async fn main() -> Result<()> {
                 .await?;
             }
         }
-        Commands::Backend(backend_cmd) => {
-            backend::handle_backend_command(backend_cmd.clone()).await?;
+        Commands::Backend(_) => {
+            // Already handled above before config loading
+            unreachable!("Backend commands should have been handled earlier")
         }
         Commands::Project(project_cmd) => match project_cmd {
             ProjectCommands::Create {
