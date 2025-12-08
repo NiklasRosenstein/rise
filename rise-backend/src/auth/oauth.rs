@@ -8,6 +8,8 @@ use std::collections::HashMap;
 struct OidcDiscovery {
     authorization_endpoint: String,
     token_endpoint: String,
+    #[serde(default)]
+    device_authorization_endpoint: Option<String>,
 }
 
 /// OAuth2 token response from OIDC provider
@@ -60,6 +62,7 @@ pub struct OAuthClient {
     http_client: HttpClient,
     authorize_url: String,
     token_url: String,
+    device_authorization_endpoint: Option<String>,
 }
 
 impl OAuthClient {
@@ -67,7 +70,7 @@ impl OAuthClient {
     async fn discover_endpoints(
         http_client: &HttpClient,
         issuer: &str,
-    ) -> Result<(String, String)> {
+    ) -> Result<(String, String, Option<String>)> {
         let discovery_url = format!(
             "{}/.well-known/openid-configuration",
             issuer.trim_end_matches('/')
@@ -88,7 +91,8 @@ impl OAuthClient {
             );
             let authorize_url = format!("{}/authorize", issuer.trim_end_matches('/'));
             let token_url = format!("{}/token", issuer.trim_end_matches('/'));
-            return Ok((authorize_url, token_url));
+            let device_endpoint = Some(format!("{}/device/code", issuer.trim_end_matches('/')));
+            return Ok((authorize_url, token_url, device_endpoint));
         }
 
         let discovery: OidcDiscovery = response
@@ -97,12 +101,17 @@ impl OAuthClient {
             .context("Failed to parse OIDC discovery document")?;
 
         tracing::info!(
-            "OIDC discovery successful: authorize_endpoint={}, token_endpoint={}",
+            "OIDC discovery successful: authorize_endpoint={}, token_endpoint={}, device_endpoint={:?}",
             discovery.authorization_endpoint,
-            discovery.token_endpoint
+            discovery.token_endpoint,
+            discovery.device_authorization_endpoint
         );
 
-        Ok((discovery.authorization_endpoint, discovery.token_endpoint))
+        Ok((
+            discovery.authorization_endpoint,
+            discovery.token_endpoint,
+            discovery.device_authorization_endpoint,
+        ))
     }
 
     /// Create a new OAuth2 client for the configured OIDC provider
@@ -118,25 +127,29 @@ impl OAuthClient {
         let http_client = HttpClient::new();
 
         // If either URL is missing, attempt OIDC discovery
-        let (final_authorize_url, final_token_url) = if authorize_url.is_none()
+        let (final_authorize_url, final_token_url, device_endpoint) = if authorize_url.is_none()
             || token_url.is_none()
         {
             tracing::info!("One or both OAuth endpoints not configured, attempting OIDC discovery");
-            let (discovered_auth, discovered_token) =
+            let (discovered_auth, discovered_token, discovered_device) =
                 Self::discover_endpoints(&http_client, &issuer).await?;
 
             (
                 authorize_url.unwrap_or(discovered_auth),
                 token_url.unwrap_or(discovered_token),
+                discovered_device,
             )
         } else {
-            (authorize_url.unwrap(), token_url.unwrap())
+            // If both URLs are explicitly configured, assume device endpoint follows standard pattern
+            let device_endpoint = Some(format!("{}/device/code", issuer.trim_end_matches('/')));
+            (authorize_url.unwrap(), token_url.unwrap(), device_endpoint)
         };
 
         tracing::info!(
-            "OAuth2 client initialized with authorize_url={}, token_url={}",
+            "OAuth2 client initialized with authorize_url={}, token_url={}, device_endpoint={:?}",
             final_authorize_url,
-            final_token_url
+            final_token_url,
+            device_endpoint
         );
 
         Ok(Self {
@@ -146,6 +159,7 @@ impl OAuthClient {
             http_client,
             authorize_url: final_authorize_url,
             token_url: final_token_url,
+            device_authorization_endpoint: device_endpoint,
         })
     }
 
@@ -200,7 +214,12 @@ impl OAuthClient {
 
     /// Initiate device authorization flow
     pub async fn device_flow_start(&self) -> Result<DeviceAuthResponse> {
-        let device_auth_url = format!("{}/device/code", self.issuer);
+        let device_auth_url = self.device_authorization_endpoint.as_ref().ok_or_else(|| {
+            anyhow!(
+                "Device authorization flow is not supported by this identity provider. \
+                No device_authorization_endpoint found in OIDC discovery."
+            )
+        })?;
 
         let mut params = HashMap::new();
         params.insert("client_id", self.client_id.as_str());
@@ -208,7 +227,7 @@ impl OAuthClient {
 
         let response = self
             .http_client
-            .post(&device_auth_url)
+            .post(device_auth_url)
             .form(&params)
             .send()
             .await
