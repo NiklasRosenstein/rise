@@ -146,7 +146,7 @@ pub struct SigninQuery {
 ///
 /// This handler starts the OAuth2 authorization code flow with PKCE.
 /// It generates a PKCE verifier/challenge pair, stores the state, and
-/// redirects the user to Dex for authentication.
+/// redirects the user to the OIDC provider for authentication.
 #[instrument(skip(state))]
 pub async fn oauth_signin(
     State(state): State<AppState>,
@@ -180,7 +180,7 @@ pub async fn oauth_signin(
         state_token
     );
 
-    tracing::debug!("Redirecting to Dex for authentication");
+    tracing::debug!("Redirecting to OIDC provider for authentication");
     Ok(Redirect::to(&auth_url))
 }
 
@@ -190,9 +190,9 @@ pub struct CallbackQuery {
     pub state: String,
 }
 
-/// OAuth2 callback from Dex
+/// OAuth2 callback from OIDC provider
 ///
-/// This handler receives the authorization code from Dex, exchanges it for tokens,
+/// This handler receives the authorization code from the OIDC provider, exchanges it for tokens,
 /// sets a session cookie, and redirects the user back to their original URL.
 #[instrument(skip(state))]
 pub async fn oauth_callback(

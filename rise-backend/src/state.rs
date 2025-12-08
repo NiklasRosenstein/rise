@@ -9,7 +9,7 @@ use crate::registry::{
     providers::{EcrProvider, OciClientAuthProvider},
     RegistryProvider,
 };
-use crate::settings::{AuthSettings, RegistrySettings, Settings};
+use crate::settings::{AuthSettings, RegistrySettings, ServerSettings, Settings};
 use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
@@ -32,6 +32,7 @@ pub struct AppState {
     pub oci_client: Arc<crate::oci::OciClient>,
     pub admin_users: Arc<Vec<String>>,
     pub auth_settings: Arc<AuthSettings>,
+    pub server_settings: Arc<ServerSettings>,
     pub token_store: Arc<dyn TokenStore>,
     pub cookie_settings: CookieSettings,
     pub public_url: String,
@@ -176,6 +177,9 @@ impl AppState {
         // Store auth settings for issuer comparison
         let auth_settings = Arc::new(settings.auth.clone());
 
+        // Store server settings for frontend config injection
+        let server_settings = Arc::new(settings.server.clone());
+
         // Initialize token store for OAuth2 PKCE flow (10 minute TTL)
         let token_store: Arc<dyn TokenStore> =
             Arc::new(InMemoryTokenStore::new(Duration::from_secs(600)));
@@ -207,6 +211,7 @@ impl AppState {
             oci_client,
             admin_users,
             auth_settings,
+            server_settings,
             token_store,
             cookie_settings,
             public_url,
@@ -308,6 +313,7 @@ impl AppState {
         )?);
         let admin_users = Arc::new(Vec::new());
         let auth_settings = Arc::new(settings.auth.clone());
+        let server_settings = Arc::new(settings.server.clone());
 
         // Dummy OAuth proxy components (not used by controller)
         let token_store: Arc<dyn TokenStore> =
@@ -326,6 +332,7 @@ impl AppState {
             oci_client,
             admin_users,
             auth_settings,
+            server_settings,
             token_store,
             cookie_settings,
             public_url,

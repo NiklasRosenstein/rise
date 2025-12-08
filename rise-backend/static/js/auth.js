@@ -1,8 +1,10 @@
 // OAuth2 PKCE implementation (mirrors CLI implementation)
 
-const CONFIG = {
+// Configuration is injected by the backend via index.html.tera template
+// Fallback to defaults for local development if not injected
+const CONFIG = window.RISE_CONFIG || {
     backendUrl: window.location.origin,
-    dexUrl: 'http://localhost:5556/dex',
+    issuerUrl: 'http://localhost:5556/dex',
     clientId: 'rise-backend',
     redirectUri: window.location.origin + '/',
 };
@@ -49,7 +51,7 @@ async function login() {
         sessionStorage.setItem('pkce_code_verifier', codeVerifier);
 
         // Build authorization URL
-        const authUrl = new URL(`${CONFIG.dexUrl}/auth`);
+        const authUrl = new URL(`${CONFIG.issuerUrl}/auth`);
         authUrl.searchParams.append('client_id', CONFIG.clientId);
         authUrl.searchParams.append('redirect_uri', CONFIG.redirectUri);
         authUrl.searchParams.append('response_type', 'code');
@@ -57,7 +59,7 @@ async function login() {
         authUrl.searchParams.append('code_challenge', codeChallenge);
         authUrl.searchParams.append('code_challenge_method', 'S256');
 
-        // Redirect to Dex
+        // Redirect to OIDC provider
         window.location.href = authUrl.toString();
     } catch (error) {
         statusEl.textContent = 'Error: ' + error.message;

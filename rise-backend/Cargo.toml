@@ -52,3 +52,4 @@ thiserror = "2.0"
 # Frontend dependencies
 rust-embed = "8.0"
 mime_guess = "2.0"
+tera = "1.20"
