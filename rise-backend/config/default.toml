@@ -1,3 +1,23 @@
+# Rise Backend Configuration
+#
+# This configuration file supports environment variable substitution using the syntax:
+#   ${VAR_NAME}              - Use environment variable, error if not set
+#   ${VAR_NAME:-default}     - Use environment variable, or default if not set
+#
+# Examples:
+#   client_secret = "${RISE_AUTH_CLIENT_SECRET:-rise-backend-secret}"
+#   public_url = "${PUBLIC_URL:-http://localhost:3000}"
+#
+# Configuration precedence (highest to lowest):
+#   1. Environment variables directly referenced with ${VAR} in TOML
+#   2. local.toml (not checked into git, for local overrides)
+#   3. {RUN_MODE}.toml (development.toml, production.toml, etc.)
+#   4. default.toml (this file)
+#
+# Special cases:
+#   - DATABASE_URL environment variable is always read directly (no ${} needed)
+#
+
 [server]
 host = "0.0.0.0"
 port = 3000
@@ -8,13 +28,15 @@ cookie_secure = false  # Set to true for HTTPS in production
 [auth]
 issuer = "http://localhost:5556/dex"
 client_id = "rise-backend"
-# Environment variable substitution: ${VAR_NAME} or ${VAR_NAME:-default_value}
+# Use environment variable substitution for secrets
 client_secret = "${RISE_AUTH_CLIENT_SECRET:-rise-backend-secret}"
 # List of admin user emails (have full permissions on all resources)
 admin_users = ["admin@example.com"]
 
 [database]
-url = "" # DATABASE_URL takes precedence
+# DATABASE_URL environment variable is always used if set
+# No ${} substitution needed - this is a special case for compatibility
+url = ""
 
 # Controller loop intervals (in seconds) - optional, all have defaults
 [controller]

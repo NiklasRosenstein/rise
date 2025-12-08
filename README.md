@@ -82,6 +82,7 @@ Comprehensive documentation is available in [`/docs`](./docs):
 - [Web Frontend](docs/features/web-frontend.md) - Embedded web UI
 
 **Deployment**:
+- [Configuration Guide](docs/deployment/configuration.md) - Environment variables and config files
 - [AWS ECR](docs/deployment/aws-ecr.md) - Production ECR setup with Terraform
 - [Docker (Local)](docs/deployment/docker-local.md) - Local registry
 - [Production Setup](docs/deployment/production.md) - Security, monitoring, HA
