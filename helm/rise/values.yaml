@@ -94,7 +94,7 @@ config: |
   # admin_users = ["admin@example.com"]
 
   [database]
-  # Database URL should be set via environment variable DATABASE_URL from existingSecret
+  # Database URL should be set via environment variable DATABASE_URL from a Secret
 
   [registry]
   type = "oci-client-auth"

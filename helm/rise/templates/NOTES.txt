@@ -41,13 +41,3 @@ Components deployed:
 {{- if .Values.controllers.project.enabled }}
   - Project Controller: {{ .Values.controllers.project.replicaCount }} replica(s)
 {{- end }}
-
-{{- if not .Values.existingSecret }}
-
-WARNING: You are using default secrets. Please create a secret with the following keys:
-  - auth-client-secret: OAuth client secret
-  - database-password: PostgreSQL password
-  - database-url: Full database URL
-
-Then set existingSecret to the name of your secret in values.yaml.
-{{- end }}
