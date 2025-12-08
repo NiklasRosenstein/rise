@@ -231,21 +231,27 @@ pub async fn list_teams(http_client: &Client, backend_url: &str, config: &Config
         if teams.is_empty() {
             println!("No teams found.");
         } else {
-            println!("Teams:");
-            println!(
-                "{:<20} {:<36} {:<15} {:<15}",
-                "NAME", "ID", "OWNERS", "MEMBERS"
-            );
-            println!("{}", "-".repeat(90));
+            let mut table = Table::new();
+            table
+                .load_preset(UTF8_FULL)
+                .apply_modifier(UTF8_ROUND_CORNERS)
+                .set_header(vec![
+                    Cell::new("NAME").add_attribute(Attribute::Bold),
+                    Cell::new("ID").add_attribute(Attribute::Bold),
+                    Cell::new("OWNERS").add_attribute(Attribute::Bold),
+                    Cell::new("MEMBERS").add_attribute(Attribute::Bold),
+                ]);
+
             for team in teams {
-                println!(
-                    "{:<20} {:<36} {:<15} {:<15}",
-                    team.name,
-                    team.id,
-                    team.owners.len(),
-                    team.members.len()
-                );
+                table.add_row(vec![
+                    Cell::new(&team.name),
+                    Cell::new(&team.id),
+                    Cell::new(team.owners.len()),
+                    Cell::new(team.members.len()),
+                ]);
             }
+
+            println!("{}", table);
         }
     } else {
         let status = response.status();
