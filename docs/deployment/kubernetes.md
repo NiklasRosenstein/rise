@@ -23,11 +23,15 @@ kubeconfig = "/path/to/kubeconfig"
 # Ingress class to use
 ingress_class = "nginx"
 
-# Domain suffix for default deployment group
-domain_suffix = "apps.rise.dev"
+# Hostname format for default deployment group (must contain {project_name})
+hostname_format = "{project_name}.apps.rise.dev"
 
-# Optional: separate domain for non-default groups
-non_default_domain_suffix = "preview.rise.dev"
+# Optional: hostname format for non-default deployment groups
+# Supports {project_name} and {deployment_group} placeholders
+nondefault_hostname_format = "{project_name}-{deployment_group}.preview.rise.dev"
+
+# Namespace format (must contain {project_name})
+namespace_format = "rise-{project_name}"
 ```
 
 ### Environment Variables
@@ -41,11 +45,14 @@ RISE_KUBERNETES__KUBECONFIG="/path/to/kubeconfig"
 # Ingress class (required)
 RISE_KUBERNETES__INGRESS_CLASS="nginx"
 
-# Domain suffix for default group (required)
-RISE_KUBERNETES__DOMAIN_SUFFIX="apps.rise.dev"
+# Hostname format for default deployment group (required, must contain {project_name})
+RISE_KUBERNETES__HOSTNAME_FORMAT="{project_name}.apps.rise.dev"
 
-# Optional: Domain suffix for non-default groups
-RISE_KUBERNETES__NON_DEFAULT_DOMAIN_SUFFIX="preview.rise.dev"
+# Optional: Hostname format for non-default groups (must contain {project_name})
+RISE_KUBERNETES__NONDEFAULT_HOSTNAME_FORMAT="{project_name}-{deployment_group}.preview.rise.dev"
+
+# Namespace format (must contain {project_name})
+RISE_KUBERNETES__NAMESPACE_FORMAT="rise-{project_name}"
 ```
 
 ### Kubeconfig Options
@@ -96,8 +103,8 @@ Each deployment group gets its own Service and Ingress with a unique URL:
 
 | Group | URL Pattern | Example |
 |-------|-------------|---------|
-| `default` | `{project}.{domain_suffix}` | `my-app.apps.rise.dev` |
-| Custom groups | `{project}-{group}.{non_default_domain_suffix}` | `my-app-mr--26.preview.rise.dev` |
+| `default` | `hostname_format` template | `my-app.apps.rise.dev` |
+| Custom groups | `nondefault_hostname_format` template | `my-app-mr--26.preview.rise.dev` |
 
 ### Blue/Green Deployments
 

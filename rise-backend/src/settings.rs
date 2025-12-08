@@ -147,7 +147,8 @@ fn default_namespace_format() -> String {
 /// cookie_secure = true
 ///
 /// [kubernetes]
-/// domain_suffix = "apps.rise.dev"
+/// hostname_format = "{project_name}.apps.rise.dev"
+/// namespace_format = "rise-{project_name}"
 /// auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL
 /// auth_signin_url = "https://rise.dev"  # Public API URL for browser redirects
 /// ```
