@@ -110,6 +110,7 @@ pub struct AuthSettings {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct DatabaseSettings {
+    #[serde(default)]
     pub url: String,
 }
 
@@ -250,7 +251,7 @@ impl Settings {
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
         let config_dir = env::var("RISE_CONFIG_DIR").unwrap_or_else(|_| "/config".into());
 
-        Config::builder()
+        let mut settings: Settings = Config::builder()
             // Start off by merging in the "default" configuration file
             .add_source(File::with_name(&format!("{}/default.toml", config_dir)))
             // Add in the current environment file
@@ -264,6 +265,23 @@ impl Settings {
             // Eg.. `APP_DEBUG=1` would set the `debug` key
             .add_source(Environment::with_prefix("RISE").separator("__"))
             .build()?
-            .try_deserialize()
+            .try_deserialize()?;
+
+        // Special handling for DATABASE_URL environment variable (common convention)
+        // This takes precedence over both TOML config and RISE_DATABASE__URL
+        if let Ok(database_url) = env::var("DATABASE_URL") {
+            if !database_url.is_empty() {
+                settings.database.url = database_url;
+            }
+        }
+
+        // Validate that database URL is set
+        if settings.database.url.is_empty() {
+            return Err(ConfigError::Message(
+                "Database URL not configured. Set DATABASE_URL environment variable or [database] url in config".to_string()
+            ));
+        }
+
+        Ok(settings)
     }
 }
