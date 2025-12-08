@@ -39,8 +39,8 @@ fn render_index(state: &AppState) -> Response {
             }
         },
         None => {
-            // Fallback to static index.html if template not found
-            return serve_file("index.html", state);
+            tracing::error!("index.html.tera template not found in embedded assets");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "Template not found").into_response();
         }
     };
 
