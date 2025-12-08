@@ -35,3 +35,7 @@
 - [Contributing](./development/contributing.md)
 - [Database](./development/database.md)
 - [Testing](./development/testing.md)
+
+# Troubleshooting
+
+- [Buildpack Build Issues](./troubleshooting/buildpacks.md)

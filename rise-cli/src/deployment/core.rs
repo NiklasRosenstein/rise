@@ -628,9 +628,9 @@ pub async fn create_deployment(
         )
         .await?;
 
-        // Step 4: Build and push image with buildpacks (--publish handles both)
+        // Step 4: Build image with buildpacks
         info!(
-            "Building and publishing image with buildpacks: {}",
+            "Building image with buildpacks: {}",
             deployment_info.image_tag
         );
         if let Err(e) = build_image_with_buildpacks(path, &deployment_info.image_tag) {
@@ -646,7 +646,7 @@ pub async fn create_deployment(
             return Err(e);
         }
 
-        // Step 5: Mark as pushing (buildpacks --publish already pushed, but state machine requires this transition)
+        // Step 5: Mark as pushing
         update_deployment_status(
             http_client,
             backend_url,
@@ -656,6 +656,21 @@ pub async fn create_deployment(
             None,
         )
         .await?;
+
+        // Step 5a: Push image to registry
+        info!("Pushing image to registry: {}", deployment_info.image_tag);
+        if let Err(e) = docker_push(&deployment_info.image_tag) {
+            update_deployment_status(
+                http_client,
+                backend_url,
+                &token,
+                &deployment_info.deployment_id,
+                "Failed",
+                Some(&e.to_string()),
+            )
+            .await?;
+            return Err(e);
+        }
 
         // Step 6: Mark as pushed (controller will take over deployment)
         update_deployment_status(
@@ -845,8 +860,30 @@ fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
         .arg("host")
         .arg("--builder")
         .arg("paketobuildpacks/builder:base")
-        .arg("--publish")
         .env("DOCKER_API_VERSION", "1.44");
+
+    // Never use --publish - always build locally and push separately
+    // This avoids code bifurcation and allows CA certificate injection
+
+    // If SSL_CERT_FILE is set, inject CA certificate into lifecycle container
+    if let Ok(ca_cert_path) = std::env::var("SSL_CERT_FILE") {
+        // Validate the file exists
+        if !std::path::Path::new(&ca_cert_path).exists() {
+            bail!("CA certificate file not found: {}", ca_cert_path);
+        }
+
+        // Mount the CA certificate into the lifecycle container
+        cmd.arg("--volume").arg(format!(
+            "{}:/etc/ssl/certs/ca-certificates.crt:ro",
+            ca_cert_path
+        ));
+
+        // Tell the lifecycle container where to find the certificate
+        cmd.arg("--env")
+            .arg("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt");
+
+        info!("Injecting CA certificate from: {}", ca_cert_path);
+    }
 
     debug!("Executing command: {:?}", cmd);
 
@@ -854,6 +891,23 @@ fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
 
     if !status.success() {
         bail!("pack build failed with status: {}", status);
+    }
+
+    Ok(())
+}
+
+fn docker_push(image_tag: &str) -> Result<()> {
+    info!("Pushing image to registry: {}", image_tag);
+
+    let mut cmd = Command::new("docker");
+    cmd.arg("push").arg(image_tag);
+
+    debug!("Executing command: {:?}", cmd);
+
+    let status = cmd.status().context("Failed to execute docker push")?;
+
+    if !status.success() {
+        bail!("docker push failed with status: {}", status);
     }
 
     Ok(())
