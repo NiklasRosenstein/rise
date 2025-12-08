@@ -82,7 +82,7 @@ spec:
           mountPath: /tmp
       {{- if .Values.controllers.project.enabled }}
       # Project controller container
-      - name: project-controller
+      - name: project
         securityContext:
           {{- toYaml .Values.securityContext | nindent 12 }}
         image: {{ include "rise.image" . }}
@@ -113,7 +113,7 @@ spec:
       {{- end }}
       {{- if .Values.controllers.ecr.enabled }}
       # ECR controller container
-      - name: ecr-controller
+      - name: ecr
         securityContext:
           {{- toYaml .Values.securityContext | nindent 12 }}
         image: {{ include "rise.image" . }}
@@ -143,8 +143,8 @@ spec:
           mountPath: /tmp
       {{- end }}
       {{- if .Values.controllers.deployment.enabled }}
-      # Deployment controller container
-      - name: deployment-controller
+      # Deployment controller container (Kubernetes)
+      - name: kubernetes
         securityContext:
           {{- toYaml .Values.securityContext | nindent 12 }}
         image: {{ include "rise.image" . }}
