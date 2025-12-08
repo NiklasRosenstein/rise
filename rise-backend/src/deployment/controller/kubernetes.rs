@@ -1819,6 +1819,11 @@ mod tests {
         use axum::http::Uri;
         use sqlx::postgres::PgPoolOptions;
 
+        // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+
         // Create a minimal controller with mock values
         // Note: We won't actually connect to K8s or DB for these unit tests
         let pool = PgPoolOptions::new()
@@ -1845,6 +1850,8 @@ mod tests {
             registry_url: None,
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
+            ingress_annotations: std::collections::HashMap::new(),
+            ingress_tls_secret_name: None,
         }
     }
 }
