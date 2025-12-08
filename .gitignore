@@ -7,7 +7,7 @@ pb_data
 /book
 
 # Local config overrides
-**/config/local.toml
+**/config/local.*
 
 # Example app dependencies
 example/**/node_modules

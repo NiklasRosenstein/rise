@@ -1,0 +1,116 @@
+# Rise Backend Configuration
+#
+# This configuration file supports environment variable substitution using the syntax:
+#   ${VAR_NAME}              - Use environment variable, error if not set
+#   ${VAR_NAME:-default}     - Use environment variable, or default if not set
+#
+# Examples:
+#   client_secret: "${RISE_AUTH_CLIENT_SECRET:-rise-backend-secret}"
+#   public_url: "${PUBLIC_URL:-http://localhost:3000}"
+#
+# Configuration precedence (highest to lowest):
+#   1. Environment variables directly referenced with ${VAR} in config
+#   2. local.yaml (not checked into git, for local overrides)
+#   3. {RUN_MODE}.yaml (development.yaml, production.yaml, etc.)
+#   4. default.yaml (this file)
+#
+# Special cases:
+#   - DATABASE_URL environment variable is always read directly (no ${} needed)
+#
+
+server:
+  host: "0.0.0.0"
+  port: 3000
+  public_url: "http://localhost:3000"
+  cookie_domain: ""  # Empty = current host only (good for localhost)
+  cookie_secure: false  # Set to true for HTTPS in production
+
+auth:
+  issuer: "http://localhost:5556/dex"
+  client_id: "rise-backend"
+  # Use environment variable substitution for secrets
+  client_secret: "${RISE_AUTH_CLIENT_SECRET:-rise-backend-secret}"
+  # List of admin user emails (have full permissions on all resources)
+  admin_users:
+    - "admin@example.com"
+
+database:
+  # DATABASE_URL environment variable is always used if set
+  # No ${} substitution needed - this is a special case for compatibility
+  url: ""
+
+# Controller loop intervals (in seconds) - optional, all have defaults
+controller: {}
+  # How often to check for deployments to reconcile (default: 5)
+  # reconcile_interval_secs: 5
+  # How often to perform health checks on active deployments (default: 5)
+  # health_check_interval_secs: 5
+  # How often to process terminating deployments (default: 5)
+  # termination_interval_secs: 5
+  # How often to process cancelling deployments (default: 5)
+  # cancellation_interval_secs: 5
+  # How often to check for expired deployments (default: 60)
+  # expiration_interval_secs: 60
+  # How often to refresh Kubernetes image pull secrets (default: 3600)
+  # secret_refresh_interval_secs: 3600
+
+# Container registry configuration (optional)
+# Uncomment and configure ONE of the following registry providers:
+
+# AWS ECR Example:
+# registry:
+#   type: "ecr"
+#   region: "us-east-1"
+#   account_id: "123456789012"
+#   access_key_id: "AKIAIOSFODNN7EXAMPLE"  # Optional: static credentials (use IAM role in production)
+#   secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+#   repo_prefix: "rise/"
+#   role_arn: "arn:aws:iam::123456789012:policy/rise-ecr-controller"
+#   push_role_arn: "arn:aws:iam::123456789012:role/rise-ecr-push"
+#   auto_remove: true
+
+# OCI registry for local development (client-side auth via docker login)
+registry:
+  type: "oci-client-auth"
+  registry_url: "localhost:5000"
+  namespace: "rise-apps"
+
+# Kubernetes configuration (optional)
+# Uncomment to enable Kubernetes deployment controller
+#
+# IMPORTANT: For ingress authentication to work, the backend API must be accessible
+# on the same parent domain as your apps. Example setup:
+#
+# Production:
+#   - Deploy backend with Ingress at https://rise.dev
+#   - Apps will be at https://{project}.apps.rise.dev
+#   - Set cookie_domain = ".rise.dev" (note the leading dot)
+#   - Set public_url = "https://rise.dev"
+#   - Set auth_signin_url = "https://rise.dev"
+#   - Set auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"
+#
+# Development (Minikube):
+#   - Create Ingress for backend at http://rise.dev
+#   - Add to /etc/hosts: <minikube-ip> rise.dev foo.apps.rise.dev
+#   - Set cookie_domain = ".rise.dev"
+#   - Set public_url = "http://rise.dev"
+#   - Set auth_signin_url = "http://rise.dev"
+#   - Set auth_backend_url = "http://172.17.0.1:3000" (Docker bridge IP for Minikube to reach host)
+#
+# kubernetes:
+#   ingress_class: "nginx"
+#   hostname_format: "{project_name}.apps.rise.dev"  # Hostname format for default deployment group (must contain {project_name})
+#   nondefault_hostname_format: "{project_name}-{deployment_group}.preview.rise.dev"  # Optional: for non-default groups (must contain {project_name})
+#   namespace_format: "rise-{project_name}"  # Template for Kubernetes namespaces (must contain {project_name}, default: "rise-{project_name}")
+#   auth_backend_url: "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster service URL for auth checks
+#   auth_signin_url: "https://rise.dev"  # Public API URL for browser redirects during authentication
+#   kubeconfig: "/path/to/kubeconfig"  # Optional: explicit kubeconfig path
+#
+#   # Optional: Ingress annotations to apply to all deployed app ingresses
+#   # Example for cert-manager TLS certificates:
+#   ingress_annotations:
+#     cert-manager.io/cluster-issuer: "letsencrypt-prod"
+#
+#   # Optional: TLS secret name for ingress certificates
+#   # The secret must exist in each namespace (can be created by cert-manager)
+#   ingress_tls_secret_name: "rise-apps-tls"

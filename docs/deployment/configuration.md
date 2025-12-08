@@ -1,6 +1,6 @@
 # Configuration Guide
 
-Rise backend uses TOML or YAML configuration files with environment variable substitution support.
+Rise backend uses YAML configuration files with environment variable substitution support. TOML is also supported for backward compatibility.
 
 ## Configuration Files
 
@@ -14,7 +14,7 @@ Configuration files are located in `rise-backend/config/` and loaded in this ord
 
 Later files override earlier ones.
 
-**File Format**: The backend supports both TOML and YAML formats. When multiple formats exist for the same config file (e.g., both `default.toml` and `default.yaml`), TOML takes precedence. For Kubernetes/Helm deployments, YAML format is recommended as it integrates seamlessly with Helm values.
+**File Format**: The backend supports both YAML and TOML formats. When multiple formats exist for the same config file (e.g., both `default.yaml` and `default.toml`), TOML takes precedence. YAML is the recommended format as it integrates seamlessly with Kubernetes/Helm deployments.
 
 ## Environment Variable Substitution
 

@@ -1,0 +1,31 @@
+# Production Configuration Example
+#
+# This file shows how to use environment variable substitution for production deployments.
+# Copy this to local.yaml and customize, or set environment variables directly.
+
+auth:
+  issuer: "${DEX_ISSUER:-http://dex:5556/dex}"
+  # IMPORTANT: Use environment variables for secrets in production!
+  client_secret: "${RISE_AUTH_CLIENT_SECRET}"  # No default - must be set
+
+database:
+  # DATABASE_URL is always read directly, no ${} needed
+  # But you can also use substitution if you prefer:
+  # url: "${DATABASE_URL}"
+  url: "${DATABASE_URL:-postgres://rise:rise123@postgres:5432/rise}"
+
+# Example: Docker registry with environment variables
+# registry:
+#   type: "oci-client-auth"
+#   registry_url: "${REGISTRY_URL:-registry:5000}"
+#   namespace: "${REGISTRY_NAMESPACE:-rise-apps}"
+
+# Example: AWS ECR with environment variables
+registry:
+  type: "ecr"
+  region: "${AWS_REGION:-us-east-1}"
+  account_id: "${AWS_ACCOUNT_ID}"  # No default - must be set
+  repo_prefix: "${ECR_REPO_PREFIX:-rise/}"
+  role_arn: "${ECR_CONTROLLER_ROLE_ARN}"  # No default - must be set
+  push_role_arn: "${ECR_PUSH_ROLE_ARN}"  # No default - must be set
+  auto_remove: false

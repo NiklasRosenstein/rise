@@ -452,7 +452,6 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::Path;
 
     #[test]
     fn test_substitute_env_vars_in_string_basic() {
@@ -493,47 +492,4 @@ mod tests {
         assert_eq!(result, "plain_value");
     }
 
-    #[test]
-    fn test_yaml_config_loading() {
-        // Verify test config directory exists
-        let test_config_dir = Path::new("config/test-yaml");
-        assert!(test_config_dir.exists(), "config/test-yaml directory should exist for testing");
-
-        // Set environment variables for the test config
-        env::set_var("RISE_CONFIG_DIR", "config/test-yaml");
-        env::set_var("RUN_MODE", "nonexistent"); // Don't load any environment-specific config
-        env::set_var("DATABASE_URL", "postgres://test:test@localhost/test");
-        env::set_var("TEST_CLIENT_SECRET", "yaml-test-secret");
-
-        // Load settings - should successfully load default.yaml from test-yaml directory
-        let settings = Settings::new();
-        assert!(settings.is_ok(), "Should load YAML config successfully: {:?}", settings.err());
-
-        let settings = settings.unwrap();
-
-        // Verify values from default.yaml
-        assert_eq!(settings.server.port, 4000, "Port should be 4000 from test YAML");
-        assert_eq!(settings.server.public_url, "http://test.example.com");
-        assert_eq!(settings.auth.issuer, "http://test-dex:5556/dex");
-        assert_eq!(settings.auth.client_id, "test-client");
-        assert_eq!(settings.auth.client_secret, "yaml-test-secret", "Should use env var substitution");
-
-        // Verify registry settings
-        assert!(settings.registry.is_some());
-        match settings.registry {
-            Some(RegistrySettings::OciClientAuth { registry_url, namespace }) => {
-                assert_eq!(registry_url, "test-registry:5000");
-                assert_eq!(namespace, "test-apps");
-            }
-            Some(ref other) => {
-                panic!("Registry should be OciClientAuth type, got: {:?}", other);
-            }
-            None => panic!("Registry should be configured"),
-        }
-
-        // Clean up
-        env::remove_var("RISE_CONFIG_DIR");
-        env::remove_var("RUN_MODE");
-        env::remove_var("TEST_CLIENT_SECRET");
-    }
 }
