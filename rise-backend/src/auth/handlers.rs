@@ -731,12 +731,6 @@ pub async fn ingress_auth(
             )
         })?;
 
-    tracing::debug!(
-        "Rise JWT validated for project: {}, user: {}",
-        params.project,
-        ingress_claims.email
-    );
-
     let email = ingress_claims.email;
 
     // Find or create user in database
@@ -749,6 +743,13 @@ pub async fn ingress_auth(
                 "Database error".to_string(),
             )
         })?;
+
+    tracing::debug!(
+        project = %params.project,
+        user_id = %user.id,
+        user_email = %user.email,
+        "Rise JWT validated"
+    );
 
     // Find project by name
     let project = projects::find_by_name(&state.db_pool, &params.project)
@@ -767,7 +768,12 @@ pub async fn ingress_auth(
 
     // Check if project is public - if so, allow access without further checks
     if matches!(project.visibility, ProjectVisibility::Public) {
-        tracing::debug!("Project is public, allowing access");
+        tracing::debug!(
+            project = %params.project,
+            user_id = %user.id,
+            user_email = %user.email,
+            "Public project access granted"
+        );
         return Ok((
             StatusCode::OK,
             [
@@ -790,7 +796,12 @@ pub async fn ingress_auth(
         })?;
 
     if has_access {
-        tracing::debug!("User has access to private project");
+        tracing::debug!(
+            project = %params.project,
+            user_id = %user.id,
+            user_email = %user.email,
+            "Private project access granted"
+        );
         Ok((
             StatusCode::OK,
             [
@@ -801,9 +812,10 @@ pub async fn ingress_auth(
             .into_response())
     } else {
         tracing::warn!(
-            user_email = %user.email,
             project = %params.project,
-            "User denied access to private project"
+            user_id = %user.id,
+            user_email = %user.email,
+            "Private project access denied"
         );
         Err((
             StatusCode::FORBIDDEN,
