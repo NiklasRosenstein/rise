@@ -1,6 +1,6 @@
-# Rise ECR Controller Terraform Module
+# Rise AWS Terraform Module
 
-This module creates the AWS IAM resources required for the Rise ECR controller to manage ECR repositories.
+This module creates the AWS IAM resources required for the Rise backend to manage AWS services (primarily ECR for container registries).
 
 ## Features
 
@@ -16,7 +16,7 @@ This module creates the AWS IAM resources required for the Rise ECR controller t
 
 The module creates two separate IAM roles with distinct permissions:
 
-1. **Controller Role** (`{name_prefix}-ecr-controller`): Used by the ECR controller to manage repositories
+1. **Backend Role** (`{name_prefix}-backend`): Used by the Rise backend to manage ECR repositories
    - Create/delete repositories
    - Tag repositories (managed, orphaned)
    - List repositories for discovery
@@ -30,8 +30,8 @@ The module creates two separate IAM roles with distinct permissions:
 ### Basic Usage (IAM Role)
 
 ```hcl
-module "rise_ecr" {
-  source = "./modules/rise-ecr-controller"
+module "rise_aws" {
+  source = "./modules/rise-aws"
 
   name_prefix = "rise"
   repo_prefix = "rise/"
@@ -46,22 +46,22 @@ module "rise_ecr" {
 ### With IRSA (EKS)
 
 ```hcl
-module "rise_ecr" {
-  source = "./modules/rise-ecr-controller"
+module "rise_aws" {
+  source = "./modules/rise-aws"
 
   name_prefix            = "rise"
   repo_prefix            = "rise/"
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
   irsa_namespace         = "rise-system"
-  irsa_service_account   = "rise-ecr-controller"
+  irsa_service_account   = "rise-backend"
 }
 ```
 
 ### With IAM User (Non-AWS Deployment)
 
 ```hcl
-module "rise_ecr" {
-  source = "./modules/rise-ecr-controller"
+module "rise_aws" {
+  source = "./modules/rise-aws"
 
   name_prefix     = "rise"
   repo_prefix     = "rise/"
@@ -70,15 +70,15 @@ module "rise_ecr" {
 }
 
 # Store credentials securely
-resource "aws_secretsmanager_secret" "rise_ecr_creds" {
-  name = "rise/ecr-controller-credentials"
+resource "aws_secretsmanager_secret" "rise_backend_creds" {
+  name = "rise/backend-credentials"
 }
 
-resource "aws_secretsmanager_secret_version" "rise_ecr_creds" {
-  secret_id = aws_secretsmanager_secret.rise_ecr_creds.id
+resource "aws_secretsmanager_secret_version" "rise_backend_creds" {
+  secret_id = aws_secretsmanager_secret.rise_backend_creds.id
   secret_string = jsonencode({
-    access_key_id     = module.rise_ecr.access_key_id
-    secret_access_key = module.rise_ecr.secret_access_key
+    access_key_id     = module.rise_aws.access_key_id
+    secret_access_key = module.rise_aws.secret_access_key
   })
 }
 ```
@@ -91,12 +91,12 @@ After applying this module, configure the Rise backend with the ECR settings:
 # config/local.toml
 [registry]
 type = "ecr"
-region = "eu-west-1"  # From module.rise_ecr.rise_config.region
-account_id = "123456789012"  # From module.rise_ecr.rise_config.account_id
-repo_prefix = "rise/"  # From module.rise_ecr.rise_config.repo_prefix
-role_arn = "arn:aws:iam::123456789012:role/rise-ecr-controller"  # From module.rise_ecr.role_arn
-push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"  # From module.rise_ecr.push_role_arn
-auto_remove = false  # From module.rise_ecr.rise_config.auto_remove
+region = "eu-west-1"  # From module.rise_aws.rise_config.region
+account_id = "123456789012"  # From module.rise_aws.rise_config.account_id
+repo_prefix = "rise/"  # From module.rise_aws.rise_config.repo_prefix
+role_arn = "arn:aws:iam::123456789012:role/rise-backend"  # From module.rise_aws.role_arn
+push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"  # From module.rise_aws.push_role_arn
+auto_remove = false  # From module.rise_aws.rise_config.auto_remove
 
 # If using IAM user instead of role:
 # access_key_id = "AKIA..."
@@ -117,7 +117,7 @@ auto_remove = false  # From module.rise_ecr.rise_config.auto_remove
 | role_assume_policy | Custom assume role policy JSON | `string` | `null` | no |
 | irsa_oidc_provider_arn | OIDC provider ARN for IRSA | `string` | `null` | no |
 | irsa_namespace | Kubernetes namespace for IRSA | `string` | `"rise-system"` | no |
-| irsa_service_account | Kubernetes service account for IRSA | `string` | `"rise-ecr-controller"` | no |
+| irsa_service_account | Kubernetes service account for IRSA | `string` | `"rise-backend"` | no |
 | auto_remove | Delete repos on project deletion | `bool` | `false` | no |
 | image_tag_mutability | Tag mutability for repositories | `string` | `"MUTABLE"` | no |
 | scan_on_push | Enable image scanning on push | `bool` | `true` | no |

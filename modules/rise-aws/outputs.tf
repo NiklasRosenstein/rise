@@ -3,13 +3,13 @@
 # -----------------------------------------------------------------------------
 
 output "role_arn" {
-  description = "ARN of the IAM role for the ECR controller"
-  value       = var.create_iam_role ? aws_iam_role.ecr_controller[0].arn : null
+  description = "ARN of the IAM role for the Rise backend"
+  value       = var.create_iam_role ? aws_iam_role.backend[0].arn : null
 }
 
 output "role_name" {
-  description = "Name of the IAM role for the ECR controller"
-  value       = var.create_iam_role ? aws_iam_role.ecr_controller[0].name : null
+  description = "Name of the IAM role for the Rise backend"
+  value       = var.create_iam_role ? aws_iam_role.backend[0].name : null
 }
 
 # -----------------------------------------------------------------------------
@@ -17,24 +17,24 @@ output "role_name" {
 # -----------------------------------------------------------------------------
 
 output "user_arn" {
-  description = "ARN of the IAM user for the ECR controller"
-  value       = var.create_iam_user ? aws_iam_user.ecr_controller[0].arn : null
+  description = "ARN of the IAM user for the Rise backend"
+  value       = var.create_iam_user ? aws_iam_user.backend[0].arn : null
 }
 
 output "user_name" {
-  description = "Name of the IAM user for the ECR controller"
-  value       = var.create_iam_user ? aws_iam_user.ecr_controller[0].name : null
+  description = "Name of the IAM user for the Rise backend"
+  value       = var.create_iam_user ? aws_iam_user.backend[0].name : null
 }
 
 output "access_key_id" {
-  description = "Access key ID for the ECR controller IAM user"
-  value       = var.create_iam_user ? aws_iam_access_key.ecr_controller[0].id : null
+  description = "Access key ID for the Rise backend IAM user"
+  value       = var.create_iam_user ? aws_iam_access_key.backend[0].id : null
   sensitive   = true
 }
 
 output "secret_access_key" {
-  description = "Secret access key for the ECR controller IAM user"
-  value       = var.create_iam_user ? aws_iam_access_key.ecr_controller[0].secret : null
+  description = "Secret access key for the Rise backend IAM user"
+  value       = var.create_iam_user ? aws_iam_access_key.backend[0].secret : null
   sensitive   = true
 }
 
@@ -57,8 +57,8 @@ output "push_role_name" {
 # -----------------------------------------------------------------------------
 
 output "controller_policy_arn" {
-  description = "ARN of the IAM policy for the ECR controller"
-  value       = aws_iam_policy.ecr_controller.arn
+  description = "ARN of the IAM policy for the Rise backend"
+  value       = aws_iam_policy.backend.arn
 }
 
 output "push_policy_arn" {
@@ -67,8 +67,8 @@ output "push_policy_arn" {
 }
 
 output "policy_document" {
-  description = "The IAM policy document JSON for the controller"
-  value       = data.aws_iam_policy_document.ecr_controller.json
+  description = "The IAM policy document JSON for the Rise backend"
+  value       = data.aws_iam_policy_document.backend.json
 }
 
 # -----------------------------------------------------------------------------
@@ -81,7 +81,7 @@ output "rise_config" {
     region        = local.region
     account_id    = local.account_id
     repo_prefix   = var.repo_prefix
-    role_arn      = var.create_iam_role ? aws_iam_role.ecr_controller[0].arn : null
+    role_arn      = var.create_iam_role ? aws_iam_role.backend[0].arn : null
     push_role_arn = var.create_push_role ? aws_iam_role.push_role[0].arn : null
     auto_remove   = var.auto_remove
   }

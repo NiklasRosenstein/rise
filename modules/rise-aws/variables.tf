@@ -19,13 +19,13 @@ variable "tags" {
 # Authentication method - choose one
 
 variable "create_iam_user" {
-  description = "Create an IAM user with access keys for the controller (use for non-AWS deployments)"
+  description = "Create an IAM user with access keys for the Rise backend (use for non-AWS deployments)"
   type        = bool
   default     = false
 }
 
 variable "create_iam_role" {
-  description = "Create an IAM role for the controller (use for AWS deployments with IRSA or instance profiles)"
+  description = "Create an IAM role for the Rise backend (use for AWS deployments with IRSA or instance profiles)"
   type        = bool
   default     = true
 }
@@ -43,15 +43,15 @@ variable "irsa_oidc_provider_arn" {
 }
 
 variable "irsa_namespace" {
-  description = "Kubernetes namespace where the controller runs (for IRSA)"
+  description = "Kubernetes namespace where the Rise backend runs (for IRSA)"
   type        = string
   default     = "rise-system"
 }
 
 variable "irsa_service_account" {
-  description = "Kubernetes service account name for the controller (for IRSA)"
+  description = "Kubernetes service account name for the Rise backend (for IRSA)"
   type        = string
-  default     = "rise-ecr-controller"
+  default     = "rise-backend"
 }
 
 # Push role settings

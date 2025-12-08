@@ -15,7 +15,7 @@ type = "ecr"
 region = "us-east-1"
 account_id = "123456789012"
 repo_prefix = "rise/"
-role_arn = "arn:aws:iam::123456789012:role/rise-ecr-controller"
+role_arn = "arn:aws:iam::123456789012:role/rise-backend"
 push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"
 ```
 

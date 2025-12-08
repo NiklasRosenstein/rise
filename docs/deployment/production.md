@@ -108,7 +108,7 @@ RISE_REGISTRY__TYPE="ecr"
 RISE_REGISTRY__REGION="us-east-1"
 RISE_REGISTRY__ACCOUNT_ID="123456789012"
 RISE_REGISTRY__REPO_PREFIX="rise/"
-RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-controller"
+RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend"
 RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-push"
 
 # Kubernetes (if using Kubernetes backend)

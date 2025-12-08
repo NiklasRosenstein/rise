@@ -1,9 +1,9 @@
 locals {
-  name = "${var.name_prefix}-ecr-controller"
+  name = "${var.name_prefix}-backend"
 
   default_tags = {
     "rise:managed-by" = "terraform"
-    "rise:component"  = "ecr-controller"
+    "rise:component"  = "backend"
   }
 
   tags = merge(local.default_tags, var.tags)
@@ -39,7 +39,7 @@ locals {
 # IAM Policy for ECR Controller
 # -----------------------------------------------------------------------------
 
-data "aws_iam_policy_document" "ecr_controller" {
+data "aws_iam_policy_document" "backend" {
   # Allow getting authorization tokens (required for any ECR operation)
   statement {
     sid    = "GetAuthorizationToken"
@@ -123,10 +123,10 @@ data "aws_iam_policy_document" "ecr_controller" {
   }
 }
 
-resource "aws_iam_policy" "ecr_controller" {
+resource "aws_iam_policy" "backend" {
   name        = local.name
-  description = "IAM policy for Rise ECR controller to manage ECR repositories"
-  policy      = data.aws_iam_policy_document.ecr_controller.json
+  description = "IAM policy for Rise backend to manage ECR repositories"
+  policy      = data.aws_iam_policy_document.backend.json
   tags        = local.tags
 }
 
@@ -178,44 +178,44 @@ locals {
   )
 }
 
-resource "aws_iam_role" "ecr_controller" {
+resource "aws_iam_role" "backend" {
   count = var.create_iam_role ? 1 : 0
 
   name               = local.name
-  description        = "IAM role for Rise ECR controller"
+  description        = "IAM role for Rise backend"
   assume_role_policy = local.assume_role_policy
   tags               = local.tags
 }
 
-resource "aws_iam_role_policy_attachment" "ecr_controller" {
+resource "aws_iam_role_policy_attachment" "backend" {
   count = var.create_iam_role ? 1 : 0
 
-  role       = aws_iam_role.ecr_controller[0].name
-  policy_arn = aws_iam_policy.ecr_controller.arn
+  role       = aws_iam_role.backend[0].name
+  policy_arn = aws_iam_policy.backend.arn
 }
 
 # -----------------------------------------------------------------------------
 # IAM User (for non-AWS deployments)
 # -----------------------------------------------------------------------------
 
-resource "aws_iam_user" "ecr_controller" {
+resource "aws_iam_user" "backend" {
   count = var.create_iam_user ? 1 : 0
 
   name = local.name
   tags = local.tags
 }
 
-resource "aws_iam_user_policy_attachment" "ecr_controller" {
+resource "aws_iam_user_policy_attachment" "backend" {
   count = var.create_iam_user ? 1 : 0
 
-  user       = aws_iam_user.ecr_controller[0].name
-  policy_arn = aws_iam_policy.ecr_controller.arn
+  user       = aws_iam_user.backend[0].name
+  policy_arn = aws_iam_policy.backend.arn
 }
 
-resource "aws_iam_access_key" "ecr_controller" {
+resource "aws_iam_access_key" "backend" {
   count = var.create_iam_user ? 1 : 0
 
-  user = aws_iam_user.ecr_controller[0].name
+  user = aws_iam_user.backend[0].name
 }
 
 # -----------------------------------------------------------------------------
@@ -276,7 +276,7 @@ data "aws_iam_policy_document" "push_role_assume" {
       effect = "Allow"
       principals {
         type        = "AWS"
-        identifiers = [aws_iam_role.ecr_controller[0].arn]
+        identifiers = [aws_iam_role.backend[0].arn]
       }
       actions = ["sts:AssumeRole"]
     }
@@ -289,7 +289,7 @@ data "aws_iam_policy_document" "push_role_assume" {
       effect = "Allow"
       principals {
         type        = "AWS"
-        identifiers = [aws_iam_user.ecr_controller[0].arn]
+        identifiers = [aws_iam_user.backend[0].arn]
       }
       actions = ["sts:AssumeRole"]
     }
@@ -351,13 +351,13 @@ resource "aws_iam_policy" "assume_push_role" {
 resource "aws_iam_role_policy_attachment" "controller_assume_push" {
   count = var.create_push_role && var.create_iam_role ? 1 : 0
 
-  role       = aws_iam_role.ecr_controller[0].name
+  role       = aws_iam_role.backend[0].name
   policy_arn = aws_iam_policy.assume_push_role[0].arn
 }
 
 resource "aws_iam_user_policy_attachment" "controller_assume_push" {
   count = var.create_push_role && var.create_iam_user ? 1 : 0
 
-  user       = aws_iam_user.ecr_controller[0].name
+  user       = aws_iam_user.backend[0].name
   policy_arn = aws_iam_policy.assume_push_role[0].arn
 }

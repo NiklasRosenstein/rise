@@ -16,7 +16,7 @@ serviceAccount:
   name: ""
   # IAM role ARN for IRSA (IAM Roles for Service Accounts) on EKS
   # When set, adds eks.amazonaws.com/role-arn annotation to the ServiceAccount
-  # Example: "arn:aws:iam::123456789012:role/rise-ecr-controller"
+  # Example: "arn:aws:iam::123456789012:role/rise-backend"
   iamRoleArn: ""
 
 podAnnotations: {}
@@ -128,7 +128,7 @@ config:
     # region: "us-east-1"
     # account_id: "123456789012"
     # repo_prefix: "rise/"
-    # role_arn: "arn:aws:iam::123456789012:role/rise-ecr-controller"
+    # role_arn: "arn:aws:iam::123456789012:role/rise-backend"
     # push_role_arn: "arn:aws:iam::123456789012:role/rise-ecr-push"
     # auto_remove: false
 

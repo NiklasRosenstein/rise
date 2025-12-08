@@ -182,7 +182,7 @@ OIDC_CLIENT_ID=rise-production
 OIDC_CLIENT_SECRET=very-secret-value
 ADMIN_EMAIL=admin@example.com
 AWS_ACCOUNT_ID=123456789012
-ECR_CONTROLLER_ROLE_ARN=arn:aws:iam::123456789012:policy/rise-ecr-controller
+ECR_CONTROLLER_ROLE_ARN=arn:aws:iam::123456789012:policy/rise-backend
 ECR_PUSH_ROLE_ARN=arn:aws:iam::123456789012:role/rise-ecr-push
 DATABASE_URL=postgres://rise:${DB_PASSWORD}@db.example.com/rise
 ```

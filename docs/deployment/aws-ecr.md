@@ -11,13 +11,13 @@ AWS ECR provides a managed Docker registry with:
 - **Private repositories** within your AWS account
 - **High availability** across multiple availability zones
 
-Rise includes a Terraform module (`modules/rise-ecr-controller`) that provisions all required AWS resources for ECR integration.
+Rise includes a Terraform module (`modules/rise-aws`) that provisions all required AWS resources for ECR integration.
 
 ## Architecture
 
 The Rise ECR integration uses a two-role architecture for security and least privilege:
 
-### Controller Role (`rise-ecr-controller`)
+### Controller Role (`rise-backend`)
 
 **Purpose**: Allows the Rise ECR controller to manage repository lifecycle.
 
@@ -63,7 +63,7 @@ The Rise ECR integration uses a two-role architecture for security and least pri
 
 ### What the Module Creates
 
-The `rise-ecr-controller` Terraform module provisions:
+The `rise-aws` Terraform module provisions:
 
 1. **ECR Controller IAM Role**:
    - Manages repository lifecycle
@@ -94,7 +94,7 @@ Create a `terraform/rise-ecr.tf` file:
 
 ```hcl
 module "rise_ecr" {
-  source = "../modules/rise-ecr-controller"
+  source = "../modules/rise-aws"
 
   name_prefix = "rise"
   repo_prefix = "rise/"
@@ -130,13 +130,13 @@ If you plan to run the Rise backend on EKS with IRSA:
 
 ```hcl
 module "rise_ecr" {
-  source = "../modules/rise-ecr-controller"
+  source = "../modules/rise-aws"
 
   name_prefix            = "rise"
   repo_prefix            = "rise/"
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
   irsa_namespace         = "rise-system"
-  irsa_service_account   = "rise-ecr-controller"
+  irsa_service_account   = "rise-backend"
 }
 
 # Output the role ARN for Helm values
@@ -155,7 +155,7 @@ This configures the trust policy to allow the Kubernetes service account to assu
 serviceAccount:
   create: true
   # Automatically adds eks.amazonaws.com/role-arn annotation
-  iamRoleArn: "arn:aws:iam::123456789012:role/rise-ecr-controller"
+  iamRoleArn: "arn:aws:iam::123456789012:role/rise-backend"
 
 # Backend config doesn't need static credentials with IRSA
 config:
@@ -164,7 +164,7 @@ config:
     region: "us-east-1"
     account_id: "123456789012"
     repo_prefix: "rise/"
-    role_arn: "arn:aws:iam::123456789012:role/rise-ecr-controller"
+    role_arn: "arn:aws:iam::123456789012:role/rise-backend"
     push_role_arn: "arn:aws:iam::123456789012:role/rise-ecr-push"
     # NO access_key_id or secret_access_key needed with IRSA
 ```
@@ -184,7 +184,7 @@ If running Rise outside AWS (e.g., on-premises, other cloud):
 
 ```hcl
 module "rise_ecr" {
-  source = "../modules/rise-ecr-controller"
+  source = "../modules/rise-aws"
 
   name_prefix     = "rise"
   repo_prefix     = "rise/"
@@ -240,7 +240,7 @@ type = "ecr"
 region = "us-east-1"                    # From Terraform output
 account_id = "123456789012"              # From Terraform output
 repo_prefix = "rise/"                    # From Terraform output
-role_arn = "arn:aws:iam::123456789012:role/rise-ecr-controller"      # From module.rise_ecr.role_arn
+role_arn = "arn:aws:iam::123456789012:role/rise-backend"      # From module.rise_ecr.role_arn
 push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"       # From module.rise_ecr.push_role_arn
 auto_remove = false                      # From Terraform output
 
@@ -258,7 +258,7 @@ export RISE_REGISTRY__TYPE="ecr"
 export RISE_REGISTRY__REGION="us-east-1"
 export RISE_REGISTRY__ACCOUNT_ID="123456789012"
 export RISE_REGISTRY__REPO_PREFIX="rise/"
-export RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-controller"
+export RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend"
 export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-push"
 ```
 
@@ -303,7 +303,7 @@ Here's how credentials work in the ECR integration:
 2. Verify controller role has `sts:AssumeRole` on push role:
    ```bash
    aws iam simulate-principal-policy \
-     --policy-source-arn arn:aws:iam::123456789012:role/rise-ecr-controller \
+     --policy-source-arn arn:aws:iam::123456789012:role/rise-backend \
      --action-names sts:AssumeRole \
      --resource-arns arn:aws:iam::123456789012:role/rise-ecr-push
    ```
@@ -354,7 +354,7 @@ Key Terraform module inputs:
 | `encryption_type` | AES256 or KMS | `"AES256"` |
 | `irsa_oidc_provider_arn` | EKS OIDC provider for IRSA | `null` |
 
-See [modules/rise-ecr-controller/README.md](../../modules/rise-ecr-controller/README.md) for full documentation.
+See [modules/rise-aws/README.md](../../modules/rise-aws/README.md) for full documentation.
 
 ## Security Best Practices
 
