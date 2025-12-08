@@ -48,33 +48,41 @@ This happens **after** TOML parsing but **before** deserialization, so:
 
 ## Configuration Precedence
 
-**DEPRECATED**: The old `RISE__` environment variable prefix approach is no longer supported.
+Configuration is loaded in this order (later values override earlier ones):
 
-Use explicit `${VAR}` substitution in TOML instead:
+1. `default.toml` - Base configuration with defaults
+2. `{RUN_MODE}.toml` - Environment-specific (e.g., production.toml)
+3. `local.toml` - Local overrides (not in git)
+4. Environment variable substitution - `${VAR}` patterns are replaced
+5. DATABASE_URL special case - Overrides `[database] url` if set
 
-❌ **Old approach (no longer works)**:
-```bash
-export RISE__AUTH__CLIENT_SECRET=my-secret
-```
-
-✅ **New approach**:
+Example:
 ```toml
-# In config file
-client_secret = "${RISE_AUTH_CLIENT_SECRET:-default}"
-```
-```bash
-export RISE_AUTH_CLIENT_SECRET=my-secret
+# In default.toml
+client_secret = "${AUTH_SECRET:-default-secret}"
+
+# In production.toml
+client_secret = "${AUTH_SECRET}"  # Override: no default, required
+
+# In local.toml
+client_secret = "my-local-secret"  # Override: hardcoded value
 ```
 
 ### Special Cases
 
-**DATABASE_URL** is still read directly as an environment variable for compatibility:
+**DATABASE_URL**: For convenience, the DATABASE_URL environment variable is checked after config loading and will override any `[database] url` setting. This is optional - you can use `${DATABASE_URL}` in TOML instead:
 
-```bash
-export DATABASE_URL="postgres://user:pass@host/db"
+```toml
+# Option 1: Direct environment variable (checked after config loads)
+[database]
+url = ""  # Empty, DATABASE_URL env var will be used
+
+# Option 2: Explicit substitution (recommended for consistency)
+[database]
+url = "${DATABASE_URL}"
 ```
 
-This takes precedence over any `[database] url` setting in TOML.
+**Note**: DATABASE_URL is only required at compile time for SQLX query verification. At runtime, you can set it via either method above.
 
 ## Examples
 
@@ -223,28 +231,3 @@ Run with `RUST_LOG=debug` to see configuration loading details:
 ```bash
 RUST_LOG=debug cargo run --bin rise -- backend server
 ```
-
-## Migration from Old Approach
-
-If you were using the `RISE__` prefix approach:
-
-1. Identify which environment variables you were setting
-2. Add `${VAR}` references in your TOML config
-3. Optionally rename your environment variables (no RISE__ prefix needed)
-
-**Before**:
-```bash
-export RISE__AUTH__CLIENT_SECRET=my-secret
-```
-
-**After**:
-```toml
-# In config/local.toml or config/production.toml
-[auth]
-client_secret = "${AUTH_CLIENT_SECRET}"
-```
-```bash
-export AUTH_CLIENT_SECRET=my-secret
-```
-
-This gives you more control and makes configuration explicit and self-documenting.
