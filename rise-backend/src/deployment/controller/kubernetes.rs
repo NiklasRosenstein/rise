@@ -68,13 +68,23 @@ enum ReconcilePhase {
     Completed,
 }
 
+/// Parsed ingress URL components
+#[derive(Debug, Clone)]
+struct IngressUrl {
+    /// The hostname (e.g., "rise.dev")
+    host: String,
+    /// Optional path prefix (e.g., "/myapp")
+    /// None for subdomain-based routing
+    path_prefix: Option<String>,
+}
+
 /// Kubernetes controller implementation
 pub struct KubernetesController {
     state: ControllerState,
     kube_client: Client,
     ingress_class: String,
-    hostname_format: String,
-    nondefault_hostname_format: Option<String>,
+    production_ingress_url_template: String,
+    staging_ingress_url_template: Option<String>,
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     registry_url: Option<String>,
     auth_backend_url: String,
@@ -89,8 +99,8 @@ impl KubernetesController {
         state: ControllerState,
         kube_client: Client,
         ingress_class: String,
-        hostname_format: String,
-        nondefault_hostname_format: Option<String>,
+        production_ingress_url_template: String,
+        staging_ingress_url_template: Option<String>,
         registry_provider: Option<Arc<dyn RegistryProvider>>,
         registry_url: Option<String>,
         auth_backend_url: String,
@@ -102,8 +112,8 @@ impl KubernetesController {
             state,
             kube_client,
             ingress_class,
-            hostname_format,
-            nondefault_hostname_format,
+            production_ingress_url_template,
+            staging_ingress_url_template,
             registry_provider,
             registry_url,
             auth_backend_url,
@@ -439,44 +449,78 @@ impl KubernetesController {
         Self::escaped_group_name(&deployment.deployment_group)
     }
 
-    /// Get hostname for a deployment group
+    /// Get hostname (without path) for deployment
     fn hostname(&self, project: &Project, deployment: &Deployment) -> String {
-        if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
-            // Use hostname_format for default deployment group
-            self.hostname_format
-                .replace("{project_name}", &project.name)
-        } else {
-            // Use nondefault_hostname_format if set, otherwise derive from hostname_format
-            if let Some(ref nondefault_format) = self.nondefault_hostname_format {
-                nondefault_format
-                    .replace("{project_name}", &project.name)
-                    .replace(
-                        "{deployment_group}",
-                        &Self::escaped_group_name(&deployment.deployment_group),
-                    )
-            } else {
-                // Fallback: insert "-{group}" before the first dot in hostname_format
-                // e.g., "{project_name}.apps.rise.dev" → "{project_name}-{group}.apps.rise.dev"
-                let hostname = self
-                    .hostname_format
-                    .replace("{project_name}", &project.name);
-                if let Some(dot_pos) = hostname.find('.') {
-                    format!(
-                        "{}-{}{}",
-                        &hostname[..dot_pos],
-                        Self::escaped_group_name(&deployment.deployment_group),
-                        &hostname[dot_pos..]
-                    )
-                } else {
-                    // No dot found, just append the group
-                    format!(
-                        "{}-{}",
-                        hostname,
-                        Self::escaped_group_name(&deployment.deployment_group)
-                    )
+        let url = self.resolved_ingress_url(project, deployment);
+        let parsed = Self::parse_ingress_url(&url);
+        parsed.host
+    }
+
+    /// Parse a fully-resolved URL into (host, path_prefix)
+    ///
+    /// Examples:
+    ///   "myapp.apps.rise.dev" → IngressUrl { host: "myapp.apps.rise.dev", path_prefix: None }
+    ///   "rise.dev/myapp" → IngressUrl { host: "rise.dev", path_prefix: Some("/myapp") }
+    fn parse_ingress_url(url: &str) -> IngressUrl {
+        match url.find('/') {
+            Some(slash_pos) => {
+                let host = url[..slash_pos].to_string();
+                let path = url[slash_pos..].to_string();
+                IngressUrl {
+                    host,
+                    path_prefix: Some(path),
                 }
             }
+            None => IngressUrl {
+                host: url.to_string(),
+                path_prefix: None,
+            },
         }
+    }
+
+    /// Get fully resolved ingress URL with placeholders replaced
+    fn resolved_ingress_url(&self, project: &Project, deployment: &Deployment) -> String {
+        if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            self.production_ingress_url_template
+                .replace("{project_name}", &project.name)
+        } else if let Some(ref staging_template) = self.staging_ingress_url_template {
+            staging_template
+                .replace("{project_name}", &project.name)
+                .replace(
+                    "{deployment_group}",
+                    &Self::escaped_group_name(&deployment.deployment_group),
+                )
+        } else {
+            // Fallback: insert "-{group}" before first dot
+            let base_url = self
+                .production_ingress_url_template
+                .replace("{project_name}", &project.name);
+            if let Some(dot_pos) = base_url.find('.') {
+                format!(
+                    "{}-{}{}",
+                    &base_url[..dot_pos],
+                    Self::escaped_group_name(&deployment.deployment_group),
+                    &base_url[dot_pos..]
+                )
+            } else {
+                format!(
+                    "{}-{}",
+                    base_url,
+                    Self::escaped_group_name(&deployment.deployment_group)
+                )
+            }
+        }
+    }
+
+    /// Get parsed URL components for Ingress creation
+    fn ingress_url_components(&self, project: &Project, deployment: &Deployment) -> IngressUrl {
+        let url = self.resolved_ingress_url(project, deployment);
+        Self::parse_ingress_url(&url)
+    }
+
+    /// Get full ingress URL for deployment_url field
+    fn full_ingress_url(&self, project: &Project, deployment: &Deployment) -> String {
+        self.resolved_ingress_url(project, deployment)
     }
 
     /// Clean up deployment group resources (Service and Ingress) if no other deployments exist in the group
@@ -806,7 +850,7 @@ impl KubernetesController {
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
     ) -> Ingress {
-        let host = self.hostname(project, deployment);
+        let url_components = self.ingress_url_components(project, deployment);
 
         // Start with user-provided annotations from config (convert HashMap to BTreeMap)
         let mut annotations: BTreeMap<String, String> = self
@@ -814,6 +858,24 @@ impl KubernetesController {
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
+
+        // Add Nginx rewrite annotations for sub-path routing
+        if let Some(ref path) = url_components.path_prefix {
+            // Strip path prefix: /myapp/foo → /foo
+            annotations.insert(
+                "nginx.ingress.kubernetes.io/rewrite-target".to_string(),
+                "/$2".to_string(),
+            );
+
+            // Pass original prefix as header
+            annotations.insert(
+                "nginx.ingress.kubernetes.io/configuration-snippet".to_string(),
+                format!(
+                    r#"proxy_set_header X-Forwarded-Prefix "{}";"#,
+                    path.trim_end_matches('/')
+                ),
+            );
+        }
 
         if matches!(project.visibility, ProjectVisibility::Private) {
             // Add Nginx auth annotations for private projects
@@ -838,10 +900,21 @@ impl KubernetesController {
         }
         // Public projects have no auth annotations
 
+        // Determine path and path type based on routing mode
+        let (ingress_path, path_type) = if let Some(ref path) = url_components.path_prefix {
+            // Regex: /myapp(/|$)(.*)
+            // Matches: /myapp, /myapp/, /myapp/anything
+            // $2 captures everything after /myapp/
+            let pattern = format!("{}(/|$)(.*)", path.trim_end_matches('/'));
+            (pattern, "ImplementationSpecific")
+        } else {
+            ("/".to_string(), "Prefix")
+        };
+
         // Build TLS configuration if secret name is provided
         let tls = self.ingress_tls_secret_name.as_ref().map(|secret_name| {
             vec![k8s_openapi::api::networking::v1::IngressTLS {
-                hosts: Some(vec![host.clone()]),
+                hosts: Some(vec![url_components.host.clone()]),
                 secret_name: Some(secret_name.clone()),
             }]
         });
@@ -862,11 +935,11 @@ impl KubernetesController {
                 ingress_class_name: Some(self.ingress_class.clone()),
                 tls,
                 rules: Some(vec![IngressRule {
-                    host: Some(host),
+                    host: Some(url_components.host.clone()),
                     http: Some(HTTPIngressRuleValue {
                         paths: vec![HTTPIngressPath {
-                            path: Some("/".to_string()),
-                            path_type: "Prefix".to_string(),
+                            path: Some(ingress_path),
+                            path_type: path_type.to_string(),
                             backend: IngressBackend {
                                 service: Some(IngressServiceBackend {
                                     name: Self::service_name(project, deployment),
@@ -1290,7 +1363,8 @@ impl DeploymentBackend for KubernetesController {
                 ReconcilePhase::WaitingForHealth => {
                     // Use health_check to verify deployment is healthy before switching traffic
                     let health = self.health_check(deployment).await?;
-                    let deployment_url = format!("https://{}", self.hostname(project, deployment));
+                    let deployment_url =
+                        format!("https://{}", self.full_ingress_url(project, deployment));
 
                     if health.healthy {
                         info!(
@@ -1341,7 +1415,8 @@ impl DeploymentBackend for KubernetesController {
                     );
 
                     metadata.reconcile_phase = ReconcilePhase::Completed;
-                    let deployment_url = format!("https://{}", self.hostname(project, deployment));
+                    let deployment_url =
+                        format!("https://{}", self.full_ingress_url(project, deployment));
 
                     return Ok(ReconcileResult {
                         status: DeploymentStatus::Healthy,
@@ -1481,7 +1556,8 @@ impl DeploymentBackend for KubernetesController {
                         Err(e) => return Err(e.into()),
                     }
 
-                    let deployment_url = format!("https://{}", self.hostname(project, deployment));
+                    let deployment_url =
+                        format!("https://{}", self.full_ingress_url(project, deployment));
 
                     return Ok(ReconcileResult {
                         status: DeploymentStatus::Healthy,
@@ -1867,8 +1943,8 @@ mod tests {
             state,
             kube_client,
             ingress_class: "nginx".to_string(),
-            hostname_format: "{project_name}.test.local".to_string(),
-            nondefault_hostname_format: None,
+            production_ingress_url_template: "{project_name}.test.local".to_string(),
+            staging_ingress_url_template: None,
             registry_provider: None,
             registry_url: None,
             auth_backend_url: "http://localhost:3000".to_string(),
@@ -1876,5 +1952,29 @@ mod tests {
             ingress_annotations: std::collections::HashMap::new(),
             ingress_tls_secret_name: None,
         }
+    }
+
+    #[test]
+    fn test_parse_ingress_url_subdomain() {
+        let url = "myapp.apps.rise.dev";
+        let parsed = KubernetesController::parse_ingress_url(url);
+        assert_eq!(parsed.host, "myapp.apps.rise.dev");
+        assert!(parsed.path_prefix.is_none());
+    }
+
+    #[test]
+    fn test_parse_ingress_url_single_path() {
+        let url = "rise.dev/myapp";
+        let parsed = KubernetesController::parse_ingress_url(url);
+        assert_eq!(parsed.host, "rise.dev");
+        assert_eq!(parsed.path_prefix, Some("/myapp".to_string()));
+    }
+
+    #[test]
+    fn test_parse_ingress_url_multi_level_path() {
+        let url = "rise.dev/myapp/staging";
+        let parsed = KubernetesController::parse_ingress_url(url);
+        assert_eq!(parsed.host, "rise.dev");
+        assert_eq!(parsed.path_prefix, Some("/myapp/staging".to_string()));
     }
 }

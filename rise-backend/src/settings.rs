@@ -186,19 +186,21 @@ pub struct KubernetesSettings {
     #[serde(default = "default_ingress_class")]
     pub ingress_class: String,
 
-    /// Hostname format for default deployment group
-    /// Template variables: {project_name}
-    /// Example: "{project_name}.apps.rise.dev" → hostname "myapp.apps.rise.dev" for project "myapp"
+    /// Ingress URL template for production (default) deployment group
+    /// Supports both subdomain and sub-path routing:
+    ///   Subdomain: "{project_name}.apps.rise.dev"
+    ///   Sub-path: "rise.dev/{project_name}"
     /// Must contain {project_name} placeholder
-    pub hostname_format: String,
+    pub production_ingress_url_template: String,
 
-    /// Hostname format for non-default deployment groups
-    /// Template variables: {project_name}, {deployment_group}
-    /// Example: "{project_name}-{deployment_group}.preview.rise.dev"
-    /// If not set, uses hostname_format with "-{deployment_group}" suffix before domain
-    /// Must contain {project_name} placeholder
+    /// Ingress URL template for staging (non-default) deployment groups
+    /// Supports both subdomain and sub-path routing:
+    ///   Subdomain: "{project_name}-{deployment_group}.preview.rise.dev"
+    ///   Sub-path: "rise.dev/{project_name}/{deployment_group}"
+    /// Must contain both {project_name} and {deployment_group} placeholders
+    /// If not set, falls back to inserting "-{deployment_group}" before first dot
     #[serde(default)]
-    pub nondefault_hostname_format: Option<String>,
+    pub staging_ingress_url_template: Option<String>,
 
     /// Backend URL for Nginx auth subrequests (internal cluster URL)
     /// Example: "http://rise-backend.default.svc.cluster.local:3000"
@@ -415,16 +417,21 @@ impl Settings {
                 "{project_name}",
             )?;
             Self::validate_format_string(
-                &k8s.hostname_format,
-                "hostname_format",
+                &k8s.production_ingress_url_template,
+                "production_ingress_url_template",
                 "{project_name}",
             )?;
 
-            if let Some(ref nondefault_format) = k8s.nondefault_hostname_format {
+            if let Some(ref staging_template) = k8s.staging_ingress_url_template {
                 Self::validate_format_string(
-                    nondefault_format,
-                    "nondefault_hostname_format",
+                    staging_template,
+                    "staging_ingress_url_template",
                     "{project_name}",
+                )?;
+                Self::validate_format_string(
+                    staging_template,
+                    "staging_ingress_url_template",
+                    "{deployment_group}",
                 )?;
             }
         }

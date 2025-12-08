@@ -599,7 +599,10 @@ pub async fn update_deployment_status(
                         if error_msg.contains("Invalid deployment state transition") {
                             (StatusCode::BAD_REQUEST, error_msg)
                         } else {
-                            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e))
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("Failed to update deployment: {}", e),
+                            )
                         }
                     })?;
 

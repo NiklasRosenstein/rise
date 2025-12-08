@@ -23,12 +23,17 @@ kubeconfig = "/path/to/kubeconfig"
 # Ingress class to use
 ingress_class = "nginx"
 
-# Hostname format for default deployment group (must contain {project_name})
-hostname_format = "{project_name}.apps.rise.dev"
+# Ingress URL template for production (default) deployment group
+# Supports both subdomain and sub-path routing (must contain {project_name})
+production_ingress_url_template = "{project_name}.apps.rise.dev"
 
-# Optional: hostname format for non-default deployment groups
-# Supports {project_name} and {deployment_group} placeholders
-nondefault_hostname_format = "{project_name}-{deployment_group}.preview.rise.dev"
+# Optional: Ingress URL template for staging (non-default) deployment groups
+# Must contain both {project_name} and {deployment_group} placeholders
+staging_ingress_url_template = "{project_name}-{deployment_group}.preview.rise.dev"
+
+# Or for sub-path routing:
+# production_ingress_url_template = "rise.dev/{project_name}"
+# staging_ingress_url_template = "rise.dev/{project_name}/{deployment_group}"
 
 # Namespace format (must contain {project_name})
 namespace_format = "rise-{project_name}"
@@ -45,11 +50,11 @@ RISE_KUBERNETES__KUBECONFIG="/path/to/kubeconfig"
 # Ingress class (required)
 RISE_KUBERNETES__INGRESS_CLASS="nginx"
 
-# Hostname format for default deployment group (required, must contain {project_name})
-RISE_KUBERNETES__HOSTNAME_FORMAT="{project_name}.apps.rise.dev"
+# Ingress URL template for production deployment group (required, must contain {project_name})
+RISE_KUBERNETES__PRODUCTION_INGRESS_URL_TEMPLATE="{project_name}.apps.rise.dev"
 
-# Optional: Hostname format for non-default groups (must contain {project_name})
-RISE_KUBERNETES__NONDEFAULT_HOSTNAME_FORMAT="{project_name}-{deployment_group}.preview.rise.dev"
+# Optional: Ingress URL template for staging groups (must contain {project_name} and {deployment_group})
+RISE_KUBERNETES__STAGING_INGRESS_URL_TEMPLATE="{project_name}-{deployment_group}.preview.rise.dev"
 
 # Namespace format (must contain {project_name})
 RISE_KUBERNETES__NAMESPACE_FORMAT="rise-{project_name}"
@@ -101,10 +106,47 @@ Resources follow consistent naming patterns:
 
 Each deployment group gets its own Service and Ingress with a unique URL:
 
-| Group | URL Pattern | Example |
-|-------|-------------|---------|
-| `default` | `hostname_format` template | `my-app.apps.rise.dev` |
-| Custom groups | `nondefault_hostname_format` template | `my-app-mr--26.preview.rise.dev` |
+| Group | URL Pattern | Example (Subdomain) | Example (Sub-path) |
+|-------|-------------|---------------------|-------------------|
+| `default` | `production_ingress_url_template` | `my-app.apps.rise.dev` | `rise.dev/my-app` |
+| Custom groups | `staging_ingress_url_template` | `my-app-mr--26.preview.rise.dev` | `rise.dev/my-app/mr--26` |
+
+### Sub-path vs Subdomain Routing
+
+Rise supports two Ingress routing modes configured globally via URL templates:
+
+**Subdomain Routing** (traditional approach):
+- Production: `{project_name}.apps.rise.dev`
+- Staging: `{project_name}-{deployment_group}.preview.rise.dev`
+- Each project gets a unique subdomain
+- Ingress path: `/` (Prefix type)
+- No path rewriting needed
+
+**Sub-path Routing** (shared domain):
+- Production: `rise.dev/{project_name}`
+- Staging: `rise.dev/{project_name}/{deployment_group}`
+- All projects share the same domain with different paths
+- Ingress path: `/{project}(/|$)(.*)` (ImplementationSpecific type with regex)
+- Nginx automatically rewrites paths
+
+#### Path Rewriting
+
+For sub-path routing, Nginx automatically rewrites paths so your application receives requests at `/` while preserving the original path prefix:
+
+- **Client request**: `GET https://rise.dev/myapp/api/users`
+- **Application receives**: `GET /api/users`
+- **Headers added**: `X-Forwarded-Prefix: /myapp`
+
+Configure your application to use the `X-Forwarded-Prefix` header when generating URLs to ensure links and assets work correctly.
+
+**Example configuration**:
+```toml
+[kubernetes]
+production_ingress_url_template = "rise.dev/{project_name}"
+staging_ingress_url_template = "rise.dev/{project_name}/{deployment_group}"
+auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"
+auth_signin_url = "https://rise.dev"
+```
 
 ### Blue/Green Deployments
 
