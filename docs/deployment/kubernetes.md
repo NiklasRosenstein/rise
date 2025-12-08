@@ -137,7 +137,7 @@ For sub-path routing, Nginx automatically rewrites paths so your application rec
 - **Application receives**: `GET /api/users`
 - **Headers added**: `X-Forwarded-Prefix: /myapp`
 
-Configure your application to use the `X-Forwarded-Prefix` header when generating URLs to ensure links and assets work correctly.
+The controller uses the built-in `nginx.ingress.kubernetes.io/x-forwarded-prefix` annotation to add this header. Configure your application to use the `X-Forwarded-Prefix` header when generating URLs to ensure links and assets work correctly.
 
 **Example configuration**:
 ```toml

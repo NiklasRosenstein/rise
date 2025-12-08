@@ -883,13 +883,10 @@ impl KubernetesController {
                 "/$2".to_string(),
             );
 
-            // Pass original prefix as header
+            // Pass original prefix as header using the built-in annotation
             annotations.insert(
-                "nginx.ingress.kubernetes.io/configuration-snippet".to_string(),
-                format!(
-                    r#"proxy_set_header X-Forwarded-Prefix "{}";"#,
-                    path.trim_end_matches('/')
-                ),
+                "nginx.ingress.kubernetes.io/x-forwarded-prefix".to_string(),
+                path.trim_end_matches('/').to_string(),
             );
         }
 
