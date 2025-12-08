@@ -136,8 +136,10 @@ pub async fn users_lookup(
 
 #[derive(Debug, Deserialize)]
 pub struct SigninQuery {
-    /// Optional redirect URL to return to after authentication
+    /// Optional redirect URL to return to after authentication (path only)
     pub redirect: Option<String>,
+    /// Optional full redirect URL from Nginx ingress (includes host)
+    pub rd: Option<String>,
 }
 
 /// Initiate OAuth2 login flow for ingress auth
@@ -150,7 +152,9 @@ pub async fn oauth_signin(
     State(state): State<AppState>,
     Query(params): Query<SigninQuery>,
 ) -> Result<Redirect, (StatusCode, String)> {
-    tracing::info!("OAuth signin initiated, redirect={:?}", params.redirect);
+    // Prefer rd (full URL) over redirect (path only)
+    let redirect_url = params.rd.or(params.redirect);
+    tracing::info!("OAuth signin initiated, redirect={:?}", redirect_url);
 
     // Generate PKCE parameters
     let code_verifier = generate_code_verifier();
@@ -160,7 +164,7 @@ pub async fn oauth_signin(
     // Store PKCE state with redirect URL for later retrieval
     let oauth_state = OAuth2State {
         code_verifier: code_verifier.clone(),
-        redirect_url: params.redirect,
+        redirect_url,
     };
     state.token_store.save(state_token.clone(), oauth_state);
 
