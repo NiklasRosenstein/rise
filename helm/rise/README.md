@@ -62,8 +62,10 @@ ingress:
       hosts:
         - rise.example.com
 
-# Create a secret with sensitive values
-existingSecret: "rise-secrets"
+# Inject sensitive configuration via envFrom
+envFrom:
+  - secretRef:
+      name: rise-secrets
 
 # Server container resources
 server:
@@ -116,13 +118,12 @@ dex:
         redirectURI: https://dex.example.com/dex/callback
 ```
 
-Create the secret:
+Create the secret with required environment variables:
 
 ```bash
 kubectl create secret generic rise-secrets \
-  --from-literal=auth-client-secret=YOUR_CLIENT_SECRET \
-  --from-literal=database-password=YOUR_DB_PASSWORD \
-  --from-literal=database-url=postgres://rise:YOUR_DB_PASSWORD@postgresql:5432/rise
+  --from-literal=DATABASE_URL=postgres://rise:YOUR_DB_PASSWORD@postgresql:5432/rise \
+  --from-literal=RISE_AUTH__CLIENT_SECRET=YOUR_CLIENT_SECRET
 ```
 
 Install the chart:
@@ -144,8 +145,7 @@ The following table lists the configurable parameters of the Rise chart and thei
 | `image.tag` | Image tag | `""` (uses Chart appVersion) |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `config` | Rise configuration in TOML format | See values.yaml |
-| `existingSecret` | Name of existing secret with sensitive values | `""` |
-| `envFrom` | List of sources to populate environment variables | `[]` |
+| `envFrom` | List of sources to populate environment variables (required for secrets) | `[]` |
 | `ingress.enabled` | Enable ingress | `false` |
 
 ### Server

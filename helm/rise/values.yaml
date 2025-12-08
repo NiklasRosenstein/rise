@@ -115,20 +115,6 @@ config: |
   # domain_suffix = "apps.rise.net"
   # namespace_format = "rise-{project_name}"  # MUST use consistent prefix for security
 
-# Existing secret containing sensitive configuration
-# Required for production deployments
-# Expected keys:
-#   - auth-client-secret: OAuth client secret
-#   - database-password: PostgreSQL password (if not using DATABASE_URL)
-#   - database-url: Full database URL (e.g., postgres://rise:password@postgresql:5432/rise)
-#
-# Example:
-# kubectl create secret generic rise-secrets \
-#   --from-literal=auth-client-secret=YOUR_CLIENT_SECRET \
-#   --from-literal=database-password=YOUR_DB_PASSWORD \
-#   --from-literal=database-url=postgres://rise:YOUR_DB_PASSWORD@postgresql:5432/rise
-existingSecret: "rise-secrets"
-
 # PostgreSQL dependency (optional, can use external database)
 postgresql:
   enabled: false

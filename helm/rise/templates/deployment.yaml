@@ -46,16 +46,6 @@ spec:
         env:
         - name: RISE_CONFIG_DIR
           value: "/config"
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.existingSecret }}
-              key: database-url
-        - name: RISE_AUTH__CLIENT_SECRET
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.existingSecret }}
-              key: auth-client-secret
         {{- with .Values.envFrom }}
         envFrom:
           {{- toYaml . | nindent 10 }}
@@ -98,11 +88,6 @@ spec:
         env:
         - name: RISE_CONFIG_DIR
           value: "/config"
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.existingSecret }}
-              key: database-url
         {{- with .Values.envFrom }}
         envFrom:
           {{- toYaml . | nindent 10 }}
@@ -130,11 +115,6 @@ spec:
         env:
         - name: RISE_CONFIG_DIR
           value: "/config"
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.existingSecret }}
-              key: database-url
         {{- with .Values.envFrom }}
         envFrom:
           {{- toYaml . | nindent 10 }}
@@ -162,11 +142,6 @@ spec:
         env:
         - name: RISE_CONFIG_DIR
           value: "/config"
-        - name: DATABASE_URL
-          valueFrom:
-            secretKeyRef:
-              name: {{ .Values.existingSecret }}
-              key: database-url
         {{- with .Values.envFrom }}
         envFrom:
           {{- toYaml . | nindent 10 }}
