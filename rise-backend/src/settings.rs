@@ -28,10 +28,25 @@ pub struct ServerSettings {
     /// Whether to set Secure flag on cookies (true for HTTPS, false for HTTP development)
     #[serde(default = "default_cookie_secure")]
     pub cookie_secure: bool,
+
+    /// JWT signing secret for ingress authentication (base64-encoded, minimum 32 bytes)
+    /// Generate with: openssl rand -base64 32
+    /// If not set, the backend will fall back to using IdP tokens for ingress auth
+    #[serde(default)]
+    pub jwt_signing_secret: Option<String>,
+
+    /// JWT claims to include from IdP token when issuing Rise JWTs
+    /// Default: ["sub", "email", "name"]
+    #[serde(default = "default_jwt_claims")]
+    pub jwt_claims: Vec<String>,
 }
 
 fn default_cookie_secure() -> bool {
     true
+}
+
+fn default_jwt_claims() -> Vec<String> {
+    vec!["sub".to_string(), "email".to_string(), "name".to_string()]
 }
 
 fn default_reconcile_interval() -> u64 {

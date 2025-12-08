@@ -10,6 +10,8 @@ use std::time::Duration;
 pub struct OAuth2State {
     pub code_verifier: String,
     pub redirect_url: Option<String>,
+    /// Project name for ingress authentication flow
+    pub project_name: Option<String>,
 }
 
 /// Trait for storing and retrieving OAuth2 state tokens
@@ -134,6 +136,7 @@ mod tests {
         let data = OAuth2State {
             code_verifier: "test_verifier".to_string(),
             redirect_url: Some("https://example.com".to_string()),
+            project_name: None,
         };
 
         store.save(state.to_string(), data.clone());
@@ -159,6 +162,7 @@ mod tests {
         let data = OAuth2State {
             code_verifier: "test_verifier".to_string(),
             redirect_url: None,
+            project_name: None,
         };
 
         store.save(state.to_string(), data);

@@ -8,16 +8,18 @@ use crate::db::{
     models::{ProjectVisibility, User},
     projects, users,
 };
+use crate::frontend::StaticAssets;
 use crate::state::AppState;
 use axum::{
     extract::{Extension, Query, State},
     http::{HeaderMap, StatusCode},
-    response::{IntoResponse, Redirect, Response},
+    response::{Html, IntoResponse, Redirect, Response},
     Json,
 };
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use tera::Tera;
 use tracing::instrument;
 
 #[derive(Debug, Deserialize)]
@@ -353,15 +355,101 @@ pub struct SigninQuery {
     pub redirect: Option<String>,
     /// Optional full redirect URL from Nginx ingress (includes host)
     pub rd: Option<String>,
+    /// Optional project name for ingress authentication flow
+    pub project: Option<String>,
 }
 
-/// Initiate OAuth2 login flow for ingress auth
+/// Pre-authentication page for ingress auth
+///
+/// Shows the user which project they're about to authenticate for before
+/// starting the OAuth flow. This provides better UX by explaining what's happening.
+#[instrument(skip(state))]
+pub async fn signin_page(
+    State(state): State<AppState>,
+    Query(params): Query<SigninQuery>,
+) -> Result<Response, (StatusCode, String)> {
+    let project_name = params.project.as_deref().unwrap_or("Unknown");
+    let redirect_url = params
+        .redirect
+        .or(params.rd)
+        .unwrap_or_else(|| "/".to_string());
+
+    tracing::info!(
+        "Signin page requested for project: {}, redirect: {}",
+        project_name,
+        redirect_url
+    );
+
+    // Load template from embedded assets
+    let template_content = StaticAssets::get("auth-signin.html.tera")
+        .ok_or_else(|| {
+            tracing::error!("auth-signin.html.tera template not found");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template not found".to_string(),
+            )
+        })?
+        .data;
+
+    let template_str = std::str::from_utf8(&template_content).map_err(|e| {
+        tracing::error!("Failed to parse template as UTF-8: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Template encoding error".to_string(),
+        )
+    })?;
+
+    // Create Tera instance and add template
+    let mut tera = Tera::default();
+    tera.add_raw_template("auth-signin.html.tera", template_str)
+        .map_err(|e| {
+            tracing::error!("Failed to parse template: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template error".to_string(),
+            )
+        })?;
+
+    // Build continue URL (to oauth_signin_start)
+    let mut continue_params = vec![];
+    if let Some(ref project) = params.project {
+        continue_params.push(format!("project={}", urlencoding::encode(project)));
+    }
+    if !redirect_url.is_empty() {
+        continue_params.push(format!("redirect={}", urlencoding::encode(&redirect_url)));
+    }
+    let continue_url = format!(
+        "{}/auth/signin/start?{}",
+        state.public_url.trim_end_matches('/'),
+        continue_params.join("&")
+    );
+
+    // Render template
+    let mut context = tera::Context::new();
+    context.insert("project_name", project_name);
+    context.insert("continue_url", &continue_url);
+    context.insert("redirect_url", &redirect_url);
+
+    let html = tera
+        .render("auth-signin.html.tera", &context)
+        .map_err(|e| {
+            tracing::error!("Failed to render template: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template rendering error".to_string(),
+            )
+        })?;
+
+    Ok(Html(html).into_response())
+}
+
+/// Initiate OAuth2 login flow for ingress auth (start of OAuth flow)
 ///
 /// This handler starts the OAuth2 authorization code flow with PKCE.
 /// It generates a PKCE verifier/challenge pair, stores the state, and
 /// redirects the user to the OIDC provider for authentication.
 #[instrument(skip(state))]
-pub async fn oauth_signin(
+pub async fn oauth_signin_start(
     State(state): State<AppState>,
     Query(params): Query<SigninQuery>,
 ) -> Result<Redirect, (StatusCode, String)> {
@@ -374,10 +462,11 @@ pub async fn oauth_signin(
     let code_challenge = generate_code_challenge(&code_verifier);
     let state_token = generate_state_token();
 
-    // Store PKCE state with redirect URL for later retrieval
+    // Store PKCE state with redirect URL and project name for later retrieval
     let oauth_state = OAuth2State {
         code_verifier: code_verifier.clone(),
         redirect_url,
+        project_name: params.project.clone(), // For ingress auth flow
     };
     state.token_store.save(state_token.clone(), oauth_state);
 
@@ -474,26 +563,121 @@ pub async fn oauth_callback(
         3600 // Default to 1 hour if exp is in the past
     };
 
-    // Create session cookie with JWT
-    let cookie = cookie_helpers::create_session_cookie(
-        &token_info.id_token,
-        &state.cookie_settings,
-        max_age,
-    );
-
     // Determine redirect URL
     let redirect_url = oauth_state.redirect_url.unwrap_or_else(|| "/".to_string());
 
-    tracing::info!("Setting session cookie and redirecting to {}", redirect_url);
+    // Check if this is an ingress auth flow with Rise JWT available
+    let (cookie, is_ingress_auth) = if let (Some(ref signer), Some(ref project)) =
+        (&state.jwt_signer, &oauth_state.project_name)
+    {
+        tracing::info!("Issuing Rise JWT for project: {}", project);
 
-    // Build response with Set-Cookie header and redirect
-    let response = (
-        StatusCode::FOUND,
-        [("Location", redirect_url.as_str()), ("Set-Cookie", &cookie)],
-    )
-        .into_response();
+        // Issue Rise JWT scoped to the project
+        let rise_jwt = signer
+            .sign_ingress_jwt(&claims, project, Some(exp))
+            .map_err(|e| {
+                tracing::error!("Failed to sign Rise JWT: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to create authentication token".to_string(),
+                )
+            })?;
 
-    Ok(response)
+        let cookie =
+            cookie_helpers::create_ingress_jwt_cookie(&rise_jwt, &state.cookie_settings, max_age);
+
+        (cookie, true)
+    } else {
+        tracing::info!("Using IdP token for session (fallback)");
+
+        // Fallback to IdP token
+        let cookie = cookie_helpers::create_session_cookie(
+            &token_info.id_token,
+            &state.cookie_settings,
+            max_age,
+        );
+
+        (cookie, false)
+    };
+
+    // For ingress auth flow, render success page with auto-redirect
+    if is_ingress_auth {
+        let project_name = oauth_state
+            .project_name
+            .unwrap_or_else(|| "Unknown".to_string());
+
+        // Load success template
+        let template_content = StaticAssets::get("auth-success.html.tera")
+            .ok_or_else(|| {
+                tracing::error!("auth-success.html.tera template not found");
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Template not found".to_string(),
+                )
+            })?
+            .data;
+
+        let template_str = std::str::from_utf8(&template_content).map_err(|e| {
+            tracing::error!("Failed to parse template as UTF-8: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template encoding error".to_string(),
+            )
+        })?;
+
+        // Create Tera instance and add template
+        let mut tera = Tera::default();
+        tera.add_raw_template("auth-success.html.tera", template_str)
+            .map_err(|e| {
+                tracing::error!("Failed to parse template: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Template error".to_string(),
+                )
+            })?;
+
+        // Render success template
+        let mut context = tera::Context::new();
+        context.insert("success", &true);
+        context.insert("project_name", &project_name);
+        context.insert("redirect_url", &redirect_url);
+
+        let html = tera
+            .render("auth-success.html.tera", &context)
+            .map_err(|e| {
+                tracing::error!("Failed to render template: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Template rendering error".to_string(),
+                )
+            })?;
+
+        tracing::info!(
+            "Setting ingress JWT cookie and showing success page for project: {}",
+            project_name
+        );
+
+        // Build response with cookie and HTML
+        let response = (
+            StatusCode::OK,
+            [("Set-Cookie", cookie.as_str())],
+            Html(html),
+        )
+            .into_response();
+
+        Ok(response)
+    } else {
+        tracing::info!("Setting session cookie and redirecting to {}", redirect_url);
+
+        // For regular OAuth flow, immediate redirect
+        let response = (
+            StatusCode::FOUND,
+            [("Location", redirect_url.as_str()), ("Set-Cookie", &cookie)],
+        )
+            .into_response();
+
+        Ok(response)
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -501,21 +685,13 @@ pub struct IngressAuthQuery {
     pub project: String,
 }
 
-/// Nginx ingress auth endpoint
-///
-/// This handler is called by Nginx for every request to a private project.
-/// It validates the session cookie, checks JWT validity, and verifies
-/// project access authorization.
-#[instrument(skip(state))]
-pub async fn ingress_auth(
-    State(state): State<AppState>,
-    Query(params): Query<IngressAuthQuery>,
-    headers: HeaderMap,
-) -> Result<Response, (StatusCode, String)> {
-    tracing::debug!("Ingress auth check for project: {}", params.project);
-
+/// Helper function to validate IdP token from session cookie
+async fn validate_idp_token(
+    state: &AppState,
+    headers: &HeaderMap,
+) -> Result<String, (StatusCode, String)> {
     // Extract session cookie
-    let session_token = cookie_helpers::extract_session_cookie(&headers).ok_or_else(|| {
+    let session_token = cookie_helpers::extract_session_cookie(headers).ok_or_else(|| {
         tracing::debug!("No session cookie found");
         (StatusCode::UNAUTHORIZED, "No session cookie".to_string())
     })?;
@@ -533,7 +709,7 @@ pub async fn ingress_auth(
         )
         .await
         .map_err(|e| {
-            tracing::warn!("Invalid or expired JWT: {}", e);
+            tracing::warn!("Invalid or expired IdP JWT: {}", e);
             (
                 StatusCode::UNAUTHORIZED,
                 "Invalid or expired session".to_string(),
@@ -541,16 +717,82 @@ pub async fn ingress_auth(
         })?;
 
     // Extract email from claims
-    let email = claims["email"].as_str().ok_or_else(|| {
-        tracing::error!("JWT missing email claim");
-        (
-            StatusCode::UNAUTHORIZED,
-            "Invalid token: missing email".to_string(),
-        )
-    })?;
+    let email = claims["email"]
+        .as_str()
+        .ok_or_else(|| {
+            tracing::error!("JWT missing email claim");
+            (
+                StatusCode::UNAUTHORIZED,
+                "Invalid token: missing email".to_string(),
+            )
+        })?
+        .to_string();
+
+    Ok(email)
+}
+
+/// Nginx ingress auth endpoint
+///
+/// This handler is called by Nginx for every request to a private project.
+/// It validates the session cookie, checks JWT validity, and verifies
+/// project access authorization.
+#[instrument(skip(state))]
+pub async fn ingress_auth(
+    State(state): State<AppState>,
+    Query(params): Query<IngressAuthQuery>,
+    headers: HeaderMap,
+) -> Result<Response, (StatusCode, String)> {
+    tracing::debug!("Ingress auth check for project: {}", params.project);
+
+    // Try Rise JWT first (if signer available), then fall back to IdP token
+    let email = if let Some(ref signer) = state.jwt_signer {
+        // Try to extract and validate Rise JWT
+        if let Some(rise_jwt) = cookie_helpers::extract_ingress_jwt_cookie(&headers) {
+            match signer.verify_ingress_jwt(&rise_jwt) {
+                Ok(ingress_claims) => {
+                    // Validate project claim matches request
+                    if ingress_claims.project != params.project {
+                        tracing::warn!(
+                            "Project mismatch: JWT for '{}', requested '{}'",
+                            ingress_claims.project,
+                            params.project
+                        );
+                        return Err((
+                            StatusCode::UNAUTHORIZED,
+                            "Invalid token for this project".to_string(),
+                        ));
+                    }
+
+                    tracing::debug!(
+                        "Rise JWT validated for project: {}, user: {}",
+                        ingress_claims.project,
+                        ingress_claims.email
+                    );
+
+                    ingress_claims.email
+                }
+                Err(e) => {
+                    tracing::debug!("Rise JWT validation failed: {}, trying IdP token", e);
+
+                    // Fall back to IdP token validation
+                    validate_idp_token(&state, &headers).await?
+                }
+            }
+        } else {
+            tracing::debug!("No Rise JWT found, trying IdP token");
+
+            // Fall back to IdP token validation
+            validate_idp_token(&state, &headers).await?
+        }
+    } else {
+        tracing::debug!("No JWT signer configured, using IdP token");
+
+        // No JWT signer, must use IdP token
+        validate_idp_token(&state, &headers).await?
+    };
 
     // Find or create user in database
-    let user = users::find_or_create(&state.db_pool, email)
+    let user = users::find_or_create(&state.db_pool, &email)
         .await
         .map_err(|e| {
             tracing::error!("Database error finding/creating user: {}", e);
@@ -582,7 +824,7 @@ pub async fn ingress_auth(
             StatusCode::OK,
             [
                 ("X-Auth-Request-Email", email),
-                ("X-Auth-Request-User", user.id.to_string().as_str()),
+                ("X-Auth-Request-User", user.id.to_string()),
             ],
         )
             .into_response());
@@ -605,7 +847,7 @@ pub async fn ingress_auth(
             StatusCode::OK,
             [
                 ("X-Auth-Request-Email", email),
-                ("X-Auth-Request-User", user.id.to_string().as_str()),
+                ("X-Auth-Request-User", user.id.to_string()),
             ],
         )
             .into_response())

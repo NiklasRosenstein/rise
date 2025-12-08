@@ -897,8 +897,9 @@ impl KubernetesController {
                 self.auth_backend_url, project.name
             );
             let signin_url = format!(
-                "{}/auth/signin?redirect=$escaped_request_uri",
-                self.auth_signin_url
+                "{}/auth/signin?project={}&redirect=$escaped_request_uri",
+                self.auth_signin_url,
+                urlencoding::encode(&project.name)
             );
 
             annotations.insert("nginx.ingress.kubernetes.io/auth-url".to_string(), auth_url);
