@@ -1,5 +1,6 @@
 use crate::config::Config;
 use anyhow::{Context, Result};
+use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, Table};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 
@@ -290,21 +291,47 @@ pub async fn show_team(
 
         println!("Team: {}", team.name);
         println!("ID: {}", team.id);
+
+        // Display owners table
         println!("\nOwners:");
         if team.owners.is_empty() {
             println!("  (none)");
         } else {
+            let mut owners_table = Table::new();
+            owners_table
+                .load_preset(UTF8_FULL)
+                .apply_modifier(UTF8_ROUND_CORNERS)
+                .set_header(vec![
+                    Cell::new("EMAIL").add_attribute(Attribute::Bold),
+                    Cell::new("ID").add_attribute(Attribute::Bold),
+                ]);
+
             for owner in &team.owners {
-                println!("  - {}", owner.email);
+                owners_table.add_row(vec![Cell::new(&owner.email), Cell::new(&owner.id)]);
             }
+
+            println!("{}", owners_table);
         }
+
+        // Display members table
         println!("\nMembers:");
         if team.members.is_empty() {
             println!("  (none)");
         } else {
+            let mut members_table = Table::new();
+            members_table
+                .load_preset(UTF8_FULL)
+                .apply_modifier(UTF8_ROUND_CORNERS)
+                .set_header(vec![
+                    Cell::new("EMAIL").add_attribute(Attribute::Bold),
+                    Cell::new("ID").add_attribute(Attribute::Bold),
+                ]);
+
             for member in &team.members {
-                println!("  - {}", member.email);
+                members_table.add_row(vec![Cell::new(&member.email), Cell::new(&member.id)]);
             }
+
+            println!("{}", members_table);
         }
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         // Handle 404 with potential fuzzy match suggestions
