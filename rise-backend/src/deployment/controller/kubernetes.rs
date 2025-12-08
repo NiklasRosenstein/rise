@@ -914,12 +914,20 @@ impl DeploymentBackend for KubernetesController {
                                 secret_api
                                     .replace("rise-registry-creds", &PostParams::default(), &secret)
                                     .await?;
-                                info!("Updated image pull secret in namespace {}", namespace);
+                                info!(
+                                    project = project.name,
+                                    namespace = namespace,
+                                    "ImagePullSecret replaced (any drift corrected)"
+                                );
                             }
                             Err(kube::Error::Api(ae)) if ae.code == 404 => {
                                 // Secret doesn't exist, create it
                                 secret_api.create(&PostParams::default(), &secret).await?;
-                                info!("Created image pull secret in namespace {}", namespace);
+                                info!(
+                                    project = project.name,
+                                    namespace = namespace,
+                                    "ImagePullSecret created"
+                                );
                             }
                             Err(e) => return Err(e.into()),
                         }
@@ -947,8 +955,14 @@ impl DeploymentBackend for KubernetesController {
                     let svc = self.create_service(project, deployment, &metadata);
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&svc);
-                    svc_api.patch(&service_name, &patch_params, &patch).await?;
-                    info!("Created/updated service {}", service_name);
+                    let result = svc_api.patch(&service_name, &patch_params, &patch).await?;
+
+                    info!(
+                        project = project.name,
+                        deployment_id = %deployment.id,
+                        resource_version = ?result.metadata.resource_version,
+                        "Service applied (any drift corrected)"
+                    );
 
                     metadata.reconcile_phase = ReconcilePhase::CreatingReplicaSet;
                     // Continue to next phase
@@ -967,14 +981,45 @@ impl DeploymentBackend for KubernetesController {
 
                     // Check if ReplicaSet exists
                     match rs_api.get(&rs_name).await {
-                        Ok(_) => {
-                            debug!("ReplicaSet {} already exists", rs_name);
+                        Ok(existing_rs) => {
+                            // ReplicaSet exists - check for drift
+                            let desired_rs = self.create_replicaset(project, deployment, &metadata);
+
+                            if self.replicaset_has_drifted(&existing_rs, &desired_rs) {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    "ReplicaSet has drifted, recreating"
+                                );
+
+                                // Delete and wait for deletion to complete
+                                self.delete_and_wait_replicaset(&rs_api, &rs_name).await?;
+
+                                // Create new ReplicaSet
+                                rs_api.create(&PostParams::default(), &desired_rs).await?;
+
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    "ReplicaSet recreated after drift detected"
+                                );
+                            } else {
+                                debug!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    "ReplicaSet exists and matches desired state"
+                                );
+                            }
                         }
                         Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                            // Create ReplicaSet
+                            // ReplicaSet doesn't exist - create it
                             let rs = self.create_replicaset(project, deployment, &metadata);
                             rs_api.create(&PostParams::default(), &rs).await?;
-                            info!("Created ReplicaSet {}", rs_name);
+                            info!(
+                                project = project.name,
+                                deployment_id = %deployment.id,
+                                "ReplicaSet created"
+                            );
                         }
                         Err(e) => return Err(e.into()),
                     }
@@ -1069,10 +1114,16 @@ impl DeploymentBackend for KubernetesController {
                     // Use server-side apply with force for idempotent ingress updates
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&ingress);
-                    ingress_api
+                    let result = ingress_api
                         .patch(&ingress_name, &patch_params, &patch)
                         .await?;
-                    info!("Created/updated Ingress {}", ingress_name);
+
+                    info!(
+                        project = project.name,
+                        deployment_id = %deployment.id,
+                        resource_version = ?result.metadata.resource_version,
+                        "Ingress applied (any drift corrected)"
+                    );
 
                     metadata.reconcile_phase = ReconcilePhase::WaitingForHealth;
                     // Continue to health check
@@ -1300,5 +1351,239 @@ impl DeploymentBackend for KubernetesController {
 
         // DO NOT delete Secret or Namespace (shared across all groups in the project)
         Ok(())
+    }
+}
+
+impl KubernetesController {
+    /// Compare actual vs desired ReplicaSet state to detect drift
+    fn replicaset_has_drifted(&self, actual: &ReplicaSet, desired: &ReplicaSet) -> bool {
+        // Compare critical fields that should never drift
+
+        // 1. Replica count
+        let actual_replicas = actual.spec.as_ref().and_then(|s| s.replicas).unwrap_or(0);
+        let desired_replicas = desired.spec.as_ref().and_then(|s| s.replicas).unwrap_or(0);
+        if actual_replicas != desired_replicas {
+            warn!(
+                "ReplicaSet drift: replicas {} != {}",
+                actual_replicas, desired_replicas
+            );
+            return true;
+        }
+
+        // 2. Container image
+        let actual_image = actual
+            .spec
+            .as_ref()
+            .and_then(|s| s.template.as_ref())
+            .and_then(|t| t.spec.as_ref())
+            .and_then(|ps| ps.containers.first())
+            .and_then(|c| c.image.as_ref());
+
+        let desired_image = desired
+            .spec
+            .as_ref()
+            .and_then(|s| s.template.as_ref())
+            .and_then(|t| t.spec.as_ref())
+            .and_then(|ps| ps.containers.first())
+            .and_then(|c| c.image.as_ref());
+
+        if actual_image != desired_image {
+            warn!(
+                "ReplicaSet drift: image {:?} != {:?}",
+                actual_image, desired_image
+            );
+            return true;
+        }
+
+        // 3. Labels (deployment-id must match)
+        let actual_labels = actual
+            .spec
+            .as_ref()
+            .and_then(|s| s.selector.match_labels.as_ref());
+        let desired_labels = desired
+            .spec
+            .as_ref()
+            .and_then(|s| s.selector.match_labels.as_ref());
+
+        if actual_labels != desired_labels {
+            warn!("ReplicaSet drift: labels don't match");
+            return true;
+        }
+
+        false
+    }
+
+    /// Delete ReplicaSet and wait for deletion to complete
+    async fn delete_and_wait_replicaset(&self, rs_api: &Api<ReplicaSet>, name: &str) -> Result<()> {
+        // Delete the ReplicaSet
+        let delete_params = DeleteParams::default();
+        match rs_api.delete(name, &delete_params).await {
+            Ok(_) => {}
+            Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                // Already deleted
+                return Ok(());
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        // Wait for deletion to complete (max 30 seconds)
+        for i in 0..30 {
+            tokio::time::sleep(Duration::from_secs(1)).await;
+
+            match rs_api.get(name).await {
+                Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                    debug!("ReplicaSet {} deleted successfully", name);
+                    return Ok(());
+                }
+                Err(e) => return Err(e.into()),
+                Ok(_) => {
+                    debug!(
+                        "Waiting for ReplicaSet {} deletion (attempt {})",
+                        name,
+                        i + 1
+                    );
+                }
+            }
+        }
+
+        Err(anyhow::anyhow!(
+            "Timeout waiting for ReplicaSet {} deletion",
+            name
+        ))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use k8s_openapi::api::core::v1::{Container, PodSpec, PodTemplateSpec};
+    use std::collections::BTreeMap;
+
+    fn create_test_replicaset(
+        name: &str,
+        replicas: i32,
+        image: &str,
+        labels: BTreeMap<String, String>,
+    ) -> ReplicaSet {
+        ReplicaSet {
+            metadata: ObjectMeta {
+                name: Some(name.to_string()),
+                ..Default::default()
+            },
+            spec: Some(ReplicaSetSpec {
+                replicas: Some(replicas),
+                selector: LabelSelector {
+                    match_labels: Some(labels.clone()),
+                    ..Default::default()
+                },
+                template: Some(PodTemplateSpec {
+                    metadata: Some(ObjectMeta {
+                        labels: Some(labels),
+                        ..Default::default()
+                    }),
+                    spec: Some(PodSpec {
+                        containers: vec![Container {
+                            name: "app".to_string(),
+                            image: Some(image.to_string()),
+                            ..Default::default()
+                        }],
+                        ..Default::default()
+                    }),
+                }),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_replicaset_has_drifted_no_drift() {
+        // Create a mock controller (we only need the method, not actual K8s connection)
+        let controller = create_mock_controller();
+
+        let mut labels = BTreeMap::new();
+        labels.insert("app".to_string(), "test".to_string());
+
+        let rs1 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels.clone());
+        let rs2 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels);
+
+        assert!(!controller.replicaset_has_drifted(&rs1, &rs2));
+    }
+
+    #[tokio::test]
+    async fn test_replicaset_has_drifted_replica_count() {
+        let controller = create_mock_controller();
+
+        let mut labels = BTreeMap::new();
+        labels.insert("app".to_string(), "test".to_string());
+
+        let rs1 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels.clone());
+        let rs2 = create_test_replicaset("test-rs", 3, "nginx:1.0", labels);
+
+        assert!(controller.replicaset_has_drifted(&rs1, &rs2));
+    }
+
+    #[tokio::test]
+    async fn test_replicaset_has_drifted_image() {
+        let controller = create_mock_controller();
+
+        let mut labels = BTreeMap::new();
+        labels.insert("app".to_string(), "test".to_string());
+
+        let rs1 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels.clone());
+        let rs2 = create_test_replicaset("test-rs", 1, "nginx:2.0", labels);
+
+        assert!(controller.replicaset_has_drifted(&rs1, &rs2));
+    }
+
+    #[tokio::test]
+    async fn test_replicaset_has_drifted_labels() {
+        let controller = create_mock_controller();
+
+        let mut labels1 = BTreeMap::new();
+        labels1.insert("app".to_string(), "test".to_string());
+
+        let mut labels2 = BTreeMap::new();
+        labels2.insert("app".to_string(), "other".to_string());
+
+        let rs1 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels1);
+        let rs2 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels2);
+
+        assert!(controller.replicaset_has_drifted(&rs1, &rs2));
+    }
+
+    // Helper function to create a mock controller for testing
+    fn create_mock_controller() -> KubernetesController {
+        use crate::state::ControllerState;
+        use axum::http::Uri;
+        use sqlx::postgres::PgPoolOptions;
+
+        // Create a minimal controller with mock values
+        // Note: We won't actually connect to K8s or DB for these unit tests
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://localhost/test")
+            .expect("Failed to create pool");
+
+        let state = ControllerState { db_pool: pool };
+
+        // Create a fake kube client (won't be used in these tests)
+        let cluster_url = "http://localhost:8080"
+            .parse::<Uri>()
+            .expect("Failed to parse URI");
+        let kube_config = kube::Config::new(cluster_url);
+        let kube_client = kube::Client::try_from(kube_config).expect("Failed to create client");
+
+        KubernetesController {
+            state,
+            kube_client,
+            ingress_class: "nginx".to_string(),
+            domain_suffix: "test.local".to_string(),
+            non_default_domain_suffix: None,
+            registry_provider: None,
+            registry_url: None,
+            auth_backend_url: "http://localhost:3000".to_string(),
+            api_domain: "api.test.local".to_string(),
+        }
     }
 }

@@ -4,7 +4,10 @@ use crate::auth::{
         generate_code_challenge, generate_code_verifier, generate_state_token, OAuth2State,
     },
 };
-use crate::db::{models::{ProjectVisibility, User}, projects, users};
+use crate::db::{
+    models::{ProjectVisibility, User},
+    projects, users,
+};
 use crate::state::AppState;
 use axum::{
     extract::{Extension, Query, State},
@@ -318,15 +321,13 @@ pub async fn ingress_auth(
         })?;
 
     // Extract email from claims
-    let email = claims["email"]
-        .as_str()
-        .ok_or_else(|| {
-            tracing::error!("JWT missing email claim");
-            (
-                StatusCode::UNAUTHORIZED,
-                "Invalid token: missing email".to_string(),
-            )
-        })?;
+    let email = claims["email"].as_str().ok_or_else(|| {
+        tracing::error!("JWT missing email claim");
+        (
+            StatusCode::UNAUTHORIZED,
+            "Invalid token: missing email".to_string(),
+        )
+    })?;
 
     // Find or create user in database
     let user = users::find_or_create(&state.db_pool, email)
