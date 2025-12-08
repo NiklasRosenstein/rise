@@ -70,6 +70,15 @@ impl std::str::FromStr for ProjectVisibility {
     }
 }
 
+impl std::fmt::Display for ProjectVisibility {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ProjectVisibility::Public => write!(f, "Public"),
+            ProjectVisibility::Private => write!(f, "Private"),
+        }
+    }
+}
+
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "PascalCase")]
 enum ProjectStatus {
@@ -307,6 +316,7 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                 .set_header(vec![
                     Cell::new("NAME").add_attribute(Attribute::Bold),
                     Cell::new("STATUS").add_attribute(Attribute::Bold),
+                    Cell::new("VISIBILITY").add_attribute(Attribute::Bold),
                     Cell::new("OWNER").add_attribute(Attribute::Bold),
                     Cell::new("ACTIVE DEPLOYMENT").add_attribute(Attribute::Bold),
                     Cell::new("URL").add_attribute(Attribute::Bold),
@@ -341,6 +351,7 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                 table.add_row(vec![
                     Cell::new(&project.name),
                     Cell::new(format!("{}", project.status)),
+                    Cell::new(format!("{}", project.visibility)),
                     Cell::new(&owner),
                     Cell::new(&active_deployment),
                     Cell::new(url),
@@ -398,6 +409,7 @@ pub async fn show_project(
         println!("Project: {}", project.name);
         println!("ID: {}", project.id);
         println!("Status: {}", project.status);
+        println!("Visibility: {}", project.visibility);
         if let Some(url) = project.deployment_url {
             println!("URL: {}", url);
         } else {

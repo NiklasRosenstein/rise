@@ -454,6 +454,25 @@ pub async fn update_project(
         })?;
     }
 
+    // Update visibility if provided
+    if let Some(visibility) = payload.visibility {
+        updated_project = projects::update_visibility(
+            &state.db_pool,
+            updated_project.id,
+            crate::db::models::ProjectVisibility::from(visibility),
+        )
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to update project visibility: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+    }
+
     // Update status if provided
     if let Some(status) = payload.status {
         updated_project = projects::update_status(
