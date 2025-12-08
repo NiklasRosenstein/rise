@@ -24,10 +24,10 @@ kubeconfig = "/path/to/kubeconfig"
 ingress_class = "nginx"
 
 # Domain suffix for default deployment group
-domain_suffix = "apps.rise.net"
+domain_suffix = "apps.rise.dev"
 
 # Optional: separate domain for non-default groups
-non_default_domain_suffix = "preview.rise.net"
+non_default_domain_suffix = "preview.rise.dev"
 ```
 
 ### Environment Variables
@@ -42,10 +42,10 @@ RISE_KUBERNETES__KUBECONFIG="/path/to/kubeconfig"
 RISE_KUBERNETES__INGRESS_CLASS="nginx"
 
 # Domain suffix for default group (required)
-RISE_KUBERNETES__DOMAIN_SUFFIX="apps.rise.net"
+RISE_KUBERNETES__DOMAIN_SUFFIX="apps.rise.dev"
 
 # Optional: Domain suffix for non-default groups
-RISE_KUBERNETES__NON_DEFAULT_DOMAIN_SUFFIX="preview.rise.net"
+RISE_KUBERNETES__NON_DEFAULT_DOMAIN_SUFFIX="preview.rise.dev"
 ```
 
 ### Kubeconfig Options
@@ -96,8 +96,8 @@ Each deployment group gets its own Service and Ingress with a unique URL:
 
 | Group | URL Pattern | Example |
 |-------|-------------|---------|
-| `default` | `{project}.{domain_suffix}` | `my-app.apps.rise.net` |
-| Custom groups | `{project}-{group}.{non_default_domain_suffix}` | `my-app-mr--26.preview.rise.net` |
+| `default` | `{project}.{domain_suffix}` | `my-app.apps.rise.dev` |
+| Custom groups | `{project}-{group}.{non_default_domain_suffix}` | `my-app-mr--26.preview.rise.dev` |
 
 ### Blue/Green Deployments
 
@@ -237,7 +237,7 @@ metadata:
     kubernetes.io/ingress.class: "nginx"
 spec:
   rules:
-    - host: my-app.apps.rise.net
+    - host: my-app.apps.rise.dev
       http:
         paths:
           - path: /

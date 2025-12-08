@@ -58,25 +58,34 @@ namespace = "rise-apps"
 # on the same parent domain as your apps. Example setup:
 #
 # Production:
-#   - Deploy backend with Ingress at https://api.rise.net
-#   - Apps will be at https://{project}.apps.rise.net
-#   - Set cookie_domain = ".rise.net" (note the leading dot)
-#   - Set public_url = "https://api.rise.net"
-#   - Set auth_signin_url = "https://api.rise.net"
+#   - Deploy backend with Ingress at https://rise.dev
+#   - Apps will be at https://{project}.apps.rise.dev
+#   - Set cookie_domain = ".rise.dev" (note the leading dot)
+#   - Set public_url = "https://rise.dev"
+#   - Set auth_signin_url = "https://rise.dev"
 #   - Set auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"
 #
 # Development (Minikube):
-#   - Create Ingress for backend at http://api.rise.net
-#   - Add to /etc/hosts: <minikube-ip> api.rise.net foo.apps.rise.net
-#   - Set cookie_domain = ".rise.net"
-#   - Set public_url = "http://api.rise.net"
-#   - Set auth_signin_url = "http://api.rise.net"
+#   - Create Ingress for backend at http://rise.dev
+#   - Add to /etc/hosts: <minikube-ip> rise.dev foo.apps.rise.dev
+#   - Set cookie_domain = ".rise.dev"
+#   - Set public_url = "http://rise.dev"
+#   - Set auth_signin_url = "http://rise.dev"
 #   - Set auth_backend_url = "http://172.17.0.1:3000" (Docker bridge IP for Minikube to reach host)
 #
 # [kubernetes]
 # ingress_class = "nginx"
-# domain_suffix = "apps.rise.net"
+# domain_suffix = "apps.rise.dev"
 # namespace_format = "rise-{project_name}"  # Template for Kubernetes namespaces (default: "rise-{project_name}")
 # auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster service URL for auth checks
-# auth_signin_url = "https://api.rise.net"  # Public API URL for browser redirects during authentication
+# auth_signin_url = "https://rise.dev"  # Public API URL for browser redirects during authentication
 # kubeconfig = "/path/to/kubeconfig"  # Optional: explicit kubeconfig path
+#
+# # Optional: Ingress annotations to apply to all deployed app ingresses
+# # Example for cert-manager TLS certificates:
+# [kubernetes.ingress_annotations]
+# "cert-manager.io/cluster-issuer" = "letsencrypt-prod"
+#
+# # Optional: TLS secret name for ingress certificates
+# # The secret must exist in each namespace (can be created by cert-manager)
+# ingress_tls_secret_name = "rise-apps-tls"

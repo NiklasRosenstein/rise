@@ -69,7 +69,7 @@ The **`default`** group represents the primary deployment:
 
 ```bash
 rise deployment create my-app
-# Accessible at: https://my-app.rise.net
+# Accessible at: https://my-app.rise.dev
 ```
 
 ### Custom Groups

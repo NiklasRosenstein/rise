@@ -113,7 +113,7 @@ config: |
   #
   # [kubernetes]
   # ingress_class = "nginx"
-  # domain_suffix = "apps.rise.net"
+  # domain_suffix = "apps.rise.dev"
   # namespace_format = "rise-{project_name}"  # MUST use consistent prefix for security
 
 # PostgreSQL dependency (optional, can use external database)

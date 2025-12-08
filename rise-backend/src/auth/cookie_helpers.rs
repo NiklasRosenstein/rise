@@ -16,7 +16,7 @@ pub struct CookieSettings {
 /// - HttpOnly: Prevents JavaScript access (XSS protection)
 /// - Secure: HTTPS-only transmission (configurable for development)
 /// - SameSite=Lax: CSRF protection while allowing navigation
-/// - Domain: Shared across subdomains (e.g., .rise.net)
+/// - Domain: Shared across subdomains (e.g., .rise.dev)
 /// - Max-Age: Matches JWT expiry time
 /// - Path=/: Valid for all paths
 pub fn create_session_cookie(
@@ -95,7 +95,7 @@ mod tests {
     #[test]
     fn test_create_session_cookie_with_domain() {
         let settings = CookieSettings {
-            domain: ".rise.net".to_string(),
+            domain: ".rise.dev".to_string(),
             secure: true,
         };
 
@@ -106,7 +106,7 @@ mod tests {
         assert!(cookie.contains("Path=/"));
         assert!(cookie.contains("HttpOnly"));
         assert!(cookie.contains("SameSite=Lax"));
-        assert!(cookie.contains("Domain=.rise.net"));
+        assert!(cookie.contains("Domain=.rise.dev"));
         assert!(cookie.contains("Secure"));
     }
 
@@ -168,7 +168,7 @@ mod tests {
     #[test]
     fn test_clear_session_cookie() {
         let settings = CookieSettings {
-            domain: ".rise.net".to_string(),
+            domain: ".rise.dev".to_string(),
             secure: true,
         };
 
@@ -178,7 +178,7 @@ mod tests {
         assert!(cookie.contains("Max-Age=0"));
         assert!(cookie.contains("Path=/"));
         assert!(cookie.contains("HttpOnly"));
-        assert!(cookie.contains("Domain=.rise.net"));
+        assert!(cookie.contains("Domain=.rise.dev"));
         assert!(cookie.contains("Secure"));
     }
 }

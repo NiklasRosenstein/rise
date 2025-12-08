@@ -21,7 +21,7 @@ pub struct ServerSettings {
     pub port: u16,
     pub public_url: String,
 
-    /// Cookie domain for session cookies (e.g., ".rise.net" for all subdomains, "" for current host only)
+    /// Cookie domain for session cookies (e.g., ".rise.dev" for all subdomains, "" for current host only)
     #[serde(default)]
     pub cookie_domain: String,
 
@@ -133,37 +133,37 @@ fn default_namespace_format() -> String {
 /// must be accessible on the same parent domain as the deployed applications:
 ///
 /// **Required Setup:**
-/// 1. Deploy backend with Ingress at a subdomain (e.g., `api.rise.net`)
-/// 2. Configure apps to use sibling subdomains (e.g., `{project}.apps.rise.net`)
-/// 3. Set `cookie_domain` to parent domain (e.g., `.rise.net`)
-/// 4. Set `public_url` to API ingress URL (e.g., `https://api.rise.net`)
+/// 1. Deploy backend with Ingress at a subdomain (e.g., `rise.dev`)
+/// 2. Configure apps to use sibling subdomains (e.g., `{project}.apps.rise.dev`)
+/// 3. Set `cookie_domain` to parent domain (e.g., `.rise.dev`)
+/// 4. Set `public_url` to API ingress URL (e.g., `https://rise.dev`)
 ///
 /// **Example Production Configuration:**
 /// ```toml
 /// [server]
-/// public_url = "https://api.rise.net"
-/// cookie_domain = ".rise.net"  # Shared across api.rise.net and *.apps.rise.net
+/// public_url = "https://rise.dev"
+/// cookie_domain = ".rise.dev"  # Shared across rise.dev and *.apps.rise.dev
 /// cookie_secure = true
 ///
 /// [kubernetes]
-/// domain_suffix = "apps.rise.net"
+/// domain_suffix = "apps.rise.dev"
 /// auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL
-/// auth_signin_url = "https://api.rise.net"  # Public API URL for browser redirects
+/// auth_signin_url = "https://rise.dev"  # Public API URL for browser redirects
 /// ```
 ///
 /// **How it works:**
-/// 1. User visits `myapp.apps.rise.net` (deployed application)
+/// 1. User visits `myapp.apps.rise.dev` (deployed application)
 /// 2. Nginx ingress checks authentication via `auth_backend_url` (cluster-internal)
 /// 3. If unauthenticated, redirects browser to `auth_signin_url` (public API URL)
-/// 4. Backend sets session cookie with `domain=.rise.net`
-/// 5. Browser redirects back to `myapp.apps.rise.net` with cookie
+/// 4. Backend sets session cookie with `domain=.rise.dev`
+/// 5. Browser redirects back to `myapp.apps.rise.dev` with cookie
 /// 6. Cookie is sent by browser (same parent domain) and Nginx auth succeeds
 ///
 /// **Development Setup (Minikube):**
-/// - Create Ingress for backend at `api.rise.net`
+/// - Create Ingress for backend at `rise.dev`
 /// - Add `/etc/hosts` entries pointing to Minikube IP
 /// - Use `auth_backend_url = "http://172.17.0.1:3000"` (Docker bridge IP)
-/// - Use `auth_signin_url = "http://api.rise.net"` (through ingress)
+/// - Use `auth_signin_url = "http://rise.dev"` (through ingress)
 #[derive(Debug, Clone, Deserialize)]
 pub struct KubernetesSettings {
     /// Optional kubeconfig path (defaults to in-cluster or ~/.kube/config)
@@ -174,13 +174,13 @@ pub struct KubernetesSettings {
     #[serde(default = "default_ingress_class")]
     pub ingress_class: String,
 
-    /// Domain suffix for default deployment group (e.g., "apps.rise.net")
-    /// Results in URLs like: https://{project}.apps.rise.net
+    /// Domain suffix for default deployment group (e.g., "apps.rise.dev")
+    /// Results in URLs like: https://{project}.apps.rise.dev
     pub domain_suffix: String,
 
     /// Optional domain suffix for non-default deployment groups
     /// If not set, uses domain_suffix for all groups
-    /// Results in URLs like: https://{project}-{group}.preview.rise.net
+    /// Results in URLs like: https://{project}-{group}.preview.rise.dev
     #[serde(default)]
     pub non_default_domain_suffix: Option<String>,
 
@@ -191,7 +191,7 @@ pub struct KubernetesSettings {
     pub auth_backend_url: String,
 
     /// Public backend URL for browser redirects during authentication
-    /// Example: "https://api.rise.net"
+    /// Example: "https://rise.dev"
     /// This must be the public URL where the backend is accessible via Ingress.
     /// The domain should share a parent with app domains for cookie sharing (see struct docs).
     pub auth_signin_url: String,
@@ -202,6 +202,17 @@ pub struct KubernetesSettings {
     /// Defaults to "rise-{project_name}"
     #[serde(default = "default_namespace_format")]
     pub namespace_format: String,
+
+    /// Ingress annotations to apply to all deployed application ingresses
+    /// Example: {"cert-manager.io/cluster-issuer": "letsencrypt-prod"}
+    #[serde(default)]
+    pub ingress_annotations: std::collections::HashMap<String, String>,
+
+    /// TLS secret name for ingress certificates
+    /// If set, enables TLS on all ingresses with this secret
+    /// Example: "rise-apps-tls" (secret must exist in each namespace)
+    #[serde(default)]
+    pub ingress_tls_secret_name: Option<String>,
 }
 
 /// Registry provider configuration

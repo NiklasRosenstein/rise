@@ -9,4 +9,4 @@ ADD COLUMN project_url TEXT;
 
 -- Add comment for documentation
 COMMENT ON COLUMN projects.project_url IS
-  'Stable URL assigned by deployment controller that routes to the active deployment in the default group. For Docker: http://localhost:PORT, for Kubernetes: https://project-name.rise.net';
+  'Stable URL assigned by deployment controller that routes to the active deployment in the default group. For Docker: http://localhost:PORT, for Kubernetes: https://project-name.rise.dev';

@@ -106,7 +106,7 @@ pub struct Project {
 impl Project {
     /// Compute the URL for this project based on its name
     pub fn url(&self) -> String {
-        format!("https://{}.rise.net", self.name)
+        format!("https://{}.rise.dev", self.name)
     }
 
     /// Get the owner as a ProjectOwner enum

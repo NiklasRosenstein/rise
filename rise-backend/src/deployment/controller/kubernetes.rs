@@ -79,6 +79,8 @@ pub struct KubernetesController {
     registry_url: Option<String>,
     auth_backend_url: String,
     auth_signin_url: String,
+    ingress_annotations: std::collections::HashMap<String, String>,
+    ingress_tls_secret_name: Option<String>,
 }
 
 impl KubernetesController {
@@ -93,6 +95,8 @@ impl KubernetesController {
         registry_url: Option<String>,
         auth_backend_url: String,
         auth_signin_url: String,
+        ingress_annotations: std::collections::HashMap<String, String>,
+        ingress_tls_secret_name: Option<String>,
     ) -> Result<Self> {
         Ok(Self {
             state,
@@ -104,6 +108,8 @@ impl KubernetesController {
             registry_url,
             auth_backend_url,
             auth_signin_url,
+            ingress_annotations,
+            ingress_tls_secret_name,
         })
     }
 
@@ -779,8 +785,12 @@ impl KubernetesController {
     ) -> Ingress {
         let host = self.hostname(project, deployment);
 
-        // Build annotations based on project visibility
-        let mut annotations = BTreeMap::new();
+        // Start with user-provided annotations from config (convert HashMap to BTreeMap)
+        let mut annotations: BTreeMap<String, String> = self
+            .ingress_annotations
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
 
         if matches!(project.visibility, ProjectVisibility::Private) {
             // Add Nginx auth annotations for private projects
@@ -805,6 +815,14 @@ impl KubernetesController {
         }
         // Public projects have no auth annotations
 
+        // Build TLS configuration if secret name is provided
+        let tls = self.ingress_tls_secret_name.as_ref().map(|secret_name| {
+            vec![k8s_openapi::api::networking::v1::IngressTLS {
+                hosts: Some(vec![host.clone()]),
+                secret_name: Some(secret_name.clone()),
+            }]
+        });
+
         Ingress {
             metadata: ObjectMeta {
                 name: Some(Self::ingress_name(project, deployment)),
@@ -819,6 +837,7 @@ impl KubernetesController {
             },
             spec: Some(IngressSpec {
                 ingress_class_name: Some(self.ingress_class.clone()),
+                tls,
                 rules: Some(vec![IngressRule {
                     host: Some(host),
                     http: Some(HTTPIngressRuleValue {

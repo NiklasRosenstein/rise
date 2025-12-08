@@ -12,14 +12,14 @@ Container images are pushed to an internal container registry through temporary 
 backend.
 
 The CLI allows creating and managing "projects" which represent an app that can be published. A project has a name, and the name defines how
-the app is accessible under the common domain name for it (e.g. https://my-project.rise.net). Users need to authenticate with the backend to
+the app is accessible under the common domain name for it (e.g. https://my-project.rise.dev). Users need to authenticate with the backend to
 get access to manage projects. The backend must support local authentication (most useful for development) and OIDC (either login via OAuth2
 and/or accepting JWT from a set of configured trusted issuers).
 
 An example interaction with the `rise` CLI that a user might perform might be:
 
   $ rise login
-  Please login to rise at https://rise.net/oauth/login?code=1234-abcd
+  Please login to rise at https://rise.dev/oauth/login?code=1234-abcd
   Login successful! Welcome back, Niklas!
 
   $ rise p c secret-app --visibility private --owner team:devopsy
@@ -30,8 +30,8 @@ An example interaction with the `rise` CLI that a user might perform might be:
 
   $ rise p ls
   PROJECT         STATUS        URL                             VISIBILITY    OWNER
-  my-first-app    running       https://my-first-app.rise.net   public        user:niklas
-  secret-app      stopped       https://secret-app.rise.net     private       team:devops
+  my-first-app    running       https://my-first-app.rise.dev   public        user:niklas
+  secret-app      stopped       https://secret-app.rise.dev     private       team:devops
 
   $ cat .rise.toml
   project = "secret-app"
@@ -40,10 +40,10 @@ An example interaction with the `rise` CLI that a user might perform might be:
   backend = "buildpacks"
 
   $ rise d c secret-app
-  Building container image 'registry.rise.net/secret-app:latest' using buildpacks...
-  Pushing container image to registry.rise.net...
+  Building container image 'registry.rise.dev/secret-app:latest' using buildpacks...
+  Pushing container image to registry.rise.dev...
   Deploying 'secret-app' ...
-  Deployment successful! Your app is now running at https://secret-app.rise.net
+  Deployment successful! Your app is now running at https://secret-app.rise.dev
 
 The backend and CLI should be designed with extensibility in mind, allowing for future support of additional container
 runtimes, build methods, and authentication mechanisms. The CLI should provide clear and concise feedback to the user

@@ -180,7 +180,7 @@ Team 'devopsy' does not exist or you do not have permission. Did you mean 'devop
 
 Deployment groups allow multiple deployments of the same project:
 
-- **`default`**: Primary deployment (accessible at `https://my-app.rise.net`)
+- **`default`**: Primary deployment (accessible at `https://my-app.rise.dev`)
 - **Custom groups**: Additional deployments (e.g., `mr/123`, `staging`, `preview/feature-x`)
 
 Use `--group` to specify:
