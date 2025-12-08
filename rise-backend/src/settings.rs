@@ -82,9 +82,10 @@ pub struct KubernetesSettings {
     /// This is the URL Nginx will use internally to validate authentication
     pub auth_backend_url: String,
 
-    /// API domain for user-facing OAuth redirects (e.g., "api.rise.net")
+    /// Full URL for auth signin redirect with schema (e.g., "https://api.rise.net" or "http://localhost:3000")
     /// Used in auth-signin annotation for redirecting users to login
-    pub api_domain: String,
+    /// Must include the schema (http:// or https://)
+    pub auth_signin_url: String,
 }
 
 /// Registry provider configuration

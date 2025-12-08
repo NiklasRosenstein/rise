@@ -43,5 +43,5 @@ namespace = "rise-apps"
 # ingress_class = "nginx"
 # domain_suffix = "apps.rise.net"
 # auth_backend_url = "http://host.minikube.internal:3000"  # URL for Nginx auth subrequests (use localhost equivalent for development)
-# api_domain = "api.rise.local"  # Domain for user-facing OAuth redirects
+# auth_signin_url = "http://localhost:3000"  # Full URL with schema for auth signin redirects (use http:// for development, https:// for production)
 # kubeconfig = "/path/to/kubeconfig"  # Optional: explicit kubeconfig path

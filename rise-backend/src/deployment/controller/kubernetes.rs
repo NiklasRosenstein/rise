@@ -73,7 +73,7 @@ pub struct KubernetesController {
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     registry_url: Option<String>,
     auth_backend_url: String,
-    api_domain: String,
+    auth_signin_url: String,
 }
 
 impl KubernetesController {
@@ -87,7 +87,7 @@ impl KubernetesController {
         registry_provider: Option<Arc<dyn RegistryProvider>>,
         registry_url: Option<String>,
         auth_backend_url: String,
-        api_domain: String,
+        auth_signin_url: String,
     ) -> Result<Self> {
         Ok(Self {
             state,
@@ -98,7 +98,7 @@ impl KubernetesController {
             registry_provider,
             registry_url,
             auth_backend_url,
-            api_domain,
+            auth_signin_url,
         })
     }
 
@@ -692,8 +692,8 @@ impl KubernetesController {
                 self.auth_backend_url, project.name
             );
             let signin_url = format!(
-                "https://{}/auth/signin?redirect=$escaped_request_uri",
-                self.api_domain
+                "{}/auth/signin?redirect=$escaped_request_uri",
+                self.auth_signin_url
             );
 
             annotations.insert("nginx.ingress.kubernetes.io/auth-url".to_string(), auth_url);
@@ -1583,7 +1583,7 @@ mod tests {
             registry_provider: None,
             registry_url: None,
             auth_backend_url: "http://localhost:3000".to_string(),
-            api_domain: "api.test.local".to_string(),
+            auth_signin_url: "http://localhost:3000".to_string(),
         }
     }
 }
