@@ -80,42 +80,64 @@ tolerations: []
 
 affinity: {}
 
-# Rise backend configuration (TOML format)
-# This is passed directly to the ConfigMap without any processing
-config: |
-  [server]
-  host = "0.0.0.0"
-  port = 3000
-  public_url = "http://rise.example.com"
+# Rise backend configuration
+# Converted to YAML and mounted as /config/default.yaml
+# The backend supports both TOML and YAML - this chart outputs YAML by default
+config:
+  server:
+    host: "0.0.0.0"
+    port: 3000
+    public_url: "http://rise.example.com"
+    # cookie_domain: ""  # Optional: Cookie domain for session cookies (e.g., ".rise.dev" for subdomain sharing)
+    # cookie_secure: true  # Optional: Set Secure flag on cookies (default: true, set false for HTTP development)
 
-  [auth]
-  issuer = "http://dex:5556/dex"
-  client_id = "rise-backend"
-  client_secret = ""  # Override with RISE_AUTH__CLIENT_SECRET environment variable
-  # admin_users = ["admin@example.com"]
+  auth:
+    issuer: "http://dex:5556/dex"
+    client_id: "rise-backend"
+    client_secret: ""  # Override with Secret or environment variable
+    # admin_users: []  # Optional: List of admin user emails with full permissions
 
-  [database]
-  # Database URL should be set via environment variable DATABASE_URL from a Secret
+  database: {}
+    # url is typically set via DATABASE_URL environment variable from a Secret
+    # url: "postgres://user:pass@host:5432/dbname"
 
-  [registry]
-  type = "oci-client-auth"
-  registry_url = "registry.example.com"
-  namespace = "rise-apps"
+  # Optional: Controller timing configuration
+  # controller:
+  #   reconcile_interval_secs: 5
+  #   health_check_interval_secs: 5
+  #   termination_interval_secs: 5
+  #   cancellation_interval_secs: 5
+  #   expiration_interval_secs: 60
+  #   secret_refresh_interval_secs: 3600
 
-  # Uncomment to enable Kubernetes controller
-  #
+  # Container registry configuration (required)
+  registry:
+    type: "oci-client-auth"
+    registry_url: "registry.example.com"
+    namespace: "rise-apps"
+    # Alternative: AWS ECR registry
+    # type: "ecr"
+    # region: "us-east-1"
+    # account_id: "123456789012"
+    # repo_prefix: "rise/"
+    # role_arn: "arn:aws:iam::123456789012:role/rise-ecr-controller"
+    # push_role_arn: "arn:aws:iam::123456789012:role/rise-ecr-push"
+    # auto_remove: false
+
+  # Optional: Kubernetes deployment controller configuration
   # IMPORTANT: namespace_format should use a consistent prefix for security.
   # Rise requires ClusterRole permissions (Kubernetes RBAC doesn't support namespace wildcards).
-  # Use a consistent prefix (e.g., "rise-") and enforce it with:
-  #   - Admission controllers (OPA/Gatekeeper)
-  #   - Namespace naming policies
-  #   - Audit logging
-  #
-  # [kubernetes]
-  # ingress_class = "nginx"
-  # hostname_format = "{project_name}.apps.rise.dev"  # Must contain {project_name}
-  # nondefault_hostname_format = "{project_name}-{deployment_group}.preview.rise.dev"  # Optional, must contain {project_name}
-  # namespace_format = "rise-{project_name}"  # MUST use consistent prefix for security and contain {project_name}
+  # Use a consistent prefix (e.g., "rise-") and enforce it with admission controllers or policies.
+  # kubernetes:
+  #   kubeconfig: ""  # Optional: Path to kubeconfig (defaults to in-cluster config)
+  #   ingress_class: "nginx"
+  #   hostname_format: "{project_name}.apps.rise.dev"  # Must contain {project_name}
+  #   nondefault_hostname_format: "{project_name}-{deployment_group}.preview.rise.dev"  # Optional, must contain {project_name}
+  #   auth_backend_url: "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL for Nginx auth
+  #   auth_signin_url: "https://rise.dev"  # Public URL for browser redirects
+  #   namespace_format: "rise-{project_name}"  # Must use consistent prefix and contain {project_name}
+  #   ingress_annotations: {}  # Optional: Additional annotations (e.g., cert-manager)
+  #   ingress_tls_secret_name: ""  # Optional: TLS secret name for ingresses
 
 # PostgreSQL (optional, can use external database)
 # When enabled, DATABASE_URL is automatically injected into all containers
@@ -226,12 +248,43 @@ dex:
   tolerations: []
   affinity: {}
 
-  # Issuer URL for Dex OIDC provider
-  # This will be injected into the Dex config as the 'issuer' field
-  issuerUrl: "http://dex:5556/dex"
+  # Dex configuration
+  # Converted to YAML and mounted as /etc/dex/config.yaml
+  # See https://dexidp.io/docs/ for full configuration options
+  config:
+    issuer: "http://dex:5556/dex"
 
-  # Dex configuration (YAML format)
-# If empty, uses the default config from files/dex-config.yaml
-  # If provided, this overrides the default config entirely
-  # See https://dexidp.io/docs/
-  config: ""
+    storage:
+      type: memory
+
+    web:
+      http: "0.0.0.0:5556"
+
+    staticClients:
+      - id: rise-backend
+        redirectURIs:
+          # Frontend JavaScript OAuth flow (update based on your actual public_url)
+          - "http://rise.example.com/"
+          # Backend OAuth2 Proxy flow for ingress auth
+          - "http://rise.example.com/auth/callback"
+          # CLI callback URLs
+          - "http://localhost:8765/callback"
+          - "http://localhost:8766/callback"
+          - "http://localhost:8767/callback"
+        name: "Rise Backend"
+        secret: "rise-backend-secret"
+
+    enablePasswordDB: true
+    staticPasswords:
+      - email: "admin@example.com"
+        hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"  # password
+        username: "admin"
+        userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+      - email: "test@example.com"
+        hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"  # password
+        username: "test"
+        userID: "f4d1c5e1-3c6e-4d2a-9f4b-2e5d7c8e9f01"
+
+    oauth2:
+      skipApprovalScreen: true
+      passwordConnector: local

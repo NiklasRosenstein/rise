@@ -1,8 +1,4 @@
 {{- if .Values.dex.enabled }}
-{{- $config := .Values.dex.config }}
-{{- if not $config }}
-{{- $config = .Files.Get "files/dex-config.yaml" }}
-{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -12,5 +8,5 @@ metadata:
     app.kubernetes.io/component: dex
 data:
   config.yaml: |
-{{ $config | nindent 4 }}
+{{ .Values.dex.config | toYaml | nindent 4 }}
 {{- end }}
