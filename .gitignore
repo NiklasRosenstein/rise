@@ -17,3 +17,4 @@ example/**/node_modules
 
 # Cargo chef recipe (generated during Docker builds)
 **/recipe.json
+todo.txt

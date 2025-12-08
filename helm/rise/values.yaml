@@ -91,6 +91,7 @@ config: |
   [auth]
   issuer = "http://dex:5556/dex"
   client_id = "rise-backend"
+  client_secret = ""  # Override with RISE_AUTH__CLIENT_SECRET environment variable
   # admin_users = ["admin@example.com"]
 
   [database]
