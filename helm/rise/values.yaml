@@ -14,6 +14,10 @@ serviceAccount:
   create: true
   annotations: {}
   name: ""
+  # IAM role ARN for IRSA (IAM Roles for Service Accounts) on EKS
+  # When set, adds eks.amazonaws.com/role-arn annotation to the ServiceAccount
+  # Example: "arn:aws:iam::123456789012:role/rise-ecr-controller"
+  iamRoleArn: ""
 
 podAnnotations: {}
 

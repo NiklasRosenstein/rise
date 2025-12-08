@@ -122,9 +122,11 @@ terraform plan
 terraform apply
 ```
 
-#### With IRSA for EKS (Future)
+#### With IRSA for EKS
 
-If you plan to run the Rise backend on EKS:
+If you plan to run the Rise backend on EKS with IRSA:
+
+**1. Configure Terraform module with IRSA settings:**
 
 ```hcl
 module "rise_ecr" {
@@ -136,9 +138,45 @@ module "rise_ecr" {
   irsa_namespace         = "rise-system"
   irsa_service_account   = "rise-ecr-controller"
 }
+
+# Output the role ARN for Helm values
+output "rise_ecr_role_arn" {
+  value = module.rise_ecr.role_arn
+  description = "IAM role ARN for IRSA annotation"
+}
 ```
 
 This configures the trust policy to allow the Kubernetes service account to assume the role.
+
+**2. Configure Helm chart with IRSA annotation:**
+
+```yaml
+# values-production.yaml
+serviceAccount:
+  create: true
+  # Automatically adds eks.amazonaws.com/role-arn annotation
+  iamRoleArn: "arn:aws:iam::123456789012:role/rise-ecr-controller"
+
+# Backend config doesn't need static credentials with IRSA
+config:
+  registry:
+    type: "ecr"
+    region: "us-east-1"
+    account_id: "123456789012"
+    repo_prefix: "rise/"
+    role_arn: "arn:aws:iam::123456789012:role/rise-ecr-controller"
+    push_role_arn: "arn:aws:iam::123456789012:role/rise-ecr-push"
+    # NO access_key_id or secret_access_key needed with IRSA
+```
+
+Deploy with Helm:
+
+```bash
+helm upgrade --install rise ./helm/rise \
+  -f values-production.yaml \
+  --namespace rise-system \
+  --create-namespace
+```
 
 #### With IAM User (Non-AWS Deployment)
 
