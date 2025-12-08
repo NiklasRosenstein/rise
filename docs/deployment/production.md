@@ -99,7 +99,7 @@ DATABASE_URL="postgres://rise:password@rds-endpoint:5432/rise"
 
 # Backend configuration
 RISE_CONFIG_DIR="/etc/rise/config"
-RUN_MODE="production"
+RISE_CONFIG_RUN_MODE="production"
 RISE_SERVER__HOST="0.0.0.0"
 RISE_SERVER__PORT="3000"
 

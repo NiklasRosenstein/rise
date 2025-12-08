@@ -58,7 +58,7 @@ namespace = "rise-apps"
 Registry configuration is in `rise-backend/config/`:
 
 - **`default.toml`**: Default settings
-- **`production.toml`**: Production overrides (loaded when `RUN_MODE=production`)
+- **`production.toml`**: Production overrides (loaded when `RISE_CONFIG_RUN_MODE=production`)
 - **`local.toml`**: Local overrides (gitignored)
 
 **Precedence** (highest to lowest):

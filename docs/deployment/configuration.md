@@ -7,9 +7,9 @@ Rise backend uses YAML configuration files with environment variable substitutio
 Configuration files are located in `rise-backend/config/` and loaded in this order:
 
 1. `default.{toml,yaml,yml}` - Base configuration with sensible defaults
-2. `{RUN_MODE}.{toml,yaml,yml}` - Environment-specific config (optional)
-   - `development.toml` or `development.yaml` when `RUN_MODE=development`
-   - `production.toml` or `production.yaml` when `RUN_MODE=production`
+2. `{RISE_CONFIG_RUN_MODE}.{toml,yaml,yml}` - Environment-specific config (optional)
+   - `development.toml` or `development.yaml` when `RISE_CONFIG_RUN_MODE=development`
+   - `production.toml` or `production.yaml` when `RISE_CONFIG_RUN_MODE=production`
 3. `local.{toml,yaml,yml}` - Local overrides (not checked into git)
 
 Later files override earlier ones.
@@ -59,7 +59,7 @@ This happens **after** TOML/YAML parsing but **before** deserialization, so:
 Configuration is loaded in this order (later values override earlier ones):
 
 1. `default.{toml,yaml,yml}` - Base configuration with defaults
-2. `{RUN_MODE}.{toml,yaml,yml}` - Environment-specific (e.g., production.yaml)
+2. `{RISE_CONFIG_RUN_MODE}.{toml,yaml,yml}` - Environment-specific (e.g., production.yaml)
 3. `local.{toml,yaml,yml}` - Local overrides (not in git)
 4. Environment variable substitution - `${VAR}` patterns are replaced
 5. DATABASE_URL special case - Overrides `[database] url` if set

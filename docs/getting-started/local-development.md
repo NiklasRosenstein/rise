@@ -149,7 +149,7 @@ The `.envrc` file (loaded automatically by `direnv`) sets environment variables 
 DATABASE_URL="postgres://rise:rise123@localhost:5432/rise"
 
 # Rise configuration
-RUN_MODE="development"
+RISE_CONFIG_RUN_MODE="development"
 
 # Docker API version
 DOCKER_API_VERSION=1.44

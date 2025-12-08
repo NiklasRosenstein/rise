@@ -11,7 +11,7 @@
 # Configuration precedence (highest to lowest):
 #   1. Environment variables directly referenced with ${VAR} in config
 #   2. local.yaml (not checked into git, for local overrides)
-#   3. {RUN_MODE}.yaml (development.yaml, production.yaml, etc.)
+#   3. {RISE_CONFIG_RUN_MODE}.yaml (development.yaml, production.yaml, etc.)
 #   4. default.yaml (this file)
 #
 # Special cases:

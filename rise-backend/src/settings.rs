@@ -371,8 +371,8 @@ impl Settings {
     }
 
     pub fn new() -> Result<Self, ConfigError> {
-        let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
-        let config_dir = env::var("RISE_CONFIG_DIR").unwrap_or_else(|_| "/config".into());
+        let run_mode = env::var("RISE_CONFIG_RUN_MODE").unwrap_or_else(|_| "development".into());
+        let config_dir = env::var("RISE_CONFIG_DIR").unwrap_or_else(|_| "config".into());
 
         let mut builder = Config::builder();
 
