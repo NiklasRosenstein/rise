@@ -363,7 +363,7 @@ pub struct SigninQuery {
 ///
 /// Shows the user which project they're about to authenticate for before
 /// starting the OAuth flow. This provides better UX by explaining what's happening.
-#[instrument(skip(state))]
+#[instrument(skip(state, params))]
 pub async fn signin_page(
     State(state): State<AppState>,
     Query(params): Query<SigninQuery>,
@@ -375,9 +375,9 @@ pub async fn signin_page(
         .unwrap_or_else(|| "/".to_string());
 
     tracing::info!(
-        "Signin page requested for project: {}, redirect: {}",
-        project_name,
-        redirect_url
+        project = %project_name,
+        has_redirect = !redirect_url.is_empty(),
+        "Signin page requested"
     );
 
     // Load template from embedded assets
@@ -448,14 +448,18 @@ pub async fn signin_page(
 /// This handler starts the OAuth2 authorization code flow with PKCE.
 /// It generates a PKCE verifier/challenge pair, stores the state, and
 /// redirects the user to the OIDC provider for authentication.
-#[instrument(skip(state))]
+#[instrument(skip(state, params))]
 pub async fn oauth_signin_start(
     State(state): State<AppState>,
     Query(params): Query<SigninQuery>,
 ) -> Result<Redirect, (StatusCode, String)> {
     // Prefer rd (full URL) over redirect (path only)
     let redirect_url = params.rd.or(params.redirect);
-    tracing::info!("OAuth signin initiated, redirect={:?}", redirect_url);
+    tracing::info!(
+        project = ?params.project,
+        has_redirect = redirect_url.is_some(),
+        "OAuth signin initiated"
+    );
 
     // Generate PKCE parameters
     let code_verifier = generate_code_verifier();
@@ -499,7 +503,7 @@ pub struct CallbackQuery {
 ///
 /// This handler receives the authorization code from the OIDC provider, exchanges it for tokens,
 /// sets a session cookie, and redirects the user back to their original URL.
-#[instrument(skip(state))]
+#[instrument(skip(state, params))]
 pub async fn oauth_callback(
     State(state): State<AppState>,
     Query(params): Query<CallbackQuery>,
@@ -692,13 +696,23 @@ pub struct IngressAuthQuery {
 /// This handler is called by Nginx for every request to a private project.
 /// It validates the session cookie, checks JWT validity, and verifies
 /// project access authorization.
-#[instrument(skip(state))]
+#[instrument(skip(state, params, headers))]
 pub async fn ingress_auth(
     State(state): State<AppState>,
     Query(params): Query<IngressAuthQuery>,
     headers: HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
-    tracing::debug!("Ingress auth check for project: {}", params.project);
+    // Log only safe, relevant information (excluding sensitive cookies, tokens, etc.)
+    let request_id = headers
+        .get("x-request-id")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("none");
+
+    tracing::debug!(
+        project = %params.project,
+        request_id = %request_id,
+        "Ingress auth check"
+    );
 
     // Extract and validate Rise JWT (required)
     let rise_jwt = cookie_helpers::extract_ingress_jwt_cookie(&headers).ok_or_else(|| {
@@ -787,9 +801,9 @@ pub async fn ingress_auth(
             .into_response())
     } else {
         tracing::warn!(
-            "User {} denied access to private project {}",
-            user.email,
-            params.project
+            user_email = %user.email,
+            project = %params.project,
+            "User denied access to private project"
         );
         Err((
             StatusCode::FORBIDDEN,
