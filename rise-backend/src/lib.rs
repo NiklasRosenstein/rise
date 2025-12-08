@@ -54,7 +54,13 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
     info!("HTTP server listening on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
-    axum::serve(listener, app).await?;
+
+    // Graceful shutdown support
+    axum::serve(listener, app)
+        .with_graceful_shutdown(shutdown_signal())
+        .await?;
+
+    info!("HTTP server shutdown complete");
     Ok(())
 }
 
@@ -97,8 +103,9 @@ pub async fn run_deployment_controller(settings: settings::Settings) -> Result<(
     controller.start();
     info!("Deployment controller started");
 
-    // Block forever
-    std::future::pending::<()>().await;
+    // Wait for shutdown signal
+    shutdown_signal().await;
+    info!("Deployment controller shutdown complete");
     Ok(())
 }
 
@@ -110,8 +117,9 @@ pub async fn run_project_controller(settings: settings::Settings) -> Result<()> 
     controller.start();
     info!("Project controller started");
 
-    // Block forever
-    std::future::pending::<()>().await;
+    // Wait for shutdown signal
+    shutdown_signal().await;
+    info!("Project controller shutdown complete");
     Ok(())
 }
 
@@ -157,8 +165,9 @@ pub async fn run_ecr_controller(settings: settings::Settings) -> Result<()> {
     controller.start();
     info!("ECR controller started");
 
-    // Block forever
-    std::future::pending::<()>().await;
+    // Wait for shutdown signal
+    shutdown_signal().await;
+    info!("ECR controller shutdown complete");
     Ok(())
 }
 
@@ -235,11 +244,43 @@ pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<(
     ));
     info!("Kubernetes secret refresh loop started");
 
-    // Block forever
-    std::future::pending::<()>().await;
+    // Wait for shutdown signal
+    shutdown_signal().await;
+    info!("Kubernetes deployment controller shutdown complete");
     Ok(())
 }
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+/// Wait for a shutdown signal (SIGTERM or SIGINT)
+async fn shutdown_signal() {
+    use tokio::signal;
+
+    let ctrl_c = async {
+        signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        signal::unix::signal(signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {
+            info!("Received SIGINT (Ctrl+C), shutting down gracefully");
+        },
+        _ = terminate => {
+            info!("Received SIGTERM, shutting down gracefully");
+        },
+    }
 }
