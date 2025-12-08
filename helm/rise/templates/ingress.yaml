@@ -28,7 +28,18 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
+          {{- if $.Values.dex.enabled }}
+          # Dex OIDC provider (when enabled)
+          - path: /dex
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "rise.fullname" $ }}-dex
+                port:
+                  number: {{ $.Values.dex.service.port }}
+          {{- end }}
           {{- range .paths }}
+          # Rise backend
           - path: {{ .path }}
             pathType: {{ .pathType }}
             backend:
