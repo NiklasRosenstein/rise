@@ -113,6 +113,11 @@ registry:
 #   auth_signin_url: "https://rise.dev"  # Public API URL for browser redirects during authentication
 #   kubeconfig: "/path/to/kubeconfig"  # Optional: explicit kubeconfig path
 #
+#   # Optional: Annotations to apply to all managed namespaces
+#   namespace_annotations:
+#     company.com/team: "platform"
+#     cost-center: "engineering"
+#
 #   # Optional: Ingress annotations to apply to all deployed app ingresses
 #   # Example for cert-manager TLS certificates:
 #   ingress_annotations:

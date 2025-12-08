@@ -221,6 +221,11 @@ pub struct KubernetesSettings {
     #[serde(default = "default_namespace_format")]
     pub namespace_format: String,
 
+    /// Annotations to apply to all managed namespaces
+    /// Example: {"company.com/team": "platform", "cost-center": "engineering"}
+    #[serde(default)]
+    pub namespace_annotations: std::collections::HashMap<String, String>,
+
     /// Ingress annotations to apply to all deployed application ingresses
     /// Example: {"cert-manager.io/cluster-issuer": "letsencrypt-prod"}
     #[serde(default)]

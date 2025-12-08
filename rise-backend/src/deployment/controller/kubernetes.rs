@@ -89,6 +89,7 @@ pub struct KubernetesController {
     registry_url: Option<String>,
     auth_backend_url: String,
     auth_signin_url: String,
+    namespace_annotations: std::collections::HashMap<String, String>,
     ingress_annotations: std::collections::HashMap<String, String>,
     ingress_tls_secret_name: Option<String>,
 }
@@ -105,6 +106,7 @@ impl KubernetesController {
         registry_url: Option<String>,
         auth_backend_url: String,
         auth_signin_url: String,
+        namespace_annotations: std::collections::HashMap<String, String>,
         ingress_annotations: std::collections::HashMap<String, String>,
         ingress_tls_secret_name: Option<String>,
     ) -> Result<Self> {
@@ -118,6 +120,7 @@ impl KubernetesController {
             registry_url,
             auth_backend_url,
             auth_signin_url,
+            namespace_annotations,
             ingress_annotations,
             ingress_tls_secret_name,
         })
@@ -733,10 +736,23 @@ impl KubernetesController {
 
     /// Create Namespace resource
     fn create_namespace(&self, project: &Project) -> Namespace {
+        // Convert HashMap to BTreeMap for annotations
+        let annotations = if !self.namespace_annotations.is_empty() {
+            Some(
+                self.namespace_annotations
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+            )
+        } else {
+            None
+        };
+
         Namespace {
             metadata: ObjectMeta {
                 name: Some(Self::namespace_name(project)),
                 labels: Some(Self::common_labels(project)),
+                annotations,
                 ..Default::default()
             },
             ..Default::default()
@@ -1949,6 +1965,7 @@ mod tests {
             registry_url: None,
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
+            namespace_annotations: std::collections::HashMap::new(),
             ingress_annotations: std::collections::HashMap::new(),
             ingress_tls_secret_name: None,
         }

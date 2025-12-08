@@ -219,6 +219,7 @@ pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<(
         registry_url,
         k8s_settings.auth_backend_url,
         k8s_settings.auth_signin_url,
+        k8s_settings.namespace_annotations,
         k8s_settings.ingress_annotations,
         k8s_settings.ingress_tls_secret_name,
     )?);

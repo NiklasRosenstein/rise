@@ -143,6 +143,7 @@ config:
   #   auth_backend_url: "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL for Nginx auth
   #   auth_signin_url: "https://rise.dev"  # Public URL for browser redirects
   #   namespace_format: "rise-{project_name}"  # Must use consistent prefix and contain {project_name}
+  #   namespace_annotations: {}  # Optional: Annotations for managed namespaces
   #   ingress_annotations: {}  # Optional: Additional annotations (e.g., cert-manager)
   #   ingress_tls_secret_name: ""  # Optional: TLS secret name for ingresses
 
