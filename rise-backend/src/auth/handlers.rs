@@ -566,14 +566,13 @@ pub async fn oauth_callback(
     // Determine redirect URL
     let redirect_url = oauth_state.redirect_url.unwrap_or_else(|| "/".to_string());
 
-    // Check if this is an ingress auth flow with Rise JWT available
-    let (cookie, is_ingress_auth) = if let (Some(ref signer), Some(ref project)) =
-        (&state.jwt_signer, &oauth_state.project_name)
-    {
+    // Check if this is an ingress auth flow (has project context)
+    let (cookie, is_ingress_auth) = if let Some(ref project) = oauth_state.project_name {
         tracing::info!("Issuing Rise JWT for ingress auth (project context: {})", project);
 
         // Issue Rise JWT (NOT project-scoped - the cookie is shared across all *.rise.dev subdomains)
-        let rise_jwt = signer
+        let rise_jwt = state
+            .jwt_signer
             .sign_ingress_jwt(&claims, Some(exp))
             .map_err(|e| {
                 tracing::error!("Failed to sign Rise JWT: {}", e);
@@ -588,9 +587,9 @@ pub async fn oauth_callback(
 
         (cookie, true)
     } else {
-        tracing::info!("Using IdP token for session (fallback)");
+        tracing::info!("Using IdP token for session");
 
-        // Fallback to IdP token
+        // Regular OAuth flow (not ingress auth)
         let cookie = cookie_helpers::create_session_cookie(
             &token_info.id_token,
             &state.cookie_settings,
@@ -685,52 +684,6 @@ pub struct IngressAuthQuery {
     pub project: String,
 }
 
-/// Helper function to validate IdP token from session cookie
-async fn validate_idp_token(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<String, (StatusCode, String)> {
-    // Extract session cookie
-    let session_token = cookie_helpers::extract_session_cookie(headers).ok_or_else(|| {
-        tracing::debug!("No session cookie found");
-        (StatusCode::UNAUTHORIZED, "No session cookie".to_string())
-    })?;
-
-    // Validate JWT
-    let mut expected_claims = HashMap::new();
-    expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
-
-    let claims = state
-        .jwt_validator
-        .validate(
-            &session_token,
-            &state.auth_settings.issuer,
-            &expected_claims,
-        )
-        .await
-        .map_err(|e| {
-            tracing::warn!("Invalid or expired IdP JWT: {}", e);
-            (
-                StatusCode::UNAUTHORIZED,
-                "Invalid or expired session".to_string(),
-            )
-        })?;
-
-    // Extract email from claims
-    let email = claims["email"]
-        .as_str()
-        .ok_or_else(|| {
-            tracing::error!("JWT missing email claim");
-            (
-                StatusCode::UNAUTHORIZED,
-                "Invalid token: missing email".to_string(),
-            )
-        })?
-        .to_string();
-
-    Ok(email)
-}
-
 /// Nginx ingress auth endpoint
 ///
 /// This handler is called by Nginx for every request to a private project.
@@ -744,39 +697,27 @@ pub async fn ingress_auth(
 ) -> Result<Response, (StatusCode, String)> {
     tracing::debug!("Ingress auth check for project: {}", params.project);
 
-    // Try Rise JWT first (if signer available), then fall back to IdP token
-    let email = if let Some(ref signer) = state.jwt_signer {
-        // Try to extract and validate Rise JWT
-        if let Some(rise_jwt) = cookie_helpers::extract_ingress_jwt_cookie(&headers) {
-            match signer.verify_ingress_jwt(&rise_jwt) {
-                Ok(ingress_claims) => {
-                    tracing::debug!(
-                        "Rise JWT validated for project: {}, user: {}",
-                        params.project,
-                        ingress_claims.email
-                    );
+    // Extract and validate Rise JWT (required)
+    let rise_jwt = cookie_helpers::extract_ingress_jwt_cookie(&headers).ok_or_else(|| {
+        tracing::debug!("No ingress JWT cookie found");
+        (StatusCode::UNAUTHORIZED, "No session cookie".to_string())
+    })?;
 
-                    ingress_claims.email
-                }
-                Err(e) => {
-                    tracing::debug!("Rise JWT validation failed: {}, trying IdP token", e);
+    let ingress_claims = state.jwt_signer.verify_ingress_jwt(&rise_jwt).map_err(|e| {
+        tracing::warn!("Invalid or expired ingress JWT: {}", e);
+        (
+            StatusCode::UNAUTHORIZED,
+            "Invalid or expired session".to_string(),
+        )
+    })?;
 
-                    // Fall back to IdP token validation
-                    validate_idp_token(&state, &headers).await?
-                }
-            }
-        } else {
-            tracing::debug!("No Rise JWT found, trying IdP token");
+    tracing::debug!(
+        "Rise JWT validated for project: {}, user: {}",
+        params.project,
+        ingress_claims.email
+    );
 
-            // Fall back to IdP token validation
-            validate_idp_token(&state, &headers).await?
-        }
-    } else {
-        tracing::debug!("No JWT signer configured, using IdP token");
-
-        // No JWT signer, must use IdP token
-        validate_idp_token(&state, &headers).await?
-    };
+    let email = ingress_claims.email;
 
     // Find or create user in database
     let user = users::find_or_create(&state.db_pool, &email)

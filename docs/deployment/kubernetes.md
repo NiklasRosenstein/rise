@@ -162,12 +162,13 @@ The Kubernetes controller implements ingress-level authentication for private pr
 
 #### Configuration
 
-Private project authentication requires additional server configuration:
+Private project authentication requires JWT signing configuration:
 
 ```toml
 [server]
 # JWT signing secret for ingress authentication (base64-encoded, min 32 bytes)
 # Generate with: openssl rand -base64 32
+# REQUIRED: The backend will fail to start without this
 jwt_signing_secret = "YOUR_BASE64_SECRET_HERE"
 
 # Optional: JWT claims to include from IdP token (default shown)

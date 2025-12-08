@@ -25,6 +25,14 @@ server:
   cookie_domain: ""  # Empty = current host only (good for localhost)
   cookie_secure: false  # Set to true for HTTPS in production
 
+  # JWT signing secret for ingress authentication (REQUIRED)
+  # Generate with: openssl rand -base64 32
+  # Use environment variable substitution to keep secrets out of git
+  jwt_signing_secret: "${RISE_JWT_SIGNING_SECRET:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}"
+
+  # JWT claims to include from IdP token (optional, default shown)
+  jwt_claims: ["sub", "email", "name"]
+
 auth:
   issuer: "http://localhost:5556/dex"
   client_id: "rise-backend"

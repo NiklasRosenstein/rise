@@ -31,9 +31,8 @@ pub struct ServerSettings {
 
     /// JWT signing secret for ingress authentication (base64-encoded, minimum 32 bytes)
     /// Generate with: openssl rand -base64 32
-    /// If not set, the backend will fall back to using IdP tokens for ingress auth
-    #[serde(default)]
-    pub jwt_signing_secret: Option<String>,
+    /// Required for ingress authentication
+    pub jwt_signing_secret: String,
 
     /// JWT claims to include from IdP token when issuing Rise JWTs
     /// Default: ["sub", "email", "name"]
@@ -426,6 +425,13 @@ impl Settings {
         if settings.database.url.is_empty() {
             return Err(ConfigError::Message(
                 "Database URL not configured. Set DATABASE_URL environment variable or [database] url in config".to_string()
+            ));
+        }
+
+        // Validate that JWT signing secret is set and valid
+        if settings.server.jwt_signing_secret.is_empty() {
+            return Err(ConfigError::Message(
+                "JWT signing secret not configured. Set RISE_SERVER__JWT_SIGNING_SECRET environment variable or [server] jwt_signing_secret in config. Generate with: openssl rand -base64 32".to_string()
             ));
         }
 

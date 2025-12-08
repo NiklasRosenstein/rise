@@ -17,7 +17,8 @@ mod tests {
                 public_url: "http://localhost:3000".to_string(),
                 cookie_domain: String::new(),
                 cookie_secure: false,
-                jwt_signing_secret: None,
+                // Use a valid base64-encoded 32-byte secret for testing
+                jwt_signing_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=".to_string(),
                 jwt_claims: vec!["sub".to_string(), "email".to_string()],
             },
             auth: AuthSettings {

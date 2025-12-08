@@ -28,7 +28,7 @@ pub struct ControllerState {
 pub struct AppState {
     pub db_pool: PgPool,
     pub jwt_validator: Arc<JwtValidator>,
-    pub jwt_signer: Option<Arc<JwtSigner>>,
+    pub jwt_signer: Arc<JwtSigner>,
     pub oauth_client: Arc<OAuthClient>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub oci_client: Arc<crate::oci::OciClient>,
@@ -90,33 +90,17 @@ impl AppState {
         // Initialize JWT validator (JWKS is fetched on-demand)
         let jwt_validator = Arc::new(JwtValidator::new());
 
-        // Initialize JWT signer for ingress authentication (if secret provided)
-        let jwt_signer = if let Some(ref secret) = settings.server.jwt_signing_secret {
-            match JwtSigner::new(
-                secret,
+        // Initialize JWT signer for ingress authentication (required)
+        let jwt_signer = Arc::new(
+            JwtSigner::new(
+                &settings.server.jwt_signing_secret,
                 settings.server.public_url.clone(),
                 3600, // Default 1 hour expiry (matches typical IdP token expiry)
                 settings.server.jwt_claims.clone(),
-            ) {
-                Ok(signer) => {
-                    tracing::info!("Initialized JWT signer for ingress authentication");
-                    Some(Arc::new(signer))
-                }
-                Err(e) => {
-                    tracing::error!("Failed to initialize JWT signer: {}", e);
-                    tracing::warn!(
-                        "Ingress authentication will fall back to IdP tokens (less secure)"
-                    );
-                    None
-                }
-            }
-        } else {
-            tracing::warn!(
-                "No JWT signing secret configured - ingress authentication will use IdP tokens"
-            );
-            tracing::warn!("Generate a secret with: openssl rand -base64 32");
-            None
-        };
+            )
+            .context("Failed to initialize JWT signer for ingress authentication")?,
+        );
+        tracing::info!("Initialized JWT signer for ingress authentication");
 
         // Initialize OAuth2 client
         let oauth_client = Arc::new(
@@ -342,7 +326,18 @@ impl AppState {
 
         // Dummy auth components (not used by controller)
         let jwt_validator = Arc::new(JwtValidator::new());
-        let jwt_signer = None; // Not used by controller
+
+        // Initialize dummy JWT signer (not used by controller, but required by AppState)
+        let jwt_signer = Arc::new(
+            JwtSigner::new(
+                &settings.server.jwt_signing_secret,
+                settings.server.public_url.clone(),
+                3600,
+                settings.server.jwt_claims.clone(),
+            )
+            .context("Failed to initialize JWT signer")?,
+        );
+
         let oauth_client = Arc::new(
             OAuthClient::new(
                 settings.auth.issuer.clone(),
