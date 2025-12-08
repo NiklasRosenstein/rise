@@ -144,8 +144,9 @@ pub struct KubernetesSettings {
     #[serde(default)]
     pub non_default_domain_suffix: Option<String>,
 
-    /// Backend URL for Nginx auth subrequests (e.g., "https://api.rise.net" or "http://host.minikube.internal:3000")
+    /// Backend URL for Nginx auth subrequests (e.g., "https://api.rise.net" or "http://172.17.0.1:3000")
     /// This is the URL Nginx will use internally to validate authentication
+    /// Note: For Minikube, use 172.17.0.1 (Docker bridge IP) to reach the host machine
     pub auth_backend_url: String,
 
     /// Full URL for auth signin redirect with schema (e.g., "https://api.rise.net" or "http://localhost:3000")
