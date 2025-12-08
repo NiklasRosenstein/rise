@@ -56,6 +56,10 @@ spec:
             secretKeyRef:
               name: {{ .Values.existingSecret }}
               key: auth-client-secret
+        {{- with .Values.envFrom }}
+        envFrom:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         livenessProbe:
           httpGet:
             path: /health
@@ -99,6 +103,10 @@ spec:
             secretKeyRef:
               name: {{ .Values.existingSecret }}
               key: database-url
+        {{- with .Values.envFrom }}
+        envFrom:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         resources:
           {{- toYaml .Values.controllers.project.resources | nindent 12 }}
         volumeMounts:
@@ -127,6 +135,10 @@ spec:
             secretKeyRef:
               name: {{ .Values.existingSecret }}
               key: database-url
+        {{- with .Values.envFrom }}
+        envFrom:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         resources:
           {{- toYaml .Values.controllers.ecr.resources | nindent 12 }}
         volumeMounts:
@@ -155,6 +167,10 @@ spec:
             secretKeyRef:
               name: {{ .Values.existingSecret }}
               key: database-url
+        {{- with .Values.envFrom }}
+        envFrom:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         resources:
           {{- toYaml .Values.controllers.deployment.resources | nindent 12 }}
         volumeMounts:

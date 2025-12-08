@@ -145,6 +145,7 @@ The following table lists the configurable parameters of the Rise chart and thei
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `config` | Rise configuration in TOML format | See values.yaml |
 | `existingSecret` | Name of existing secret with sensitive values | `""` |
+| `envFrom` | List of sources to populate environment variables | `[]` |
 | `ingress.enabled` | Enable ingress | `false` |
 
 ### Server
@@ -303,6 +304,52 @@ dex:
         clientSecret: $GITHUB_CLIENT_SECRET
         redirectURI: https://dex.example.com/dex/callback
 ```
+
+### Environment Variables from Secrets/ConfigMaps
+
+The `envFrom` parameter allows you to inject environment variables from Secrets and ConfigMaps into all Rise containers (server and controllers). This is useful for:
+
+- Injecting sensitive configuration that shouldn't be in the TOML config
+- Overriding specific configuration values
+- Managing environment-specific settings
+
+**Example: Using a Secret for AWS credentials**
+
+Create a secret with your AWS credentials:
+
+```bash
+kubectl create secret generic rise-aws-creds \
+  --from-literal=AWS_ACCESS_KEY_ID=AKIAIOSFODNN7EXAMPLE \
+  --from-literal=AWS_SECRET_ACCESS_KEY=wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY \
+  --from-literal=AWS_REGION=us-east-1
+```
+
+Configure the chart to use this secret:
+
+```yaml
+envFrom:
+  - secretRef:
+      name: rise-aws-creds
+```
+
+**Example: Using multiple sources**
+
+You can combine multiple Secrets and ConfigMaps:
+
+```yaml
+envFrom:
+  # AWS credentials from secret
+  - secretRef:
+      name: rise-aws-creds
+  # Additional environment-specific config
+  - configMapRef:
+      name: rise-env-config
+  # Override specific settings
+  - secretRef:
+      name: rise-overrides
+```
+
+**Note:** Environment variables set via `envFrom` can override TOML configuration values. Rise follows standard environment variable precedence where `RISE_SECTION__KEY` maps to `[section] key` in TOML.
 
 ## Upgrading
 

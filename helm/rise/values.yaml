@@ -29,6 +29,14 @@ securityContext:
   readOnlyRootFilesystem: true
   allowPrivilegeEscalation: false
 
+# Environment variables from ConfigMaps and Secrets
+# Applied to all containers (server and controllers)
+envFrom: []
+  # - secretRef:
+  #     name: rise-env-secrets
+  # - configMapRef:
+  #     name: rise-env-config
+
 service:
   type: ClusterIP
   port: 3000
