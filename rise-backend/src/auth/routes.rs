@@ -15,6 +15,7 @@ pub fn routes() -> Router<AppState> {
 /// Public routes that don't require authentication
 pub fn public_routes() -> Router<AppState> {
     Router::new()
+        .route("/auth/authorize", post(handlers::authorize))
         .route("/auth/code/exchange", post(handlers::code_exchange))
         .route("/auth/signin", get(handlers::oauth_signin))
         .route("/auth/callback", get(handlers::oauth_callback))

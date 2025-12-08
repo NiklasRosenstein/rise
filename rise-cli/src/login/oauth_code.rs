@@ -6,7 +6,6 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
-use url::Url;
 
 /// Generate PKCE code_verifier and code_challenge
 fn generate_pkce_challenge() -> (String, String) {
@@ -97,6 +96,18 @@ async fn start_callback_server() -> Result<(String, tokio::sync::oneshot::Receiv
 }
 
 #[derive(Debug, Serialize)]
+struct AuthorizeRequest {
+    redirect_uri: String,
+    code_challenge: String,
+    code_challenge_method: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct AuthorizeResponse {
+    authorization_url: String,
+}
+
+#[derive(Debug, Serialize)]
 struct CodeExchangeRequest {
     code: String,
     code_verifier: String,
@@ -112,8 +123,8 @@ struct CodeExchangeResponse {
 pub async fn handle_authorization_code_flow(
     http_client: &Client,
     backend_url: &str,
-    dex_url: &str,
-    client_id: &str,
+    _dex_url: &str,
+    _client_id: &str,
     config: &mut Config,
     backend_url_to_save: Option<&str>,
 ) -> Result<()> {
@@ -125,18 +136,43 @@ pub async fn handle_authorization_code_flow(
         .await
         .context("Failed to start local callback server")?;
 
-    // Step 3: Build authorization URL
-    let mut auth_url = Url::parse(&format!("{}/auth", dex_url))
-        .context("Failed to parse Dex authorization URL")?;
+    // Step 3: Request authorization URL from backend
+    println!("Requesting authorization URL from backend...");
 
-    auth_url
-        .query_pairs_mut()
-        .append_pair("client_id", client_id)
-        .append_pair("redirect_uri", &redirect_uri)
-        .append_pair("response_type", "code")
-        .append_pair("scope", "openid email profile offline_access")
-        .append_pair("code_challenge", &code_challenge)
-        .append_pair("code_challenge_method", "S256");
+    let authorize_request = AuthorizeRequest {
+        redirect_uri: redirect_uri.clone(),
+        code_challenge: code_challenge.clone(),
+        code_challenge_method: "S256".to_string(),
+    };
+
+    let authorize_url = format!("{}/auth/authorize", backend_url);
+
+    let response = http_client
+        .post(&authorize_url)
+        .json(&authorize_request)
+        .send()
+        .await
+        .context("Failed to request authorization URL from backend")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to get authorization URL (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    let authorize_response: AuthorizeResponse = response
+        .json()
+        .await
+        .context("Failed to parse authorization URL response")?;
+
+    let auth_url = authorize_response.authorization_url;
 
     // Step 4: Open browser
     println!("Opening browser to authenticate...");

@@ -32,6 +32,55 @@ pub struct LoginResponse {
     pub token: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct AuthorizeRequest {
+    pub redirect_uri: String,
+    pub code_challenge: String,
+    pub code_challenge_method: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AuthorizeResponse {
+    pub authorization_url: String,
+}
+
+/// Build OAuth2 authorization URL with PKCE (for CLI)
+#[instrument(skip(state))]
+pub async fn authorize(
+    State(state): State<AppState>,
+    Json(payload): Json<AuthorizeRequest>,
+) -> Result<Json<AuthorizeResponse>, (StatusCode, String)> {
+    // Build authorization URL
+    let auth_url_base = &state.oauth_client.authorize_url();
+
+    // Build query parameters
+    let params = vec![
+        ("client_id", state.auth_settings.client_id.as_str()),
+        ("redirect_uri", payload.redirect_uri.as_str()),
+        ("response_type", "code"),
+        ("scope", "openid email profile offline_access"),
+        ("code_challenge", payload.code_challenge.as_str()),
+        (
+            "code_challenge_method",
+            payload.code_challenge_method.as_str(),
+        ),
+    ];
+
+    let query_string: String = params
+        .into_iter()
+        .map(|(k, v)| format!("{}={}", urlencoding::encode(k), urlencoding::encode(v)))
+        .collect::<Vec<_>>()
+        .join("&");
+
+    let authorization_url = if auth_url_base.contains('?') {
+        format!("{}&{}", auth_url_base, query_string)
+    } else {
+        format!("{}?{}", auth_url_base, query_string)
+    };
+
+    Ok(Json(AuthorizeResponse { authorization_url }))
+}
+
 /// Exchange authorization code for token (OAuth2 PKCE flow)
 #[instrument(skip(state, payload))]
 pub async fn code_exchange(
