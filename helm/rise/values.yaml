@@ -116,18 +116,33 @@ config: |
   # domain_suffix = "apps.rise.dev"
   # namespace_format = "rise-{project_name}"  # MUST use consistent prefix for security
 
-# PostgreSQL dependency (optional, can use external database)
+# PostgreSQL (optional, can use external database)
 # When enabled, DATABASE_URL is automatically injected into all containers
 postgresql:
   enabled: false
+
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+
   auth:
     username: rise
-    password: rise123
+    password: rise123  # CHANGE IN PRODUCTION: Override via Secret
     database: rise
-  primary:
-    persistence:
-      enabled: true
-      size: 8Gi
+
+  persistence:
+    enabled: true
+    size: 8Gi
+    storageClass: ""  # Use cluster default
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
 
 # Controllers configuration
 # All controllers run as sidecar containers in the main deployment pod

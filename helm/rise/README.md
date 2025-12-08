@@ -181,16 +181,43 @@ All controllers run as sidecar containers in the main deployment pod.
 | `dex.issuerUrl` | OIDC issuer URL injected into Dex config | `http://dex:5556/dex` |
 | `dex.config` | Dex configuration in YAML format (empty = use default) | `""` |
 
-### PostgreSQL Dependency
+### PostgreSQL
+
+The chart can deploy a PostgreSQL database using a simple StatefulSet.
 
 | Parameter | Description | Default |
 |-----------|-------------|---------|
-| `postgresql.enabled` | Enable PostgreSQL subchart | `false` |
+| `postgresql.enabled` | Enable PostgreSQL deployment | `false` |
+| `postgresql.image.repository` | PostgreSQL image repository | `postgres` |
+| `postgresql.image.tag` | PostgreSQL image tag | `16-alpine` |
+| `postgresql.image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `postgresql.auth.username` | PostgreSQL username | `rise` |
 | `postgresql.auth.password` | PostgreSQL password | `rise123` |
 | `postgresql.auth.database` | PostgreSQL database | `rise` |
+| `postgresql.persistence.enabled` | Enable persistent storage | `true` |
+| `postgresql.persistence.size` | Storage size for PostgreSQL data | `8Gi` |
+| `postgresql.persistence.storageClass` | Storage class (empty = cluster default) | `""` |
+| `postgresql.resources.requests.cpu` | CPU request | `100m` |
+| `postgresql.resources.requests.memory` | Memory request | `256Mi` |
+| `postgresql.resources.limits.cpu` | CPU limit | `500m` |
+| `postgresql.resources.limits.memory` | Memory limit | `512Mi` |
 
-**Note:** When `postgresql.enabled: true`, the chart automatically injects the `DATABASE_URL` environment variable into all containers using the configured credentials. You don't need to manually configure it via `envFrom`.
+**Automatic DATABASE_URL Injection:**
+When `postgresql.enabled: true`, the chart automatically injects the `DATABASE_URL` environment variable into all containers using the configured credentials. You don't need to manually configure it via `envFrom`.
+
+**Security Warning:**
+The default password (`rise123`) is for development only. In production, override it using a Kubernetes Secret:
+```yaml
+postgresql:
+  auth:
+    password: ""  # Leave empty in values.yaml
+# Create secret manually:
+# kubectl create secret generic rise-postgresql-password --from-literal=password=YOUR_SECURE_PASSWORD
+# Then reference it in envFrom or mount as volume
+```
+
+**External PostgreSQL:**
+To use an external PostgreSQL database instead, keep `postgresql.enabled: false` and provide `DATABASE_URL` via a Secret referenced in `envFrom`.
 
 ## Architecture
 
