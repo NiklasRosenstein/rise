@@ -23,6 +23,7 @@ use tracing::{debug, error, info, warn};
 use super::{DeploymentBackend, HealthStatus, ReconcileHint, ReconcileResult};
 use crate::db::deployments as db_deployments;
 use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectVisibility};
+use crate::db::projects as db_projects;
 use crate::registry::RegistryProvider;
 use crate::state::ControllerState;
 
@@ -32,6 +33,10 @@ const LABEL_PROJECT: &str = "rise.dev/project";
 const LABEL_DEPLOYMENT_GROUP: &str = "rise.dev/deployment-group";
 const LABEL_DEPLOYMENT_ID: &str = "rise.dev/deployment-id";
 const ANNOTATION_LAST_REFRESH: &str = "rise.dev/last-refresh";
+
+/// Finalizer name for Kubernetes namespaces
+/// Added when a namespace is created for a project, removed when namespace cleanup is complete.
+pub const KUBERNETES_NAMESPACE_FINALIZER: &str = "kubernetes.rise.dev/namespace";
 
 /// Kubernetes-specific metadata stored in deployment.controller_metadata
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -102,6 +107,17 @@ impl KubernetesController {
         })
     }
 
+    /// Start namespace cleanup loop
+    ///
+    /// This loop runs independently and handles namespace deletion when projects are deleted.
+    /// It follows the finalizer pattern to coordinate with project deletion.
+    pub fn start(self: Arc<Self>) {
+        let cleanup_self = Arc::clone(&self);
+        tokio::spawn(async move {
+            cleanup_self.namespace_cleanup_loop().await;
+        });
+    }
+
     /// Start secret refresh loop (Kubernetes-specific)
     pub fn start_secret_refresh_loop(self: Arc<Self>, interval_duration: Duration) {
         tokio::spawn(async move {
@@ -113,6 +129,87 @@ impl KubernetesController {
                 }
             }
         });
+    }
+
+    /// Namespace cleanup loop - deletes namespaces for deleted projects
+    ///
+    /// Runs every 5 seconds and:
+    /// 1. Finds projects in Deleting status with the Kubernetes namespace finalizer
+    /// 2. Deletes the Kubernetes namespace
+    /// 3. Removes the finalizer so project can be fully deleted
+    async fn namespace_cleanup_loop(&self) {
+        info!("Kubernetes namespace cleanup loop started");
+        let mut ticker = interval(Duration::from_secs(5));
+
+        loop {
+            ticker.tick().await;
+            if let Err(e) = self.cleanup_namespaces().await {
+                error!("Error in Kubernetes namespace cleanup loop: {}", e);
+            }
+        }
+    }
+
+    /// Process namespace cleanup for all deleting projects with Kubernetes finalizer
+    async fn cleanup_namespaces(&self) -> Result<()> {
+        // Find projects marked for deletion that still have Kubernetes namespace finalizer
+        let projects = db_projects::find_deleting_with_finalizer(
+            &self.state.db_pool,
+            KUBERNETES_NAMESPACE_FINALIZER,
+            10,
+        )
+        .await?;
+
+        for project in projects {
+            debug!(
+                "Cleaning up Kubernetes namespace for project: {}",
+                project.name
+            );
+
+            let namespace_name = Self::namespace_name(&project);
+            let ns_api: Api<Namespace> = Api::all(self.kube_client.clone());
+
+            // Try to delete the namespace
+            match ns_api
+                .delete(&namespace_name, &DeleteParams::default())
+                .await
+            {
+                Ok(_) => {
+                    info!(
+                        "Deleted Kubernetes namespace '{}' for project: {}",
+                        namespace_name, project.name
+                    );
+                }
+                Err(kube::Error::Api(err)) if err.code == 404 => {
+                    // Namespace doesn't exist, that's fine
+                    info!(
+                        "Kubernetes namespace '{}' did not exist for project: {} (already deleted)",
+                        namespace_name, project.name
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        "Failed to delete Kubernetes namespace '{}' for project {}: {}",
+                        namespace_name, project.name, e
+                    );
+                    // Continue to next project, will retry on next loop
+                    continue;
+                }
+            }
+
+            // Remove finalizer so project can be deleted
+            db_projects::remove_finalizer(
+                &self.state.db_pool,
+                project.id,
+                KUBERNETES_NAMESPACE_FINALIZER,
+            )
+            .await?;
+            info!(
+                "Removed Kubernetes namespace finalizer from project: {}, cleanup complete",
+                project.name
+            );
+        }
+
+        Ok(())
     }
 
     /// Refresh image pull secrets for all projects with active deployments
@@ -882,6 +979,24 @@ impl DeploymentBackend for KubernetesController {
                             info!("Created namespace {}", namespace);
                         }
                         Err(e) => return Err(e.into()),
+                    }
+
+                    // Add Kubernetes namespace finalizer if not already present
+                    // This ensures namespace cleanup when project is deleted
+                    if !project
+                        .finalizers
+                        .contains(&KUBERNETES_NAMESPACE_FINALIZER.to_string())
+                    {
+                        db_projects::add_finalizer(
+                            &self.state.db_pool,
+                            project.id,
+                            KUBERNETES_NAMESPACE_FINALIZER,
+                        )
+                        .await?;
+                        debug!(
+                            "Added Kubernetes namespace finalizer to project: {}",
+                            project.name
+                        );
                     }
 
                     metadata.reconcile_phase = ReconcilePhase::CreatingImagePullSecret;

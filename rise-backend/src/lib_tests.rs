@@ -1,6 +1,8 @@
 #[cfg(test)]
 mod tests {
-    use crate::settings::{AuthSettings, DatabaseSettings, ServerSettings, Settings};
+    use crate::settings::{
+        AuthSettings, ControllerSettings, DatabaseSettings, ServerSettings, Settings,
+    };
 
     #[tokio::test]
     async fn test_router_builds_without_panic() {
@@ -25,6 +27,7 @@ mod tests {
             database: DatabaseSettings {
                 url: "postgres://rise:rise123@localhost:5432/rise".to_string(),
             },
+            controller: ControllerSettings::default(),
             registry: None,
             kubernetes: None,
         };

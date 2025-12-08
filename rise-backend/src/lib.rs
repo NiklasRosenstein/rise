@@ -224,7 +224,10 @@ pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<(
     controller.start();
     info!("Kubernetes deployment controller started");
 
-    // Start Kubernetes-specific secret refresh loop
+    // Start Kubernetes-specific background loops
+    Arc::clone(&backend).start(); // Namespace cleanup loop
+    info!("Kubernetes namespace cleanup loop started");
+
     backend.start_secret_refresh_loop(Duration::from_secs(
         settings.controller.secret_refresh_interval_secs,
     ));
