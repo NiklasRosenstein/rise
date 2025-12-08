@@ -178,7 +178,8 @@ All controllers run as sidecar containers in the main deployment pod.
 | `dex.image.tag` | Dex image tag | `v2.40.0` |
 | `dex.service.port` | Dex HTTP port | `5556` |
 | `dex.service.grpcPort` | Dex gRPC port | `5557` |
-| `dex.config` | Dex configuration in YAML format | See values.yaml |
+| `dex.issuerUrl` | OIDC issuer URL injected into Dex config | `http://dex:5556/dex` |
+| `dex.config` | Dex configuration in YAML format (empty = use default) | `""` |
 
 ### PostgreSQL Dependency
 
@@ -272,14 +273,34 @@ config: |
 
 ### Dex Configuration
 
-When Dex is enabled (`dex.enabled: true`), you can provide Dex configuration in YAML format via `dex.config`:
+When Dex is enabled (`dex.enabled: true`), the chart provides sensible defaults for development and testing.
+
+#### Using the Default Configuration
+
+By default, `dex.config` is empty and the chart uses a pre-configured development setup that includes:
+- SQLite storage (suitable for development)
+- Static password authentication with test users (admin@example.com and test@example.com, both with password "password")
+- Configured redirect URIs for local development
+
+To use the default config, simply set the issuer URL:
 
 ```yaml
 dex:
   enabled: true
-  config: |
-    issuer: https://dex.example.com/dex
+  issuerUrl: "https://dex.example.com/dex"
+```
 
+The `issuerUrl` will be automatically injected into the Dex configuration, replacing the default `http://localhost:5556/dex`.
+
+#### Custom Configuration
+
+For production deployments, you can provide a complete custom configuration via `dex.config`:
+
+```yaml
+dex:
+  enabled: true
+  issuerUrl: "https://dex.example.com/dex"
+  config: |
     storage:
       type: kubernetes
       config:
@@ -304,6 +325,8 @@ dex:
         clientSecret: $GITHUB_CLIENT_SECRET
         redirectURI: https://dex.example.com/dex/callback
 ```
+
+**Note:** The `issuerUrl` is automatically injected as the `issuer:` field in the Dex config, so you don't need to specify it in the config YAML.
 
 ### Environment Variables from Secrets/ConfigMaps
 

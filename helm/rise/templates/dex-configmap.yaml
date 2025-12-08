@@ -1,4 +1,9 @@
 {{- if .Values.dex.enabled }}
+{{- $config := .Values.dex.config }}
+{{- if not $config }}
+{{- $config = .Files.Get "files/dex-config.yaml" }}
+{{- end }}
+{{- $config = regexReplaceAll "issuer:.*" $config (printf "issuer: %s" .Values.dex.issuerUrl) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,5 +13,5 @@ metadata:
     app.kubernetes.io/component: dex
 data:
   config.yaml: |
-{{ .Values.dex.config | nindent 4 }}
+{{ $config | nindent 4 }}
 {{- end }}
