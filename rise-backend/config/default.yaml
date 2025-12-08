@@ -78,7 +78,7 @@ controller: {}
 #   secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 #   repo_prefix: "rise/"
 #   role_arn: "arn:aws:iam::123456789012:policy/rise-backend"
-#   push_role_arn: "arn:aws:iam::123456789012:role/rise-ecr-push"
+#   push_role_arn: "arn:aws:iam::123456789012:role/rise-backend-ecr-push"
 #   auto_remove: true
 
 # OCI registry for local development (client-side auth via docker login)

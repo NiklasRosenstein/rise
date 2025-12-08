@@ -16,7 +16,7 @@ region = "us-east-1"
 account_id = "123456789012"
 repo_prefix = "rise/"
 role_arn = "arn:aws:iam::123456789012:role/rise-backend"
-push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"
+push_role_arn = "arn:aws:iam::123456789012:role/rise-backend-ecr-push"
 ```
 
 **How it works**:
@@ -72,7 +72,7 @@ Registry configuration is in `rise-backend/config/`:
 export RISE_REGISTRY__TYPE="ecr"
 export RISE_REGISTRY__REGION="us-east-1"
 export RISE_REGISTRY__ACCOUNT_ID="123456789012"
-export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-push"
+export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend-ecr-push"
 ```
 
 ## API Endpoint

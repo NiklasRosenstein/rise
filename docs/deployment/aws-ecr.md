@@ -30,7 +30,7 @@ The Rise ECR integration uses a two-role architecture for security and least pri
 
 **Used by**: The `backend-ecr` controller process
 
-### Push Role (`rise-ecr-push`)
+### Push Role (`rise-backend-ecr-push`)
 
 **Purpose**: Provides scoped credentials for pushing images to specific repositories.
 
@@ -165,7 +165,7 @@ config:
     account_id: "123456789012"
     repo_prefix: "rise/"
     role_arn: "arn:aws:iam::123456789012:role/rise-backend"
-    push_role_arn: "arn:aws:iam::123456789012:role/rise-ecr-push"
+    push_role_arn: "arn:aws:iam::123456789012:role/rise-backend-ecr-push"
     # NO access_key_id or secret_access_key needed with IRSA
 ```
 
@@ -241,7 +241,7 @@ region = "us-east-1"                    # From Terraform output
 account_id = "123456789012"              # From Terraform output
 repo_prefix = "rise/"                    # From Terraform output
 role_arn = "arn:aws:iam::123456789012:role/rise-backend"      # From module.rise_ecr.role_arn
-push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"       # From module.rise_ecr.push_role_arn
+push_role_arn = "arn:aws:iam::123456789012:role/rise-backend-ecr-push"       # From module.rise_ecr.push_role_arn
 auto_remove = false                      # From Terraform output
 
 # Optional: If using IAM user instead of role
@@ -259,7 +259,7 @@ export RISE_REGISTRY__REGION="us-east-1"
 export RISE_REGISTRY__ACCOUNT_ID="123456789012"
 export RISE_REGISTRY__REPO_PREFIX="rise/"
 export RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend"
-export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-ecr-push"
+export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend-ecr-push"
 ```
 
 ## Credential Flow
@@ -297,7 +297,7 @@ Here's how credentials work in the ECR integration:
 **Solution**:
 1. Verify trust policy on push role allows controller role:
    ```bash
-   aws iam get-role --role-name rise-ecr-push --query 'Role.AssumeRolePolicyDocument'
+   aws iam get-role --role-name rise-backend-ecr-push --query 'Role.AssumeRolePolicyDocument'
    ```
 
 2. Verify controller role has `sts:AssumeRole` on push role:
@@ -305,7 +305,7 @@ Here's how credentials work in the ECR integration:
    aws iam simulate-principal-policy \
      --policy-source-arn arn:aws:iam::123456789012:role/rise-backend \
      --action-names sts:AssumeRole \
-     --resource-arns arn:aws:iam::123456789012:role/rise-ecr-push
+     --resource-arns arn:aws:iam::123456789012:role/rise-backend-ecr-push
    ```
 
 ### "Repository does not exist"

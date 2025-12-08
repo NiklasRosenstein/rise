@@ -21,7 +21,7 @@ The module creates two separate IAM roles with distinct permissions:
    - Tag repositories (managed, orphaned)
    - List repositories for discovery
 
-2. **Push Role** (e.g., `rise-ecr-push`): Assumed by the backend to generate scoped credentials
+2. **Push Role** (e.g., `rise-backend-ecr-push`): Assumed by the backend to generate scoped credentials
    - Push images to ECR
    - The backend uses STS AssumeRole with an inline session policy to scope credentials to specific repositories
 
@@ -95,7 +95,7 @@ region = "eu-west-1"  # From module.rise_aws.rise_config.region
 account_id = "123456789012"  # From module.rise_aws.rise_config.account_id
 repo_prefix = "rise/"  # From module.rise_aws.rise_config.repo_prefix
 role_arn = "arn:aws:iam::123456789012:role/rise-backend"  # From module.rise_aws.role_arn
-push_role_arn = "arn:aws:iam::123456789012:role/rise-ecr-push"  # From module.rise_aws.push_role_arn
+push_role_arn = "arn:aws:iam::123456789012:role/rise-backend-ecr-push"  # From module.rise_aws.push_role_arn
 auto_remove = false  # From module.rise_aws.rise_config.auto_remove
 
 # If using IAM user instead of role:
