@@ -67,6 +67,7 @@ pub fn is_valid_transition(from: &DeploymentStatus, to: &DeploymentStatus) -> bo
         // Build/Deploy Path
         (Pending, Building) => true,
         (Building, Pushing) => true,
+        (Building, Pushed) => true, // Allow skipping Pushing state if status update fails
         (Pushing, Pushed) => true,
         (Pushed, Deploying) => true,
 
@@ -200,6 +201,9 @@ mod tests {
         assert!(is_valid_transition(&Pushing, &Pushed));
         assert!(is_valid_transition(&Pushed, &Deploying));
         assert!(is_valid_transition(&Deploying, &Healthy));
+
+        // Allow skipping Pushing if status update fails
+        assert!(is_valid_transition(&Building, &Pushed));
 
         // Health state transitions
         assert!(is_valid_transition(&Healthy, &Unhealthy));
