@@ -148,6 +148,210 @@ auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"
 auth_signin_url = "https://rise.dev"
 ```
 
+### Private Project Authentication
+
+The Kubernetes controller implements ingress-level authentication for private projects using Nginx auth annotations and Rise-issued JWTs.
+
+#### Overview
+
+- **Public projects**: Accessible without authentication
+- **Private projects**: Require user authentication AND project access authorization
+- **Authentication method**: OAuth2 via configured identity provider (Dex)
+- **Token security**: Rise-issued JWTs scoped to specific projects
+- **Cookie isolation**: Separate cookies prevent projects from accessing Rise APIs
+
+#### Configuration
+
+Private project authentication requires additional server configuration:
+
+```toml
+[server]
+# JWT signing secret for ingress authentication (base64-encoded, min 32 bytes)
+# Generate with: openssl rand -base64 32
+jwt_signing_secret = "YOUR_BASE64_SECRET_HERE"
+
+# Optional: JWT claims to include from IdP token (default shown)
+jwt_claims = ["sub", "email", "name"]
+
+# Cookie settings for subdomain sharing
+cookie_domain = ".rise.dev"  # Allows cookies to work across *.rise.dev
+cookie_secure = true         # Require HTTPS (disable for local development)
+```
+
+```toml
+[kubernetes]
+# Internal cluster URL for Nginx auth subrequests
+auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"
+
+# Public backend URL for browser redirects during authentication
+auth_signin_url = "https://rise.dev"
+```
+
+**Generate JWT signing secret**:
+```bash
+openssl rand -base64 32
+```
+
+#### Authentication Flow
+
+When a user visits a private project, the following flow occurs:
+
+```
+User → myapp.apps.rise.dev (private)
+  ↓
+Nginx calls GET /auth/ingress?project=myapp
+  - 🍪 NO COOKIE or invalid JWT
+  ↓ Returns 401 Unauthorized
+  ↓
+Nginx redirects to /auth/signin?project=myapp&redirect=https://myapp.apps.rise.dev
+  ↓
+GET /auth/signin (Pre-Auth Page):
+  - Renders auth-signin.html.tera
+  - Shows: "Project 'myapp' is private. Sign in to access."
+  - Button: "Sign In" → /auth/signin/start?project=myapp&redirect=...
+  ↓
+User clicks "Sign In" button
+  ↓
+GET /auth/signin/start (OAuth Start):
+  - Stores project_name='myapp' in OAuth2State (PKCE state)
+  - Redirects to Dex IdP authorize endpoint
+  ↓
+User completes OAuth at Dex
+  ↓
+Dex redirects to /auth/callback?code=xyz&state=abc
+  ↓
+GET /auth/callback (Token Exchange):
+  - Retrieve OAuth2State (includes project_name='myapp')
+  - Exchange code for IdP tokens
+  - Validate IdP JWT
+  - Extract claims (sub, email, name) and expiry
+  - Issue Rise JWT with claims + project='myapp'
+  - 🍪 SET COOKIE: _rise_ingress = <Rise JWT>
+       (Domain: .rise.dev, HttpOnly, Secure, SameSite=Lax)
+  - Renders auth-success.html.tera
+  - Shows: "Authentication successful! Redirecting in 3s..."
+  - JavaScript auto-redirects to https://myapp.apps.rise.dev
+  ↓
+After 3 seconds, browser redirects to https://myapp.apps.rise.dev
+  ↓
+Nginx calls GET /auth/ingress?project=myapp
+  - 🍪 READS COOKIE: _rise_ingress
+  - Verifies Rise JWT signature (HS256)
+  - Validates claims.project == 'myapp' (PROJECT SCOPING!)
+  - Validates expiry
+  - Checks user has project access
+  ↓ Returns 200 OK + headers (X-Auth-Request-Email, X-Auth-Request-User)
+  ↓
+Nginx serves app
+  - 🍪 Rise JWT cookie is sent to app (but app cannot decode it - HttpOnly)
+  - App does NOT have access to Rise APIs (different cookie name)
+```
+
+#### JWT Structure
+
+Rise issues symmetric HS256 JWTs with the following claims:
+
+```json
+{
+  "sub": "user-id-from-idp",
+  "email": "user@example.com",
+  "name": "User Name",
+  "project": "myapp",
+  "iat": 1234567890,
+  "exp": 1234571490,
+  "iss": "https://rise.dev",
+  "aud": "rise-ingress"
+}
+```
+
+**Key features**:
+- **Project scoping**: `project` claim prevents JWT reuse across projects
+- **Configurable claims**: Include only necessary user information
+- **Expiry matching**: Token expiration matches IdP token (typically 1 hour)
+- **Symmetric signing**: HS256 with shared secret for fast validation
+
+#### Cookie Security
+
+Two separate cookies are used for different purposes:
+
+| Cookie | Purpose | Contents | Access |
+|--------|---------|----------|--------|
+| `_rise_session` | Rise API authentication | IdP JWT | Frontend JavaScript |
+| `_rise_ingress` | Project access authentication | Rise JWT | HttpOnly (no JS access) |
+
+**Security attributes**:
+- `HttpOnly`: Prevents JavaScript access (XSS protection)
+- `Secure`: HTTPS-only transmission
+- `SameSite=Lax`: CSRF protection while allowing navigation
+- `Domain`: Shared across subdomains (e.g., `.rise.dev`)
+- `Max-Age`: Matches JWT expiration
+
+#### Access Control
+
+For private projects, the ingress auth endpoint validates:
+
+1. **JWT validity**: Signature, expiration, issuer, audience
+2. **Project scoping**: `claims.project` must match requested project
+3. **User permissions**: User must be owner or team member
+
+Access check logic:
+```rust
+// User can access if:
+// - User is the project owner (owner_user_id), OR
+// - User is a member of the team that owns the project (owner_team_id)
+```
+
+#### Ingress Annotations
+
+For private projects, the controller adds these Nginx annotations:
+
+```yaml
+annotations:
+  nginx.ingress.kubernetes.io/auth-url: "http://rise-backend.default.svc.cluster.local:3000/auth/ingress?project=myapp"
+  nginx.ingress.kubernetes.io/auth-signin: "https://rise.dev/auth/signin?project=myapp&redirect=$escaped_request_uri"
+  nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-Email,X-Auth-Request-User"
+```
+
+**How it works**:
+- `auth-url`: Nginx calls this endpoint for every request to validate authentication
+- `auth-signin`: Where to redirect unauthenticated users
+- `auth-response-headers`: Headers to pass from auth response to the application
+
+The application receives authenticated requests with these additional headers:
+- `X-Auth-Request-Email`: User's email address
+- `X-Auth-Request-User`: User's ID
+
+#### Troubleshooting Authentication
+
+**Infinite redirect loop**:
+- Check `cookie_domain` matches your domain structure
+- Verify cookies are being set (check browser DevTools → Application → Cookies)
+- Ensure `cookie_secure` is `false` for HTTP development environments
+
+**"Invalid token for this project" error**:
+- User authenticated for a different project
+- Clear cookies and re-authenticate
+- JWT contains wrong project claim (check logs)
+
+**"No session cookie" error**:
+- Cookie expired or not set
+- Cookie domain mismatch
+- Browser blocking third-party cookies
+- Check `cookie_domain` configuration
+
+**Authentication succeeds but access denied**:
+- User is authenticated but not authorized for this project
+- Check project ownership: `rise project show <project-name>`
+- Add user to project's team if needed
+
+**JWT signing errors in logs**:
+```
+Error: Failed to initialize JWT signer: Invalid base64
+```
+- JWT signing secret is not valid base64
+- Regenerate with: `openssl rand -base64 32`
+- Ensure secret is at least 32 bytes when decoded
+
 ### Blue/Green Deployments
 
 The controller implements blue/green deployments using Service selector updates:
