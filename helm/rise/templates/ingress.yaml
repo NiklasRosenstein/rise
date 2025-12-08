@@ -2,9 +2,9 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: {{ include "rise-backend.fullname" . }}
+  name: {{ include "rise.fullname" . }}
   labels:
-    {{- include "rise-backend.labels" . | nindent 4 }}
+    {{- include "rise.labels" . | nindent 4 }}
   {{- with .Values.ingress.annotations }}
   annotations:
     {{- toYaml . | nindent 4 }}
@@ -33,7 +33,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "rise-backend.fullname" $ }}
+                name: {{ include "rise.fullname" $ }}
                 port:
                   number: {{ $.Values.service.port }}
           {{- end }}

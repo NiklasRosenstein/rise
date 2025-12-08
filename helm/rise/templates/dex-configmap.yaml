@@ -1,0 +1,12 @@
+{{- if .Values.dex.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "rise.fullname" . }}-dex-config
+  labels:
+    {{- include "rise.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+data:
+  config.yaml: |
+{{ .Values.dex.config | nindent 4 }}
+{{- end }}

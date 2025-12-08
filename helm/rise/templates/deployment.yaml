@@ -1,9 +1,9 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "rise-backend.fullname" . }}-server
+  name: {{ include "rise.fullname" . }}-server
   labels:
-    {{- include "rise-backend.labels" . | nindent 4 }}
+    {{- include "rise.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
   {{- if not .Values.autoscaling.enabled }}
@@ -11,7 +11,7 @@ spec:
   {{- end }}
   selector:
     matchLabels:
-      {{- include "rise-backend.selectorLabels" . | nindent 6 }}
+      {{- include "rise.selectorLabels" . | nindent 6 }}
       app.kubernetes.io/component: server
   template:
     metadata:
@@ -22,21 +22,21 @@ spec:
         {{- toYaml . | nindent 8 }}
         {{- end }}
       labels:
-        {{- include "rise-backend.selectorLabels" . | nindent 8 }}
+        {{- include "rise.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: server
     spec:
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "rise-backend.serviceAccountName" . }}
+      serviceAccountName: {{ include "rise.serviceAccountName" . }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
       - name: server
         securityContext:
           {{- toYaml .Values.securityContext | nindent 12 }}
-        image: {{ include "rise-backend.image" . }}
+        image: {{ include "rise.image" . }}
         imagePullPolicy: {{ .Values.image.pullPolicy }}
         args:
           - "backend"
@@ -51,12 +51,12 @@ spec:
         - name: DATABASE_URL
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.existingSecret | default (printf "%s-secret" (include "rise-backend.fullname" .)) }}
+              name: {{ .Values.existingSecret | default (printf "%s-secret" (include "rise.fullname" .)) }}
               key: database-url
         - name: RISE_AUTH__CLIENT_SECRET
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.existingSecret | default (printf "%s-secret" (include "rise-backend.fullname" .)) }}
+              name: {{ .Values.existingSecret | default (printf "%s-secret" (include "rise.fullname" .)) }}
               key: auth-client-secret
         livenessProbe:
           httpGet:
@@ -85,7 +85,7 @@ spec:
       volumes:
       - name: config
         configMap:
-          name: {{ include "rise-backend.fullname" . }}-config
+          name: {{ include "rise.fullname" . }}-config
       - name: tmp
         emptyDir: {}
       {{- with .Values.nodeSelector }}

@@ -1,6 +1,6 @@
 apiVersion: v2
-name: rise-backend
-description: A Helm chart for Rise Backend - a Kubernetes deployment platform
+name: rise
+description: A Helm chart for Rise - a Kubernetes deployment platform
 type: application
 version: 0.1.0
 appVersion: "0.1.0"

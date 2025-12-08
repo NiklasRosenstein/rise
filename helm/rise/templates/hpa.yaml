@@ -2,15 +2,15 @@
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "rise-backend.fullname" . }}-server
+  name: {{ include "rise.fullname" . }}-server
   labels:
-    {{- include "rise-backend.labels" . | nindent 4 }}
+    {{- include "rise.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "rise-backend.fullname" . }}-server
+    name: {{ include "rise.fullname" . }}-server
   minReplicas: {{ .Values.autoscaling.minReplicas }}
   maxReplicas: {{ .Values.autoscaling.maxReplicas }}
   metrics:

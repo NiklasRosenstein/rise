@@ -1,0 +1,208 @@
+# Default values for rise
+replicaCount: 1
+
+image:
+  repository: ghcr.io/niklasrosenstein/rise-backend
+  pullPolicy: IfNotPresent
+  tag: ""  # Overrides the image tag whose default is the chart appVersion
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: true
+  allowPrivilegeEscalation: false
+
+service:
+  type: ClusterIP
+  port: 3000
+  targetPort: 3000
+
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: rise.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: rise-tls
+  #    hosts:
+  #      - rise.example.com
+
+resources:
+  limits:
+    cpu: 1000m
+    memory: 512Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+  # targetMemoryUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Rise backend configuration (TOML format)
+# This is passed directly to the ConfigMap without any processing
+config: |
+  [server]
+  host = "0.0.0.0"
+  port = 3000
+  public_url = "http://rise.example.com"
+
+  [auth]
+  issuer = "http://dex:5556/dex"
+  client_id = "rise-backend"
+  # admin_users = ["admin@example.com"]
+
+  [database]
+  # Database URL should be set via environment variable DATABASE_URL from existingSecret
+
+  [registry]
+  type = "oci-client-auth"
+  registry_url = "registry.example.com"
+  namespace = "rise-apps"
+
+  # Uncomment to enable Kubernetes controller
+  # [kubernetes]
+  # ingress_class = "nginx"
+  # domain_suffix = "apps.rise.net"
+
+# Existing secret containing sensitive configuration
+# Required for production deployments
+# Expected keys:
+#   - auth-client-secret: OAuth client secret
+#   - database-password: PostgreSQL password (if not using DATABASE_URL)
+#   - database-url: Full database URL (e.g., postgres://rise:password@postgresql:5432/rise)
+#
+# Example:
+# kubectl create secret generic rise-secrets \
+#   --from-literal=auth-client-secret=YOUR_CLIENT_SECRET \
+#   --from-literal=database-password=YOUR_DB_PASSWORD \
+#   --from-literal=database-url=postgres://rise:YOUR_DB_PASSWORD@postgresql:5432/rise
+existingSecret: "rise-secrets"
+
+# PostgreSQL dependency (optional, can use external database)
+postgresql:
+  enabled: false
+  auth:
+    username: rise
+    password: rise123
+    database: rise
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+
+# Controllers configuration
+controllers:
+  deployment:
+    enabled: true
+    replicaCount: 1
+
+  project:
+    enabled: true
+    replicaCount: 1
+
+# Dex OIDC provider (optional)
+dex:
+  enabled: false
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/dexidp/dex
+    tag: v2.40.0
+    pullPolicy: IfNotPresent
+
+  imagePullSecrets: []
+
+  podAnnotations: {}
+
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+
+  securityContext:
+    capabilities:
+      drop:
+      - ALL
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+
+  service:
+    type: ClusterIP
+    port: 5556
+    grpcPort: 5557
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 64Mi
+
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+
+  # Dex configuration (YAML format)
+  # This is passed directly to the ConfigMap
+  # See https://dexidp.io/docs/
+  config: |
+    issuer: http://dex:5556/dex
+
+    storage:
+      type: memory
+
+    web:
+      http: 0.0.0.0:5556
+
+    grpc:
+      addr: 0.0.0.0:5557
+
+    oauth2:
+      skipApprovalScreen: true
+
+    staticClients:
+    - id: rise-backend
+      redirectURIs:
+      - 'http://rise.example.com/auth/callback'
+      name: 'Rise Backend'
+      secret: ZXhhbXBsZS1hcHAtc2VjcmV0
+
+    enablePasswordDB: true
+    staticPasswords:
+    - email: admin@example.com
+      hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+      username: admin
+      userID: 08a8684b-db88-4b73-90a9-3cd1661f5466

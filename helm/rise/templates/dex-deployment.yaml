@@ -1,0 +1,79 @@
+{{- if .Values.dex.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rise.fullname" . }}-dex
+  labels:
+    {{- include "rise.labels" . | nindent 4 }}
+    app.kubernetes.io/component: dex
+spec:
+  replicas: {{ .Values.dex.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "rise.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: dex
+  template:
+    metadata:
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/dex-configmap.yaml") . | sha256sum }}
+        {{- with .Values.dex.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      labels:
+        {{- include "rise.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: dex
+    spec:
+      {{- with .Values.dex.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        {{- toYaml .Values.dex.podSecurityContext | nindent 8 }}
+      containers:
+      - name: dex
+        securityContext:
+          {{- toYaml .Values.dex.securityContext | nindent 12 }}
+        image: "{{ .Values.dex.image.repository }}:{{ .Values.dex.image.tag }}"
+        imagePullPolicy: {{ .Values.dex.image.pullPolicy }}
+        command:
+          - /usr/local/bin/dex
+          - serve
+          - /etc/dex/config.yaml
+        ports:
+        - name: http
+          containerPort: 5556
+          protocol: TCP
+        - name: grpc
+          containerPort: 5557
+          protocol: TCP
+        livenessProbe:
+          httpGet:
+            path: /healthz/live
+            port: http
+        readinessProbe:
+          httpGet:
+            path: /healthz/ready
+            port: http
+        volumeMounts:
+        - name: config
+          mountPath: /etc/dex
+          readOnly: true
+        resources:
+          {{- toYaml .Values.dex.resources | nindent 12 }}
+      volumes:
+      - name: config
+        configMap:
+          name: {{ include "rise.fullname" . }}-dex-config
+      {{- with .Values.dex.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dex.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.dex.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
