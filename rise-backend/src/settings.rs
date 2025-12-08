@@ -289,11 +289,23 @@ impl Settings {
 
         // Validate Kubernetes settings if configured
         if let Some(ref k8s) = settings.kubernetes {
-            Self::validate_format_string(&k8s.namespace_format, "namespace_format", "{project_name}")?;
-            Self::validate_format_string(&k8s.hostname_format, "hostname_format", "{project_name}")?;
+            Self::validate_format_string(
+                &k8s.namespace_format,
+                "namespace_format",
+                "{project_name}",
+            )?;
+            Self::validate_format_string(
+                &k8s.hostname_format,
+                "hostname_format",
+                "{project_name}",
+            )?;
 
             if let Some(ref nondefault_format) = k8s.nondefault_hostname_format {
-                Self::validate_format_string(nondefault_format, "nondefault_hostname_format", "{project_name}")?;
+                Self::validate_format_string(
+                    nondefault_format,
+                    "nondefault_hostname_format",
+                    "{project_name}",
+                )?;
             }
         }
 

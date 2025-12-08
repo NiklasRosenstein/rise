@@ -56,7 +56,7 @@ fn render_index(state: &AppState) -> Response {
         "backendUrl": state.server_settings.public_url,
         "issuerUrl": state.auth_settings.issuer,
         "clientId": state.auth_settings.client_id,
-        "redirectUri": format!("{}/", state.server_settings.public_url),
+        "redirectUri": format!("{}/auth/callback", state.server_settings.public_url),
     });
 
     // Render template with config
@@ -67,7 +67,11 @@ fn render_index(state: &AppState) -> Response {
         Ok(html) => Html(html).into_response(),
         Err(e) => {
             tracing::error!("Failed to render index.html template: {}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, "Template rendering error").into_response()
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template rendering error",
+            )
+                .into_response()
         }
     }
 }
