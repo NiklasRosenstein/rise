@@ -278,7 +278,7 @@ When Dex is enabled (`dex.enabled: true`), the chart provides sensible defaults 
 #### Using the Default Configuration
 
 By default, `dex.config` is empty and the chart uses a pre-configured development setup that includes:
-- SQLite storage (suitable for development)
+- In-memory storage (data is lost on pod restart)
 - Static password authentication with test users (admin@example.com and test@example.com, both with password "password")
 - Configured redirect URIs for local development
 

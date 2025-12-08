@@ -62,16 +62,12 @@ spec:
         - name: config
           mountPath: /etc/dex
           readOnly: true
-        - name: dex-data
-          mountPath: /var/dex
         resources:
           {{- toYaml .Values.dex.resources | nindent 12 }}
       volumes:
       - name: config
         configMap:
           name: {{ include "rise.fullname" . }}-dex-config
-      - name: dex-data
-        emptyDir: {}
       {{- with .Values.dex.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}
