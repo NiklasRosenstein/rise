@@ -1,5 +1,9 @@
 locals {
-  name = "${var.name_prefix}-backend"
+  name = var.name
+
+  # Derive prefix from name by removing -backend suffix if present
+  # e.g., "rise-backend" -> "rise", "rise-prod-backend" -> "rise-prod"
+  prefix = replace(var.name, "/-backend$/", "")
 
   default_tags = {
     "rise:managed-by" = "terraform"
@@ -259,7 +263,7 @@ data "aws_iam_policy_document" "push_role" {
 resource "aws_iam_policy" "push_role" {
   count = var.create_push_role ? 1 : 0
 
-  name        = "${var.name_prefix}-ecr-push"
+  name        = "${local.prefix}-ecr-push"
   description = "IAM policy for Rise ECR push operations"
   policy      = data.aws_iam_policy_document.push_role.json
   tags        = local.tags
@@ -312,7 +316,7 @@ data "aws_iam_policy_document" "push_role_assume" {
 resource "aws_iam_role" "push_role" {
   count = var.create_push_role ? 1 : 0
 
-  name               = "${var.name_prefix}-ecr-push"
+  name               = "${local.prefix}-ecr-push"
   description        = "IAM role for Rise ECR push operations (assumed to generate scoped credentials)"
   assume_role_policy = data.aws_iam_policy_document.push_role_assume[0].json
   tags               = local.tags
@@ -342,7 +346,7 @@ data "aws_iam_policy_document" "assume_push_role" {
 resource "aws_iam_policy" "assume_push_role" {
   count = var.create_push_role ? 1 : 0
 
-  name        = "${var.name_prefix}-ecr-assume-push"
+  name        = "${local.prefix}-ecr-assume-push"
   description = "Allow assuming the ECR push role"
   policy      = data.aws_iam_policy_document.assume_push_role[0].json
   tags        = local.tags

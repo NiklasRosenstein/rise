@@ -16,12 +16,12 @@ This module creates the AWS IAM resources required for the Rise backend to manag
 
 The module creates two separate IAM roles with distinct permissions:
 
-1. **Backend Role** (`{name_prefix}-backend`): Used by the Rise backend to manage ECR repositories
+1. **Backend Role** (e.g., `rise-backend`): Used by the Rise backend to manage ECR repositories
    - Create/delete repositories
    - Tag repositories (managed, orphaned)
    - List repositories for discovery
 
-2. **Push Role** (`{name_prefix}-ecr-push`): Assumed by the backend to generate scoped credentials
+2. **Push Role** (e.g., `rise-ecr-push`): Assumed by the backend to generate scoped credentials
    - Push images to ECR
    - The backend uses STS AssumeRole with an inline session policy to scope credentials to specific repositories
 
@@ -33,7 +33,7 @@ The module creates two separate IAM roles with distinct permissions:
 module "rise_aws" {
   source = "./modules/rise-aws"
 
-  name_prefix = "rise"
+  name        = "rise-backend"
   repo_prefix = "rise/"
   auto_remove = false  # Tag as orphaned instead of deleting
 
@@ -49,7 +49,7 @@ module "rise_aws" {
 module "rise_aws" {
   source = "./modules/rise-aws"
 
-  name_prefix            = "rise"
+  name                   = "rise-backend"
   repo_prefix            = "rise/"
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
   irsa_namespace         = "rise-system"
@@ -63,7 +63,7 @@ module "rise_aws" {
 module "rise_aws" {
   source = "./modules/rise-aws"
 
-  name_prefix     = "rise"
+  name            = "rise-backend"
   repo_prefix     = "rise/"
   create_iam_role = false
   create_iam_user = true
@@ -107,7 +107,7 @@ auto_remove = false  # From module.rise_aws.rise_config.auto_remove
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
-| name_prefix | Prefix for all resource names | `string` | `"rise"` | no |
+| name | Name for the IAM role and policy | `string` | `"rise-backend"` | no |
 | repo_prefix | Prefix for ECR repository names | `string` | `"rise/"` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
 | create_iam_role | Create an IAM role for the controller | `bool` | `true` | no |

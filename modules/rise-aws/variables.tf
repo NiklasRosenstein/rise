@@ -1,7 +1,7 @@
-variable "name_prefix" {
-  description = "Prefix for all resource names (e.g., 'rise-prod', 'rise-dev')"
+variable "name" {
+  description = "Name for the IAM role and policy (e.g., 'rise-backend', 'rise-prod-backend')"
   type        = string
-  default     = "rise"
+  default     = "rise-backend"
 }
 
 variable "repo_prefix" {

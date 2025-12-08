@@ -96,7 +96,7 @@ Create a `terraform/rise-ecr.tf` file:
 module "rise_ecr" {
   source = "../modules/rise-aws"
 
-  name_prefix = "rise"
+  name        = "rise-backend"
   repo_prefix = "rise/"
   auto_remove = false  # Tag as orphaned instead of deleting
 
@@ -132,7 +132,7 @@ If you plan to run the Rise backend on EKS with IRSA:
 module "rise_ecr" {
   source = "../modules/rise-aws"
 
-  name_prefix            = "rise"
+  name                   = "rise-backend"
   repo_prefix            = "rise/"
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
   irsa_namespace         = "rise-system"
@@ -186,7 +186,7 @@ If running Rise outside AWS (e.g., on-premises, other cloud):
 module "rise_ecr" {
   source = "../modules/rise-aws"
 
-  name_prefix     = "rise"
+  name            = "rise-backend"
   repo_prefix     = "rise/"
   create_iam_role = false
   create_iam_user = true
@@ -346,7 +346,7 @@ Key Terraform module inputs:
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `name_prefix` | Prefix for IAM roles/policies | `"rise"` |
+| `name` | Name for IAM role and policy | `"rise-backend"` |
 | `repo_prefix` | Prefix for ECR repositories | `"rise/"` |
 | `auto_remove` | Delete repos on project deletion | `false` |
 | `max_image_count` | Max images per repository | `100` |
