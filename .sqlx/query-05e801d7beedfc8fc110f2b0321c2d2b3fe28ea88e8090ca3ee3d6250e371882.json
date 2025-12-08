@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET status = $2\n        WHERE id = $1\n          AND NOT is_protected(status)\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        ",
+  "query": "\n        UPDATE deployments\n        SET status = $2\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -134,5 +134,5 @@
       false
     ]
   },
-  "hash": "139c670fcdbc1eb3c5c11a648b00cb14f90fdda6b5ae222564bdc9caff7507e6"
+  "hash": "05e801d7beedfc8fc110f2b0321c2d2b3fe28ea88e8090ca3ee3d6250e371882"
 }
