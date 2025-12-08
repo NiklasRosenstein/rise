@@ -121,6 +121,45 @@ fn default_ingress_class() -> String {
     "nginx".to_string()
 }
 
+/// Kubernetes deployment controller configuration
+///
+/// # Ingress Authentication Architecture
+///
+/// For cookie-based authentication to work with private projects, the backend API
+/// must be accessible on the same parent domain as the deployed applications:
+///
+/// **Required Setup:**
+/// 1. Deploy backend with Ingress at a subdomain (e.g., `api.rise.net`)
+/// 2. Configure apps to use sibling subdomains (e.g., `{project}.apps.rise.net`)
+/// 3. Set `cookie_domain` to parent domain (e.g., `.rise.net`)
+/// 4. Set `public_url` to API ingress URL (e.g., `https://api.rise.net`)
+///
+/// **Example Production Configuration:**
+/// ```toml
+/// [server]
+/// public_url = "https://api.rise.net"
+/// cookie_domain = ".rise.net"  # Shared across api.rise.net and *.apps.rise.net
+/// cookie_secure = true
+///
+/// [kubernetes]
+/// domain_suffix = "apps.rise.net"
+/// auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL
+/// auth_signin_url = "https://api.rise.net"  # Public API URL for browser redirects
+/// ```
+///
+/// **How it works:**
+/// 1. User visits `myapp.apps.rise.net` (deployed application)
+/// 2. Nginx ingress checks authentication via `auth_backend_url` (cluster-internal)
+/// 3. If unauthenticated, redirects browser to `auth_signin_url` (public API URL)
+/// 4. Backend sets session cookie with `domain=.rise.net`
+/// 5. Browser redirects back to `myapp.apps.rise.net` with cookie
+/// 6. Cookie is sent by browser (same parent domain) and Nginx auth succeeds
+///
+/// **Development Setup (Minikube):**
+/// - Create Ingress for backend at `api.rise.net`
+/// - Add `/etc/hosts` entries pointing to Minikube IP
+/// - Use `auth_backend_url = "http://172.17.0.1:3000"` (Docker bridge IP)
+/// - Use `auth_signin_url = "http://api.rise.net"` (through ingress)
 #[derive(Debug, Clone, Deserialize)]
 pub struct KubernetesSettings {
     /// Optional kubeconfig path (defaults to in-cluster or ~/.kube/config)
@@ -141,14 +180,16 @@ pub struct KubernetesSettings {
     #[serde(default)]
     pub non_default_domain_suffix: Option<String>,
 
-    /// Backend URL for Nginx auth subrequests (e.g., "https://api.rise.net" or "http://172.17.0.1:3000")
-    /// This is the URL Nginx will use internally to validate authentication
-    /// Note: For Minikube, use 172.17.0.1 (Docker bridge IP) to reach the host machine
+    /// Backend URL for Nginx auth subrequests (internal cluster URL)
+    /// Example: "http://rise-backend.default.svc.cluster.local:3000"
+    /// This is the URL Nginx will use internally within the cluster to validate authentication.
+    /// For Minikube development, use "http://172.17.0.1:3000" (Docker bridge IP) to reach host.
     pub auth_backend_url: String,
 
-    /// Full URL for auth signin redirect with schema (e.g., "https://api.rise.net" or "http://localhost:3000")
-    /// Used in auth-signin annotation for redirecting users to login
-    /// Must include the schema (http:// or https://)
+    /// Public backend URL for browser redirects during authentication
+    /// Example: "https://api.rise.net"
+    /// This must be the public URL where the backend is accessible via Ingress.
+    /// The domain should share a parent with app domains for cookie sharing (see struct docs).
     pub auth_signin_url: String,
 }
 

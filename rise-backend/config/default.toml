@@ -53,9 +53,29 @@ namespace = "rise-apps"
 
 # Kubernetes configuration (optional)
 # Uncomment to enable Kubernetes deployment controller
+#
+# IMPORTANT: For ingress authentication to work, the backend API must be accessible
+# on the same parent domain as your apps. Example setup:
+#
+# Production:
+#   - Deploy backend with Ingress at https://api.rise.net
+#   - Apps will be at https://{project}.apps.rise.net
+#   - Set cookie_domain = ".rise.net" (note the leading dot)
+#   - Set public_url = "https://api.rise.net"
+#   - Set auth_signin_url = "https://api.rise.net"
+#   - Set auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"
+#
+# Development (Minikube):
+#   - Create Ingress for backend at http://api.rise.net
+#   - Add to /etc/hosts: <minikube-ip> api.rise.net foo.apps.rise.net
+#   - Set cookie_domain = ".rise.net"
+#   - Set public_url = "http://api.rise.net"
+#   - Set auth_signin_url = "http://api.rise.net"
+#   - Set auth_backend_url = "http://172.17.0.1:3000" (Docker bridge IP for Minikube to reach host)
+#
 # [kubernetes]
 # ingress_class = "nginx"
 # domain_suffix = "apps.rise.net"
-# auth_backend_url = "http://172.17.0.1:3000"  # URL for Nginx auth subrequests (172.17.0.1 is Docker bridge IP for Minikube to reach host)
-# auth_signin_url = "http://localhost:3000"  # Full URL with schema for auth signin redirects (use http:// for development, https:// for production)
+# auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster service URL for auth checks
+# auth_signin_url = "https://api.rise.net"  # Public API URL for browser redirects during authentication
 # kubeconfig = "/path/to/kubeconfig"  # Optional: explicit kubeconfig path
