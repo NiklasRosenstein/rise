@@ -81,9 +81,54 @@ impl Config {
     }
 
     /// Get the backend URL (with default fallback)
+    /// Checks RISE_URL environment variable first, then falls back to config file, then to default
     pub fn get_backend_url(&self) -> String {
+        // Check environment variable first
+        if let Ok(url) = std::env::var("RISE_URL") {
+            return url;
+        }
+        // Fall back to config file, then to default
         self.backend_url
             .clone()
             .unwrap_or_else(|| "http://localhost:3000".to_string())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_backend_url_precedence() {
+        // Test 1: Default when nothing is set
+        let config = Config {
+            token: None,
+            backend_url: None,
+        };
+        assert_eq!(config.get_backend_url(), "http://localhost:3000");
+
+        // Test 2: Config file value used when env var not set
+        let config = Config {
+            token: None,
+            backend_url: Some("https://api.example.com".to_string()),
+        };
+        assert_eq!(config.get_backend_url(), "https://api.example.com");
+
+        // Test 3: Environment variable takes precedence (would need to be tested with actual env var)
+        // This test would require setting RISE_URL in the environment, which we skip in unit tests
+        // but document the expected behavior
+    }
+
+    #[test]
+    fn test_token_precedence() {
+        // Test config file token when env var not set
+        let config = Config {
+            token: Some("config-token".to_string()),
+            backend_url: None,
+        };
+        // When RISE_TOKEN env var is not set, should use config file token
+        if std::env::var("RISE_TOKEN").is_err() {
+            assert_eq!(config.get_token(), Some("config-token".to_string()));
+        }
     }
 }
