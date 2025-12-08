@@ -21,9 +21,6 @@ pub struct ServerSettings {
     pub port: u16,
     pub public_url: String,
 
-    /// API domain for OAuth2 redirects (e.g., "api.rise.net")
-    pub api_domain: String,
-
     /// Cookie domain for session cookies (e.g., ".rise.net" for all subdomains, "" for current host only)
     #[serde(default)]
     pub cookie_domain: String,

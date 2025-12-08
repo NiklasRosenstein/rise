@@ -34,7 +34,6 @@ pub struct AppState {
     pub auth_settings: Arc<AuthSettings>,
     pub token_store: Arc<dyn TokenStore>,
     pub cookie_settings: CookieSettings,
-    pub api_domain: String,
     pub public_url: String,
 }
 
@@ -197,9 +196,6 @@ impl AppState {
             cookie_settings.secure
         );
 
-        let api_domain = settings.server.api_domain.clone();
-        tracing::info!("API domain: {}", api_domain);
-
         let public_url = settings.server.public_url.clone();
         tracing::info!("Public URL: {}", public_url);
 
@@ -213,7 +209,6 @@ impl AppState {
             auth_settings,
             token_store,
             cookie_settings,
-            api_domain,
             public_url,
         })
     }
@@ -321,7 +316,6 @@ impl AppState {
             domain: String::new(),
             secure: true,
         };
-        let api_domain = "localhost".to_string(); // Dummy value, not used by controller
         let public_url = "http://localhost:3000".to_string(); // Dummy value, not used by controller
 
         Ok(Self {
@@ -334,7 +328,6 @@ impl AppState {
             auth_settings,
             token_store,
             cookie_settings,
-            api_domain,
             public_url,
         })
     }

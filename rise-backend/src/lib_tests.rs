@@ -13,7 +13,6 @@ mod tests {
                 host: "127.0.0.1".to_string(),
                 port: 0, // Use port 0 for testing
                 public_url: "http://localhost:3000".to_string(),
-                api_domain: "localhost:3000".to_string(),
                 cookie_domain: String::new(),
                 cookie_secure: false,
             },
