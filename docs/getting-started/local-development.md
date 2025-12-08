@@ -149,10 +149,7 @@ The `.envrc` file (loaded automatically by `direnv`) sets environment variables 
 DATABASE_URL="postgres://rise:rise123@localhost:5432/rise"
 
 # Rise configuration
-RISE_CONFIG_DIR="rise-backend/config"
 RUN_MODE="development"
-RISE_SERVER__HOST="0.0.0.0"
-RISE_SERVER__PORT="3000"
 
 # Docker API version
 DOCKER_API_VERSION=1.44
@@ -160,6 +157,8 @@ DOCKER_API_VERSION=1.44
 # Add debug binaries to PATH
 PATH="$PATH:$PWD/target/debug"
 ```
+
+Configuration settings like server host and port are specified in `rise-backend/config/default.toml`.
 
 If you don't use `direnv`, manually source this file:
 ```bash
@@ -272,7 +271,7 @@ docker-compose exec postgres pg_isready -U rise
 # Find the process
 lsof -i :3000
 
-# Kill it or change RISE_SERVER__PORT in .envrc
+# Kill it or change the port in rise-backend/config/local.toml
 ```
 
 ### Overmind won't start processes

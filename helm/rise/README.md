@@ -124,7 +124,7 @@ Create the secret with required environment variables:
 ```bash
 kubectl create secret generic rise-secrets \
   --from-literal=DATABASE_URL=postgres://rise:YOUR_DB_PASSWORD@postgresql:5432/rise \
-  --from-literal=RISE_AUTH__CLIENT_SECRET=YOUR_CLIENT_SECRET
+  --from-literal=AUTH_CLIENT_SECRET=YOUR_CLIENT_SECRET
 ```
 
 Install the chart:
@@ -297,15 +297,13 @@ config: |
   [auth]
   issuer = "https://dex.example.com/dex"
   client_id = "rise-backend"
-  client_secret = ""  # Placeholder - override with RISE_AUTH__CLIENT_SECRET env var
+  client_secret = "${AUTH_CLIENT_SECRET}"
 
   [registry]
   type = "oci-client-auth"
   registry_url = "registry.example.com"
   namespace = "rise-apps"
 ```
-
-**Note:** Required fields like `client_secret` must have a placeholder value (e.g., `""`) in the TOML, even if you override them with environment variables.
 
 ### Dex Configuration
 
@@ -374,15 +372,13 @@ The `envFrom` parameter allows you to inject environment variables from Secrets 
 - Overriding specific configuration values
 - Managing environment-specific settings
 
-#### How Environment Variable Overrides Work
+#### How Environment Variable Substitution Works
 
-Rise uses a layered configuration system where environment variables have the **highest priority** and override TOML values:
+Rise uses a layered configuration system with environment variable substitution:
 
 1. Load TOML config from ConfigMap
-2. Apply environment variables (prefix: `RISE_`, separator: `__`)
-3. Environment variables override TOML values
-
-**Important:** For **required fields**, you must include a placeholder value in the TOML config, even if you plan to override it with an environment variable. Use an empty string (`""`) as the placeholder.
+2. Replace `${VAR}` and `${VAR:-default}` patterns with environment variable values
+3. Fail startup if required variables are missing
 
 **Example:**
 
@@ -392,7 +388,7 @@ config: |
   [auth]
   issuer = "http://dex:5556/dex"
   client_id = "rise-backend"
-  client_secret = ""  # Required placeholder - will be overridden by env var
+  client_secret = "${AUTH_CLIENT_SECRET}"
 
 envFrom:
   - secretRef:
@@ -402,15 +398,10 @@ envFrom:
 ```bash
 # Create secret with actual value
 kubectl create secret generic rise-secrets \
-  --from-literal=RISE_AUTH__CLIENT_SECRET=your-actual-secret
+  --from-literal=AUTH_CLIENT_SECRET=your-actual-secret
 ```
 
-The final configuration will use `client_secret = "your-actual-secret"` from the environment variable.
-
-**Environment Variable Format:**
-- TOML: `[section]` → `key = "value"`
-- Env Var: `RISE_SECTION__KEY=value`
-- Example: `[auth]` → `client_secret = "..."` becomes `RISE_AUTH__CLIENT_SECRET=...`
+The configuration substitutes `${AUTH_CLIENT_SECRET}` with the value from the environment variable.
 
 **Example: Using a Secret for AWS credentials**
 
@@ -448,7 +439,7 @@ envFrom:
       name: rise-overrides
 ```
 
-**Note:** Environment variables set via `envFrom` can override TOML configuration values. Rise follows standard environment variable precedence where `RISE_SECTION__KEY` maps to `[section] key` in TOML.
+**Note:** Environment variables set via `envFrom` are available for substitution in TOML configuration using `${VAR_NAME}` syntax.
 
 ## Upgrading
 

@@ -159,9 +159,9 @@ cargo run --bin rise -- backend controller project              # Project contro
 
 Environment variables are centralized in `.envrc` (loaded by direnv):
 - `DATABASE_URL`: PostgreSQL connection string
-- `RISE_CONFIG_DIR`: Configuration directory
 - `RUN_MODE`: development/production
-- `RISE_SERVER__HOST` and `RISE_SERVER__PORT`: Server binding
+
+Server configuration (host, port, etc.) is specified in `rise-backend/config/default.toml` and can be overridden in `local.toml` or using environment variable substitution in config files.
 
 ## Guidelines
 

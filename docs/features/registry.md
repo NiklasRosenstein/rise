@@ -62,17 +62,26 @@ Registry configuration is in `rise-backend/config/`:
 - **`local.toml`**: Local overrides (gitignored)
 
 **Precedence** (highest to lowest):
-1. Environment variables (`RISE_REGISTRY__TYPE=docker`)
-2. Local config (`local.toml`)
-3. Environment-specific config (`production.toml`)
-4. Default config (`default.toml`)
+1. Local config (`local.toml`)
+2. Environment-specific config (`production.toml`)
+3. Default config (`default.toml`)
+4. Environment variable substitution - `${VAR}` patterns are replaced
 
-**Environment variables**:
+**Using environment variables in configuration**:
+```toml
+# In production.toml
+[registry]
+type = "ecr"
+region = "${AWS_REGION:-us-east-1}"
+account_id = "${AWS_ACCOUNT_ID}"
+push_role_arn = "${ECR_PUSH_ROLE_ARN}"
+```
+
 ```bash
-export RISE_REGISTRY__TYPE="ecr"
-export RISE_REGISTRY__REGION="us-east-1"
-export RISE_REGISTRY__ACCOUNT_ID="123456789012"
-export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend-ecr-push"
+# In your environment
+export AWS_REGION="us-east-1"
+export AWS_ACCOUNT_ID="123456789012"
+export ECR_PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend-ecr-push"
 ```
 
 ## API Endpoint

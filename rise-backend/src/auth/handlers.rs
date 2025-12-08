@@ -568,7 +568,10 @@ pub async fn oauth_callback(
 
     // Check if this is an ingress auth flow (has project context)
     let (cookie, is_ingress_auth) = if let Some(ref project) = oauth_state.project_name {
-        tracing::info!("Issuing Rise JWT for ingress auth (project context: {})", project);
+        tracing::info!(
+            "Issuing Rise JWT for ingress auth (project context: {})",
+            project
+        );
 
         // Issue Rise JWT (NOT project-scoped - the cookie is shared across all *.rise.dev subdomains)
         let rise_jwt = state
@@ -703,13 +706,16 @@ pub async fn ingress_auth(
         (StatusCode::UNAUTHORIZED, "No session cookie".to_string())
     })?;
 
-    let ingress_claims = state.jwt_signer.verify_ingress_jwt(&rise_jwt).map_err(|e| {
-        tracing::warn!("Invalid or expired ingress JWT: {}", e);
-        (
-            StatusCode::UNAUTHORIZED,
-            "Invalid or expired session".to_string(),
-        )
-    })?;
+    let ingress_claims = state
+        .jwt_signer
+        .verify_ingress_jwt(&rise_jwt)
+        .map_err(|e| {
+            tracing::warn!("Invalid or expired ingress JWT: {}", e);
+            (
+                StatusCode::UNAUTHORIZED,
+                "Invalid or expired session".to_string(),
+            )
+        })?;
 
     tracing::debug!(
         "Rise JWT validated for project: {}, user: {}",
