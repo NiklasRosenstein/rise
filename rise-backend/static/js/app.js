@@ -231,9 +231,11 @@ async function showProject(projectName) {
     viewEl.style.display = 'block';
 
     const detailEl = document.getElementById('project-detail');
+    const serviceAccountListEl = document.getElementById('service-account-list');
     const deploymentListEl = document.getElementById('deployment-list');
 
     detailEl.innerHTML = '<p aria-busy="true">Loading project...</p>';
+    serviceAccountListEl.innerHTML = '';
     deploymentListEl.innerHTML = '';
 
     // Reset pagination and filter state
@@ -262,6 +264,9 @@ async function showProject(projectName) {
                 </dl>
             </article>
         `;
+
+        // Load service accounts
+        await loadServiceAccounts(projectName);
 
         // Load deployments
         await loadDeployments(projectName, 0);
@@ -342,6 +347,56 @@ async function loadDeployments(projectName, page = 0) {
     } catch (error) {
         listEl.innerHTML = `<p>Error loading deployments: ${escapeHtml(error.message)}</p>`;
         pageInfoEl.textContent = '';
+    }
+}
+
+// Load service accounts for a project
+async function loadServiceAccounts(projectName) {
+    const listEl = document.getElementById('service-account-list');
+    listEl.innerHTML = '<p aria-busy="true">Loading service accounts...</p>';
+
+    try {
+        const response = await api.getProjectServiceAccounts(projectName);
+        const serviceAccounts = response.workload_identities || [];
+
+        if (serviceAccounts.length === 0) {
+            listEl.innerHTML = '<p>No service accounts found.</p>';
+            return;
+        }
+
+        const tableHtml = `
+            <figure>
+                <table role="grid">
+                    <thead>
+                        <tr>
+                            <th>Email</th>
+                            <th>Issuer URL</th>
+                            <th>Claims</th>
+                            <th>Created</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${serviceAccounts.map(sa => `
+                            <tr>
+                                <td>${escapeHtml(sa.email)}</td>
+                                <td style="word-break: break-all; max-width: 300px;">${escapeHtml(sa.issuer_url)}</td>
+                                <td style="font-family: monospace; font-size: 0.85em;">
+                                    ${Object.entries(sa.claims || {})
+                                        .map(([key, value]) => `${escapeHtml(key)}=${escapeHtml(value)}`)
+                                        .join('<br>')
+                                    }
+                                </td>
+                                <td>${formatDate(sa.created_at)}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </figure>
+        `;
+
+        listEl.innerHTML = tableHtml;
+    } catch (error) {
+        listEl.innerHTML = `<p>Error loading service accounts: ${escapeHtml(error.message)}</p>`;
     }
 }
 

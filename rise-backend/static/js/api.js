@@ -73,6 +73,11 @@ class RiseAPI {
     async getDeployment(projectName, deploymentId) {
         return this.request(`/projects/${projectName}/deployments/${deploymentId}`);
     }
+
+    // Service account endpoints
+    async getProjectServiceAccounts(projectName) {
+        return this.request(`/projects/${projectName}/workload-identities`);
+    }
 }
 
 const api = new RiseAPI();
