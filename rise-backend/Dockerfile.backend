@@ -58,7 +58,7 @@ RUN apt-get update && apt-get install -y \
 COPY --from=builder /usr/local/bin/rise /usr/local/bin/rise
 
 # Copy the configuration files
-COPY rise-backend/config /config
+COPY /config /config
 
 # Expose the application port
 EXPOSE 3000
