@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
@@ -146,20 +146,51 @@ pub async fn create(
 }
 
 /// Update deployment status
+///
+/// Validates state transition using the state machine before updating.
+/// Returns error if the transition is invalid or if the deployment doesn't exist.
 pub async fn update_status(
     pool: &PgPool,
     id: Uuid,
     status: DeploymentStatus,
 ) -> Result<Deployment> {
-    let status_str = status.to_string();
+    // Fetch current deployment to validate state transition
+    let current = sqlx::query_as!(
+        Deployment,
+        r#"
+        SELECT
+            id, deployment_id, project_id, created_by_id,
+            status as "status: DeploymentStatus",
+            deployment_group, expires_at,
+            completed_at, error_message, build_logs,
+            controller_metadata as "controller_metadata: serde_json::Value",
+            deployment_url,
+            image, image_digest,
+            http_port,
+            termination_reason as "termination_reason: _",
+            created_at, updated_at
+        FROM deployments
+        WHERE id = $1
+        "#,
+        id
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to fetch deployment for status update")?;
 
+    let current = current.ok_or_else(|| anyhow::anyhow!("Deployment not found"))?;
+
+    // Validate state transition
+    state_machine::validate_transition(&current.status, &status)?;
+
+    // Perform the update
+    let status_str = status.to_string();
     let deployment = sqlx::query_as!(
         Deployment,
         r#"
         UPDATE deployments
         SET status = $2
         WHERE id = $1
-          AND NOT is_protected(status)
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
@@ -175,11 +206,22 @@ pub async fn update_status(
         id,
         status_str
     )
-    .fetch_one(pool)
+    .fetch_optional(pool)
     .await
-    .context("Failed to update deployment status")?;
+    .context("Failed to execute deployment status update")?;
 
-    Ok(deployment)
+    match deployment {
+        Some(d) => Ok(d),
+        None => {
+            tracing::warn!(
+                "UPDATE returned 0 rows for deployment {} (transition {} -> {}), but validation passed",
+                current.deployment_id,
+                current.status,
+                status
+            );
+            bail!("Failed to update deployment status: deployment may have been modified concurrently");
+        }
+    }
 }
 
 /// Mark deployment as failed

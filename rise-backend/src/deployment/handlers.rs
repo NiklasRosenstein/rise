@@ -587,29 +587,20 @@ pub async fn update_deployment_status(
             deployment
         }
         _ => {
-            // Validate state transition against the state machine
+            // update_status will validate the state transition
             let db_status = convert_status_to_db(payload.status);
-            if let Err(e) = crate::deployment::state_machine::validate_transition(
-                &deployment.status,
-                &db_status,
-            ) {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    format!(
-                        "Invalid status transition from {} to {}: {}",
-                        deployment.status, db_status, e
-                    ),
-                ));
-            }
-
             let deployment =
                 db_deployments::update_status(&state.db_pool, deployment.id, db_status)
                     .await
                     .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Failed to update deployment: {}", e),
-                        )
+                        // State transition validation errors are returned as anyhow errors
+                        // Return BAD_REQUEST for validation errors, INTERNAL_SERVER_ERROR otherwise
+                        let error_msg = e.to_string();
+                        if error_msg.contains("Invalid deployment state transition") {
+                            (StatusCode::BAD_REQUEST, error_msg)
+                        } else {
+                            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to update deployment: {}", e))
+                        }
                     })?;
 
             // Update project status (e.g., to Deploying)
