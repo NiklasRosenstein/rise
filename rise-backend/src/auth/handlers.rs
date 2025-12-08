@@ -169,7 +169,7 @@ pub async fn oauth_signin(
     state.token_store.save(state_token.clone(), oauth_state);
 
     // Build OAuth2 authorization URL
-    let callback_url = format!("{}/auth/callback", state.public_url);
+    let callback_url = format!("{}/auth/callback", state.public_url.trim_end_matches('/'));
 
     let auth_url = format!(
         "{}/auth?client_id={}&redirect_uri={}&response_type=code&scope=openid+email+profile&code_challenge={}&code_challenge_method=S256&state={}",
@@ -211,7 +211,7 @@ pub async fn oauth_callback(
     })?;
 
     // Build callback URL (must match the one used in signin)
-    let callback_url = format!("{}/auth/callback", state.public_url);
+    let callback_url = format!("{}/auth/callback", state.public_url.trim_end_matches('/'));
 
     // Exchange authorization code for tokens
     let token_info = state

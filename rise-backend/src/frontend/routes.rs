@@ -46,24 +46,24 @@ fn render_index(state: &AppState) -> Response {
 
     // Create Tera instance and add template
     let mut tera = Tera::default();
-    if let Err(e) = tera.add_raw_template("index.html", &template_content) {
+    if let Err(e) = tera.add_raw_template("index.html.tera", &template_content) {
         tracing::error!("Failed to parse index.html.tera template: {}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "Template error").into_response();
     }
 
     // Build config object from backend settings
     let config = json!({
-        "backendUrl": state.server_settings.public_url,
+        "backendUrl": state.server_settings.public_url.trim_end_matches('/'),
         "issuerUrl": state.auth_settings.issuer,
         "clientId": state.auth_settings.client_id,
-        "redirectUri": format!("{}/", state.server_settings.public_url),
+        "redirectUri": format!("{}/", state.server_settings.public_url.trim_end_matches('/')),
     });
 
     // Render template with config
     let mut context = tera::Context::new();
     context.insert("config", &config.to_string());
 
-    match tera.render("index.html", &context) {
+    match tera.render("index.html.tera", &context) {
         Ok(html) => Html(html).into_response(),
         Err(e) => {
             tracing::error!("Failed to render index.html template: {}", e);

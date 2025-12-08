@@ -18,10 +18,6 @@ mod tests {
             "index.html.tera should be embedded"
         );
         assert!(
-            StaticAssets::get("index.html").is_some(),
-            "index.html should be embedded"
-        );
-        assert!(
             StaticAssets::get("dashboard.html").is_some(),
             "dashboard.html should be embedded"
         );
