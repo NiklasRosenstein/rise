@@ -38,6 +38,9 @@ spec:
         command:
           - /usr/local/bin/dex
           - serve
+          - /etc/dex/config.yaml79
+          - --telemetry-addr
+          - 0.0.0.0:5558
           - /etc/dex/config.yaml
         ports:
         - name: http
@@ -46,16 +49,19 @@ spec:
         - name: grpc
           containerPort: 5557
           protocol: TCP
+        - name: telemetry
+          containerPort: 5558
+          protocol: TCP
         livenessProbe:
           httpGet:
-            path: /healthz
-            port: http
+            path: /healthz/live
+            port: telemetry
           initialDelaySeconds: 10
           periodSeconds: 10
         readinessProbe:
           httpGet:
-            path: /healthz
-            port: http
+            path: /healthz/live
+            port: telemetry
           initialDelaySeconds: 5
           periodSeconds: 5
         volumeMounts:
