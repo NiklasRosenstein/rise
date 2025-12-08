@@ -17,6 +17,8 @@ mod tests {
                 public_url: "http://localhost:3000".to_string(),
                 cookie_domain: String::new(),
                 cookie_secure: false,
+                jwt_signing_secret: None,
+                jwt_claims: vec!["sub".to_string(), "email".to_string()],
             },
             auth: AuthSettings {
                 issuer: "http://localhost:5556".to_string(),

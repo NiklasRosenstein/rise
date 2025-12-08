@@ -570,11 +570,11 @@ pub async fn oauth_callback(
     let (cookie, is_ingress_auth) = if let (Some(ref signer), Some(ref project)) =
         (&state.jwt_signer, &oauth_state.project_name)
     {
-        tracing::info!("Issuing Rise JWT for project: {}", project);
+        tracing::info!("Issuing Rise JWT for ingress auth (project context: {})", project);
 
-        // Issue Rise JWT scoped to the project
+        // Issue Rise JWT (NOT project-scoped - the cookie is shared across all *.rise.dev subdomains)
         let rise_jwt = signer
-            .sign_ingress_jwt(&claims, project, Some(exp))
+            .sign_ingress_jwt(&claims, Some(exp))
             .map_err(|e| {
                 tracing::error!("Failed to sign Rise JWT: {}", e);
                 (
@@ -750,22 +750,9 @@ pub async fn ingress_auth(
         if let Some(rise_jwt) = cookie_helpers::extract_ingress_jwt_cookie(&headers) {
             match signer.verify_ingress_jwt(&rise_jwt) {
                 Ok(ingress_claims) => {
-                    // Validate project claim matches request
-                    if ingress_claims.project != params.project {
-                        tracing::warn!(
-                            "Project mismatch: JWT for '{}', requested '{}'",
-                            ingress_claims.project,
-                            params.project
-                        );
-                        return Err((
-                            StatusCode::UNAUTHORIZED,
-                            "Invalid token for this project".to_string(),
-                        ));
-                    }
-
                     tracing::debug!(
                         "Rise JWT validated for project: {}, user: {}",
-                        ingress_claims.project,
+                        params.project,
                         ingress_claims.email
                     );
 

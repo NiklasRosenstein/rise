@@ -221,11 +221,11 @@ User completes OAuth at Dex
 Dex redirects to /auth/callback?code=xyz&state=abc
   ↓
 GET /auth/callback (Token Exchange):
-  - Retrieve OAuth2State (includes project_name='myapp')
+  - Retrieve OAuth2State (includes project_name='myapp' for UI context only)
   - Exchange code for IdP tokens
   - Validate IdP JWT
   - Extract claims (sub, email, name) and expiry
-  - Issue Rise JWT with claims + project='myapp'
+  - Issue Rise JWT with user claims (NOT project-scoped!)
   - 🍪 SET COOKIE: _rise_ingress = <Rise JWT>
        (Domain: .rise.dev, HttpOnly, Secure, SameSite=Lax)
   - Renders auth-success.html.tera
@@ -237,9 +237,8 @@ After 3 seconds, browser redirects to https://myapp.apps.rise.dev
 Nginx calls GET /auth/ingress?project=myapp
   - 🍪 READS COOKIE: _rise_ingress
   - Verifies Rise JWT signature (HS256)
-  - Validates claims.project == 'myapp' (PROJECT SCOPING!)
   - Validates expiry
-  - Checks user has project access
+  - Checks user has project access via database query (NOT JWT claim!)
   ↓ Returns 200 OK + headers (X-Auth-Request-Email, X-Auth-Request-User)
   ↓
 Nginx serves app
@@ -256,7 +255,6 @@ Rise issues symmetric HS256 JWTs with the following claims:
   "sub": "user-id-from-idp",
   "email": "user@example.com",
   "name": "User Name",
-  "project": "myapp",
   "iat": 1234567890,
   "exp": 1234571490,
   "iss": "https://rise.dev",
@@ -265,7 +263,7 @@ Rise issues symmetric HS256 JWTs with the following claims:
 ```
 
 **Key features**:
-- **Project scoping**: `project` claim prevents JWT reuse across projects
+- **NOT project-scoped**: JWTs do NOT contain a project claim because the cookie is set at `rise.dev` domain and shared across all `*.apps.rise.dev` subdomains. Project access is validated separately in the ingress auth handler by checking database permissions.
 - **Configurable claims**: Include only necessary user information
 - **Expiry matching**: Token expiration matches IdP token (typically 1 hour)
 - **Symmetric signing**: HS256 with shared secret for fast validation
@@ -291,14 +289,16 @@ Two separate cookies are used for different purposes:
 For private projects, the ingress auth endpoint validates:
 
 1. **JWT validity**: Signature, expiration, issuer, audience
-2. **Project scoping**: `claims.project` must match requested project
-3. **User permissions**: User must be owner or team member
+2. **User permissions**: Database query to check if user is owner or team member
 
 Access check logic:
 ```rust
 // User can access if:
 // - User is the project owner (owner_user_id), OR
 // - User is a member of the team that owns the project (owner_team_id)
+//
+// NOTE: JWTs are NOT project-scoped - the same JWT can be used across all projects
+// because the cookie is set at rise.dev domain level and shared across *.apps.rise.dev
 ```
 
 #### Ingress Annotations
@@ -328,10 +328,10 @@ The application receives authenticated requests with these additional headers:
 - Verify cookies are being set (check browser DevTools → Application → Cookies)
 - Ensure `cookie_secure` is `false` for HTTP development environments
 
-**"Invalid token for this project" error**:
-- User authenticated for a different project
-- Clear cookies and re-authenticate
-- JWT contains wrong project claim (check logs)
+**"Access denied" or 403 Forbidden error**:
+- User is authenticated but not authorized for this project
+- Check project ownership: `rise project show <project-name>`
+- Add user to project's team if needed
 
 **"No session cookie" error**:
 - Cookie expired or not set

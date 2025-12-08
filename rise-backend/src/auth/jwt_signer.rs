@@ -5,6 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Claims for Rise-issued ingress authentication JWTs
+///
+/// Note: These JWTs are NOT scoped to specific projects because the cookie
+/// is set at the rise.dev domain and shared across all *.apps.rise.dev subdomains.
+/// Project access is validated separately in the ingress_auth handler.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct IngressClaims {
     /// User ID from IdP
@@ -14,8 +18,6 @@ pub struct IngressClaims {
     /// User name (optional)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Project name (for scoping)
-    pub project: String,
     /// Issued at timestamp
     pub iat: u64,
     /// Expiration timestamp
@@ -81,16 +83,17 @@ impl JwtSigner {
         })
     }
 
-    /// Sign a new ingress JWT scoped to a specific project
+    /// Sign a new ingress JWT for authenticated users
+    ///
+    /// Note: This JWT is NOT scoped to a specific project because the cookie is shared
+    /// across all subdomains. Project access is validated in the ingress_auth handler.
     ///
     /// # Arguments
     /// * `idp_claims` - Claims from the IdP JWT (must contain at least "sub" and "email")
-    /// * `project_name` - The project name to scope this JWT to
     /// * `expiry_override` - Optional expiry timestamp (if None, uses default_expiry_seconds)
     pub fn sign_ingress_jwt(
         &self,
         idp_claims: &serde_json::Value,
-        project_name: &str,
         expiry_override: Option<u64>,
     ) -> Result<String, JwtSignerError> {
         let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
@@ -124,7 +127,6 @@ impl JwtSigner {
             sub,
             email,
             name,
-            project: project_name.to_string(),
             iat: now,
             exp,
             iss: self.issuer.clone(),
@@ -157,8 +159,8 @@ mod tests {
     use serde_json::json;
 
     fn create_test_signer() -> JwtSigner {
-        // 32-byte secret encoded as base64
-        let secret = BASE64.encode(b"this-is-a-32-byte-test-secret!");
+        // Exactly 32 bytes encoded as base64
+        let secret = BASE64.encode(&[0u8; 32]);
         JwtSigner::new(
             &secret,
             "https://rise.test".to_string(),
@@ -178,20 +180,19 @@ mod tests {
             "name": "Test User"
         });
 
-        let token = signer.sign_ingress_jwt(&idp_claims, "myapp", None).unwrap();
+        let token = signer.sign_ingress_jwt(&idp_claims, None).unwrap();
 
         let claims = signer.verify_ingress_jwt(&token).unwrap();
 
         assert_eq!(claims.sub, "user123");
         assert_eq!(claims.email, "user@example.com");
         assert_eq!(claims.name, Some("Test User".to_string()));
-        assert_eq!(claims.project, "myapp");
         assert_eq!(claims.aud, "rise-ingress");
     }
 
     #[test]
     fn test_jwt_without_name_claim() {
-        let secret = BASE64.encode(b"this-is-a-32-byte-test-secret!");
+        let secret = BASE64.encode(&[0u8; 32]);
         let signer = JwtSigner::new(
             &secret,
             "https://rise.test".to_string(),
@@ -206,7 +207,7 @@ mod tests {
             "name": "Test User"
         });
 
-        let token = signer.sign_ingress_jwt(&idp_claims, "myapp", None).unwrap();
+        let token = signer.sign_ingress_jwt(&idp_claims, None).unwrap();
 
         let claims = signer.verify_ingress_jwt(&token).unwrap();
 
@@ -222,7 +223,7 @@ mod tests {
             // missing email
         });
 
-        let result = signer.sign_ingress_jwt(&idp_claims, "myapp", None);
+        let result = signer.sign_ingress_jwt(&idp_claims, None);
 
         assert!(matches!(
             result,
@@ -246,7 +247,7 @@ mod tests {
             + 7200;
 
         let token = signer
-            .sign_ingress_jwt(&idp_claims, "myapp", Some(custom_exp))
+            .sign_ingress_jwt(&idp_claims, Some(custom_exp))
             .unwrap();
 
         let claims = signer.verify_ingress_jwt(&token).unwrap();
@@ -255,7 +256,10 @@ mod tests {
     }
 
     #[test]
-    fn test_project_scoping() {
+    fn test_jwt_reuse_across_projects() {
+        // JWTs are NOT project-scoped because the cookie is set at the rise.dev domain level.
+        // The same JWT can be used across all projects - access is controlled at the
+        // ingress_auth handler level by checking project permissions in the database.
         let signer = create_test_signer();
 
         let idp_claims = json!({
@@ -263,19 +267,15 @@ mod tests {
             "email": "user@example.com"
         });
 
-        let token1 = signer
-            .sign_ingress_jwt(&idp_claims, "project1", None)
-            .unwrap();
-        let token2 = signer
-            .sign_ingress_jwt(&idp_claims, "project2", None)
-            .unwrap();
+        let token = signer.sign_ingress_jwt(&idp_claims, None).unwrap();
 
-        let claims1 = signer.verify_ingress_jwt(&token1).unwrap();
-        let claims2 = signer.verify_ingress_jwt(&token2).unwrap();
+        let claims = signer.verify_ingress_jwt(&token).unwrap();
 
-        assert_eq!(claims1.project, "project1");
-        assert_eq!(claims2.project, "project2");
-        assert_ne!(token1, token2);
+        // The JWT contains user info but no project claim
+        assert_eq!(claims.sub, "user123");
+        assert_eq!(claims.email, "user@example.com");
+        // This same JWT can be used to access any project the user has permission for
+        // Project access is validated separately in the ingress_auth handler
     }
 
     #[test]
