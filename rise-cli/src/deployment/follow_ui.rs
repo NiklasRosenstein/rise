@@ -330,29 +330,56 @@ pub fn print_deployment_snapshot(deployment: &Deployment) {
     };
 
     println!(
-        "{} Status:    {}{}{}",
+        "{} Status:         {}{}{}",
         icon,
         color,
         status_text,
         ansi::RESET
     );
 
+    // Deployment ID
+    println!("   Deployment ID:  {}", deployment.deployment_id);
+
+    // Deployment group (if not default)
+    if deployment.deployment_group != "default" {
+        println!("   Group:          {}", deployment.deployment_group);
+    }
+
     // Created by
-    println!("   Created by: {}", deployment.created_by_email);
+    println!("   Created by:     {}", deployment.created_by_email);
+
+    // Created/Updated timestamps
+    println!("   Created:        {}", deployment.created);
+    if deployment.updated != deployment.created {
+        println!("   Updated:        {}", deployment.updated);
+    }
+
+    // Expires at (if set)
+    if let Some(ref expires) = deployment.expires_at {
+        println!("   Expires at:     {}", expires);
+    }
+
+    // Image and digest (if available)
+    if let Some(ref image) = deployment.image {
+        println!("   Image:          {}", image);
+    }
+    if let Some(ref digest) = deployment.image_digest {
+        println!("   Image digest:   {}", digest);
+    }
 
     // URL if available
     if let Some(ref url) = deployment.deployment_url {
-        println!("   URL:       {}", url);
+        println!("   URL:            {}", url);
+    }
+
+    // Controller metadata summary (container ID if available)
+    if let Some(container_id) = extract_container_id(&deployment.controller_metadata) {
+        println!("   Container:      {}", container_id);
     }
 
     // Error message if present
     if let Some(ref error) = deployment.error_message {
         println!("   {}Error:{} {}", "\x1B[31m", ansi::RESET, error);
-    }
-
-    // Controller metadata summary (container ID if available)
-    if let Some(container_id) = extract_container_id(&deployment.controller_metadata) {
-        println!("   Container: {}", container_id);
     }
 }
 
