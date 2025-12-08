@@ -1,4 +1,4 @@
-use config::{Config, ConfigError, Environment, File};
+use config::{Config, ConfigError};
 use serde::Deserialize;
 use std::env;
 
@@ -252,25 +252,98 @@ pub enum RegistrySettings {
 }
 
 impl Settings {
+    /// Substitute environment variables in a string value
+    /// Replaces ${VAR_NAME} or ${VAR_NAME:-default} with environment variable values
+    fn substitute_env_vars_in_string(s: &str) -> String {
+        let re = regex::Regex::new(r"\$\{([^}:]+)(?::-([^}]*))?\}").unwrap();
+
+        re.replace_all(s, |caps: &regex::Captures| {
+            let var_name = &caps[1];
+            let default_value = caps.get(2).map(|m| m.as_str());
+
+            match env::var(var_name) {
+                Ok(val) => val,
+                Err(_) => default_value.unwrap_or("").to_string(),
+            }
+        })
+        .to_string()
+    }
+
+    /// Convert a config::Value to a serde_json::Value, performing environment variable substitution
+    fn config_value_to_json(value: &config::Value) -> serde_json::Value {
+        use config::ValueKind;
+
+        match &value.kind {
+            ValueKind::Nil => serde_json::Value::Null,
+            ValueKind::Boolean(b) => serde_json::Value::Bool(*b),
+            ValueKind::I64(i) => serde_json::Value::Number((*i).into()),
+            ValueKind::I128(i) => serde_json::Value::Number((*i as i64).into()),
+            ValueKind::U64(u) => serde_json::Value::Number((*u).into()),
+            ValueKind::U128(u) => serde_json::Value::Number((*u as u64).into()),
+            ValueKind::Float(f) => serde_json::Number::from_f64(*f)
+                .map(serde_json::Value::Number)
+                .unwrap_or(serde_json::Value::Null),
+            ValueKind::String(s) => {
+                // Perform environment variable substitution
+                serde_json::Value::String(Self::substitute_env_vars_in_string(s))
+            }
+            ValueKind::Table(table) => {
+                let mut map = serde_json::Map::new();
+                for (k, v) in table.iter() {
+                    map.insert(k.clone(), Self::config_value_to_json(v));
+                }
+                serde_json::Value::Object(map)
+            }
+            ValueKind::Array(arr) => {
+                let vec: Vec<serde_json::Value> =
+                    arr.iter().map(|v| Self::config_value_to_json(v)).collect();
+                serde_json::Value::Array(vec)
+            }
+        }
+    }
+
     pub fn new() -> Result<Self, ConfigError> {
         let run_mode = env::var("RUN_MODE").unwrap_or_else(|_| "development".into());
         let config_dir = env::var("RISE_CONFIG_DIR").unwrap_or_else(|_| "/config".into());
 
-        let mut settings: Settings = Config::builder()
+        let builder = Config::builder()
             // Start off by merging in the "default" configuration file
-            .add_source(File::with_name(&format!("{}/default.toml", config_dir)))
+            .add_source(config::File::with_name(&format!(
+                "{}/default.toml",
+                config_dir
+            )))
             // Add in the current environment file
             // Default to 'development' env
             // Note that this file is optional
-            .add_source(File::with_name(&format!("{}/{}", config_dir, run_mode)).required(false))
+            .add_source(
+                config::File::with_name(&format!("{}/{}.toml", config_dir, run_mode))
+                    .required(false),
+            )
             // Add in a local configuration file
             // This file shouldn't be checked in to git
-            .add_source(File::with_name(&format!("{}/local", config_dir)).required(false))
-            // Add in settings from the environment (with a prefix of APP)
-            // Eg.. `APP_DEBUG=1` would set the `debug` key
-            .add_source(Environment::with_prefix("RISE").separator("__"))
-            .build()?
-            .try_deserialize()?;
+            .add_source(
+                config::File::with_name(&format!("{}/local.toml", config_dir)).required(false),
+            );
+
+        // Build config and substitute environment variables
+        let config = builder.build()?;
+
+        // Get the root value and convert to JSON with env var substitution
+        let root_value = config
+            .cache
+            .into_table()
+            .map_err(|e| ConfigError::Message(format!("Failed to get config table: {}", e)))?;
+
+        // Convert config values to serde_json::Value (with env var substitution in strings)
+        let mut json_map = serde_json::Map::new();
+        for (k, v) in root_value.iter() {
+            json_map.insert(k.clone(), Self::config_value_to_json(v));
+        }
+        let json_value = serde_json::Value::Object(json_map);
+
+        // Deserialize from JSON value
+        let mut settings: Settings = serde_json::from_value(json_value)
+            .map_err(|e| ConfigError::Message(format!("Failed to deserialize settings: {}", e)))?;
 
         // Special handling for DATABASE_URL environment variable (common convention)
         // This takes precedence over both TOML config and RISE_DATABASE__URL
@@ -325,5 +398,49 @@ impl Settings {
             )));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_substitute_env_vars_in_string_basic() {
+        env::set_var("TEST_VAR", "test_value");
+        let result = Settings::substitute_env_vars_in_string("${TEST_VAR}");
+        assert_eq!(result, "test_value");
+        env::remove_var("TEST_VAR");
+    }
+
+    #[test]
+    fn test_substitute_env_vars_in_string_with_default() {
+        env::remove_var("MISSING_VAR");
+        let result = Settings::substitute_env_vars_in_string("${MISSING_VAR:-default_value}");
+        assert_eq!(result, "default_value");
+    }
+
+    #[test]
+    fn test_substitute_env_vars_in_string_override_default() {
+        env::set_var("OVERRIDE_VAR", "actual_value");
+        let result = Settings::substitute_env_vars_in_string("${OVERRIDE_VAR:-default_value}");
+        assert_eq!(result, "actual_value");
+        env::remove_var("OVERRIDE_VAR");
+    }
+
+    #[test]
+    fn test_substitute_env_vars_in_string_multiple() {
+        env::set_var("VAR1", "value1");
+        env::set_var("VAR2", "value2");
+        let result = Settings::substitute_env_vars_in_string("${VAR1} and ${VAR2}");
+        assert_eq!(result, "value1 and value2");
+        env::remove_var("VAR1");
+        env::remove_var("VAR2");
+    }
+
+    #[test]
+    fn test_substitute_env_vars_in_string_no_substitution() {
+        let result = Settings::substitute_env_vars_in_string("plain_value");
+        assert_eq!(result, "plain_value");
     }
 }

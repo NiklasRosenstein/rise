@@ -8,7 +8,8 @@ cookie_secure = false  # Set to true for HTTPS in production
 [auth]
 issuer = "http://localhost:5556/dex"
 client_id = "rise-backend"
-client_secret = "rise-backend-secret"
+# Environment variable substitution: ${VAR_NAME} or ${VAR_NAME:-default_value}
+client_secret = "${RISE_AUTH_CLIENT_SECRET:-rise-backend-secret}"
 # List of admin user emails (have full permissions on all resources)
 admin_users = ["admin@example.com"]
 
