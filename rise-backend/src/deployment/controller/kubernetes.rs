@@ -1100,8 +1100,52 @@ impl DeploymentBackend for KubernetesController {
 
                     // Check if namespace exists
                     match ns_api.get(&namespace).await {
-                        Ok(_) => {
-                            debug!("Namespace {} already exists", namespace);
+                        Ok(existing_ns) => {
+                            debug!("Namespace {} already exists, checking for drift", namespace);
+
+                            // Check if annotations have drifted
+                            let desired_annotations: BTreeMap<String, String> = self
+                                .namespace_annotations
+                                .iter()
+                                .map(|(k, v)| (k.clone(), v.clone()))
+                                .collect();
+
+                            let current_annotations = existing_ns
+                                .metadata
+                                .annotations
+                                .as_ref()
+                                .cloned()
+                                .unwrap_or_default();
+
+                            // Check if our managed annotations match
+                            let mut needs_update = false;
+                            for (key, desired_value) in &desired_annotations {
+                                if current_annotations.get(key) != Some(desired_value) {
+                                    needs_update = true;
+                                    break;
+                                }
+                            }
+
+                            if needs_update {
+                                // Merge current annotations with desired ones
+                                let mut updated_annotations = current_annotations;
+                                for (key, value) in desired_annotations {
+                                    updated_annotations.insert(key, value);
+                                }
+
+                                // Create updated namespace with merged annotations
+                                let mut updated_ns = existing_ns.clone();
+                                updated_ns.metadata.annotations = Some(updated_annotations);
+
+                                // Apply the update
+                                let patch_params = PatchParams::apply("rise-controller");
+                                let patch = Patch::Apply(&updated_ns);
+                                ns_api.patch(&namespace, &patch_params, &patch).await?;
+                                info!(
+                                    "Updated namespace {} annotations to match configuration",
+                                    namespace
+                                );
+                            }
                         }
                         Err(kube::Error::Api(ae)) if ae.code == 404 => {
                             // Create namespace
