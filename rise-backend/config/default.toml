@@ -76,6 +76,7 @@ namespace = "rise-apps"
 # [kubernetes]
 # ingress_class = "nginx"
 # domain_suffix = "apps.rise.net"
+# namespace_format = "rise-{project_name}"  # Template for Kubernetes namespaces (default: "rise-{project_name}")
 # auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster service URL for auth checks
 # auth_signin_url = "https://api.rise.net"  # Public API URL for browser redirects during authentication
 # kubeconfig = "/path/to/kubeconfig"  # Optional: explicit kubeconfig path

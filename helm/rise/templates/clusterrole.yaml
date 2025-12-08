@@ -1,0 +1,48 @@
+{{- if and .Values.controllers.deployment.enabled (eq .Values.controllers.deployment.type "deployment-kubernetes") }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "rise.fullname" . }}
+  labels:
+    {{- include "rise.labels" . | nindent 4 }}
+rules:
+# Namespace management
+- apiGroups: [""]
+  resources: ["namespaces"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Deployment management
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Service management
+- apiGroups: [""]
+  resources: ["services"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Ingress management
+- apiGroups: ["networking.k8s.io"]
+  resources: ["ingresses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# ConfigMap management (for application configs)
+- apiGroups: [""]
+  resources: ["configmaps"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Secret management (for application secrets)
+- apiGroups: [""]
+  resources: ["secrets"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# Pod management (for status checking and logs)
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+
+# Pod logs (for debugging)
+- apiGroups: [""]
+  resources: ["pods/log"]
+  verbs: ["get"]
+{{- end }}

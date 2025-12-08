@@ -97,6 +97,7 @@ config: |
   # [kubernetes]
   # ingress_class = "nginx"
   # domain_suffix = "apps.rise.net"
+  # namespace_format = "rise-{project_name}"
 
 # Existing secret containing sensitive configuration
 # Required for production deployments

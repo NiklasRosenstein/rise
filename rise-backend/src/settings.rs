@@ -121,6 +121,10 @@ fn default_ingress_class() -> String {
     "nginx".to_string()
 }
 
+fn default_namespace_format() -> String {
+    "rise-{project_name}".to_string()
+}
+
 /// Kubernetes deployment controller configuration
 ///
 /// # Ingress Authentication Architecture
@@ -191,6 +195,13 @@ pub struct KubernetesSettings {
     /// This must be the public URL where the backend is accessible via Ingress.
     /// The domain should share a parent with app domains for cookie sharing (see struct docs).
     pub auth_signin_url: String,
+
+    /// Namespace format template for deployed applications
+    /// Template variables: {project_name}
+    /// Example: "rise-{project_name}" → namespace "rise-myapp" for project "myapp"
+    /// Defaults to "rise-{project_name}"
+    #[serde(default = "default_namespace_format")]
+    pub namespace_format: String,
 }
 
 /// Registry provider configuration
