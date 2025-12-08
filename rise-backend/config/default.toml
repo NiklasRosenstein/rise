@@ -16,6 +16,21 @@ admin_users = ["admin@example.com"]
 [database]
 url = "postgres://rise:rise123@localhost:5432/rise"
 
+# Controller loop intervals (in seconds) - optional, all have defaults
+[controller]
+# How often to check for deployments to reconcile (default: 15)
+# reconcile_interval_secs = 15
+# How often to perform health checks on active deployments (default: 5)
+# health_check_interval_secs = 5
+# How often to process terminating deployments (default: 5)
+# termination_interval_secs = 5
+# How often to process cancelling deployments (default: 5)
+# cancellation_interval_secs = 5
+# How often to check for expired deployments (default: 60)
+# expiration_interval_secs = 60
+# How often to refresh Kubernetes image pull secrets (default: 3600)
+# secret_refresh_interval_secs = 3600
+
 # Container registry configuration (optional)
 # Uncomment and configure ONE of the following registry providers:
 

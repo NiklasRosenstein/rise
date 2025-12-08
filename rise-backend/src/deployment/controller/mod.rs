@@ -119,6 +119,9 @@ pub struct DeploymentController {
     backend: Arc<dyn DeploymentBackend>,
     reconcile_interval: Duration,
     health_check_interval: Duration,
+    termination_interval: Duration,
+    cancellation_interval: Duration,
+    expiration_interval: Duration,
 }
 
 impl DeploymentController {
@@ -127,15 +130,28 @@ impl DeploymentController {
     /// # Arguments
     /// * `state` - Minimal controller state with database access
     /// * `backend` - The deployment backend implementation (e.g., DockerController)
+    /// * `reconcile_interval` - How often to check for deployments to reconcile
+    /// * `health_check_interval` - How often to perform health checks
+    /// * `termination_interval` - How often to process terminating deployments
+    /// * `cancellation_interval` - How often to process cancelling deployments
+    /// * `expiration_interval` - How often to check for expired deployments
     pub fn new(
         state: Arc<ControllerState>,
         backend: Arc<dyn DeploymentBackend>,
+        reconcile_interval: Duration,
+        health_check_interval: Duration,
+        termination_interval: Duration,
+        cancellation_interval: Duration,
+        expiration_interval: Duration,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             state,
             backend,
-            reconcile_interval: Duration::from_secs(15),
-            health_check_interval: Duration::from_secs(5),
+            reconcile_interval,
+            health_check_interval,
+            termination_interval,
+            cancellation_interval,
+            expiration_interval,
         })
     }
 
@@ -524,10 +540,10 @@ impl DeploymentController {
 
     /// Termination loop - processes deployments in Terminating state
     ///
-    /// Runs every 5 seconds and terminates containers for deployments marked as Terminating
+    /// Terminates containers for deployments marked as Terminating
     async fn termination_loop(&self) {
         info!("Deployment termination loop started");
-        let mut ticker = interval(Duration::from_secs(5));
+        let mut ticker = interval(self.termination_interval);
 
         loop {
             ticker.tick().await;
@@ -601,10 +617,10 @@ impl DeploymentController {
 
     /// Cancellation loop - processes deployments in Cancelling state
     ///
-    /// Runs every 5 seconds and cancels deployments that haven't provisioned infrastructure yet
+    /// Cancels deployments that haven't provisioned infrastructure yet
     async fn cancellation_loop(&self) {
         info!("Deployment cancellation loop started");
-        let mut ticker = interval(Duration::from_secs(5));
+        let mut ticker = interval(self.cancellation_interval);
 
         loop {
             ticker.tick().await;
@@ -652,10 +668,10 @@ impl DeploymentController {
 
     /// Expiration loop - monitors and cleans up expired deployments
     ///
-    /// Runs every 60 seconds and checks for deployments past their expires_at timestamp
+    /// Checks for deployments past their expires_at timestamp
     async fn expiration_loop(&self) {
         info!("Deployment expiration loop started");
-        let mut ticker = interval(Duration::from_secs(60));
+        let mut ticker = interval(self.expiration_interval);
 
         loop {
             ticker.tick().await;

@@ -103,9 +103,9 @@ impl KubernetesController {
     }
 
     /// Start secret refresh loop (Kubernetes-specific)
-    pub fn start_secret_refresh_loop(self: Arc<Self>) {
+    pub fn start_secret_refresh_loop(self: Arc<Self>, interval_duration: Duration) {
         tokio::spawn(async move {
-            let mut ticker = interval(Duration::from_secs(3600)); // Check every hour
+            let mut ticker = interval(interval_duration);
             loop {
                 ticker.tick().await;
                 if let Err(e) = self.refresh_image_pull_secrets().await {

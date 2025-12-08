@@ -18,6 +18,7 @@ use anyhow::Result;
 use axum::{middleware, Router};
 use state::{AppState, ControllerState};
 use std::sync::Arc;
+use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::info;
@@ -87,6 +88,11 @@ pub async fn run_deployment_controller(settings: settings::Settings) -> Result<(
     let controller = Arc::new(deployment::controller::DeploymentController::new(
         Arc::new(controller_state),
         backend,
+        Duration::from_secs(settings.controller.reconcile_interval_secs),
+        Duration::from_secs(settings.controller.health_check_interval_secs),
+        Duration::from_secs(settings.controller.termination_interval_secs),
+        Duration::from_secs(settings.controller.cancellation_interval_secs),
+        Duration::from_secs(settings.controller.expiration_interval_secs),
     )?);
     controller.start();
     info!("Deployment controller started");
@@ -209,12 +215,19 @@ pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<(
     let controller = Arc::new(deployment::controller::DeploymentController::new(
         Arc::new(controller_state),
         backend.clone(),
+        Duration::from_secs(settings.controller.reconcile_interval_secs),
+        Duration::from_secs(settings.controller.health_check_interval_secs),
+        Duration::from_secs(settings.controller.termination_interval_secs),
+        Duration::from_secs(settings.controller.cancellation_interval_secs),
+        Duration::from_secs(settings.controller.expiration_interval_secs),
     )?);
     controller.start();
     info!("Kubernetes deployment controller started");
 
     // Start Kubernetes-specific secret refresh loop
-    backend.start_secret_refresh_loop();
+    backend.start_secret_refresh_loop(Duration::from_secs(
+        settings.controller.secret_refresh_interval_secs,
+    ));
     info!("Kubernetes secret refresh loop started");
 
     // Block forever
