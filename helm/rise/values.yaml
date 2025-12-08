@@ -117,6 +117,7 @@ config: |
   # namespace_format = "rise-{project_name}"  # MUST use consistent prefix for security
 
 # PostgreSQL dependency (optional, can use external database)
+# When enabled, DATABASE_URL is automatically injected into all containers
 postgresql:
   enabled: false
   auth:

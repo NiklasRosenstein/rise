@@ -187,7 +187,10 @@ All controllers run as sidecar containers in the main deployment pod.
 |-----------|-------------|---------|
 | `postgresql.enabled` | Enable PostgreSQL subchart | `false` |
 | `postgresql.auth.username` | PostgreSQL username | `rise` |
+| `postgresql.auth.password` | PostgreSQL password | `rise123` |
 | `postgresql.auth.database` | PostgreSQL database | `rise` |
+
+**Note:** When `postgresql.enabled: true`, the chart automatically injects the `DATABASE_URL` environment variable into all containers using the configured credentials. You don't need to manually configure it via `envFrom`.
 
 ## Architecture
 
