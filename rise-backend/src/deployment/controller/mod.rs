@@ -294,8 +294,8 @@ impl DeploymentController {
             }
         }
 
-        if let Some(url) = result.deployment_url {
-            db_deployments::update_deployment_url(&self.state.db_pool, deployment.id, &url).await?;
+        if let Some(ref url) = result.deployment_url {
+            db_deployments::update_deployment_url(&self.state.db_pool, deployment.id, url).await?;
         }
 
         db_deployments::update_controller_metadata(
@@ -373,7 +373,7 @@ impl DeploymentController {
                 projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id)
                     .await?;
 
-                if let Some(ref url) = deployment.deployment_url {
+                if let Some(ref url) = result.deployment_url {
                     projects::update_project_url(&self.state.db_pool, project.id, url).await?;
                 }
             }
