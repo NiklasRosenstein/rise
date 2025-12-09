@@ -522,6 +522,7 @@ pub async fn create_deployment(
     group: Option<&str>,
     expires_in: Option<&str>,
     http_port: u16,
+    builder: Option<&str>,
 ) -> Result<()> {
     if let Some(image_ref) = image {
         info!(
@@ -633,7 +634,7 @@ pub async fn create_deployment(
             "Building image with buildpacks: {}",
             deployment_info.image_tag
         );
-        if let Err(e) = build_image_with_buildpacks(path, &deployment_info.image_tag) {
+        if let Err(e) = build_image_with_buildpacks(path, &deployment_info.image_tag, builder) {
             update_deployment_status(
                 http_client,
                 backend_url,
@@ -837,7 +838,11 @@ async fn update_deployment_status(
     }
 }
 
-fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
+fn build_image_with_buildpacks(
+    app_path: &str,
+    image_tag: &str,
+    builder: Option<&str>,
+) -> Result<()> {
     // Check if pack CLI is available
     let pack_check = Command::new("pack").arg("version").output();
 
@@ -849,6 +854,10 @@ fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
         );
     }
 
+    // Default to paketobuildpacks/builder:base if no builder specified
+    let builder_image = builder.unwrap_or("paketobuildpacks/builder:base");
+    info!("Using builder: {}", builder_image);
+
     let mut cmd = Command::new("pack");
     cmd.arg("build")
         .arg(image_tag)
@@ -859,7 +868,7 @@ fn build_image_with_buildpacks(app_path: &str, image_tag: &str) -> Result<()> {
         .arg("--network")
         .arg("host")
         .arg("--builder")
-        .arg("paketobuildpacks/builder:base")
+        .arg(builder_image)
         .env("DOCKER_API_VERSION", "1.44");
 
     // Never use --publish - always build locally and push separately

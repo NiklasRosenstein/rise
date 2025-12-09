@@ -203,6 +203,10 @@ enum DeploymentCommands {
         /// Required when using --image. Defaults to 8080 for buildpack builds.
         #[arg(long)]
         http_port: Option<u16>,
+        /// Buildpack builder to use (e.g., 'paketobuildpacks/builder:base', 'heroku/buildpacks:22').
+        /// Defaults to 'paketobuildpacks/builder:base'. Only used when building from source.
+        #[arg(long)]
+        builder: Option<String>,
     },
     /// List deployments for a project
     #[command(visible_alias = "ls")]
@@ -527,6 +531,7 @@ async fn main() -> Result<()> {
                 group,
                 expire,
                 http_port,
+                builder,
             } => {
                 // Validate http_port requirements
                 let port = match (image.as_ref(), http_port) {
@@ -563,6 +568,7 @@ async fn main() -> Result<()> {
                     group.as_deref(),
                     expire.as_deref(),
                     port,
+                    builder.as_deref(),
                 )
                 .await?;
             }
