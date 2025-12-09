@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::{ReplicaSet, ReplicaSetSpec};
@@ -793,12 +793,67 @@ impl KubernetesController {
         }
     }
 
+    /// Load and decrypt environment variables for a deployment
+    async fn load_env_vars(
+        &self,
+        deployment_id: uuid::Uuid,
+    ) -> Result<Vec<k8s_openapi::api::core::v1::EnvVar>> {
+        use k8s_openapi::api::core::v1::EnvVar;
+
+        // Fetch deployment environment variables from database
+        let db_env_vars =
+            crate::db::env_vars::list_deployment_env_vars(&self.state.db_pool, deployment_id)
+                .await?;
+
+        let mut env_vars = Vec::new();
+
+        for var in db_env_vars {
+            let value = if var.is_secret {
+                // Decrypt secret values
+                match &self.state.encryption_provider {
+                    Some(provider) => provider.decrypt(&var.value).await.with_context(|| {
+                        format!("Failed to decrypt secret variable '{}'", var.key)
+                    })?,
+                    None => {
+                        // This should not happen - secrets should only be stored with encryption enabled
+                        error!(
+                            "Encountered secret variable '{}' but no encryption provider configured",
+                            var.key
+                        );
+                        return Err(anyhow::anyhow!(
+                            "Cannot decrypt secret variable '{}': no encryption provider",
+                            var.key
+                        ));
+                    }
+                }
+            } else {
+                // Plain text value
+                var.value
+            };
+
+            env_vars.push(EnvVar {
+                name: var.key,
+                value: Some(value),
+                ..Default::default()
+            });
+        }
+
+        info!(
+            "Loaded {} environment variables for deployment {}",
+            env_vars.len(),
+            deployment_id
+        );
+
+        Ok(env_vars)
+    }
+
     /// Create ReplicaSet resource
     fn create_replicaset(
         &self,
         project: &Project,
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
+        env_vars: Vec<k8s_openapi::api::core::v1::EnvVar>,
     ) -> ReplicaSet {
         // Build image reference from deployment.image_digest or registry_url
         let image = if let Some(ref image_digest) = deployment.image_digest {
@@ -849,6 +904,11 @@ impl KubernetesController {
                                 ..Default::default()
                             }]),
                             image_pull_policy: Some("Always".to_string()),
+                            env: if env_vars.is_empty() {
+                                None
+                            } else {
+                                Some(env_vars)
+                            },
                             ..Default::default()
                         }],
                         ..Default::default()
@@ -1263,6 +1323,9 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    // Load and decrypt environment variables
+                    let env_vars = self.load_env_vars(deployment.id).await?;
+
                     let rs_name = format!("{}-{}", project.name, deployment.deployment_id);
                     let rs_api: Api<ReplicaSet> =
                         Api::namespaced(self.kube_client.clone(), namespace);
@@ -1271,7 +1334,12 @@ impl DeploymentBackend for KubernetesController {
                     match rs_api.get(&rs_name).await {
                         Ok(existing_rs) => {
                             // ReplicaSet exists - check for drift
-                            let desired_rs = self.create_replicaset(project, deployment, &metadata);
+                            let desired_rs = self.create_replicaset(
+                                project,
+                                deployment,
+                                &metadata,
+                                env_vars.clone(),
+                            );
 
                             if self.replicaset_has_drifted(&existing_rs, &desired_rs) {
                                 info!(
@@ -1301,7 +1369,8 @@ impl DeploymentBackend for KubernetesController {
                         }
                         Err(kube::Error::Api(ae)) if ae.code == 404 => {
                             // ReplicaSet doesn't exist - create it
-                            let rs = self.create_replicaset(project, deployment, &metadata);
+                            let rs =
+                                self.create_replicaset(project, deployment, &metadata, env_vars);
                             rs_api.create(&PostParams::default(), &rs).await?;
                             info!(
                                 project = project.name,
@@ -1492,6 +1561,9 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    // Load and decrypt environment variables for drift detection
+                    let env_vars = self.load_env_vars(deployment.id).await?;
+
                     // 1. Re-apply Service to correct any drift
                     let service_name = Self::service_name(project, deployment);
                     let svc_api: Api<Service> =
@@ -1534,7 +1606,12 @@ impl DeploymentBackend for KubernetesController {
 
                     match rs_api.get(rs_name).await {
                         Ok(existing_rs) => {
-                            let desired_rs = self.create_replicaset(project, deployment, &metadata);
+                            let desired_rs = self.create_replicaset(
+                                project,
+                                deployment,
+                                &metadata,
+                                env_vars.clone(),
+                            );
 
                             if self.replicaset_has_drifted(&existing_rs, &desired_rs) {
                                 info!(
@@ -1988,7 +2065,10 @@ mod tests {
             .connect_lazy("postgres://localhost/test")
             .expect("Failed to create pool");
 
-        let state = ControllerState { db_pool: pool };
+        let state = ControllerState {
+            db_pool: pool,
+            encryption_provider: None,
+        };
 
         // Create a fake kube client (won't be used in these tests)
         let cluster_url = "http://localhost:8080"

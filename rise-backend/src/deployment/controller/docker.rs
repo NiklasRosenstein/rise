@@ -168,6 +168,52 @@ impl DockerController {
         }
     }
 
+    /// Load and decrypt environment variables for a deployment
+    async fn load_env_vars(&self, deployment_id: uuid::Uuid) -> anyhow::Result<Vec<String>> {
+        // Fetch deployment environment variables from database
+        let db_env_vars =
+            crate::db::env_vars::list_deployment_env_vars(&self.state.db_pool, deployment_id)
+                .await?;
+
+        let mut env_vars = Vec::new();
+
+        for var in db_env_vars {
+            let value = if var.is_secret {
+                // Decrypt secret values
+                match &self.state.encryption_provider {
+                    Some(provider) => provider.decrypt(&var.value).await.with_context(|| {
+                        format!("Failed to decrypt secret variable '{}'", var.key)
+                    })?,
+                    None => {
+                        // This should not happen - secrets should only be stored with encryption enabled
+                        error!(
+                            "Encountered secret variable '{}' but no encryption provider configured",
+                            var.key
+                        );
+                        return Err(anyhow::anyhow!(
+                            "Cannot decrypt secret variable '{}': no encryption provider",
+                            var.key
+                        ));
+                    }
+                }
+            } else {
+                // Plain text value
+                var.value
+            };
+
+            // Format as KEY=VALUE
+            env_vars.push(format!("{}={}", var.key, value));
+        }
+
+        info!(
+            "Loaded {} environment variables for deployment {}",
+            env_vars.len(),
+            deployment_id
+        );
+
+        Ok(env_vars)
+    }
+
     /// Create a Docker container
     async fn create_container(
         &self,
@@ -175,6 +221,7 @@ impl DockerController {
         host_port: u16,
         container_port: u16,
         container_name: &str,
+        env_vars: Vec<String>,
     ) -> anyhow::Result<String> {
         debug!(
             "Creating container {} with image {} on port {}",
@@ -248,6 +295,11 @@ impl DockerController {
             image: Some(image_tag.to_string()),
             exposed_ports: Some(exposed_ports),
             host_config: Some(host_config),
+            env: if env_vars.is_empty() {
+                None
+            } else {
+                Some(env_vars)
+            },
             ..Default::default()
         };
 
@@ -492,8 +544,18 @@ impl DeploymentBackend for DockerController {
                 metadata.container_name = Some(container_name.clone());
 
                 let container_port = deployment.http_port as u16;
+
+                // Load and decrypt environment variables
+                let env_vars = self.load_env_vars(deployment.id).await.map_err(|e| {
+                    error!(
+                        "Failed to load environment variables for deployment {}: {}",
+                        deployment.deployment_id, e
+                    );
+                    e
+                })?;
+
                 match self
-                    .create_container(&image_tag, port, container_port, &container_name)
+                    .create_container(&image_tag, port, container_port, &container_name, env_vars)
                     .await
                 {
                     Ok(container_id) => {

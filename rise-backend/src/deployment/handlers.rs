@@ -398,7 +398,7 @@ pub async fn create_deployment(
         info!("Successfully resolved image to digest: {}", image_digest);
 
         // Create deployment record with image fields set
-        let _deployment = db_deployments::create(
+        let deployment = db_deployments::create(
             &state.db_pool,
             &deployment_id,
             project.id,
@@ -422,6 +422,24 @@ pub async fn create_deployment(
             "Created pre-built image deployment {} for project {}",
             deployment_id, payload.project
         );
+
+        // Copy project environment variables to deployment
+        crate::db::env_vars::copy_project_env_vars_to_deployment(
+            &state.db_pool,
+            project.id,
+            deployment.id,
+        )
+        .await
+        .map_err(|e| {
+            error!(
+                "Failed to copy environment variables for deployment {}: {}",
+                deployment_id, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to copy environment variables: {}", e),
+            )
+        })?;
 
         // Return response with digest as image_tag and empty credentials
         Ok(Json(CreateDeploymentResponse {
@@ -464,7 +482,7 @@ pub async fn create_deployment(
         debug!("Image tag: {}", image_tag);
 
         // Create deployment record in database (image fields are NULL)
-        let _deployment = db_deployments::create(
+        let deployment = db_deployments::create(
             &state.db_pool,
             &deployment_id,
             project.id,
@@ -488,6 +506,24 @@ pub async fn create_deployment(
             "Created build-from-source deployment {} for project {}",
             deployment_id, payload.project
         );
+
+        // Copy project environment variables to deployment
+        crate::db::env_vars::copy_project_env_vars_to_deployment(
+            &state.db_pool,
+            project.id,
+            deployment.id,
+        )
+        .await
+        .map_err(|e| {
+            error!(
+                "Failed to copy environment variables for deployment {}: {}",
+                deployment_id, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to copy environment variables: {}", e),
+            )
+        })?;
 
         // Return response
         Ok(Json(CreateDeploymentResponse {
