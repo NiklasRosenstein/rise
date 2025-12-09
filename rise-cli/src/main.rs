@@ -8,6 +8,7 @@ mod backend;
 mod config;
 mod deployment;
 mod dev_oidc_issuer;
+mod env;
 mod login;
 mod project;
 mod service_account;
@@ -53,6 +54,10 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "sa")]
     ServiceAccount(ServiceAccountCommands),
+    /// Environment variable management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "e")]
+    Env(EnvCommands),
 }
 
 #[derive(Subcommand, Debug)]
@@ -294,6 +299,56 @@ enum ServiceAccountCommands {
         project: String,
         /// Service account ID
         id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum EnvCommands {
+    /// Set an environment variable for a project
+    #[command(visible_alias = "s")]
+    Set {
+        /// Project name
+        project: String,
+        /// Variable name (e.g., DATABASE_URL)
+        key: String,
+        /// Variable value
+        value: String,
+        /// Mark as secret (encrypted at rest)
+        #[arg(long)]
+        secret: bool,
+    },
+    /// List environment variables for a project
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
+    List {
+        /// Project name
+        project: String,
+    },
+    /// Delete an environment variable from a project
+    #[command(visible_alias = "unset")]
+    #[command(visible_alias = "rm")]
+    #[command(visible_alias = "del")]
+    Delete {
+        /// Project name
+        project: String,
+        /// Variable name
+        key: String,
+    },
+    /// Import environment variables from a file
+    #[command(visible_alias = "i")]
+    Import {
+        /// Project name
+        project: String,
+        /// Path to file containing environment variables
+        /// Format: KEY=value or KEY=secret:value (for secrets)
+        /// Lines starting with # are comments
+        file: std::path::PathBuf,
+    },
+    /// Show environment variables for a deployment (read-only)
+    #[command(visible_alias = "show-deployment")]
+    ShowDeployment {
+        /// Deployment ID
+        deployment_id: String,
     },
 }
 
@@ -699,6 +754,43 @@ async fn main() -> Result<()> {
                 .await?;
             }
         },
+        Commands::Env(env_cmd) => {
+            let token = config.get_token().ok_or_else(|| {
+                anyhow::anyhow!("Not authenticated. Please run 'rise login' first")
+            })?;
+            match env_cmd {
+                EnvCommands::Set {
+                    project,
+                    key,
+                    value,
+                    secret,
+                } => {
+                    env::set_env(
+                        &http_client,
+                        &backend_url,
+                        &token,
+                        project,
+                        key,
+                        value,
+                        *secret,
+                    )
+                    .await?;
+                }
+                EnvCommands::List { project } => {
+                    env::list_env(&http_client, &backend_url, &token, project).await?;
+                }
+                EnvCommands::Delete { project, key } => {
+                    env::unset_env(&http_client, &backend_url, &token, project, key).await?;
+                }
+                EnvCommands::Import { project, file } => {
+                    env::import_env(&http_client, &backend_url, &token, project, file).await?;
+                }
+                EnvCommands::ShowDeployment { deployment_id } => {
+                    env::list_deployment_env(&http_client, &backend_url, &token, deployment_id)
+                        .await?;
+                }
+            }
+        }
     }
 
     Ok(())

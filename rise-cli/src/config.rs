@@ -156,6 +156,7 @@ mod tests {
         let config = Config {
             token: None,
             backend_url: None,
+            container_cli: None,
         };
         assert_eq!(config.get_backend_url(), "http://localhost:3000");
 
@@ -163,6 +164,7 @@ mod tests {
         let config = Config {
             token: None,
             backend_url: Some("https://api.example.com".to_string()),
+            container_cli: None,
         };
         assert_eq!(config.get_backend_url(), "https://api.example.com");
 
@@ -177,6 +179,7 @@ mod tests {
         let config = Config {
             token: Some("config-token".to_string()),
             backend_url: None,
+            container_cli: None,
         };
         // When RISE_TOKEN env var is not set, should use config file token
         if std::env::var("RISE_TOKEN").is_err() {
