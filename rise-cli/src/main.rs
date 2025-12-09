@@ -363,6 +363,8 @@ enum EnvCommands {
     },
     /// Show environment variables for a deployment (read-only)
     ShowDeployment {
+        /// Project name
+        project: String,
         /// Deployment ID
         deployment_id: String,
     },
@@ -801,9 +803,18 @@ async fn main() -> Result<()> {
                 EnvCommands::Import { project, file } => {
                     env::import_env(&http_client, &backend_url, &token, project, file).await?;
                 }
-                EnvCommands::ShowDeployment { deployment_id } => {
-                    env::list_deployment_env(&http_client, &backend_url, &token, deployment_id)
-                        .await?;
+                EnvCommands::ShowDeployment {
+                    project,
+                    deployment_id,
+                } => {
+                    env::list_deployment_env(
+                        &http_client,
+                        &backend_url,
+                        &token,
+                        project,
+                        deployment_id,
+                    )
+                    .await?;
                 }
             }
         }

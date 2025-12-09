@@ -281,9 +281,13 @@ pub async fn list_deployment_env(
     http_client: &Client,
     backend_url: &str,
     token: &str,
+    project: &str,
     deployment_id: &str,
 ) -> Result<()> {
-    let url = format!("{}/deployments/{}/env", backend_url, deployment_id);
+    let url = format!(
+        "{}/projects/{}/deployments/{}/env",
+        backend_url, project, deployment_id
+    );
 
     let response = http_client
         .get(&url)
@@ -312,8 +316,8 @@ pub async fn list_deployment_env(
 
     if env_vars_response.env_vars.is_empty() {
         println!(
-            "No environment variables configured for deployment '{}'",
-            deployment_id
+            "No environment variables configured for deployment '{}' in project '{}'",
+            deployment_id, project
         );
         return Ok(());
     }
@@ -338,7 +342,8 @@ pub async fn list_deployment_env(
     }
 
     println!("{}", table);
-    println!("\nDeployment: {}", deployment_id);
+    println!("\nProject: {}", project);
+    println!("Deployment: {}", deployment_id);
     println!("Note: Secret values are always masked for security");
     println!("Note: Deployment environment variables are read-only snapshots");
 

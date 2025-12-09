@@ -19,7 +19,7 @@ pub fn routes() -> Router<AppState> {
         )
         // Deployment environment variables (read-only)
         .route(
-            "/deployments/{deployment_id}/env",
+            "/projects/{project_id_or_name}/deployments/{deployment_id}/env",
             get(handlers::list_deployment_env_vars),
         )
 }

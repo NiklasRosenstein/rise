@@ -249,29 +249,32 @@ pub async fn delete_project_env_var(
 pub async fn list_deployment_env_vars(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-    Path(deployment_id): Path<String>,
+    Path((project_id_or_name, deployment_id)): Path<(String, String)>,
 ) -> Result<Json<EnvVarsResponse>, (StatusCode, String)> {
-    // Parse deployment ID
-    let deployment_uuid = deployment_id.parse().map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid deployment ID: {}", e),
-        )
-    })?;
-
-    // Get deployment
-    let deployment = crate::db::deployments::find_by_id(&state.db_pool, deployment_uuid)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get deployment: {}", e),
-            )
-        })?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+    // Find project by ID or name
+    let project = if let Ok(uuid) = project_id_or_name.parse() {
+        projects::find_by_id(&state.db_pool, uuid)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get project: {}", e),
+                )
+            })?
+    } else {
+        projects::find_by_name(&state.db_pool, &project_id_or_name)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get project: {}", e),
+                )
+            })?
+    }
+    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
     // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, deployment.project_id, user.id)
+    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
         .await
         .map_err(|e| {
             (
@@ -283,12 +286,24 @@ pub async fn list_deployment_env_vars(
     if !has_access {
         return Err((
             StatusCode::FORBIDDEN,
-            "You do not have access to this deployment's project".to_string(),
+            "You do not have access to this project".to_string(),
         ));
     }
 
+    // Get deployment by deployment_id within the project
+    let deployment =
+        crate::db::deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get deployment: {}", e),
+                )
+            })?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+
     // Get all deployment environment variables
-    let db_env_vars = db_env_vars::list_deployment_env_vars(&state.db_pool, deployment_uuid)
+    let db_env_vars = db_env_vars::list_deployment_env_vars(&state.db_pool, deployment.id)
         .await
         .map_err(|e| {
             (
