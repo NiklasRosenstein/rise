@@ -52,7 +52,7 @@ git push origin v0.2.0
 ### 4. Monitor the Release
 
 1. GitHub Actions will automatically trigger when the tag is pushed
-2. Monitor progress at: https://github.com/yourusername/rise/actions
+2. Monitor progress at: https://github.com/NiklasRosenstein/rise/actions
 3. The workflow will:
    - Verify the tag version matches Cargo.toml
    - Build and publish `rise-backend` first
@@ -111,7 +111,7 @@ All crates in the workspace inherit their version from `[workspace.package]` in 
 version = "0.1.0"
 edition = "2021"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/yourusername/rise"
+repository = "https://github.com/NiklasRosenstein/rise"
 ```
 
 Individual crate `Cargo.toml` files reference this:
