@@ -221,3 +221,29 @@ impl std::fmt::Display for TerminationReason {
         }
     }
 }
+
+/// Project environment variable
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ProjectEnvVar {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub key: String,
+    /// Encrypted value if is_secret = true
+    pub value: String,
+    pub is_secret: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Deployment environment variable
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct DeploymentEnvVar {
+    pub id: Uuid,
+    pub deployment_id: Uuid,
+    pub key: String,
+    /// Encrypted value if is_secret = true
+    pub value: String,
+    pub is_secret: bool,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
