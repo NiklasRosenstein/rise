@@ -178,9 +178,10 @@ impl RegistryProvider for EcrProvider {
         });
 
         tracing::debug!(
-            "Assuming push role {} with scoped policy for repository {}",
+            "Assuming push role {} with scoped policy for repository {} with inline policy: {}",
             self.config.push_role_arn,
-            repo_name
+            repo_name,
+            inline_policy.to_string()
         );
 
         let assumed_role = self
