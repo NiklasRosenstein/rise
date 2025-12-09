@@ -14,6 +14,27 @@ use crate::config::Config;
 // Re-export models from backend to ensure consistency
 pub use rise_backend::deployment::models::{Deployment, DeploymentStatus};
 
+/// Build method for container images
+#[derive(Debug, Clone, Copy)]
+enum BuildMethod {
+    Dockerfile,
+    Buildpacks,
+}
+
+/// Detect build method based on directory contents
+/// Returns BuildMethod::Dockerfile if Dockerfile exists, otherwise BuildMethod::Buildpacks
+fn detect_build_method(app_path: &str) -> Result<BuildMethod> {
+    let dockerfile_path = Path::new(app_path).join("Dockerfile");
+
+    if dockerfile_path.exists() && dockerfile_path.is_file() {
+        info!("Detected Dockerfile at {}", dockerfile_path.display());
+        Ok(BuildMethod::Dockerfile)
+    } else {
+        info!("No Dockerfile found, using buildpacks");
+        Ok(BuildMethod::Buildpacks)
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RollbackResponse {
     new_deployment_id: String,
@@ -496,6 +517,66 @@ pub async fn stop_deployments_by_group(
 // Deployment Creation (merged from deploy.rs)
 // ============================================================================
 
+/// Build a container image locally without pushing
+///
+/// This function auto-detects the build method (Dockerfile vs buildpacks)
+/// and builds the image locally. For buildx builds, the --load flag is
+/// automatically added to ensure the image is available in the local daemon.
+pub fn build_image(
+    config: &Config,
+    tag: &str,
+    path: &str,
+    builder: Option<&str>,
+    use_buildx: bool,
+    container_cli: Option<&str>,
+) -> Result<()> {
+    // Resolve container CLI
+    let container_cli = container_cli
+        .map(String::from)
+        .unwrap_or_else(|| config.get_container_cli());
+
+    debug!("Using container CLI: {}", container_cli);
+    info!("Building image '{}' from path '{}'", tag, path);
+
+    // Verify path exists
+    let app_path = Path::new(path);
+    if !app_path.exists() {
+        bail!("Path '{}' does not exist", path);
+    }
+    if !app_path.is_dir() {
+        bail!("Path '{}' is not a directory", path);
+    }
+
+    // Detect build method
+    let build_method = detect_build_method(path)?;
+
+    match build_method {
+        BuildMethod::Dockerfile => {
+            if builder.is_some() {
+                warn!("--builder flag is ignored when using Dockerfile build method");
+            }
+
+            build_image_with_dockerfile(
+                path,
+                tag,
+                &container_cli,
+                use_buildx,
+                false, // push=false for local build
+            )?;
+        }
+        BuildMethod::Buildpacks => {
+            if use_buildx {
+                warn!("--use-buildx flag is ignored when using buildpacks build method");
+            }
+
+            build_image_with_buildpacks(path, tag, builder)?;
+        }
+    }
+
+    info!("✓ Successfully built image '{}'", tag);
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 struct RegistryCredentials {
     registry_url: String,
@@ -637,48 +718,85 @@ pub async fn create_deployment(
         )
         .await?;
 
-        // Step 4: Build image with buildpacks
-        info!(
-            "Building image with buildpacks: {}",
-            deployment_info.image_tag
-        );
-        if let Err(e) = build_image_with_buildpacks(path, &deployment_info.image_tag, builder) {
-            update_deployment_status(
-                http_client,
-                backend_url,
-                &token,
-                &deployment_info.deployment_id,
-                "Failed",
-                Some(&e.to_string()),
-            )
-            .await?;
-            return Err(e);
-        }
+        // Step 4: Detect build method and build image
+        let build_method = detect_build_method(path)?;
 
-        // Step 5: Mark as pushing
-        update_deployment_status(
-            http_client,
-            backend_url,
-            &token,
-            &deployment_info.deployment_id,
-            "Pushing",
-            None,
-        )
-        .await?;
+        match build_method {
+            BuildMethod::Dockerfile => {
+                // Build and push in one step with Dockerfile
+                info!(
+                    "Building image with Dockerfile: {}",
+                    deployment_info.image_tag
+                );
 
-        // Step 5a: Push image to registry
-        info!("Pushing image to registry: {}", deployment_info.image_tag);
-        if let Err(e) = docker_push(&container_cli, &deployment_info.image_tag) {
-            update_deployment_status(
-                http_client,
-                backend_url,
-                &token,
-                &deployment_info.deployment_id,
-                "Failed",
-                Some(&e.to_string()),
-            )
-            .await?;
-            return Err(e);
+                if let Err(e) = build_image_with_dockerfile(
+                    path,
+                    &deployment_info.image_tag,
+                    &container_cli,
+                    false, // use_buildx: could be a CLI flag in future
+                    true,  // push: true for deployment
+                ) {
+                    update_deployment_status(
+                        http_client,
+                        backend_url,
+                        &token,
+                        &deployment_info.deployment_id,
+                        "Failed",
+                        Some(&e.to_string()),
+                    )
+                    .await?;
+                    return Err(e);
+                }
+
+                // Image already pushed via --push flag, skip separate push step
+            }
+            BuildMethod::Buildpacks => {
+                // Build with buildpacks
+                info!(
+                    "Building image with buildpacks: {}",
+                    deployment_info.image_tag
+                );
+                if let Err(e) =
+                    build_image_with_buildpacks(path, &deployment_info.image_tag, builder)
+                {
+                    update_deployment_status(
+                        http_client,
+                        backend_url,
+                        &token,
+                        &deployment_info.deployment_id,
+                        "Failed",
+                        Some(&e.to_string()),
+                    )
+                    .await?;
+                    return Err(e);
+                }
+
+                // Step 5: Mark as pushing
+                update_deployment_status(
+                    http_client,
+                    backend_url,
+                    &token,
+                    &deployment_info.deployment_id,
+                    "Pushing",
+                    None,
+                )
+                .await?;
+
+                // Step 5a: Push image to registry
+                info!("Pushing image to registry: {}", deployment_info.image_tag);
+                if let Err(e) = docker_push(&container_cli, &deployment_info.image_tag) {
+                    update_deployment_status(
+                        http_client,
+                        backend_url,
+                        &token,
+                        &deployment_info.deployment_id,
+                        "Failed",
+                        Some(&e.to_string()),
+                    )
+                    .await?;
+                    return Err(e);
+                }
+            }
         }
 
         // Step 6: Mark as pushed (controller will take over deployment)
@@ -934,6 +1052,67 @@ fn build_image_with_buildpacks(
 
     if !status.success() {
         bail!("pack build failed with status: {}", status);
+    }
+
+    Ok(())
+}
+
+fn build_image_with_dockerfile(
+    app_path: &str,
+    image_tag: &str,
+    container_cli: &str,
+    use_buildx: bool,
+    push: bool,
+) -> Result<()> {
+    // Check if container CLI is available
+    let cli_check = Command::new(container_cli).arg("--version").output();
+    if cli_check.is_err() {
+        bail!(
+            "{} CLI not found. Please install Docker or Podman.",
+            container_cli
+        );
+    }
+
+    let mut cmd = Command::new(container_cli);
+
+    if use_buildx {
+        // Check buildx availability
+        let buildx_check = Command::new(container_cli)
+            .args(["buildx", "version"])
+            .output();
+        if buildx_check.is_err() {
+            bail!(
+                "{} buildx not available. Install it or omit --use-buildx flag.",
+                container_cli
+            );
+        }
+
+        cmd.arg("buildx");
+        info!(
+            "Building image with {} buildx: {}",
+            container_cli, image_tag
+        );
+    } else {
+        info!("Building image with {}: {}", container_cli, image_tag);
+    }
+
+    cmd.arg("build").arg("-t").arg(image_tag).arg(app_path);
+
+    if push {
+        cmd.arg("--push");
+    } else if use_buildx {
+        // For buildx without push, we need --load to get image into local daemon
+        cmd.arg("--load");
+    }
+
+    debug!("Executing command: {:?}", cmd);
+
+    let status = cmd
+        .status()
+        .with_context(|| format!("Failed to execute {} build", container_cli))?;
+
+    if !status.success() {
+        bail!("{} build failed with status: {}", container_cli, status);
     }
 
     Ok(())

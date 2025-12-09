@@ -58,6 +58,23 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "e")]
     Env(EnvCommands),
+    /// Build a container image locally without deploying
+    Build {
+        /// Tag for the built image (e.g., myapp:latest, registry.io/org/app:v1.0)
+        tag: String,
+        /// Path to the directory containing the application
+        #[arg(default_value = ".")]
+        path: String,
+        /// Buildpack builder to use (only for buildpack builds)
+        #[arg(long)]
+        builder: Option<String>,
+        /// Use buildx for Docker builds (only for Dockerfile builds)
+        #[arg(long)]
+        use_buildx: bool,
+        /// Container CLI to use (docker or podman)
+        #[arg(long)]
+        container_cli: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -345,7 +362,6 @@ enum EnvCommands {
         file: std::path::PathBuf,
     },
     /// Show environment variables for a deployment (read-only)
-    #[command(visible_alias = "show-deployment")]
     ShowDeployment {
         /// Deployment ID
         deployment_id: String,
@@ -790,6 +806,22 @@ async fn main() -> Result<()> {
                         .await?;
                 }
             }
+        }
+        Commands::Build {
+            tag,
+            path,
+            builder,
+            use_buildx,
+            container_cli,
+        } => {
+            deployment::build_image(
+                &config,
+                tag,
+                path,
+                builder.as_deref(),
+                *use_buildx,
+                container_cli.as_deref(),
+            )?;
         }
     }
 

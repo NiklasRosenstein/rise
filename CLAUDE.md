@@ -69,7 +69,7 @@ Let's outline the architecture and components needed for this Rust-based project
     - **Project Commands**: Implements `project` (alias: `p`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `update/u/edit`, `delete/del/rm`.
     - **Team Commands**: Implements `team` (alias: `t`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `update/u/edit`, `delete/del/rm`.
     - **Deployment Commands**: Implements `deployment` (alias: `d`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `rollback`, `stop`.
-    - **Build Module**: Supports building container images using buildpacks, nixpacks, and Dockerfiles.
+    - **Build Module**: Supports building container images using buildpacks and Dockerfiles with automatic detection.
     - **Configuration Module**: Handles reading and writing of `.rise.toml` configuration files.
 
 ## Implementation Steps
@@ -105,7 +105,9 @@ Let's outline the architecture and components needed for this Rust-based project
       - [x] Remove password authentication
       - [x] Local HTTP callback server for authorization code flow
     - [x] Create project management commands for creating and listing projects.
-    - [x] Develop the build module to support buildpacks (via pack CLI).
+    - [x] Develop the build module to support buildpacks (via pack CLI) and Dockerfiles (via docker/podman).
+    - [x] Implement automatic build method detection (Dockerfile vs buildpacks).
+    - [x] Add `rise build` command for building images locally without deployment.
     - [x] Implement deployment commands to handle the build, push, and deploy process.
     - [x] Set up configuration handling for the CLI tool (.rise-config.toml).
     - [x] Add deployment management commands (list, show, rollback).
@@ -201,3 +203,4 @@ This feature is specifically for the Kubernetes controller and will not be imple
 - Keep the ECR controller disabled by default in Procfile.dev, we only currently have it enabled for development
 - When removing a feature, do a comprehensive check on the codebase to ensure any remaining references to that feature are removed or updated. This includes documentation files/READMEs, config files, code comments, etc.
 - Run `mise sqlx:check` and `mise sqlx:prepare` (if needed) as part of the finalizing steps
+- The CLI should first and foremost always accept the names of things (e.g. project names, or project names + deployment timestamp). The UUIDs in our tables are only for internal book-keeping.
