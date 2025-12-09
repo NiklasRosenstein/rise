@@ -117,9 +117,7 @@ async fn test_encryption_provider(provider: &dyn EncryptionProvider) -> Result<(
         .context("Decryption test failed")?;
 
     if decrypted != TEST_PLAINTEXT {
-        anyhow::bail!(
-            "Encryption round-trip test failed: decrypted value does not match original"
-        );
+        anyhow::bail!("Encryption round-trip test failed: decrypted value does not match original");
     }
 
     Ok(())
