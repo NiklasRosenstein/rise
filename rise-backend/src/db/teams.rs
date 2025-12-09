@@ -9,7 +9,7 @@ pub async fn list(pool: &PgPool) -> Result<Vec<Team>> {
     let teams = sqlx::query_as!(
         Team,
         r#"
-        SELECT id, name, created_at, updated_at
+        SELECT id, name, idp_managed, created_at, updated_at
         FROM teams
         ORDER BY created_at DESC
         "#
@@ -26,7 +26,7 @@ pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<Team>> {
     let teams = sqlx::query_as!(
         Team,
         r#"
-        SELECT t.id, t.name, t.created_at, t.updated_at
+        SELECT t.id, t.name, t.idp_managed, t.created_at, t.updated_at
         FROM teams t
         INNER JOIN team_members tm ON t.id = tm.team_id
         WHERE tm.user_id = $1
@@ -41,18 +41,21 @@ pub async fn list_for_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<Team>> {
     Ok(teams)
 }
 
-/// Find team by name
-pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Team>> {
+/// Find team by name (case-insensitive due to unique index)
+pub async fn find_by_name<'a, E>(executor: E, name: &str) -> Result<Option<Team>>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     let team = sqlx::query_as!(
         Team,
         r#"
-        SELECT id, name, created_at, updated_at
+        SELECT id, name, idp_managed, created_at, updated_at
         FROM teams
-        WHERE name = $1
+        WHERE LOWER(name) = LOWER($1)
         "#,
         name
     )
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await
     .context("Failed to find team by name")?;
 
@@ -64,7 +67,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Team>> {
     let team = sqlx::query_as!(
         Team,
         r#"
-        SELECT id, name, created_at, updated_at
+        SELECT id, name, idp_managed, created_at, updated_at
         FROM teams
         WHERE id = $1
         "#,
@@ -78,17 +81,20 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Team>> {
 }
 
 /// Create a new team
-pub async fn create(pool: &PgPool, name: &str) -> Result<Team> {
+pub async fn create<'a, E>(executor: E, name: &str) -> Result<Team>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     let team = sqlx::query_as!(
         Team,
         r#"
         INSERT INTO teams (name)
         VALUES ($1)
-        RETURNING id, name, created_at, updated_at
+        RETURNING id, name, idp_managed, created_at, updated_at
         "#,
         name
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
     .context("Failed to create team")?;
 
@@ -146,12 +152,15 @@ pub async fn get_owners(pool: &PgPool, team_id: Uuid) -> Result<Vec<User>> {
 }
 
 /// Add member to team
-pub async fn add_member(
-    pool: &PgPool,
+pub async fn add_member<'a, E>(
+    executor: E,
     team_id: Uuid,
     user_id: Uuid,
     role: TeamRole,
-) -> Result<TeamMember> {
+) -> Result<TeamMember>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     let role_str = role.to_string();
 
     let member = sqlx::query_as!(
@@ -165,7 +174,7 @@ pub async fn add_member(
         user_id,
         role_str
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
     .context("Failed to add team member")?;
 
@@ -173,13 +182,16 @@ pub async fn add_member(
 }
 
 /// Remove member from team
-pub async fn remove_member(pool: &PgPool, team_id: Uuid, user_id: Uuid) -> Result<()> {
+pub async fn remove_member<'a, E>(executor: E, team_id: Uuid, user_id: Uuid) -> Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     sqlx::query!(
         "DELETE FROM team_members WHERE team_id = $1 AND user_id = $2",
         team_id,
         user_id
     )
-    .execute(pool)
+    .execute(executor)
     .await
     .context("Failed to remove team member")?;
 
@@ -234,7 +246,10 @@ pub async fn is_owner(pool: &PgPool, team_id: Uuid, user_id: Uuid) -> Result<boo
 }
 
 /// Check if user is team member (owner or member)
-pub async fn is_member(pool: &PgPool, team_id: Uuid, user_id: Uuid) -> Result<bool> {
+pub async fn is_member<'a, E>(executor: E, team_id: Uuid, user_id: Uuid) -> Result<bool>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     let result = sqlx::query!(
         r#"
         SELECT EXISTS(
@@ -245,7 +260,7 @@ pub async fn is_member(pool: &PgPool, team_id: Uuid, user_id: Uuid) -> Result<bo
         team_id,
         user_id
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
     .context("Failed to check team membership")?;
 
@@ -270,4 +285,111 @@ pub async fn get_names_batch(
     .context("Failed to batch fetch team names")?;
 
     Ok(records.into_iter().map(|r| (r.id, r.name)).collect())
+}
+
+// ============================================================================
+// IdP Group Sync Functions
+// ============================================================================
+
+/// Update team name (for case correction from IdP)
+pub async fn update_name<'a, E>(executor: E, team_id: Uuid, name: &str) -> Result<Team>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let team = sqlx::query_as!(
+        Team,
+        r#"
+        UPDATE teams
+        SET name = $2, updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, name, idp_managed, created_at, updated_at
+        "#,
+        team_id,
+        name
+    )
+    .fetch_one(executor)
+    .await
+    .context("Failed to update team name")?;
+
+    Ok(team)
+}
+
+/// Mark team as IdP-managed
+pub async fn set_idp_managed<'a, E>(executor: E, team_id: Uuid, idp_managed: bool) -> Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    sqlx::query!(
+        r#"
+        UPDATE teams
+        SET idp_managed = $2, updated_at = NOW()
+        WHERE id = $1
+        "#,
+        team_id,
+        idp_managed
+    )
+    .execute(executor)
+    .await
+    .context("Failed to set idp_managed flag")?;
+
+    Ok(())
+}
+
+/// Remove all owners from a team (for IdP takeover)
+pub async fn remove_all_owners<'a, E>(executor: E, team_id: Uuid) -> Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    sqlx::query!(
+        r#"
+        DELETE FROM team_members
+        WHERE team_id = $1 AND role = 'owner'
+        "#,
+        team_id
+    )
+    .execute(executor)
+    .await
+    .context("Failed to remove all owners")?;
+
+    Ok(())
+}
+
+/// Get all IdP-managed teams
+pub async fn list_idp_managed<'a, E>(executor: E) -> Result<Vec<Team>>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let teams = sqlx::query_as!(
+        Team,
+        r#"
+        SELECT id, name, idp_managed, created_at, updated_at
+        FROM teams
+        WHERE idp_managed = TRUE
+        ORDER BY name
+        "#
+    )
+    .fetch_all(executor)
+    .await
+    .context("Failed to list IdP-managed teams")?;
+
+    Ok(teams)
+}
+
+/// Get team names for all teams a user is a member of (for JWT groups claim)
+pub async fn get_team_names_for_user(pool: &PgPool, user_id: Uuid) -> Result<Vec<String>> {
+    let records = sqlx::query!(
+        r#"
+        SELECT t.name
+        FROM teams t
+        INNER JOIN team_members tm ON t.id = tm.team_id
+        WHERE tm.user_id = $1
+        ORDER BY t.name
+        "#,
+        user_id
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to get team names for user")?;
+
+    Ok(records.into_iter().map(|r| r.name).collect())
 }
