@@ -1,4 +1,5 @@
 pub mod cookie_helpers;
+pub mod group_sync;
 pub mod handlers;
 pub mod jwt;
 pub mod jwt_signer;
