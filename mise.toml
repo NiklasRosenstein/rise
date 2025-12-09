@@ -5,8 +5,11 @@ pack = "0.39.0"
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
-dir = "rise-backend"
-run = "cargo sqlx prepare"
+run = "cargo sqlx prepare --workspace -- --all-targets"
+
+[tasks."sqlx:check"]
+description = "Check that all SQLX queries are valid."
+run = "cargo sqlx prepare --workspace --check -- --all-targets"
 
 [tasks."docs:serve"]
 description = "Serve documentation with live reload in port 3001."

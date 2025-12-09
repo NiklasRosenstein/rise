@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, name, created_at, updated_at\n        FROM teams\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT t.id, t.name, t.idp_managed, t.created_at, t.updated_at\n        FROM teams t\n        INNER JOIN team_members tm ON t.id = tm.team_id\n        WHERE tm.user_id = $1\n        ORDER BY t.created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -15,11 +15,16 @@
       },
       {
         "ordinal": 2,
+        "name": "idp_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -33,8 +38,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "5dc59081ab9e0f05eebb2fab54ff6782c3a3e1e1157af3343591f93c9eb8cfda"
+  "hash": "cd23c7247bfc5a123652b62530380356474a788f182408cb0ceefbdb6d502c63"
 }

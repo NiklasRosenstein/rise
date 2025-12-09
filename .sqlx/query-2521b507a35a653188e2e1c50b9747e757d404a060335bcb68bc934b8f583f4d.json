@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, name, created_at, updated_at\n        FROM teams\n        WHERE name = $1\n        ",
+  "query": "\n        SELECT id, name, idp_managed, created_at, updated_at\n        FROM teams\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -15,26 +15,32 @@
       },
       {
         "ordinal": 2,
+        "name": "idp_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "7159665fd0cee7909632f1db9e88fdb351de2b80165d88da775aa7b06fa3aba7"
+  "hash": "2521b507a35a653188e2e1c50b9747e757d404a060335bcb68bc934b8f583f4d"
 }

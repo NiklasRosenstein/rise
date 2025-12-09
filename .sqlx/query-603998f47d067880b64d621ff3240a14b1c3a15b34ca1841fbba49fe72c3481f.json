@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, name, created_at, updated_at\n        FROM teams\n        ORDER BY created_at DESC\n        ",
+  "query": "\n        INSERT INTO teams (name)\n        VALUES ($1)\n        RETURNING id, name, idp_managed, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -15,24 +15,32 @@
       },
       {
         "ordinal": 2,
+        "name": "idp_managed",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Text"
+      ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "7be4a1082d8df1e8ef1711f30955e2b7b493be65f0fa251599ccbd39d250eb36"
+  "hash": "603998f47d067880b64d621ff3240a14b1c3a15b34ca1841fbba49fe72c3481f"
 }
