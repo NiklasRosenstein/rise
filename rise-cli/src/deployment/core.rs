@@ -15,23 +15,42 @@ use crate::config::Config;
 pub use rise_backend::deployment::models::{Deployment, DeploymentStatus};
 
 /// Build method for container images
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 enum BuildMethod {
-    Dockerfile,
-    Buildpacks,
+    Docker,
+    Pack,
+    Railpack { use_buildctl: bool },
+}
+
+impl BuildMethod {
+    /// Parse backend string into BuildMethod
+    fn from_backend_str(backend: &str) -> Result<Self> {
+        match backend {
+            "docker" => Ok(BuildMethod::Docker),
+            "pack" => Ok(BuildMethod::Pack),
+            "railpack" | "railpack:buildx" => Ok(BuildMethod::Railpack {
+                use_buildctl: false,
+            }),
+            "railpack:buildctl" => Ok(BuildMethod::Railpack { use_buildctl: true }),
+            _ => bail!(
+                "Invalid build backend '{}'. Supported: docker, pack, railpack, railpack:buildctl",
+                backend
+            ),
+        }
+    }
 }
 
 /// Detect build method based on directory contents
-/// Returns BuildMethod::Dockerfile if Dockerfile exists, otherwise BuildMethod::Buildpacks
+/// Returns BuildMethod::Docker if Dockerfile exists, otherwise BuildMethod::Pack
 fn detect_build_method(app_path: &str) -> Result<BuildMethod> {
     let dockerfile_path = Path::new(app_path).join("Dockerfile");
 
     if dockerfile_path.exists() && dockerfile_path.is_file() {
         info!("Detected Dockerfile at {}", dockerfile_path.display());
-        Ok(BuildMethod::Dockerfile)
+        Ok(BuildMethod::Docker)
     } else {
         info!("No Dockerfile found, using buildpacks");
-        Ok(BuildMethod::Buildpacks)
+        Ok(BuildMethod::Pack)
     }
 }
 
@@ -551,9 +570,9 @@ pub fn build_image(
     let build_method = detect_build_method(path)?;
 
     match build_method {
-        BuildMethod::Dockerfile => {
+        BuildMethod::Docker => {
             if builder.is_some() {
-                warn!("--builder flag is ignored when using Dockerfile build method");
+                warn!("--builder flag is ignored when using docker build method");
             }
 
             build_image_with_dockerfile(
@@ -564,12 +583,15 @@ pub fn build_image(
                 false, // push=false for local build
             )?;
         }
-        BuildMethod::Buildpacks => {
+        BuildMethod::Pack => {
             if use_buildx {
-                warn!("--use-buildx flag is ignored when using buildpacks build method");
+                warn!("--use-buildx flag is ignored when using pack build method");
             }
 
             build_image_with_buildpacks(path, tag, builder)?;
+        }
+        BuildMethod::Railpack { .. } => {
+            bail!("Railpack build support not yet implemented");
         }
     }
 
@@ -722,10 +744,10 @@ pub async fn create_deployment(
         let build_method = detect_build_method(path)?;
 
         match build_method {
-            BuildMethod::Dockerfile => {
-                // Build and push in one step with Dockerfile
+            BuildMethod::Docker => {
+                // Build and push in one step with Docker
                 info!(
-                    "Building image with Dockerfile: {}",
+                    "Building image with docker: {}",
                     deployment_info.image_tag
                 );
 
@@ -750,10 +772,10 @@ pub async fn create_deployment(
 
                 // Image already pushed via --push flag, skip separate push step
             }
-            BuildMethod::Buildpacks => {
-                // Build with buildpacks
+            BuildMethod::Pack => {
+                // Build with pack (buildpacks)
                 info!(
-                    "Building image with buildpacks: {}",
+                    "Building image with pack: {}",
                     deployment_info.image_tag
                 );
                 if let Err(e) =
@@ -796,6 +818,18 @@ pub async fn create_deployment(
                     .await?;
                     return Err(e);
                 }
+            }
+            BuildMethod::Railpack { .. } => {
+                update_deployment_status(
+                    http_client,
+                    backend_url,
+                    &token,
+                    &deployment_info.deployment_id,
+                    "Failed",
+                    Some("Railpack build support not yet implemented"),
+                )
+                .await?;
+                bail!("Railpack build support not yet implemented");
             }
         }
 
