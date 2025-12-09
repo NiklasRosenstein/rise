@@ -453,14 +453,11 @@ pub async fn create_deployment(
             })?;
 
         // Construct image tag
-        // Note: For Docker registry, credentials.registry_url already includes namespace
+        // Note: credentials.registry_url already includes the full repository path
+        // (e.g., "459109751375.dkr.ecr.eu-west-1.amazonaws.com/rise-niklas-dev/devtest")
         let image_tag = format!(
             "{}:{}",
-            format!(
-                "{}/{}",
-                credentials.registry_url.trim_end_matches('/'),
-                payload.project
-            ),
+            credentials.registry_url.trim_end_matches('/'),
             deployment_id
         );
 
