@@ -36,6 +36,7 @@ mod tests {
             controller: ControllerSettings::default(),
             registry: None,
             kubernetes: None,
+            encryption: None,
         };
 
         // This test requires PostgreSQL and Dex to be running

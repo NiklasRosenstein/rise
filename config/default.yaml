@@ -87,6 +87,26 @@ registry:
   registry_url: "localhost:5000"
   namespace: "rise-apps"
 
+# Encryption configuration (optional)
+# Required if you want to encrypt secret environment variables
+# Uncomment and configure ONE of the following encryption providers:
+
+# Local encryption with AES-256-GCM (good for development and single-server deployments)
+# encryption:
+#   type: "aes-gcm-256"
+#   key: "${RISE_ENCRYPTION_KEY}"  # Generate with: openssl rand -base64 32
+
+# AWS KMS encryption (recommended for production)
+# encryption:
+#   type: "aws-kms"
+#   region: "us-east-1"
+#   key_id: "arn:aws:kms:us-east-1:123456789012:key/abcd-1234-5678-90ef-ghij"
+#   # Backend uses its existing IAM identity (IRSA/instance profile)
+#   # Ensure the backend role has kms:Encrypt and kms:Decrypt permissions
+#   # Optional: static credentials (development only)
+#   # access_key_id: "AKIAIOSFODNN7EXAMPLE"
+#   # secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
 # Kubernetes configuration (optional)
 # Uncomment to enable Kubernetes deployment controller
 #

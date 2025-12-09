@@ -20,8 +20,8 @@
       ]
     },
     "nullable": [
-      null,
-      true
+      true,
+      false
     ]
   },
   "hash": "48a927bd260f712e87a1e6b178e493bc3d09b084b35a1dc02db0fcbf70f41faa"

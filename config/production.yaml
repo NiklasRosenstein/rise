@@ -29,3 +29,14 @@ registry:
   role_arn: "${ECR_CONTROLLER_ROLE_ARN}"  # No default - must be set
   push_role_arn: "${ECR_PUSH_ROLE_ARN}"  # No default - must be set
   auto_remove: false
+
+# Example: AWS KMS encryption (recommended for production)
+encryption:
+  type: "aws-kms"
+  region: "${AWS_REGION:-us-east-1}"
+  key_id: "${KMS_KEY_ID}"  # No default - must be set (KMS key ARN)
+
+# Example: Local encryption (for development/testing)
+# encryption:
+#   type: "aes-gcm-256"
+#   key: "${RISE_ENCRYPTION_KEY}"  # Generate with: openssl rand -base64 32
