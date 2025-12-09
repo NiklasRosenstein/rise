@@ -77,6 +77,9 @@ impl std::fmt::Display for ProjectVisibility {
 pub struct Team {
     pub id: Uuid,
     pub name: String,
+    /// Whether this team is managed by an Identity Provider
+    /// When true, membership is controlled by IdP groups claim
+    pub idp_managed: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
