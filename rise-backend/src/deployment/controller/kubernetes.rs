@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::{ReplicaSet, ReplicaSetSpec};
@@ -800,51 +800,23 @@ impl KubernetesController {
     ) -> Result<Vec<k8s_openapi::api::core::v1::EnvVar>> {
         use k8s_openapi::api::core::v1::EnvVar;
 
-        // Fetch deployment environment variables from database
-        let db_env_vars =
-            crate::db::env_vars::list_deployment_env_vars(&self.state.db_pool, deployment_id)
-                .await?;
+        // Load and decrypt environment variables using shared helper
+        let env_vars = crate::db::env_vars::load_deployment_env_vars_decrypted(
+            &self.state.db_pool,
+            deployment_id,
+            self.state.encryption_provider.as_deref(),
+        )
+        .await?;
 
-        let mut env_vars = Vec::new();
-
-        for var in db_env_vars {
-            let value = if var.is_secret {
-                // Decrypt secret values
-                match &self.state.encryption_provider {
-                    Some(provider) => provider.decrypt(&var.value).await.with_context(|| {
-                        format!("Failed to decrypt secret variable '{}'", var.key)
-                    })?,
-                    None => {
-                        // This should not happen - secrets should only be stored with encryption enabled
-                        error!(
-                            "Encountered secret variable '{}' but no encryption provider configured",
-                            var.key
-                        );
-                        return Err(anyhow::anyhow!(
-                            "Cannot decrypt secret variable '{}': no encryption provider",
-                            var.key
-                        ));
-                    }
-                }
-            } else {
-                // Plain text value
-                var.value
-            };
-
-            env_vars.push(EnvVar {
-                name: var.key,
+        // Format as Kubernetes EnvVar objects
+        Ok(env_vars
+            .into_iter()
+            .map(|(key, value)| EnvVar {
+                name: key,
                 value: Some(value),
                 ..Default::default()
-            });
-        }
-
-        info!(
-            "Loaded {} environment variables for deployment {}",
-            env_vars.len(),
-            deployment_id
-        );
-
-        Ok(env_vars)
+            })
+            .collect())
     }
 
     /// Create ReplicaSet resource

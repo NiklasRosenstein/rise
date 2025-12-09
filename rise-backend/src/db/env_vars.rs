@@ -178,3 +178,57 @@ pub async fn list_deployment_env_vars(
 
     Ok(env_vars)
 }
+
+/// Load deployment environment variables with decryption
+///
+/// This is a shared helper for controllers to load environment variables
+/// with automatic decryption of secrets using the provided encryption provider.
+///
+/// Returns a vector of (key, value) tuples that can be formatted by the caller
+/// as needed (e.g., KEY=VALUE for Docker, EnvVar objects for Kubernetes).
+pub async fn load_deployment_env_vars_decrypted(
+    pool: &PgPool,
+    deployment_id: Uuid,
+    encryption_provider: Option<&dyn crate::encryption::EncryptionProvider>,
+) -> Result<Vec<(String, String)>> {
+    // Fetch deployment environment variables from database
+    let db_env_vars = list_deployment_env_vars(pool, deployment_id).await?;
+
+    let mut env_vars = Vec::new();
+
+    for var in db_env_vars {
+        let value = if var.is_secret {
+            // Decrypt secret values
+            match encryption_provider {
+                Some(provider) => provider
+                    .decrypt(&var.value)
+                    .await
+                    .with_context(|| format!("Failed to decrypt secret variable '{}'", var.key))?,
+                None => {
+                    // This should not happen - secrets should only be stored with encryption enabled
+                    tracing::error!(
+                        "Encountered secret variable '{}' but no encryption provider configured",
+                        var.key
+                    );
+                    return Err(anyhow::anyhow!(
+                        "Cannot decrypt secret variable '{}': no encryption provider",
+                        var.key
+                    ));
+                }
+            }
+        } else {
+            // Plain text value
+            var.value
+        };
+
+        env_vars.push((var.key, value));
+    }
+
+    tracing::info!(
+        "Loaded {} environment variables for deployment {}",
+        env_vars.len(),
+        deployment_id
+    );
+
+    Ok(env_vars)
+}
