@@ -268,6 +268,9 @@ async function showProject(projectName) {
         // Load service accounts
         await loadServiceAccounts(projectName);
 
+        // Load environment variables
+        await loadProjectEnvVars(projectName);
+
         // Load deployments
         await loadDeployments(projectName, 0);
 
@@ -400,6 +403,96 @@ async function loadServiceAccounts(projectName) {
     }
 }
 
+// Load environment variables for a project
+async function loadProjectEnvVars(projectName) {
+    const listEl = document.getElementById('project-env-vars-list');
+    listEl.innerHTML = '<p aria-busy="true">Loading environment variables...</p>';
+
+    try {
+        const response = await api.getProjectEnvVars(projectName);
+        const envVars = response.env_vars || [];
+
+        if (envVars.length === 0) {
+            listEl.innerHTML = '<p>No environment variables configured.</p>';
+            return;
+        }
+
+        const tableHtml = `
+            <figure>
+                <table role="grid">
+                    <thead>
+                        <tr>
+                            <th>Key</th>
+                            <th>Value</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${envVars.map(env => `
+                            <tr>
+                                <td><code>${escapeHtml(env.key)}</code></td>
+                                <td><code>${escapeHtml(env.value)}</code></td>
+                                <td>${env.is_secret ? '<span class="status-badge" style="background-color: var(--pico-color-yellow-500);">secret</span>' : '<span class="status-badge" style="background-color: var(--pico-color-grey-500);">plain</span>'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </figure>
+        `;
+
+        listEl.innerHTML = tableHtml;
+    } catch (error) {
+        listEl.innerHTML = `<p>Error loading environment variables: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+// Load environment variables for a deployment
+async function loadDeploymentEnvVars(projectName, deploymentId) {
+    const listEl = document.getElementById('deployment-env-vars-list');
+    listEl.innerHTML = '<p aria-busy="true">Loading environment variables...</p>';
+
+    try {
+        const response = await api.getDeploymentEnvVars(projectName, deploymentId);
+        const envVars = response.env_vars || [];
+
+        if (envVars.length === 0) {
+            listEl.innerHTML = '<p>No environment variables configured.</p>';
+            return;
+        }
+
+        const tableHtml = `
+            <figure>
+                <table role="grid">
+                    <thead>
+                        <tr>
+                            <th>Key</th>
+                            <th>Value</th>
+                            <th>Type</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        ${envVars.map(env => `
+                            <tr>
+                                <td><code>${escapeHtml(env.key)}</code></td>
+                                <td><code>${escapeHtml(env.value)}</code></td>
+                                <td>${env.is_secret ? '<span class="status-badge" style="background-color: var(--pico-color-yellow-500);">secret</span>' : '<span class="status-badge" style="background-color: var(--pico-color-grey-500);">plain</span>'}</td>
+                            </tr>
+                        `).join('')}
+                    </tbody>
+                </table>
+            </figure>
+            <p style="font-size: 0.9em; color: var(--pico-color-grey-500); margin-top: 1rem;">
+                <strong>Note:</strong> Environment variables are read-only snapshots taken at deployment time.
+                Secret values are always masked for security.
+            </p>
+        `;
+
+        listEl.innerHTML = tableHtml;
+    } catch (error) {
+        listEl.innerHTML = `<p>Error loading environment variables: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
 // Show deployment detail
 async function showDeployment(projectName, deploymentId) {
     // Hide all views
@@ -449,6 +542,9 @@ async function showDeployment(projectName, deploymentId) {
                 ` : ''}
             </article>
         `;
+
+        // Load environment variables
+        await loadDeploymentEnvVars(projectName, deploymentId);
 
         // Auto-refresh if deployment is in progress
         const inProgressStatuses = ['Pending', 'Building', 'Pushing', 'Pushed', 'Deploying'];

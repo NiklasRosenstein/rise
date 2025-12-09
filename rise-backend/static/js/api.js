@@ -78,6 +78,15 @@ class RiseAPI {
     async getProjectServiceAccounts(projectName) {
         return this.request(`/projects/${projectName}/workload-identities`);
     }
+
+    // Environment variable endpoints
+    async getProjectEnvVars(projectName) {
+        return this.request(`/projects/${projectName}/env`);
+    }
+
+    async getDeploymentEnvVars(projectName, deploymentId) {
+        return this.request(`/projects/${projectName}/deployments/${deploymentId}/env`);
+    }
 }
 
 const api = new RiseAPI();
