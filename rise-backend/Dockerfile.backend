@@ -46,7 +46,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     cp target/release/rise /usr/local/bin/rise
 
 # Stage 4: Create the final, smaller image (match builder's Debian version)
-FROM debian:trixie-slim
+FROM debian:trixie-slim AS rise
 
 # Install runtime dependencies
 RUN apt-get update && apt-get install -y \
@@ -65,3 +65,37 @@ EXPOSE 3000
 
 # Set the entrypoint
 ENTRYPOINT ["/usr/local/bin/rise"]
+
+# Stage 5: Create the builder image with additional build tools
+FROM rise AS rise-builder
+
+# Install dependencies for mise and build tools
+RUN apt-get update && apt-get install -y \
+    curl \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install mise
+RUN curl https://mise.run | sh
+
+# Set up mise environment
+ENV PATH="/root/.local/bin:/root/.local/share/mise/shims:${PATH}"
+
+# Install build tools via mise
+RUN /root/.local/bin/mise use -g pack@latest && \
+    /root/.local/bin/mise use -g docker-cli@latest && \
+    /root/.local/bin/mise install
+
+# Install Docker buildx plugin manually
+RUN mkdir -p /root/.docker/cli-plugins && \
+    BUILDX_VERSION=$(curl -sL https://api.github.com/repos/docker/buildx/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/') && \
+    curl -sSL "https://github.com/docker/buildx/releases/download/v${BUILDX_VERSION}/buildx-v${BUILDX_VERSION}.linux-amd64" -o /root/.docker/cli-plugins/docker-buildx && \
+    chmod +x /root/.docker/cli-plugins/docker-buildx
+
+# Verify installations
+RUN /root/.local/bin/mise exec -- pack version && \
+    /root/.local/bin/mise exec -- docker --version && \
+    /root/.local/bin/mise exec -- docker buildx version
+
+# Set the entrypoint
+ENTRYPOINT ["/usr/bin/bash"]

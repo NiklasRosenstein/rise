@@ -13,6 +13,7 @@ on:
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: niklasrosenstein/rise # ${{ github.repository }}
+  BUILDER_IMAGE_NAME: niklasrosenstein/rise-builder
 
 jobs:
   build-and-push:
@@ -56,6 +57,7 @@ jobs:
         with:
           context: .
           file: ./rise-backend/Dockerfile.backend
+          target: rise
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -72,3 +74,41 @@ jobs:
         run: |
           echo "Image digest: ${{ steps.build.outputs.digest }}"
           echo "Build completed successfully!"
+
+      - name: Extract metadata (tags, labels) for Builder Docker image
+        id: meta-builder
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.BUILDER_IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=semver,pattern={{major}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push Builder Docker image
+        id: build-builder
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./rise-backend/Dockerfile.backend
+          target: rise-builder
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta-builder.outputs.tags }}
+          labels: ${{ steps.meta-builder.outputs.labels }}
+          cache-from: |
+            type=gha
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.BUILDER_IMAGE_NAME }}:buildcache
+          cache-to: |
+            type=gha,mode=max
+            type=registry,ref=${{ env.REGISTRY }}/${{ env.BUILDER_IMAGE_NAME }}:buildcache,mode=max
+          platforms: linux/amd64
+          provenance: false
+
+      - name: Output builder build results
+        run: |
+          echo "Builder image digest: ${{ steps.build-builder.outputs.digest }}"
+          echo "Builder build completed successfully!"
