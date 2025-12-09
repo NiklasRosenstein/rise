@@ -249,7 +249,7 @@ pub async fn auth_middleware(
 
         tracing::debug!("JWT validated for user: {}", claims.email);
 
-        let user = users::find_or_create(&state.db_pool, &claims.email)
+        users::find_or_create(&state.db_pool, &claims.email)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to find/create user: {}", e);
@@ -257,33 +257,7 @@ pub async fn auth_middleware(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Database error".to_string(),
                 )
-            })?;
-
-        // Sync IdP groups if enabled and groups claim is present
-        if state.auth_settings.idp_group_sync_enabled {
-            if let Some(ref groups) = claims.groups {
-                if !groups.is_empty() {
-                    tracing::debug!(
-                        "Syncing {} IdP groups for user {}",
-                        groups.len(),
-                        user.email
-                    );
-
-                    if let Err(e) =
-                        crate::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups)
-                            .await
-                    {
-                        // Log error but don't fail authentication
-                        // This ensures users can still log in even if group sync fails
-                        tracing::error!("Failed to sync IdP groups for user {}: {}", user.email, e);
-                    } else {
-                        tracing::info!("Successfully synced IdP groups for user {}", user.email);
-                    }
-                }
-            }
-        }
-
-        user
+            })?
     } else {
         // Service account authentication (new flow)
         tracing::debug!("Authenticating as service account from issuer: {}", issuer);

@@ -22,6 +22,76 @@ use std::collections::HashMap;
 use tera::Tera;
 use tracing::instrument;
 
+/// Helper function to sync IdP groups after login
+///
+/// This validates the token and syncs the user's team memberships from IdP groups.
+/// Should be called during login flows (code exchange, device exchange, OAuth callback).
+async fn sync_groups_after_login(
+    state: &AppState,
+    id_token: &str,
+) -> Result<(), (StatusCode, String)> {
+    // Only sync if enabled
+    if !state.auth_settings.idp_group_sync_enabled {
+        return Ok(());
+    }
+
+    // Build expected claims for validation
+    let mut expected_claims = HashMap::new();
+    expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+
+    // Validate token to get claims
+    let claims_value = state
+        .jwt_validator
+        .validate(id_token, &state.auth_settings.issuer, &expected_claims)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Failed to validate token for group sync: {}", e);
+            (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+        })?;
+
+    // Parse claims
+    let claims: crate::auth::jwt::Claims = serde_json::from_value(claims_value).map_err(|e| {
+        tracing::warn!("Failed to parse claims for group sync: {}", e);
+        (
+            StatusCode::UNAUTHORIZED,
+            format!("Invalid token claims: {}", e),
+        )
+    })?;
+
+    // Get or create user
+    let user = users::find_or_create(&state.db_pool, &claims.email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find/create user for group sync: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?;
+
+    // Sync groups if present in claims
+    if let Some(ref groups) = claims.groups {
+        if !groups.is_empty() {
+            tracing::debug!(
+                "Syncing {} IdP groups for user {} during login",
+                groups.len(),
+                user.email
+            );
+
+            if let Err(e) =
+                crate::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups).await
+            {
+                // Log error but don't fail login
+                tracing::error!("Failed to sync IdP groups during login for user {}: {}", user.email, e);
+            } else {
+                tracing::info!("Successfully synced IdP groups during login for user {}", user.email);
+            }
+        }
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CodeExchangeRequest {
     pub code: String,
@@ -212,6 +282,12 @@ pub async fn code_exchange(
         }
     }
 
+    // Sync IdP groups after successful login
+    if let Err(e) = sync_groups_after_login(&state, &token_info.id_token).await {
+        tracing::warn!("Group sync failed during code exchange: {:?}", e);
+        // Don't fail the login if group sync fails
+    }
+
     // Return the ID token (which contains user claims)
     Ok(Json(LoginResponse {
         token: token_info.id_token,
@@ -237,6 +313,13 @@ pub async fn device_exchange(
     {
         Ok(Some(token_info)) => {
             tracing::info!("Device authorization successful");
+
+            // Sync IdP groups after successful login
+            if let Err(e) = sync_groups_after_login(&state, &token_info.id_token).await {
+                tracing::warn!("Group sync failed during device exchange: {:?}", e);
+                // Don't fail the login if group sync fails
+            }
+
             Json(DeviceExchangeResponse {
                 token: Some(token_info.id_token),
                 error: None,
@@ -536,6 +619,12 @@ pub async fn oauth_callback(
         })?;
 
     tracing::info!("Successfully exchanged code for tokens");
+
+    // Sync IdP groups after successful login
+    if let Err(e) = sync_groups_after_login(&state, &token_info.id_token).await {
+        tracing::warn!("Group sync failed during OAuth callback: {:?}", e);
+        // Don't fail the login if group sync fails
+    }
 
     // Validate the JWT to extract expiry time
     let mut expected_claims = HashMap::new();
