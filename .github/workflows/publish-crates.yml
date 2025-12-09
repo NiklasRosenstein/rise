@@ -42,29 +42,12 @@ jobs:
             exit 1
           fi
 
-      - name: Publish rise-backend
+      - name: Publish
         run: |
-          cd rise-backend
-          # Try trusted publishing first (if configured on crates.io)
-          # Falls back to token-based auth if CARGO_REGISTRY_TOKEN is set
-          cargo publish --no-verify
+          cargo publish --workspace --no-verify
         env:
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ secrets.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-
-      - name: Wait for crates.io index update
-        run: |
-          echo "Waiting for crates.io to update index..."
-          sleep 60
-
-      - name: Publish rise
-        run: |
-          cd rise-cli
-          cargo publish --no-verify
-        env:
-          ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ secrets.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v1
@@ -73,4 +56,4 @@ jobs:
           body: |
             Published to crates.io:
             - [rise-backend v${{ github.ref_name }}](https://crates.io/crates/rise-backend)
-            - [rise v${{ github.ref_name }}](https://crates.io/crates/rise)
+            - [rise-cli v${{ github.ref_name }}](https://crates.io/crates/rise-cli)

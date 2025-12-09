@@ -785,7 +785,7 @@ pub async fn ingress_auth(
     }
 
     // For private projects, check access permissions
-    let has_access = projects::user_can_access(&state.db_pool, user.id, project.id)
+    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
         .await
         .map_err(|e| {
             tracing::error!("Database error checking access: {}", e);
