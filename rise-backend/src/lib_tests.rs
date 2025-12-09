@@ -28,6 +28,7 @@ mod tests {
                 admin_users: vec![],
                 authorize_url: None,
                 token_url: None,
+                idp_group_sync_enabled: true,
             },
             database: DatabaseSettings {
                 url: "postgres://rise:rise123@localhost:5432/rise".to_string(),
