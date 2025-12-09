@@ -3299,33 +3299,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rise"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "axum",
- "base64 0.22.1",
- "chrono",
- "clap",
- "comfy-table",
- "dirs",
- "jsonwebtoken",
- "rand",
- "reqwest 0.12.24",
- "rise-backend",
- "rsa",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
- "urlencoding",
- "webbrowser",
-]
-
-[[package]]
 name = "rise-backend"
 version = "0.1.0"
 dependencies = [
@@ -3368,6 +3341,33 @@ dependencies = [
  "tracing-subscriber",
  "urlencoding",
  "uuid",
+]
+
+[[package]]
+name = "rise-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "base64 0.22.1",
+ "chrono",
+ "clap",
+ "comfy-table",
+ "dirs",
+ "jsonwebtoken",
+ "rand",
+ "reqwest 0.12.24",
+ "rise-backend",
+ "rsa",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+ "urlencoding",
+ "webbrowser",
 ]
 
 [[package]]

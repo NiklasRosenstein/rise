@@ -1,5 +1,5 @@
 [package]
-name = "rise"
+name = "rise-cli"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -34,4 +34,4 @@ comfy-table = "7.1"
 jsonwebtoken = "9"
 rsa = "0.9"
 # Backend dependency for shared models
-rise-backend = { path = "../rise-backend" }
+rise-backend = { path = "../rise-backend", version = "0.1.0" }
