@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::login::token_utils::format_token_expiration;
 use anyhow::{Context, Result};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -166,11 +167,21 @@ pub async fn handle_device_flow(
 
                 // Store the token
                 config
-                    .set_token(token)
+                    .set_token(token.clone())
                     .context("Failed to save authentication token")?;
 
                 println!("\n✓ Login successful!");
                 println!("  Token saved to: {}", Config::config_path()?.display());
+
+                // Display token expiration
+                match format_token_expiration(&token) {
+                    Ok(expiration) => println!("  Token expires: {}", expiration),
+                    Err(e) => {
+                        // Don't fail the login if we can't parse expiration
+                        tracing::debug!("Failed to parse token expiration: {}", e);
+                    }
+                }
+
                 return Ok(());
             } else if let Some(error) = exchange_response.error {
                 if error == "authorization_pending" || error == "slow_down" {

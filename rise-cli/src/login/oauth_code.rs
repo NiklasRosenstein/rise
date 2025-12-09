@@ -1,4 +1,5 @@
 use crate::config::Config;
+use crate::login::token_utils::format_token_expiration;
 use anyhow::{Context, Result};
 use axum::{extract::Query, response::Html, routing::get, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -241,11 +242,20 @@ pub async fn handle_authorization_code_flow(
 
     // Store the token
     config
-        .set_token(exchange_response.token)
+        .set_token(exchange_response.token.clone())
         .context("Failed to save authentication token")?;
 
     println!("✓ Login successful!");
     println!("  Token saved to: {}", Config::config_path()?.display());
+
+    // Display token expiration
+    match format_token_expiration(&exchange_response.token) {
+        Ok(expiration) => println!("  Token expires: {}", expiration),
+        Err(e) => {
+            // Don't fail the login if we can't parse expiration
+            tracing::debug!("Failed to parse token expiration: {}", e);
+        }
+    }
 
     Ok(())
 }
