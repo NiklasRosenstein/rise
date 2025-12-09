@@ -92,10 +92,16 @@ RUN mkdir -p /root/.docker/cli-plugins && \
     curl -sSL "https://github.com/docker/buildx/releases/download/v${BUILDX_VERSION}/buildx-v${BUILDX_VERSION}.linux-amd64" -o /root/.docker/cli-plugins/docker-buildx && \
     chmod +x /root/.docker/cli-plugins/docker-buildx
 
+# Install buildctl from buildkit
+RUN BUILDKIT_VERSION=$(curl -sL https://api.github.com/repos/moby/buildkit/releases/latest | grep '"tag_name":' | sed -E 's/.*"v([^"]+)".*/\1/') && \
+    curl -sSL "https://github.com/moby/buildkit/releases/download/v${BUILDKIT_VERSION}/buildkit-v${BUILDKIT_VERSION}.linux-amd64.tar.gz" | tar -xz -C /usr/local bin/buildctl && \
+    chmod +x /usr/local/bin/buildctl
+
 # Verify installations
 RUN /root/.local/bin/mise exec -- pack version && \
     /root/.local/bin/mise exec -- docker --version && \
-    /root/.local/bin/mise exec -- docker buildx version
+    /root/.local/bin/mise exec -- docker buildx version && \
+    buildctl --version
 
 # Set the entrypoint
 ENTRYPOINT []
