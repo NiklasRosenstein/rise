@@ -82,9 +82,16 @@ async fn sync_groups_after_login(
                 crate::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups).await
             {
                 // Log error but don't fail login
-                tracing::error!("Failed to sync IdP groups during login for user {}: {}", user.email, e);
+                tracing::error!(
+                    "Failed to sync IdP groups during login for user {}: {}",
+                    user.email,
+                    e
+                );
             } else {
-                tracing::info!("Successfully synced IdP groups during login for user {}", user.email);
+                tracing::info!(
+                    "Successfully synced IdP groups during login for user {}",
+                    user.email
+                );
             }
         }
     }
