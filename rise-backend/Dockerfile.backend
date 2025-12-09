@@ -98,4 +98,5 @@ RUN /root/.local/bin/mise exec -- pack version && \
     /root/.local/bin/mise exec -- docker buildx version
 
 # Set the entrypoint
-ENTRYPOINT ["/usr/bin/bash", "-c"]
+ENTRYPOINT []
+CMD ["/usr/bin/bash"]
