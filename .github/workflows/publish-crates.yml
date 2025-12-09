@@ -49,11 +49,8 @@ jobs:
           # Falls back to token-based auth if CARGO_REGISTRY_TOKEN is set
           cargo publish --no-verify
         env:
-          # For future trusted publishing support
           ACTIONS_ID_TOKEN_REQUEST_URL: ${{ env.ACTIONS_ID_TOKEN_REQUEST_URL }}
           ACTIONS_ID_TOKEN_REQUEST_TOKEN: ${{ secrets.ACTIONS_ID_TOKEN_REQUEST_TOKEN }}
-          # Fallback to classic token (comment out once trusted publishing works)
-          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
 
       - name: Wait for crates.io index update
         run: |
