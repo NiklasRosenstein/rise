@@ -884,22 +884,48 @@ fn build_image_with_buildpacks(
 
     // If SSL_CERT_FILE is set, inject CA certificate into lifecycle container
     if let Ok(ca_cert_path) = std::env::var("SSL_CERT_FILE") {
+        let cert_path = Path::new(&ca_cert_path);
+
         // Validate the file exists
-        if !std::path::Path::new(&ca_cert_path).exists() {
+        if !cert_path.exists() {
             bail!("CA certificate file not found: {}", ca_cert_path);
         }
+
+        // Convert to absolute path if relative
+        let absolute_path = if cert_path.is_absolute() {
+            cert_path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .context("Failed to get current directory")?
+                .join(cert_path)
+        };
+
+        // Resolve symlinks to get the actual file path
+        let resolved_path = absolute_path.canonicalize().with_context(|| {
+            format!(
+                "Failed to resolve certificate path: {}",
+                absolute_path.display()
+            )
+        })?;
+
+        let resolved_path_str = resolved_path
+            .to_str()
+            .ok_or_else(|| anyhow::anyhow!("Certificate path contains invalid UTF-8"))?;
 
         // Mount the CA certificate into the lifecycle container
         cmd.arg("--volume").arg(format!(
             "{}:/etc/ssl/certs/ca-certificates.crt:ro",
-            ca_cert_path
+            resolved_path_str
         ));
 
         // Tell the lifecycle container where to find the certificate
         cmd.arg("--env")
             .arg("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt");
 
-        info!("Injecting CA certificate from: {}", ca_cert_path);
+        info!(
+            "Injecting CA certificate from: {} (resolved from: {})",
+            resolved_path_str, ca_cert_path
+        );
     }
 
     debug!("Executing command: {:?}", cmd);
