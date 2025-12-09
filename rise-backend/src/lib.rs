@@ -2,6 +2,8 @@ pub mod auth;
 pub mod db;
 pub mod deployment;
 pub mod ecr;
+pub mod encryption;
+pub mod env_vars;
 pub mod frontend;
 pub mod oci;
 pub mod project;
@@ -40,6 +42,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(registry::routes::routes())
         .merge(deployment::routes::deployment_routes())
         .merge(workload_identity::routes::routes())
+        .merge(env_vars::routes::routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
@@ -71,6 +74,7 @@ pub async fn run_deployment_controller(settings: settings::Settings) -> Result<(
     // Create minimal controller state for the base controller
     let controller_state = ControllerState {
         db_pool: app_state.db_pool.clone(),
+        encryption_provider: app_state.encryption_provider.clone(),
     };
 
     // Wrap registry provider in credentials adapter
@@ -111,7 +115,8 @@ pub async fn run_deployment_controller(settings: settings::Settings) -> Result<(
 
 /// Run the project controller process
 pub async fn run_project_controller(settings: settings::Settings) -> Result<()> {
-    let state = ControllerState::new(&settings.database.url, 2).await?;
+    let state =
+        ControllerState::new(&settings.database.url, 2, settings.encryption.as_ref()).await?;
 
     let controller = Arc::new(project::ProjectController::new(Arc::new(state)));
     controller.start();
@@ -158,7 +163,8 @@ pub async fn run_ecr_controller(settings: settings::Settings) -> Result<()> {
         }
     };
 
-    let state = ControllerState::new(&settings.database.url, 2).await?;
+    let state =
+        ControllerState::new(&settings.database.url, 2, settings.encryption.as_ref()).await?;
     let manager = Arc::new(ecr::EcrRepoManager::new(ecr_config).await?);
 
     let controller = Arc::new(ecr::EcrController::new(Arc::new(state), manager));
@@ -186,6 +192,7 @@ pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<(
     let app_state = state::AppState::new_for_controller(&settings).await?;
     let controller_state = ControllerState {
         db_pool: app_state.db_pool.clone(),
+        encryption_provider: app_state.encryption_provider.clone(),
     };
 
     // Create kube client

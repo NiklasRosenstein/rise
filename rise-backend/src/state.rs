@@ -5,22 +5,26 @@ use crate::auth::{
     oauth::OAuthClient,
     token_storage::{InMemoryTokenStore, TokenStore},
 };
+use crate::encryption::EncryptionProvider;
 use crate::registry::{
     models::{EcrConfig, OciClientAuthConfig},
     providers::{EcrProvider, OciClientAuthProvider},
     RegistryProvider,
 };
-use crate::settings::{AuthSettings, RegistrySettings, ServerSettings, Settings};
+use crate::settings::{
+    AuthSettings, EncryptionSettings, RegistrySettings, ServerSettings, Settings,
+};
 use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 
-/// Minimal state for controllers - just database access
+/// Minimal state for controllers - database access and encryption
 #[derive(Clone)]
 pub struct ControllerState {
     pub db_pool: PgPool,
+    pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
 }
 
 /// Full state for HTTP server
@@ -38,11 +42,57 @@ pub struct AppState {
     pub token_store: Arc<dyn TokenStore>,
     pub cookie_settings: CookieSettings,
     pub public_url: String,
+    pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
+}
+
+/// Initialize encryption provider from settings
+async fn init_encryption_provider(
+    encryption_settings: Option<&EncryptionSettings>,
+) -> Result<Option<Arc<dyn EncryptionProvider>>> {
+    if let Some(encryption_config) = encryption_settings {
+        match encryption_config {
+            EncryptionSettings::Local { key } => {
+                use crate::encryption::providers::local::LocalEncryptionProvider;
+                let provider = LocalEncryptionProvider::new(key)
+                    .context("Failed to initialize local encryption provider")?;
+                tracing::info!("Initialized local AES-256-GCM encryption provider");
+                Ok(Some(Arc::new(provider)))
+            }
+            EncryptionSettings::AwsKms {
+                region,
+                key_id,
+                access_key_id,
+                secret_access_key,
+            } => {
+                use crate::encryption::providers::aws_kms::AwsKmsEncryptionProvider;
+                let provider = AwsKmsEncryptionProvider::new(
+                    region,
+                    key_id.clone(),
+                    access_key_id.clone(),
+                    secret_access_key.clone(),
+                )
+                .await
+                .context("Failed to initialize AWS KMS encryption provider")?;
+                tracing::info!(
+                    "Initialized AWS KMS encryption provider with key {}",
+                    key_id
+                );
+                Ok(Some(Arc::new(provider)))
+            }
+        }
+    } else {
+        tracing::info!("No encryption provider configured");
+        Ok(None)
+    }
 }
 
 impl ControllerState {
-    /// Create minimal controller state with database access only
-    pub async fn new(database_url: &str, max_connections: u32) -> Result<Self> {
+    /// Create minimal controller state with database access and encryption
+    pub async fn new(
+        database_url: &str,
+        max_connections: u32,
+        encryption_settings: Option<&EncryptionSettings>,
+    ) -> Result<Self> {
         tracing::info!(
             "Connecting to PostgreSQL with {} max connections...",
             max_connections
@@ -55,7 +105,13 @@ impl ControllerState {
             .context("Failed to connect to PostgreSQL")?;
 
         tracing::info!("Successfully connected to PostgreSQL");
-        Ok(Self { db_pool })
+
+        let encryption_provider = init_encryption_provider(encryption_settings).await?;
+
+        Ok(Self {
+            db_pool,
+            encryption_provider,
+        })
     }
 }
 
@@ -222,6 +278,9 @@ impl AppState {
         let public_url = settings.server.public_url.clone();
         tracing::info!("Public URL: {}", public_url);
 
+        // Initialize encryption provider
+        let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -235,6 +294,7 @@ impl AppState {
             token_store,
             cookie_settings,
             public_url,
+            encryption_provider,
         })
     }
 
@@ -361,6 +421,9 @@ impl AppState {
         };
         let public_url = "http://localhost:3000".to_string(); // Dummy value, not used by controller
 
+        // Initialize encryption provider
+        let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -374,6 +437,7 @@ impl AppState {
             token_store,
             cookie_settings,
             public_url,
+            encryption_provider,
         })
     }
 }

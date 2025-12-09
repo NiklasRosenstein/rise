@@ -34,7 +34,11 @@ async-trait = "0.1"
 base64 = "0.22"
 aws-config = { version = "1.5", features = ["behavior-version-latest"] }
 aws-sdk-ecr = "1.80"
+aws-sdk-kms = "1.80"
 aws-sdk-sts = "1.80"
+
+# Encryption dependencies
+aes-gcm = "0.10"
 
 # OAuth2 proxy dependencies
 moka = { version = "0.12", features = ["sync"] }

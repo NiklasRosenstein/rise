@@ -13,6 +13,8 @@ pub struct Settings {
     pub registry: Option<RegistrySettings>,
     #[serde(default)]
     pub kubernetes: Option<KubernetesSettings>,
+    #[serde(default)]
+    pub encryption: Option<EncryptionSettings>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -287,6 +289,32 @@ pub enum RegistrySettings {
         registry_url: String,
         #[serde(default)]
         namespace: String,
+    },
+}
+
+/// Encryption provider configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum EncryptionSettings {
+    /// Local AES-256-GCM encryption using a symmetric key
+    #[serde(rename = "aes-gcm-256")]
+    Local {
+        /// Base64-encoded 32-byte encryption key
+        /// Generate with: openssl rand -base64 32
+        key: String,
+    },
+    /// AWS KMS encryption
+    #[serde(rename = "aws-kms")]
+    AwsKms {
+        region: String,
+        /// KMS key ID or ARN
+        key_id: String,
+        /// Optional static credentials (development only)
+        #[serde(default)]
+        access_key_id: Option<String>,
+        /// Optional static credentials (development only)
+        #[serde(default)]
+        secret_access_key: Option<String>,
     },
 }
 
