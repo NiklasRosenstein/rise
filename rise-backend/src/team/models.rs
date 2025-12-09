@@ -55,6 +55,9 @@ pub struct Team {
     pub members: Vec<String>, // User IDs
     #[serde(default)]
     pub owners: Vec<String>, // User IDs
+    /// Whether this team is managed by an Identity Provider
+    #[serde(default)]
+    pub idp_managed: bool,
     // Timestamps
     #[serde(default)]
     pub created: String,
@@ -100,6 +103,8 @@ pub struct TeamWithEmails {
     pub name: String,
     pub members: Vec<UserInfo>,
     pub owners: Vec<UserInfo>,
+    /// Whether this team is managed by an Identity Provider
+    pub idp_managed: bool,
     pub created: String,
     pub updated: String,
 }

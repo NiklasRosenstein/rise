@@ -202,6 +202,17 @@ pub async fn update_team(
         ));
     }
 
+    // Check if team is IdP-managed (only admins can modify)
+    if team.idp_managed && !is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(TeamErrorResponse {
+                error: "This team is managed by your Identity Provider. Only administrators can modify IdP-managed teams.".to_string(),
+                suggestions: None,
+            }),
+        ));
+    }
+
     // Update name if provided
     let updated_team = if let Some(_name) = payload.name {
         // For now, we don't have an update_name function, we'll need to add it
@@ -476,6 +487,17 @@ pub async fn delete_team(
         ));
     }
 
+    // Check if team is IdP-managed (only admins can delete)
+    if team.idp_managed && !is_admin {
+        return Err((
+            StatusCode::FORBIDDEN,
+            Json(TeamErrorResponse {
+                error: "This team is managed by your Identity Provider. Only administrators can delete IdP-managed teams.".to_string(),
+                suggestions: None,
+            }),
+        ));
+    }
+
     db_teams::delete(&state.db_pool, team.id)
         .await
         .map_err(|e| {
@@ -594,6 +616,7 @@ async fn expand_team_with_emails(
         name: team.name,
         members: member_infos,
         owners: owner_infos,
+        idp_managed: team.idp_managed,
         created: team.created_at.to_rfc3339(),
         updated: team.updated_at.to_rfc3339(),
     })
@@ -675,6 +698,7 @@ fn convert_team(
         name: team.name,
         members,
         owners,
+        idp_managed: team.idp_managed,
         created: team.created_at.to_rfc3339(),
         updated: team.updated_at.to_rfc3339(),
     }
