@@ -523,7 +523,14 @@ pub async fn create_deployment(
     expires_in: Option<&str>,
     http_port: u16,
     builder: Option<&str>,
+    container_cli: Option<&str>,
 ) -> Result<()> {
+    // Resolve which container CLI to use
+    let container_cli = container_cli
+        .map(String::from)
+        .unwrap_or_else(|| config.get_container_cli());
+
+    debug!("Using container CLI: {}", container_cli);
     if let Some(image_ref) = image {
         info!(
             "Deploying project '{}' with pre-built image '{}'",
@@ -601,6 +608,7 @@ pub async fn create_deployment(
         if !deployment_info.credentials.username.is_empty() {
             info!("Logging into registry");
             if let Err(e) = docker_login(
+                &container_cli,
                 &deployment_info.credentials.registry_url,
                 &deployment_info.credentials.username,
                 &deployment_info.credentials.password,
@@ -660,7 +668,7 @@ pub async fn create_deployment(
 
         // Step 5a: Push image to registry
         info!("Pushing image to registry: {}", deployment_info.image_tag);
-        if let Err(e) = docker_push(&deployment_info.image_tag) {
+        if let Err(e) = docker_push(&container_cli, &deployment_info.image_tag) {
             update_deployment_status(
                 http_client,
                 backend_url,
@@ -905,30 +913,32 @@ fn build_image_with_buildpacks(
     Ok(())
 }
 
-fn docker_push(image_tag: &str) -> Result<()> {
+fn docker_push(container_cli: &str, image_tag: &str) -> Result<()> {
     info!("Pushing image to registry: {}", image_tag);
 
-    let mut cmd = Command::new("docker");
+    let mut cmd = Command::new(container_cli);
     cmd.arg("push").arg(image_tag);
 
     debug!("Executing command: {:?}", cmd);
 
-    let status = cmd.status().context("Failed to execute docker push")?;
+    let status = cmd
+        .status()
+        .with_context(|| format!("Failed to execute {} push", container_cli))?;
 
     if !status.success() {
-        bail!("docker push failed with status: {}", status);
+        bail!("{} push failed with status: {}", container_cli, status);
     }
 
     Ok(())
 }
 
-fn docker_login(registry: &str, username: &str, password: &str) -> Result<()> {
+fn docker_login(container_cli: &str, registry: &str, username: &str, password: &str) -> Result<()> {
     debug!(
-        "Executing: docker login {} --username {} --password-stdin",
-        registry, username
+        "Executing: {} login {} --username {} --password-stdin",
+        container_cli, registry, username
     );
 
-    let status = Command::new("docker")
+    let status = Command::new(container_cli)
         .arg("login")
         .arg(registry)
         .arg("--username")
@@ -943,10 +953,10 @@ fn docker_login(registry: &str, username: &str, password: &str) -> Result<()> {
             }
             child.wait()
         })
-        .context("Failed to execute docker login")?;
+        .with_context(|| format!("Failed to execute {} login", container_cli))?;
 
     if !status.success() {
-        bail!("docker login failed with status: {}", status);
+        bail!("{} login failed with status: {}", container_cli, status);
     }
 
     Ok(())

@@ -207,6 +207,9 @@ enum DeploymentCommands {
         /// Defaults to 'paketobuildpacks/builder:base'. Only used when building from source.
         #[arg(long)]
         builder: Option<String>,
+        /// Container CLI to use (docker or podman). Falls back to RISE_CONTAINER_CLI env var, then auto-detection.
+        #[arg(long)]
+        container_cli: Option<String>,
     },
     /// List deployments for a project
     #[command(visible_alias = "ls")]
@@ -532,6 +535,7 @@ async fn main() -> Result<()> {
                 expire,
                 http_port,
                 builder,
+                container_cli,
             } => {
                 // Validate http_port requirements
                 let port = match (image.as_ref(), http_port) {
@@ -569,6 +573,7 @@ async fn main() -> Result<()> {
                     expire.as_deref(),
                     port,
                     builder.as_deref(),
+                    container_cli.as_deref(),
                 )
                 .await?;
             }

@@ -13,6 +13,7 @@ use std::path::PathBuf;
 pub struct Config {
     pub token: Option<String>,
     pub backend_url: Option<String>,
+    pub container_cli: Option<String>,
 }
 
 impl Config {
@@ -92,6 +93,57 @@ impl Config {
             .clone()
             .unwrap_or_else(|| "http://localhost:3000".to_string())
     }
+
+    /// Set the container CLI
+    pub fn set_container_cli(&mut self, cli: String) -> Result<()> {
+        self.container_cli = Some(cli);
+        self.save()
+    }
+
+    /// Get the container CLI to use (docker or podman)
+    /// Checks RISE_CONTAINER_CLI environment variable first, then falls back to config file,
+    /// then to auto-detection (podman if available, docker otherwise)
+    pub fn get_container_cli(&self) -> String {
+        // Check environment variable first
+        if let Ok(cli) = std::env::var("RISE_CONTAINER_CLI") {
+            return cli;
+        }
+        // Fall back to config file
+        if let Some(ref cli) = self.container_cli {
+            return cli.clone();
+        }
+        // Auto-detect: prefer podman if docker is not available
+        detect_container_cli()
+    }
+}
+
+/// Auto-detect which container CLI is available
+/// Returns "podman" if docker is not available and podman is, otherwise "docker"
+fn detect_container_cli() -> String {
+    use std::process::Command;
+
+    // Check if docker is available
+    if Command::new("docker")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return "docker".to_string();
+    }
+
+    // Check if podman is available
+    if Command::new("podman")
+        .arg("--version")
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+    {
+        return "podman".to_string();
+    }
+
+    // Default to docker if neither is detected
+    "docker".to_string()
 }
 
 #[cfg(test)]
