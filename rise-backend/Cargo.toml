@@ -5,6 +5,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
+include = [
+    "src/**/*",
+    "migrations/**/*",
+    "templates/**/*",
+    "frontend/**/*",
+    ".sqlx/**/*",
+    "Cargo.toml",
+]
 
 [dependencies]
 anyhow = "1.0.100"
