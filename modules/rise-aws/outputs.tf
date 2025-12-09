@@ -4,12 +4,12 @@
 
 output "role_arn" {
   description = "ARN of the IAM role for the Rise backend"
-  value       = var.create_iam_role ? aws_iam_role.backend[0].arn : null
+  value       = aws_iam_role.backend.arn
 }
 
 output "role_name" {
   description = "Name of the IAM role for the Rise backend"
-  value       = var.create_iam_role ? aws_iam_role.backend[0].name : null
+  value       = aws_iam_role.backend.name
 }
 
 # -----------------------------------------------------------------------------
@@ -44,12 +44,12 @@ output "secret_access_key" {
 
 output "push_role_arn" {
   description = "ARN of the IAM role for push operations"
-  value       = var.create_push_role ? aws_iam_role.push_role[0].arn : null
+  value       = aws_iam_role.push_role.arn
 }
 
 output "push_role_name" {
   description = "Name of the IAM role for push operations"
-  value       = var.create_push_role ? aws_iam_role.push_role[0].name : null
+  value       = aws_iam_role.push_role.name
 }
 
 # -----------------------------------------------------------------------------
@@ -63,12 +63,26 @@ output "controller_policy_arn" {
 
 output "push_policy_arn" {
   description = "ARN of the IAM policy for push operations"
-  value       = var.create_push_role ? aws_iam_policy.push_role[0].arn : null
+  value       = aws_iam_policy.push_role.arn
 }
 
 output "policy_document" {
   description = "The IAM policy document JSON for the Rise backend"
   value       = data.aws_iam_policy_document.backend.json
+}
+
+# -----------------------------------------------------------------------------
+# KMS Key outputs
+# -----------------------------------------------------------------------------
+
+output "kms_key_arn" {
+  description = "ARN of the KMS key for ECR encryption (null if using AES256)"
+  value       = var.encryption_type == "KMS" ? aws_kms_key.ecr[0].arn : null
+}
+
+output "kms_key_id" {
+  description = "ID of the KMS key for ECR encryption (null if using AES256)"
+  value       = var.encryption_type == "KMS" ? aws_kms_key.ecr[0].key_id : null
 }
 
 # -----------------------------------------------------------------------------
@@ -80,10 +94,9 @@ output "rise_config" {
   value = {
     region        = local.region
     account_id    = local.account_id
-    repo_prefix   = var.repo_prefix
-    role_arn      = var.create_iam_role ? aws_iam_role.backend[0].arn : null
-    push_role_arn = var.create_push_role ? aws_iam_role.push_role[0].arn : null
-    auto_remove   = var.auto_remove
+    repo_prefix   = local.repo_prefix
+    role_arn      = aws_iam_role.backend.arn
+    push_role_arn = aws_iam_role.push_role.arn
   }
 }
 
