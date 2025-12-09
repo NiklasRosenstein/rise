@@ -72,6 +72,10 @@ fn default_secret_refresh_interval() -> u64 {
     3600
 }
 
+fn default_idp_group_sync_enabled() -> bool {
+    true
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct ControllerSettings {
     /// Interval in seconds for checking deployments to reconcile (default: 5)
@@ -130,6 +134,10 @@ pub struct AuthSettings {
     /// or default to {issuer}/token
     #[serde(default)]
     pub token_url: Option<String>,
+    /// Enable IdP group synchronization (default: true)
+    /// When enabled, user team memberships are automatically synced from IdP groups claim on login
+    #[serde(default = "default_idp_group_sync_enabled")]
+    pub idp_group_sync_enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Clone)]

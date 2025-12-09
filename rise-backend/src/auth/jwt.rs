@@ -18,6 +18,10 @@ pub struct Claims {
     pub iat: usize,    // Issued at
     #[serde(default)]
     pub name: Option<String>, // User's full name
+    /// Groups claim from IdP (optional array of group names)
+    /// Used for automatic team synchronization
+    #[serde(default)]
+    pub groups: Option<Vec<String>>,
 }
 
 /// JWKS (JSON Web Key Set) response from OIDC provider
