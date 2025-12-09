@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 /// Registry credentials response
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RegistryCredentials {
-    /// Registry URL (e.g., "123456789.dkr.ecr.us-east-1.amazonaws.com")
+    /// Registry path for docker login (e.g., "123456789.dkr.ecr.us-east-1.amazonaws.com/rise/myapp")
+    /// This should be the full repository path that the credentials are scoped to
     pub registry_url: String,
     /// Username for authentication
     pub username: String,

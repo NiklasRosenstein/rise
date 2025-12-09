@@ -16,6 +16,8 @@ use crate::registry::{
 pub struct EcrProvider {
     config: EcrConfig,
     sts_client: StsClient,
+    /// Default registry path with prefix (e.g., "459109751375.dkr.ecr.eu-west-1.amazonaws.com/rise/")
+    /// Used when no specific repository is provided to get_ecr_auth_token()
     registry_url: String,
     /// Registry host without path (e.g., "459109751375.dkr.ecr.eu-west-1.amazonaws.com")
     registry_host: String,
@@ -70,8 +72,10 @@ impl EcrProvider {
     /// Cache TTL for pull credentials (11 hours, 1 hour buffer before 12h expiry)
     const CACHE_TTL_SECS: u64 = 11 * 60 * 60;
 
-    /// Get ECR authorization token using the provided ECR client
-    async fn get_ecr_auth_token(&self, client: &EcrClient) -> Result<RegistryCredentials> {
+    /// Decode ECR authorization token from the client response
+    ///
+    /// Returns (username, password) tuple from the base64-encoded token
+    async fn decode_ecr_token(&self, client: &EcrClient) -> Result<(String, String)> {
         let response = client
             .get_authorization_token()
             .send()
@@ -99,14 +103,30 @@ impl EcrProvider {
             anyhow::bail!("Invalid ECR token format");
         }
 
-        let username = parts[0].to_string();
-        let password = parts[1].to_string();
+        Ok((parts[0].to_string(), parts[1].to_string()))
+    }
+
+    /// Get ECR authorization token using the provided ECR client
+    ///
+    /// # Arguments
+    /// * `client` - ECR client to use for authentication (should already be scoped with appropriate credentials)
+    /// * `repo_name` - Full repository name (e.g., "rise/compass")
+    async fn get_ecr_auth_token(
+        &self,
+        client: &EcrClient,
+        repo_name: &str,
+    ) -> Result<RegistryCredentials> {
+        let (username, password) = self.decode_ecr_token(client).await?;
 
         // ECR tokens are valid for 12 hours
         let expires_in = Some(12 * 60 * 60); // 12 hours in seconds
 
+        // Build full repository path for docker login
+        // Example: "459109751375.dkr.ecr.eu-west-1.amazonaws.com/rise/compass"
+        let registry_url = format!("{}/{}", self.registry_host, repo_name);
+
         Ok(RegistryCredentials {
-            registry_url: self.registry_url.clone(),
+            registry_url,
             username,
             password,
             expires_in,
@@ -198,8 +218,9 @@ impl RegistryProvider for EcrProvider {
 
         let scoped_ecr_client = EcrClient::new(&scoped_aws_config);
 
-        // Get ECR auth token with scoped credentials
-        self.get_ecr_auth_token(&scoped_ecr_client).await
+        // Get ECR auth token with scoped credentials for this specific repository
+        self.get_ecr_auth_token(&scoped_ecr_client, &repo_name)
+            .await
     }
 
     async fn get_pull_credentials(&self) -> Result<(String, String)> {
@@ -249,19 +270,15 @@ impl RegistryProvider for EcrProvider {
             .await;
 
         let ecr_client = EcrClient::new(&assumed_aws_config);
-        let ecr_creds = self.get_ecr_auth_token(&ecr_client).await?;
+        let (username, password) = self.decode_ecr_token(&ecr_client).await?;
 
         // Update cache
         {
             let mut cache = self.cached_pull_creds.write().unwrap();
-            *cache = Some((
-                ecr_creds.username.clone(),
-                ecr_creds.password.clone(),
-                Instant::now(),
-            ));
+            *cache = Some((username.clone(), password.clone(), Instant::now()));
         }
 
-        Ok((ecr_creds.username, ecr_creds.password))
+        Ok((username, password))
     }
 
     fn registry_host(&self) -> &str {
