@@ -84,6 +84,7 @@ ENV PATH="/root/.local/bin:/root/.local/share/mise/shims:${PATH}"
 # Install build tools via mise
 RUN /root/.local/bin/mise use -g pack@latest && \
     /root/.local/bin/mise use -g docker-cli@latest && \
+    /root/.local/bin/mise use -g ubi:railwayapp/railpack@latest && \
     /root/.local/bin/mise install
 
 # Install Docker buildx plugin manually
