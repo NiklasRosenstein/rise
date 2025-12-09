@@ -123,6 +123,20 @@ jobs:
   test:
     name: Run tests
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: rise_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -151,10 +165,21 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-target-test-
 
+      - name: Install sqlx-cli
+        run: cargo install sqlx-cli --no-default-features --features postgres
+
+      - name: Run database migrations
+        run: |
+          cd rise-backend
+          sqlx database create
+          sqlx migrate run
+        env:
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/rise_test
+
       - name: Run tests
         run: cargo test --workspace
         env:
-          SQLX_OFFLINE: true
+          DATABASE_URL: postgres://postgres:postgres@localhost:5432/rise_test
 
   build:
     name: Build all targets
