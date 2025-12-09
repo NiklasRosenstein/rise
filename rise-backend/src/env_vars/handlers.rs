@@ -8,6 +8,21 @@ use axum::{
     Json,
 };
 
+/// Format an error and its full chain of causes for logging/display
+fn format_error_chain(error: &anyhow::Error) -> String {
+    let mut chain = vec![error.to_string()];
+
+    // Collect all causes
+    let mut current_error = error.source();
+    while let Some(cause) = current_error {
+        chain.push(cause.to_string());
+        current_error = cause.source();
+    }
+
+    // Join them with " -> " to show the causal chain
+    chain.join(" -> ")
+}
+
 /// Set or update a project environment variable
 pub async fn set_project_env_var(
     State(state): State<AppState>,
@@ -70,9 +85,14 @@ pub async fn set_project_env_var(
             .expect("Encryption provider checked above");
 
         provider.encrypt(&payload.value).await.map_err(|e| {
+            // Log the full error chain for debugging
+            tracing::error!("Encryption failed: {:?}", e);
+
+            // Format error chain for the response
+            let error_chain = format_error_chain(&e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to encrypt secret: {}", e),
+                format!("Failed to encrypt secret: {}", error_chain),
             )
         })?
     } else {

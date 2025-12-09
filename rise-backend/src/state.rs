@@ -55,7 +55,12 @@ async fn init_encryption_provider(
                 use crate::encryption::providers::local::LocalEncryptionProvider;
                 let provider = LocalEncryptionProvider::new(key)
                     .context("Failed to initialize local encryption provider")?;
-                tracing::info!("Initialized local AES-256-GCM encryption provider");
+
+                // Test encryption/decryption at startup
+                tracing::info!("Testing local encryption provider...");
+                test_encryption_provider(&provider).await?;
+                tracing::info!("✓ Local AES-256-GCM encryption provider initialized and validated");
+
                 Ok(Some(Arc::new(provider)))
             }
             EncryptionSettings::AwsKms {
@@ -73,17 +78,51 @@ async fn init_encryption_provider(
                 )
                 .await
                 .context("Failed to initialize AWS KMS encryption provider")?;
-                tracing::info!(
-                    "Initialized AWS KMS encryption provider with key {}",
-                    key_id
-                );
+
+                // Test encryption/decryption at startup
+                tracing::info!("Testing AWS KMS encryption provider with key {}...", key_id);
+                test_encryption_provider(&provider).await.with_context(|| {
+                    format!(
+                        "KMS provider initialized but encryption test failed. \
+                         Please verify: 1) Key ARN/ID '{}' is valid, \
+                         2) AWS credentials are available, \
+                         3) IAM permissions include kms:Encrypt and kms:Decrypt, \
+                         4) Key is enabled and not pending deletion",
+                        key_id
+                    )
+                })?;
+                tracing::info!("✓ AWS KMS encryption provider initialized and validated");
+
                 Ok(Some(Arc::new(provider)))
             }
         }
     } else {
-        tracing::info!("No encryption provider configured");
+        tracing::info!("No encryption provider configured - secret environment variables will not be available");
         Ok(None)
     }
+}
+
+/// Test an encryption provider with a sample encrypt/decrypt round-trip
+async fn test_encryption_provider(provider: &dyn EncryptionProvider) -> Result<()> {
+    const TEST_PLAINTEXT: &str = "rise-encryption-test-12345";
+
+    let ciphertext = provider
+        .encrypt(TEST_PLAINTEXT)
+        .await
+        .context("Encryption test failed")?;
+
+    let decrypted = provider
+        .decrypt(&ciphertext)
+        .await
+        .context("Decryption test failed")?;
+
+    if decrypted != TEST_PLAINTEXT {
+        anyhow::bail!(
+            "Encryption round-trip test failed: decrypted value does not match original"
+        );
+    }
+
+    Ok(())
 }
 
 impl ControllerState {

@@ -56,7 +56,15 @@ impl EncryptionProvider for AwsKmsEncryptionProvider {
             .plaintext(Blob::new(plaintext.as_bytes()))
             .send()
             .await
-            .context("KMS encryption failed")?;
+            .with_context(|| {
+                format!(
+                    "KMS encryption failed for key '{}'. Common causes: \
+                     1) Invalid key ARN/ID, 2) No AWS credentials available, \
+                     3) Insufficient IAM permissions (kms:Encrypt), \
+                     4) Key is disabled or pending deletion",
+                    self.key_id
+                )
+            })?;
 
         let ciphertext_blob = response
             .ciphertext_blob()
@@ -78,7 +86,14 @@ impl EncryptionProvider for AwsKmsEncryptionProvider {
             .ciphertext_blob(Blob::new(ciphertext_bytes))
             .send()
             .await
-            .context("KMS decryption failed")?;
+            .with_context(|| {
+                format!(
+                    "KMS decryption failed for key '{}'. Common causes: \
+                     1) No AWS credentials available, 2) Insufficient IAM permissions (kms:Decrypt), \
+                     3) Key is disabled or pending deletion, 4) Ciphertext was encrypted with a different key",
+                    self.key_id
+                )
+            })?;
 
         let plaintext_blob = response
             .plaintext()
