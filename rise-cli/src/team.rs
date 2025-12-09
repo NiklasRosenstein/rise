@@ -110,6 +110,8 @@ struct Team {
     name: String,
     members: Vec<String>,
     owners: Vec<String>,
+    #[serde(default)]
+    idp_managed: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -118,6 +120,8 @@ struct TeamWithEmails {
     name: String,
     members: Vec<UserInfo>,
     owners: Vec<UserInfo>,
+    #[serde(default)]
+    idp_managed: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -243,8 +247,15 @@ pub async fn list_teams(http_client: &Client, backend_url: &str, config: &Config
                 ]);
 
             for team in teams {
+                // Add (IdP) indicator for IdP-managed teams
+                let team_name = if team.idp_managed {
+                    format!("{} (IdP)", team.name)
+                } else {
+                    team.name.clone()
+                };
+
                 table.add_row(vec![
-                    Cell::new(&team.name),
+                    Cell::new(&team_name),
                     Cell::new(&team.id),
                     Cell::new(team.owners.len()),
                     Cell::new(team.members.len()),
@@ -295,7 +306,12 @@ pub async fn show_team(
             .await
             .context("Failed to parse get team response")?;
 
-        println!("Team: {}", team.name);
+        let team_name = if team.idp_managed {
+            format!("{} (IdP-managed)", team.name)
+        } else {
+            team.name.clone()
+        };
+        println!("Team: {}", team_name);
         println!("ID: {}", team.id);
 
         // Display owners table
