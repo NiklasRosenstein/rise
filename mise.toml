@@ -6,7 +6,12 @@ pack = "0.39.0"
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
-run = "cargo sqlx prepare --workspace -- --all-targets"
+run = """
+cargo sqlx prepare --workspace -- --all-targets
+# Copy workspace .sqlx to rise-backend for cargo publish compatibility
+rm -rf rise-backend/.sqlx
+cp -r .sqlx rise-backend/.sqlx
+"""
 
 [tasks."sqlx:check"]
 description = "Check that all SQLX queries are valid."
