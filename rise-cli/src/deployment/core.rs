@@ -116,11 +116,12 @@ fn stop_buildkit_daemon(container_cli: &str, daemon_name: &str) -> Result<()> {
 }
 
 /// Create BuildKit daemon with SSL certificate mounted
+/// Returns the BUILDKIT_HOST value to be used with this daemon
 fn create_buildkit_daemon(
     container_cli: &str,
     daemon_name: &str,
     ssl_cert_file: &Path,
-) -> Result<()> {
+) -> Result<String> {
     info!(
         "Creating managed BuildKit daemon '{}' with SSL certificate: {}",
         daemon_name,
@@ -170,19 +171,15 @@ fn create_buildkit_daemon(
         bail!("Failed to create BuildKit daemon");
     }
 
-    // Set BUILDKIT_HOST environment variable for subsequent commands
-    std::env::set_var(
-        "BUILDKIT_HOST",
-        format!("docker-container://{}", daemon_name),
-    );
-
     info!("BuildKit daemon '{}' created successfully", daemon_name);
 
-    Ok(())
+    // Return BUILDKIT_HOST value for this daemon
+    Ok(format!("docker-container://{}", daemon_name))
 }
 
 /// Ensure managed BuildKit daemon is running with correct SSL certificate
-fn ensure_managed_buildkit_daemon(ssl_cert_file: &Path, container_cli: &str) -> Result<()> {
+/// Returns the BUILDKIT_HOST value to be used with this daemon
+fn ensure_managed_buildkit_daemon(ssl_cert_file: &Path, container_cli: &str) -> Result<String> {
     let daemon_name = "rise-buildkit";
 
     // Check if daemon exists
@@ -203,12 +200,8 @@ fn ensure_managed_buildkit_daemon(ssl_cert_file: &Path, container_cli: &str) -> 
 
                 if current_hash == expected_hash {
                     debug!("BuildKit daemon is up-to-date with current SSL_CERT_FILE");
-                    // Set BUILDKIT_HOST for this session
-                    std::env::set_var(
-                        "BUILDKIT_HOST",
-                        format!("docker-container://{}", daemon_name),
-                    );
-                    return Ok(());
+                    // Return BUILDKIT_HOST for this daemon
+                    return Ok(format!("docker-container://{}", daemon_name));
                 }
 
                 info!("SSL certificate has changed (hash mismatch), recreating daemon");
@@ -224,10 +217,8 @@ fn ensure_managed_buildkit_daemon(ssl_cert_file: &Path, container_cli: &str) -> 
         }
     }
 
-    // Create new daemon with certificate
-    create_buildkit_daemon(container_cli, daemon_name, ssl_cert_file)?;
-
-    Ok(())
+    // Create new daemon with certificate and return its BUILDKIT_HOST
+    create_buildkit_daemon(container_cli, daemon_name, ssl_cert_file)
 }
 
 /// Warn user about SSL certificate issues when managed BuildKit is disabled
@@ -772,16 +763,21 @@ pub fn build_image(
     let use_managed_buildkit = managed_buildkit.unwrap_or_else(|| config.get_managed_buildkit());
 
     // Handle SSL certificate and BuildKit daemon management
-    if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
+    let buildkit_host = if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
         if requires_buildkit(&build_method) {
             if use_managed_buildkit {
                 let cert_path = Path::new(&ssl_cert_file);
-                ensure_managed_buildkit_daemon(cert_path, &container_cli)?;
+                Some(ensure_managed_buildkit_daemon(cert_path, &container_cli)?)
             } else {
                 check_ssl_cert_and_warn(&build_method, use_managed_buildkit);
+                None
             }
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     match build_method {
         BuildMethod::Docker => {
@@ -795,6 +791,7 @@ pub fn build_image(
                 &container_cli,
                 false, // use_buildx: always false for docker backend (use railpack:buildx for buildx)
                 false, // push=false for local build
+                buildkit_host.as_deref(),
             )?;
         }
         BuildMethod::Pack => {
@@ -811,6 +808,7 @@ pub fn build_image(
                 &container_cli,
                 use_buildctl,
                 false, // push=false for local build
+                buildkit_host.as_deref(),
             )?;
         }
     }
@@ -878,19 +876,26 @@ pub async fn create_deployment(
     let use_managed_buildkit = managed_buildkit.unwrap_or_else(|| config.get_managed_buildkit());
 
     // Handle SSL certificate and BuildKit daemon management (only when building, not for pre-built images)
-    if image.is_none() {
+    let buildkit_host = if image.is_none() {
         if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
             let build_method = select_build_method(path, backend)?;
             if requires_buildkit(&build_method) {
                 if use_managed_buildkit {
                     let cert_path = Path::new(&ssl_cert_file);
-                    ensure_managed_buildkit_daemon(cert_path, &container_cli)?;
+                    Some(ensure_managed_buildkit_daemon(cert_path, &container_cli)?)
                 } else {
                     check_ssl_cert_and_warn(&build_method, use_managed_buildkit);
+                    None
                 }
+            } else {
+                None
             }
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     // Get authentication token
     let token = config
@@ -994,6 +999,7 @@ pub async fn create_deployment(
                     &container_cli,
                     false, // use_buildx: could be a CLI flag in future
                     true,  // push: true for deployment
+                    buildkit_host.as_deref(),
                 ) {
                     update_deployment_status(
                         http_client,
@@ -1066,6 +1072,7 @@ pub async fn create_deployment(
                     &container_cli,
                     use_buildctl,
                     true, // push: true for deployment
+                    buildkit_host.as_deref(),
                 ) {
                     update_deployment_status(
                         http_client,
@@ -1349,6 +1356,7 @@ fn build_image_with_dockerfile(
     container_cli: &str,
     use_buildx: bool,
     push: bool,
+    buildkit_host: Option<&str>,
 ) -> Result<()> {
     // Check if container CLI is available
     let cli_check = Command::new(container_cli).arg("--version").output();
@@ -1390,6 +1398,13 @@ fn build_image_with_dockerfile(
 
     // Add platform flag for consistent architecture
     cmd.arg("--platform").arg("linux/amd64");
+
+    // Set BUILDKIT_HOST if provided and using buildx
+    if use_buildx {
+        if let Some(host) = buildkit_host {
+            cmd.env("BUILDKIT_HOST", host);
+        }
+    }
 
     if push && supports_push_flag {
         // Only use --push with buildx
@@ -1438,6 +1453,7 @@ fn build_image_with_railpacks(
     container_cli: &str,
     use_buildctl: bool,
     push: bool,
+    buildkit_host: Option<&str>,
 ) -> Result<()> {
     // Check railpack CLI availability
     let railpack_check = Command::new("railpack").arg("--version").output();
@@ -1493,9 +1509,16 @@ fn build_image_with_railpacks(
 
     // Build with buildx or buildctl
     if use_buildctl {
-        build_with_buildctl(app_path, &plan_file, image_tag, push)?;
+        build_with_buildctl(app_path, &plan_file, image_tag, push, buildkit_host)?;
     } else {
-        build_with_buildx(app_path, &plan_file, image_tag, container_cli, push)?;
+        build_with_buildx(
+            app_path,
+            &plan_file,
+            image_tag,
+            container_cli,
+            push,
+            buildkit_host,
+        )?;
     }
 
     Ok(())
@@ -1508,6 +1531,7 @@ fn build_with_buildx(
     image_tag: &str,
     container_cli: &str,
     push: bool,
+    buildkit_host: Option<&str>,
 ) -> Result<()> {
     // Check buildx availability
     let buildx_check = Command::new(container_cli)
@@ -1536,6 +1560,11 @@ fn build_with_buildx(
         .arg(image_tag)
         .arg("--platform")
         .arg("linux/amd64");
+
+    // Set BUILDKIT_HOST if provided
+    if let Some(host) = buildkit_host {
+        cmd.env("BUILDKIT_HOST", host);
+    }
 
     if push {
         cmd.arg("--push");
@@ -1569,6 +1598,7 @@ fn build_with_buildctl(
     plan_file: &Path,
     image_tag: &str,
     push: bool,
+    buildkit_host: Option<&str>,
 ) -> Result<()> {
     // Check buildctl availability
     let buildctl_check = Command::new("buildctl").arg("--version").output();
@@ -1593,6 +1623,11 @@ fn build_with_buildctl(
         .arg("--opt")
         .arg("source=ghcr.io/railwayapp/railpack-frontend")
         .arg("--output");
+
+    // Set BUILDKIT_HOST if provided
+    if let Some(host) = buildkit_host {
+        cmd.env("BUILDKIT_HOST", host);
+    }
 
     if push {
         cmd.arg(format!(
