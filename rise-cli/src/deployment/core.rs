@@ -757,7 +757,7 @@ pub async fn create_deployment(
 
         match build_method {
             BuildMethod::Docker => {
-                // Build and push in one step with Docker
+                // Build and push (buildx uses --push, regular docker/podman uses separate push)
                 info!("Building image with docker: {}", deployment_info.image_tag);
 
                 if let Err(e) = build_image_with_dockerfile(
@@ -779,7 +779,7 @@ pub async fn create_deployment(
                     return Err(e);
                 }
 
-                // Image already pushed via --push flag, skip separate push step
+                // Image pushed (either via --push for buildx or separate push for docker/podman)
             }
             BuildMethod::Pack => {
                 // Build with pack (buildpacks)
@@ -1131,6 +1131,10 @@ fn build_image_with_dockerfile(
 
     let mut cmd = Command::new(container_cli);
 
+    // Only buildx supports --push during build
+    // Regular docker build and podman build don't support --push
+    let supports_push_flag = use_buildx;
+
     if use_buildx {
         // Check buildx availability
         let buildx_check = Command::new(container_cli)
@@ -1154,9 +1158,10 @@ fn build_image_with_dockerfile(
 
     cmd.arg("build").arg("-t").arg(image_tag).arg(app_path);
 
-    if push {
+    if push && supports_push_flag {
+        // Only use --push with buildx
         cmd.arg("--push");
-    } else if use_buildx {
+    } else if use_buildx && !push {
         // For buildx without push, we need --load to get image into local daemon
         cmd.arg("--load");
     }
@@ -1169,6 +1174,11 @@ fn build_image_with_dockerfile(
 
     if !status.success() {
         bail!("{} build failed with status: {}", container_cli, status);
+    }
+
+    // If push was requested but --push flag wasn't supported, need separate push
+    if push && !supports_push_flag {
+        docker_push(container_cli, image_tag)?;
     }
 
     Ok(())
