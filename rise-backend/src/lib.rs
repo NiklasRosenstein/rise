@@ -230,6 +230,7 @@ pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<(
             namespace_annotations: k8s_settings.namespace_annotations,
             ingress_annotations: k8s_settings.ingress_annotations,
             ingress_tls_secret_name: k8s_settings.ingress_tls_secret_name,
+            node_selector: k8s_settings.node_selector,
         },
     )?);
 

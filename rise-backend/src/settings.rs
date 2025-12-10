@@ -160,6 +160,12 @@ fn default_namespace_format() -> String {
     "rise-{project_name}".to_string()
 }
 
+fn default_node_selector() -> std::collections::HashMap<String, String> {
+    let mut selector = std::collections::HashMap::new();
+    selector.insert("kubernetes.io/arch".to_string(), "amd64".to_string());
+    selector
+}
+
 /// Kubernetes deployment controller configuration
 ///
 /// # Ingress Authentication Architecture
@@ -260,6 +266,12 @@ pub struct KubernetesSettings {
     /// Example: "rise-apps-tls" (secret must exist in each namespace)
     #[serde(default)]
     pub ingress_tls_secret_name: Option<String>,
+
+    /// Node selector for pod placement (controls which nodes pods can run on)
+    /// Default: {"kubernetes.io/arch": "amd64"}
+    /// Example: {"kubernetes.io/arch": "amd64", "node-type": "compute"}
+    #[serde(default = "default_node_selector")]
+    pub node_selector: std::collections::HashMap<String, String>,
 }
 
 /// Registry provider configuration

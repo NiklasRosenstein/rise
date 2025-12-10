@@ -90,6 +90,7 @@ pub struct KubernetesControllerConfig {
     pub namespace_annotations: std::collections::HashMap<String, String>,
     pub ingress_annotations: std::collections::HashMap<String, String>,
     pub ingress_tls_secret_name: Option<String>,
+    pub node_selector: std::collections::HashMap<String, String>,
 }
 
 /// Kubernetes controller implementation
@@ -106,6 +107,7 @@ pub struct KubernetesController {
     namespace_annotations: std::collections::HashMap<String, String>,
     ingress_annotations: std::collections::HashMap<String, String>,
     ingress_tls_secret_name: Option<String>,
+    node_selector: std::collections::HashMap<String, String>,
 }
 
 impl KubernetesController {
@@ -128,6 +130,7 @@ impl KubernetesController {
             namespace_annotations: config.namespace_annotations,
             ingress_annotations: config.ingress_annotations,
             ingress_tls_secret_name: config.ingress_tls_secret_name,
+            node_selector: config.node_selector,
         })
     }
 
@@ -888,6 +891,11 @@ impl KubernetesController {
                             },
                             ..Default::default()
                         }],
+                        node_selector: if self.node_selector.is_empty() {
+                            None
+                        } else {
+                            Some(self.node_selector.clone().into_iter().collect())
+                        },
                         ..Default::default()
                     }),
                 }),
@@ -2067,6 +2075,7 @@ mod tests {
             namespace_annotations: std::collections::HashMap::new(),
             ingress_annotations: std::collections::HashMap::new(),
             ingress_tls_secret_name: None,
+            node_selector: std::collections::HashMap::new(),
         }
     }
 

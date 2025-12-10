@@ -154,3 +154,9 @@ registry:
 #   # Optional: TLS secret name for ingress certificates
 #   # The secret must exist in each namespace (can be created by cert-manager)
 #   ingress_tls_secret_name: "rise-apps-tls"
+#
+#   # Optional: Node selector for pod placement (default: {"kubernetes.io/arch": "amd64"})
+#   # This controls which nodes pods can be scheduled on
+#   # node_selector:
+#   #   kubernetes.io/arch: "amd64"
+#   #   node-type: "compute"
