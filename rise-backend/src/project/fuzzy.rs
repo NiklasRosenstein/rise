@@ -153,11 +153,17 @@ mod tests {
 
     #[test]
     fn test_jaro_winkler_prefix_bonus() {
-        // Strings with common prefix get higher scores
-        let score1 = jaro_winkler_distance("my-app", "my-app-v2");
-        let score2 = jaro_winkler_distance("my-app", "xmy-app");
+        // Strings with common prefix get higher scores than those without
+        // Using same edit distance (1 char different) but different positions
+        let score1 = jaro_winkler_distance("abcdef", "abcdex"); // Different at end
+        let score2 = jaro_winkler_distance("abcdef", "xbcdef"); // Different at start
 
-        assert!(score1 > score2, "Common prefix should score higher");
+        assert!(
+            score1 > score2,
+            "Common prefix should score higher: score1={}, score2={}",
+            score1,
+            score2
+        );
     }
 
     #[test]
