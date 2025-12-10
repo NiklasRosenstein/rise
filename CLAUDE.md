@@ -228,6 +228,87 @@ rise build myapp:latest
 rise build myapp:latest --backend railpack
 ```
 
+## SSL Certificate Handling (Managed BuildKit Daemon)
+
+When building with BuildKit-based backends (`docker`, `railpack`) on macOS behind corporate proxies (Cloudflare, Zscaler, etc.) or environments with custom CA certificates, builds may fail with SSL certificate verification errors.
+
+### The Problem
+
+BuildKit runs as a separate daemon and requires CA certificates to be available at daemon startup. This affects two scenarios:
+1. **BuildKit daemon operations**: Pulling base images, accessing registries
+2. **Build-time operations**: Application builds (RUN instructions) downloading packages, cloning repos
+
+### Solution: Managed BuildKit Daemon
+
+Rise CLI provides an opt-in managed BuildKit daemon feature that automatically creates and manages a BuildKit daemon with SSL certificate support.
+
+**Enable via CLI flag:**
+```bash
+rise build myapp:latest --backend railpack --managed-buildkit
+rise deployment create myproject --backend railpack --managed-buildkit
+```
+
+**Or set environment variable:**
+```bash
+export RISE_MANAGED_BUILDKIT=true
+rise build myapp:latest --backend railpack
+```
+
+**Or configure permanently:**
+```bash
+# Set in config file
+rise config set managed_buildkit true
+```
+
+### How It Works
+
+When `--managed-buildkit` is enabled and `SSL_CERT_FILE` environment variable is set:
+1. Rise CLI creates a `rise-buildkit` daemon container with the certificate mounted at `/etc/ssl/certs/ca-certificates.crt`
+2. The daemon is configured with `--platform linux/amd64` for Mac compatibility
+3. Subsequent builds use this managed daemon via `BUILDKIT_HOST` environment variable
+4. If `SSL_CERT_FILE` changes, the daemon is automatically recreated
+
+### Warning When Not Enabled
+
+If `SSL_CERT_FILE` is set but managed BuildKit is disabled, you'll see:
+```
+Warning: SSL_CERT_FILE is set but managed BuildKit daemon is disabled.
+
+Railpack builds may fail with SSL certificate errors in corporate environments.
+
+To enable automatic BuildKit daemon management:
+  rise build --managed-buildkit ...
+
+Or set environment variable:
+  export RISE_MANAGED_BUILDKIT=true
+
+For manual setup, see: https://github.com/NiklasRosenstein/rise/issues/18
+```
+
+### Affected Build Backends
+
+- ✅ `pack` - Already supports `SSL_CERT_FILE` natively (no managed daemon needed)
+- ⚠️ `docker` - Benefits from managed daemon when using BuildKit
+- ⚠️ `railpack` / `railpack:buildx` - Benefits from managed daemon
+- ⚠️ `railpack:buildctl` - Benefits from managed daemon
+
+### Manual Setup (Advanced)
+
+For users who prefer manual control, you can create your own BuildKit daemon:
+
+```bash
+# Start BuildKit daemon with certificate
+docker run --platform linux/amd64 --privileged --name my-buildkit --rm -d \
+  --volume $SSL_CERT_FILE:/etc/ssl/certs/ca-certificates.crt:ro \
+  moby/buildkit
+
+# Point Rise CLI to your daemon
+export BUILDKIT_HOST=docker-container://my-buildkit
+rise build myapp:latest --backend railpack
+```
+
+For more details, see [Issue #18](https://github.com/NiklasRosenstein/rise/issues/18).
+
 ## Guidelines
 
 - You must focus on building any given feature at a time in small increments and commit your changes often.

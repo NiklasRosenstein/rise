@@ -59,6 +59,187 @@ fn select_build_method(app_path: &str, backend: Option<&str>) -> Result<BuildMet
     }
 }
 
+/// Check if a build method requires BuildKit
+fn requires_buildkit(method: &BuildMethod) -> bool {
+    matches!(method, BuildMethod::Docker | BuildMethod::Railpack { .. })
+}
+
+/// Get the SSL_CERT_FILE path from daemon labels
+fn get_daemon_cert_label(container_cli: &str, daemon_name: &str) -> Result<String> {
+    let output = Command::new(container_cli)
+        .args([
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"rise.ssl_cert_file\"}}",
+            daemon_name,
+        ])
+        .output()
+        .context("Failed to inspect BuildKit daemon")?;
+
+    if !output.status.success() {
+        bail!("Failed to get daemon certificate label");
+    }
+
+    let cert_path = String::from_utf8(output.stdout)
+        .context("Invalid UTF-8 in daemon label")?
+        .trim()
+        .to_string();
+
+    Ok(cert_path)
+}
+
+/// Stop BuildKit daemon
+fn stop_buildkit_daemon(container_cli: &str, daemon_name: &str) -> Result<()> {
+    info!("Stopping existing BuildKit daemon '{}'", daemon_name);
+
+    let status = Command::new(container_cli)
+        .args(["stop", daemon_name])
+        .status()
+        .context("Failed to stop BuildKit daemon")?;
+
+    if !status.success() {
+        bail!("Failed to stop BuildKit daemon");
+    }
+
+    Ok(())
+}
+
+/// Create BuildKit daemon with SSL certificate mounted
+fn create_buildkit_daemon(
+    container_cli: &str,
+    daemon_name: &str,
+    ssl_cert_file: &Path,
+) -> Result<()> {
+    info!(
+        "Creating managed BuildKit daemon '{}' with SSL certificate: {}",
+        daemon_name,
+        ssl_cert_file.display()
+    );
+
+    // Resolve certificate path to absolute path
+    let cert_path = if ssl_cert_file.is_absolute() {
+        ssl_cert_file.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(ssl_cert_file)
+    };
+
+    let cert_path = cert_path
+        .canonicalize()
+        .context("Failed to resolve SSL certificate path")?;
+
+    let cert_str = cert_path
+        .to_str()
+        .context("SSL certificate path contains invalid UTF-8")?;
+
+    let status = Command::new(container_cli)
+        .args([
+            "run",
+            "--platform",
+            "linux/amd64",
+            "--privileged",
+            "--name",
+            daemon_name,
+            "--rm",
+            "-d",
+            "--label",
+            &format!("rise.ssl_cert_file={}", cert_str),
+            "--volume",
+            &format!("{}:/etc/ssl/certs/ca-certificates.crt:ro", cert_str),
+            "moby/buildkit",
+        ])
+        .status()
+        .context("Failed to start BuildKit daemon")?;
+
+    if !status.success() {
+        bail!("Failed to create BuildKit daemon");
+    }
+
+    // Set BUILDKIT_HOST environment variable for subsequent commands
+    std::env::set_var(
+        "BUILDKIT_HOST",
+        format!("docker-container://{}", daemon_name),
+    );
+
+    info!("BuildKit daemon '{}' created successfully", daemon_name);
+
+    Ok(())
+}
+
+/// Ensure managed BuildKit daemon is running with correct SSL certificate
+fn ensure_managed_buildkit_daemon(ssl_cert_file: &Path, container_cli: &str) -> Result<()> {
+    let daemon_name = "rise-buildkit";
+
+    // Check if daemon exists
+    let status = Command::new(container_cli)
+        .args(["inspect", daemon_name])
+        .output()
+        .context("Failed to check for existing BuildKit daemon")?;
+
+    if status.status.success() {
+        // Daemon exists, verify SSL_CERT_FILE hasn't changed
+        match get_daemon_cert_label(container_cli, daemon_name) {
+            Ok(current_cert) => {
+                let expected_cert = ssl_cert_file
+                    .canonicalize()
+                    .context("Failed to resolve SSL certificate path")?;
+                let expected_cert_str = expected_cert
+                    .to_str()
+                    .context("SSL certificate path contains invalid UTF-8")?;
+
+                if current_cert == expected_cert_str {
+                    debug!("BuildKit daemon is up-to-date with current SSL_CERT_FILE");
+                    // Set BUILDKIT_HOST for this session
+                    std::env::set_var(
+                        "BUILDKIT_HOST",
+                        format!("docker-container://{}", daemon_name),
+                    );
+                    return Ok(());
+                }
+
+                info!(
+                    "SSL_CERT_FILE has changed (was: {}, now: {}), recreating daemon",
+                    current_cert, expected_cert_str
+                );
+                stop_buildkit_daemon(container_cli, daemon_name)?;
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to get daemon certificate label: {}, recreating daemon",
+                    e
+                );
+                stop_buildkit_daemon(container_cli, daemon_name)?;
+            }
+        }
+    }
+
+    // Create new daemon with certificate
+    create_buildkit_daemon(container_cli, daemon_name, ssl_cert_file)?;
+
+    Ok(())
+}
+
+/// Warn user about SSL certificate issues when managed BuildKit is disabled
+fn check_ssl_cert_and_warn(method: &BuildMethod, managed_buildkit: bool) {
+    if let Ok(_ssl_cert) = std::env::var("SSL_CERT_FILE") {
+        if requires_buildkit(method) && !managed_buildkit {
+            eprintln!("\nWarning: SSL_CERT_FILE is set but managed BuildKit daemon is disabled.");
+            eprintln!();
+            eprintln!(
+                "Railpack builds may fail with SSL certificate errors in corporate environments."
+            );
+            eprintln!();
+            eprintln!("To enable automatic BuildKit daemon management:");
+            eprintln!("  rise build --managed-buildkit ...");
+            eprintln!();
+            eprintln!("Or set environment variable:");
+            eprintln!("  export RISE_MANAGED_BUILDKIT=true");
+            eprintln!();
+            eprintln!("For manual setup, see: https://github.com/NiklasRosenstein/rise/issues/18");
+            eprintln!();
+        }
+    }
+}
+
 #[derive(Debug, Deserialize)]
 struct RollbackResponse {
     new_deployment_id: String,
@@ -553,6 +734,7 @@ pub fn build_image(
     backend: Option<&str>,
     builder: Option<&str>,
     container_cli: Option<&str>,
+    managed_buildkit: Option<bool>,
 ) -> Result<()> {
     // Resolve container CLI
     let container_cli = container_cli
@@ -573,6 +755,21 @@ pub fn build_image(
 
     // Select build method
     let build_method = select_build_method(path, backend)?;
+
+    // Check if managed BuildKit daemon should be used
+    let use_managed_buildkit = managed_buildkit.unwrap_or_else(|| config.get_managed_buildkit());
+
+    // Handle SSL certificate and BuildKit daemon management
+    if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
+        if requires_buildkit(&build_method) {
+            if use_managed_buildkit {
+                let cert_path = Path::new(&ssl_cert_file);
+                ensure_managed_buildkit_daemon(cert_path, &container_cli)?;
+            } else {
+                check_ssl_cert_and_warn(&build_method, use_managed_buildkit);
+            }
+        }
+    }
 
     match build_method {
         BuildMethod::Docker => {
@@ -639,6 +836,7 @@ pub async fn create_deployment(
     backend: Option<&str>,
     builder: Option<&str>,
     container_cli: Option<&str>,
+    managed_buildkit: Option<bool>,
 ) -> Result<()> {
     // Resolve which container CLI to use
     let container_cli = container_cli
@@ -661,6 +859,24 @@ pub async fn create_deployment(
         }
         if !app_path.is_dir() {
             bail!("Path '{}' is not a directory", path);
+        }
+    }
+
+    // Check if managed BuildKit daemon should be used
+    let use_managed_buildkit = managed_buildkit.unwrap_or_else(|| config.get_managed_buildkit());
+
+    // Handle SSL certificate and BuildKit daemon management (only when building, not for pre-built images)
+    if image.is_none() {
+        if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
+            let build_method = select_build_method(path, backend)?;
+            if requires_buildkit(&build_method) {
+                if use_managed_buildkit {
+                    let cert_path = Path::new(&ssl_cert_file);
+                    ensure_managed_buildkit_daemon(cert_path, &container_cli)?;
+                } else {
+                    check_ssl_cert_and_warn(&build_method, use_managed_buildkit);
+                }
+            }
         }
     }
 

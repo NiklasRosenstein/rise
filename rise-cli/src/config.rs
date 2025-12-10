@@ -14,6 +14,7 @@ pub struct Config {
     pub token: Option<String>,
     pub backend_url: Option<String>,
     pub container_cli: Option<String>,
+    pub managed_buildkit: Option<bool>,
 }
 
 impl Config {
@@ -116,6 +117,25 @@ impl Config {
         // Auto-detect: prefer podman if docker is not available
         detect_container_cli()
     }
+
+    /// Get whether to use managed BuildKit daemon
+    /// Checks RISE_MANAGED_BUILDKIT environment variable first, then falls back to config file
+    /// Returns false by default (opt-in feature)
+    pub fn get_managed_buildkit(&self) -> bool {
+        // Check environment variable first
+        if let Ok(val) = std::env::var("RISE_MANAGED_BUILDKIT") {
+            return val.to_lowercase() == "true" || val == "1";
+        }
+        // Fall back to config file, default to false
+        self.managed_buildkit.unwrap_or(false)
+    }
+
+    /// Set whether to use managed BuildKit daemon
+    #[allow(dead_code)]
+    pub fn set_managed_buildkit(&mut self, enabled: bool) -> Result<()> {
+        self.managed_buildkit = Some(enabled);
+        self.save()
+    }
 }
 
 /// Auto-detect which container CLI is available
@@ -158,6 +178,7 @@ mod tests {
             token: None,
             backend_url: None,
             container_cli: None,
+            managed_buildkit: None,
         };
         assert_eq!(config.get_backend_url(), "http://localhost:3000");
 
@@ -166,6 +187,7 @@ mod tests {
             token: None,
             backend_url: Some("https://api.example.com".to_string()),
             container_cli: None,
+            managed_buildkit: None,
         };
         assert_eq!(config.get_backend_url(), "https://api.example.com");
 
@@ -181,10 +203,32 @@ mod tests {
             token: Some("config-token".to_string()),
             backend_url: None,
             container_cli: None,
+            managed_buildkit: None,
         };
         // When RISE_TOKEN env var is not set, should use config file token
         if std::env::var("RISE_TOKEN").is_err() {
             assert_eq!(config.get_token(), Some("config-token".to_string()));
         }
+    }
+
+    #[test]
+    fn test_managed_buildkit_default() {
+        // Test default (should be false)
+        let config = Config {
+            token: None,
+            backend_url: None,
+            container_cli: None,
+            managed_buildkit: None,
+        };
+        assert!(!config.get_managed_buildkit());
+
+        // Test config file value used when env var not set
+        let config = Config {
+            token: None,
+            backend_url: None,
+            container_cli: None,
+            managed_buildkit: Some(true),
+        };
+        assert!(config.get_managed_buildkit());
     }
 }

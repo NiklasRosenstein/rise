@@ -74,6 +74,9 @@ enum Commands {
         /// Container CLI to use (docker or podman)
         #[arg(long)]
         container_cli: Option<String>,
+        /// Enable managed BuildKit daemon with SSL certificate support
+        #[arg(long)]
+        managed_buildkit: Option<bool>,
     },
 }
 
@@ -235,6 +238,9 @@ enum DeploymentCommands {
         /// Container CLI to use (docker or podman). Falls back to RISE_CONTAINER_CLI env var, then auto-detection.
         #[arg(long)]
         container_cli: Option<String>,
+        /// Enable managed BuildKit daemon with SSL certificate support
+        #[arg(long)]
+        managed_buildkit: Option<bool>,
     },
     /// List deployments for a project
     #[command(visible_alias = "ls")]
@@ -608,6 +614,7 @@ async fn main() -> Result<()> {
                 backend,
                 builder,
                 container_cli,
+                managed_buildkit,
             } => {
                 // Validate http_port requirements
                 let port = match (image.as_ref(), http_port) {
@@ -647,6 +654,7 @@ async fn main() -> Result<()> {
                     backend.as_deref(),
                     builder.as_deref(),
                     container_cli.as_deref(),
+                    *managed_buildkit,
                 )
                 .await?;
             }
@@ -824,6 +832,7 @@ async fn main() -> Result<()> {
             backend,
             builder,
             container_cli,
+            managed_buildkit,
         } => {
             deployment::build_image(
                 &config,
@@ -832,6 +841,7 @@ async fn main() -> Result<()> {
                 backend.as_deref(),
                 builder.as_deref(),
                 container_cli.as_deref(),
+                *managed_buildkit,
             )?;
         }
     }
