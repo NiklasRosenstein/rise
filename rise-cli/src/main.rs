@@ -65,12 +65,12 @@ enum Commands {
         /// Path to the directory containing the application
         #[arg(default_value = ".")]
         path: String,
-        /// Buildpack builder to use (only for buildpack builds)
+        /// Build backend (docker, pack, railpack, railpack:buildctl)
+        #[arg(long)]
+        backend: Option<String>,
+        /// Buildpack builder to use (only for pack backend)
         #[arg(long)]
         builder: Option<String>,
-        /// Use buildx for Docker builds (only for Dockerfile builds)
-        #[arg(long)]
-        use_buildx: bool,
         /// Container CLI to use (docker or podman)
         #[arg(long)]
         container_cli: Option<String>,
@@ -225,8 +225,11 @@ enum DeploymentCommands {
         /// Required when using --image. Defaults to 8080 for buildpack builds.
         #[arg(long)]
         http_port: Option<u16>,
+        /// Build backend (docker, pack, railpack, railpack:buildctl)
+        #[arg(long)]
+        backend: Option<String>,
         /// Buildpack builder to use (e.g., 'paketobuildpacks/builder:base', 'heroku/buildpacks:22').
-        /// Defaults to 'paketobuildpacks/builder:base'. Only used when building from source.
+        /// Defaults to 'paketobuildpacks/builder:base'. Only used with pack backend.
         #[arg(long)]
         builder: Option<String>,
         /// Container CLI to use (docker or podman). Falls back to RISE_CONTAINER_CLI env var, then auto-detection.
@@ -607,6 +610,7 @@ async fn main() -> Result<()> {
                 group,
                 expire,
                 http_port,
+                backend,
                 builder,
                 container_cli,
             } => {
@@ -645,6 +649,7 @@ async fn main() -> Result<()> {
                     group.as_deref(),
                     expire.as_deref(),
                     port,
+                    backend.as_deref(),
                     builder.as_deref(),
                     container_cli.as_deref(),
                 )
@@ -821,16 +826,16 @@ async fn main() -> Result<()> {
         Commands::Build {
             tag,
             path,
+            backend,
             builder,
-            use_buildx,
             container_cli,
         } => {
             deployment::build_image(
                 &config,
                 tag,
                 path,
+                backend.as_deref(),
                 builder.as_deref(),
-                *use_buildx,
                 container_cli.as_deref(),
             )?;
         }

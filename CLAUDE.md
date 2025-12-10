@@ -69,7 +69,7 @@ Let's outline the architecture and components needed for this Rust-based project
     - **Project Commands**: Implements `project` (alias: `p`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `update/u/edit`, `delete/del/rm`.
     - **Team Commands**: Implements `team` (alias: `t`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `update/u/edit`, `delete/del/rm`.
     - **Deployment Commands**: Implements `deployment` (alias: `d`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `rollback`, `stop`.
-    - **Build Module**: Supports building container images using buildpacks and Dockerfiles with automatic detection.
+    - **Build Module**: Supports building container images using buildpacks, Dockerfiles, and Railpacks with automatic detection or explicit backend selection.
     - **Configuration Module**: Handles reading and writing of `.rise.toml` configuration files.
 
 ## Implementation Steps
@@ -105,9 +105,10 @@ Let's outline the architecture and components needed for this Rust-based project
       - [x] Remove password authentication
       - [x] Local HTTP callback server for authorization code flow
     - [x] Create project management commands for creating and listing projects.
-    - [x] Develop the build module to support buildpacks (via pack CLI) and Dockerfiles (via docker/podman).
-    - [x] Implement automatic build method detection (Dockerfile vs buildpacks).
+    - [x] Develop the build module to support buildpacks (via pack CLI), Dockerfiles (via docker/podman), and Railpacks (via railpack CLI).
+    - [x] Implement automatic build method detection (Dockerfile vs buildpacks) with optional `--backend` flag for explicit selection.
     - [x] Add `rise build` command for building images locally without deployment.
+    - [x] Support Railpacks build method with both buildx (default) and buildctl via `--backend railpack` or `--backend railpack:buildctl`.
     - [x] Implement deployment commands to handle the build, push, and deploy process.
     - [x] Set up configuration handling for the CLI tool (.rise-config.toml).
     - [x] Add deployment management commands (list, show, rollback).
@@ -164,6 +165,53 @@ Environment variables are centralized in `.envrc` (loaded by direnv):
 - `RISE_CONFIG_RUN_MODE`: development/production
 
 Server configuration (host, port, etc.) is specified in `rise-backend/config/default.toml` and can be overridden in `local.toml` or using environment variable substitution in config files.
+
+## Build Backends
+
+The CLI supports three build methods for creating container images:
+
+### Docker (Dockerfile)
+Uses `docker build` or `podman build` to build from a Dockerfile:
+```bash
+rise build myapp:latest --backend docker
+rise deployment create myproject --backend docker
+```
+
+### Pack (Cloud Native Buildpacks)
+Uses `pack build` with Cloud Native Buildpacks:
+```bash
+rise build myapp:latest --backend pack
+rise build myapp:latest --backend pack --builder paketobuildpacks/builder:base
+rise deployment create myproject --backend pack
+```
+
+### Railpack (Railway Railpacks)
+Uses Railway's Railpacks with BuildKit (buildx or buildctl):
+```bash
+# Railpack with buildx (default)
+rise build myapp:latest --backend railpack
+rise deployment create myproject --backend railpack
+
+# Railpack with buildctl
+rise build myapp:latest --backend railpack:buildctl
+rise deployment create myproject --backend railpack:buildctl
+```
+
+**Auto-detection**: When `--backend` is omitted, the CLI automatically detects the build method:
+- If `Dockerfile` exists → uses `docker` backend
+- Otherwise → uses `pack` backend
+
+**Examples**:
+```bash
+# Auto-detect (has Dockerfile → uses docker)
+rise build myapp:latest
+
+# Auto-detect (no Dockerfile → uses pack)
+rise build myapp:latest
+
+# Explicit backend selection
+rise build myapp:latest --backend railpack
+```
 
 ## Guidelines
 

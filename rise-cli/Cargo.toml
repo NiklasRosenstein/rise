@@ -33,5 +33,7 @@ comfy-table = "7.1"
 # JWT and RSA for dev OIDC issuer
 jsonwebtoken = "9"
 rsa = "0.9"
+# UUID for temp file naming
+uuid = { version = "1.0", features = ["v4"] }
 # Backend dependency for shared models
 rise-backend = { path = "../rise-backend", version = "0.2.0" }

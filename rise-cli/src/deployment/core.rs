@@ -40,17 +40,22 @@ impl BuildMethod {
     }
 }
 
-/// Detect build method based on directory contents
-/// Returns BuildMethod::Docker if Dockerfile exists, otherwise BuildMethod::Pack
-fn detect_build_method(app_path: &str) -> Result<BuildMethod> {
-    let dockerfile_path = Path::new(app_path).join("Dockerfile");
-
-    if dockerfile_path.exists() && dockerfile_path.is_file() {
-        info!("Detected Dockerfile at {}", dockerfile_path.display());
-        Ok(BuildMethod::Docker)
+/// Select build method based on explicit backend or auto-detection
+/// Returns BuildMethod based on backend string or directory contents
+fn select_build_method(app_path: &str, backend: Option<&str>) -> Result<BuildMethod> {
+    if let Some(backend_str) = backend {
+        // Explicit backend specified
+        BuildMethod::from_backend_str(backend_str)
     } else {
-        info!("No Dockerfile found, using buildpacks");
-        Ok(BuildMethod::Pack)
+        // Auto-detect
+        let dockerfile_path = Path::new(app_path).join("Dockerfile");
+        if dockerfile_path.exists() && dockerfile_path.is_file() {
+            info!("Detected Dockerfile, using docker backend");
+            Ok(BuildMethod::Docker)
+        } else {
+            info!("No Dockerfile found, using pack backend");
+            Ok(BuildMethod::Pack)
+        }
     }
 }
 
@@ -538,15 +543,15 @@ pub async fn stop_deployments_by_group(
 
 /// Build a container image locally without pushing
 ///
-/// This function auto-detects the build method (Dockerfile vs buildpacks)
-/// and builds the image locally. For buildx builds, the --load flag is
+/// This function selects the build method based on explicit backend or auto-detection
+/// and builds the image locally. For railpack buildx builds, the --load flag is
 /// automatically added to ensure the image is available in the local daemon.
 pub fn build_image(
     config: &Config,
     tag: &str,
     path: &str,
+    backend: Option<&str>,
     builder: Option<&str>,
-    use_buildx: bool,
     container_cli: Option<&str>,
 ) -> Result<()> {
     // Resolve container CLI
@@ -566,8 +571,8 @@ pub fn build_image(
         bail!("Path '{}' is not a directory", path);
     }
 
-    // Detect build method
-    let build_method = detect_build_method(path)?;
+    // Select build method
+    let build_method = select_build_method(path, backend)?;
 
     match build_method {
         BuildMethod::Docker => {
@@ -579,19 +584,25 @@ pub fn build_image(
                 path,
                 tag,
                 &container_cli,
-                use_buildx,
+                false, // use_buildx: always false for docker backend (use railpack:buildx for buildx)
                 false, // push=false for local build
             )?;
         }
         BuildMethod::Pack => {
-            if use_buildx {
-                warn!("--use-buildx flag is ignored when using pack build method");
-            }
-
             build_image_with_buildpacks(path, tag, builder)?;
         }
-        BuildMethod::Railpack { .. } => {
-            bail!("Railpack build support not yet implemented");
+        BuildMethod::Railpack { use_buildctl } => {
+            if builder.is_some() {
+                warn!("--builder flag is ignored when using railpack build method");
+            }
+
+            build_image_with_railpacks(
+                path,
+                tag,
+                &container_cli,
+                use_buildctl,
+                false, // push=false for local build
+            )?;
         }
     }
 
@@ -625,6 +636,7 @@ pub async fn create_deployment(
     group: Option<&str>,
     expires_in: Option<&str>,
     http_port: u16,
+    backend: Option<&str>,
     builder: Option<&str>,
     container_cli: Option<&str>,
 ) -> Result<()> {
@@ -740,16 +752,13 @@ pub async fn create_deployment(
         )
         .await?;
 
-        // Step 4: Detect build method and build image
-        let build_method = detect_build_method(path)?;
+        // Step 4: Select build method and build image
+        let build_method = select_build_method(path, backend)?;
 
         match build_method {
             BuildMethod::Docker => {
                 // Build and push in one step with Docker
-                info!(
-                    "Building image with docker: {}",
-                    deployment_info.image_tag
-                );
+                info!("Building image with docker: {}", deployment_info.image_tag);
 
                 if let Err(e) = build_image_with_dockerfile(
                     path,
@@ -774,10 +783,7 @@ pub async fn create_deployment(
             }
             BuildMethod::Pack => {
                 // Build with pack (buildpacks)
-                info!(
-                    "Building image with pack: {}",
-                    deployment_info.image_tag
-                );
+                info!("Building image with pack: {}", deployment_info.image_tag);
                 if let Err(e) =
                     build_image_with_buildpacks(path, &deployment_info.image_tag, builder)
                 {
@@ -819,17 +825,33 @@ pub async fn create_deployment(
                     return Err(e);
                 }
             }
-            BuildMethod::Railpack { .. } => {
-                update_deployment_status(
-                    http_client,
-                    backend_url,
-                    &token,
-                    &deployment_info.deployment_id,
-                    "Failed",
-                    Some("Railpack build support not yet implemented"),
-                )
-                .await?;
-                bail!("Railpack build support not yet implemented");
+            BuildMethod::Railpack { use_buildctl } => {
+                // Build and push in one step with Railpack
+                info!(
+                    "Building image with railpack: {}",
+                    deployment_info.image_tag
+                );
+
+                if let Err(e) = build_image_with_railpacks(
+                    path,
+                    &deployment_info.image_tag,
+                    &container_cli,
+                    use_buildctl,
+                    true, // push: true for deployment
+                ) {
+                    update_deployment_status(
+                        http_client,
+                        backend_url,
+                        &token,
+                        &deployment_info.deployment_id,
+                        "Failed",
+                        Some(&e.to_string()),
+                    )
+                    .await?;
+                    return Err(e);
+                }
+
+                // Image already pushed via BuildKit output, skip separate push step
             }
         }
 
@@ -1147,6 +1169,195 @@ fn build_image_with_dockerfile(
 
     if !status.success() {
         bail!("{} build failed with status: {}", container_cli, status);
+    }
+
+    Ok(())
+}
+
+/// RAII guard for cleaning up temp files
+struct CleanupGuard {
+    path: std::path::PathBuf,
+}
+
+impl Drop for CleanupGuard {
+    fn drop(&mut self) {
+        if self.path.exists() {
+            let _ = std::fs::remove_file(&self.path);
+            debug!("Cleaned up temp file: {}", self.path.display());
+        }
+    }
+}
+
+/// Build image with Railpacks
+fn build_image_with_railpacks(
+    app_path: &str,
+    image_tag: &str,
+    container_cli: &str,
+    use_buildctl: bool,
+    push: bool,
+) -> Result<()> {
+    // Check railpack CLI availability
+    let railpack_check = Command::new("railpack").arg("--version").output();
+    if railpack_check.is_err() {
+        bail!(
+            "railpack CLI not found. Ensure the railpack CLI is installed and available in PATH.\n\
+             In production, this should be available in the rise-builder image."
+        );
+    }
+
+    // Generate temp file paths with UUID
+    let uuid = uuid::Uuid::new_v4();
+    let temp_dir = std::env::temp_dir();
+    let plan_file = temp_dir.join(format!("railpack-plan-{}.json", uuid));
+    let info_file = temp_dir.join(format!("railpack-info-{}.json", uuid));
+
+    // Set up cleanup guards
+    let _plan_guard = CleanupGuard {
+        path: plan_file.clone(),
+    };
+    let _info_guard = CleanupGuard {
+        path: info_file.clone(),
+    };
+
+    info!("Running railpack prepare for: {}", app_path);
+
+    // Run railpack prepare
+    let mut cmd = Command::new("railpack");
+    cmd.arg("prepare")
+        .arg(app_path)
+        .arg("--plan-out")
+        .arg(&plan_file)
+        .arg("--info-out")
+        .arg(&info_file);
+
+    debug!("Executing command: {:?}", cmd);
+
+    let status = cmd.status().context("Failed to execute railpack prepare")?;
+
+    if !status.success() {
+        bail!("railpack prepare failed with status: {}", status);
+    }
+
+    // Verify plan file was created
+    if !plan_file.exists() {
+        bail!(
+            "railpack prepare did not create plan file at {}",
+            plan_file.display()
+        );
+    }
+
+    info!("✓ Railpack prepare completed");
+
+    // Build with buildx or buildctl
+    if use_buildctl {
+        build_with_buildctl(app_path, &plan_file, image_tag, push)?;
+    } else {
+        build_with_buildx(app_path, &plan_file, image_tag, container_cli, push)?;
+    }
+
+    Ok(())
+}
+
+/// Build with docker buildx
+fn build_with_buildx(
+    app_path: &str,
+    plan_file: &Path,
+    image_tag: &str,
+    container_cli: &str,
+    push: bool,
+) -> Result<()> {
+    // Check buildx availability
+    let buildx_check = Command::new(container_cli)
+        .args(["buildx", "version"])
+        .output();
+    if buildx_check.is_err() {
+        bail!(
+            "{} buildx not available. Install buildx or use railpack:buildctl backend instead.",
+            container_cli
+        );
+    }
+
+    info!(
+        "Building image with {} buildx: {}",
+        container_cli, image_tag
+    );
+
+    let mut cmd = Command::new(container_cli);
+    cmd.arg("buildx")
+        .arg("build")
+        .arg("--build-arg")
+        .arg("BUILDKIT_SYNTAX=ghcr.io/railwayapp/railpack-frontend")
+        .arg("-f")
+        .arg(plan_file)
+        .arg("-t")
+        .arg(image_tag);
+
+    if push {
+        cmd.arg("--push");
+    } else {
+        // For local builds, use --load to ensure image is available in local daemon
+        cmd.arg("--load");
+    }
+
+    cmd.arg(app_path);
+
+    debug!("Executing command: {:?}", cmd);
+
+    let status = cmd
+        .status()
+        .with_context(|| format!("Failed to execute {} buildx build", container_cli))?;
+
+    if !status.success() {
+        bail!(
+            "{} buildx build failed with status: {}",
+            container_cli,
+            status
+        );
+    }
+
+    Ok(())
+}
+
+/// Build with buildctl
+fn build_with_buildctl(
+    app_path: &str,
+    plan_file: &Path,
+    image_tag: &str,
+    push: bool,
+) -> Result<()> {
+    // Check buildctl availability
+    let buildctl_check = Command::new("buildctl").arg("--version").output();
+    if buildctl_check.is_err() {
+        bail!("buildctl not found. Install buildctl or use railpack:buildx backend instead.");
+    }
+
+    info!("Building image with buildctl: {}", image_tag);
+
+    let mut cmd = Command::new("buildctl");
+    cmd.arg("build")
+        .arg("--frontend")
+        .arg("dockerfile.v0")
+        .arg("--local")
+        .arg(format!("context={}", app_path))
+        .arg("--local")
+        .arg(format!(
+            "dockerfile={}",
+            plan_file.parent().unwrap().display()
+        ))
+        .arg("--output");
+
+    if push {
+        cmd.arg(format!("type=image,name={},push=true", image_tag));
+    } else {
+        cmd.arg(format!("type=image,name={}", image_tag));
+    }
+
+    debug!("Executing command: {:?}", cmd);
+
+    let status = cmd.status().context("Failed to execute buildctl build")?;
+
+    if !status.success() {
+        bail!("buildctl build failed with status: {}", status);
     }
 
     Ok(())
