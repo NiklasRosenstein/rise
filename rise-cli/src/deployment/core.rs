@@ -1432,16 +1432,22 @@ fn build_image_with_dockerfile(
     Ok(())
 }
 
-/// RAII guard for cleaning up temp files
+/// RAII guard for cleaning up temp files and directories
 struct CleanupGuard {
     path: std::path::PathBuf,
+    is_directory: bool,
 }
 
 impl Drop for CleanupGuard {
     fn drop(&mut self) {
         if self.path.exists() {
-            let _ = std::fs::remove_file(&self.path);
-            debug!("Cleaned up temp file: {}", self.path.display());
+            if self.is_directory {
+                let _ = std::fs::remove_dir_all(&self.path);
+                debug!("Cleaned up temp directory: {}", self.path.display());
+            } else {
+                let _ = std::fs::remove_file(&self.path);
+                debug!("Cleaned up temp file: {}", self.path.display());
+            }
         }
     }
 }
@@ -1464,18 +1470,43 @@ fn build_image_with_railpacks(
         );
     }
 
-    // Generate temp file paths with UUID
-    let uuid = uuid::Uuid::new_v4();
-    let temp_dir = std::env::temp_dir();
-    let plan_file = temp_dir.join(format!("railpack-plan-{}.json", uuid));
-    let info_file = temp_dir.join(format!("railpack-info-{}.json", uuid));
+    // Create .railpack-build directory in app_path
+    let build_dir = Path::new(app_path).join(".railpack-build");
+    let dir_existed = build_dir.exists();
+
+    if !dir_existed {
+        fs::create_dir(&build_dir).with_context(|| {
+            format!("Failed to create build directory: {}", build_dir.display())
+        })?;
+    }
+
+    let plan_file = build_dir.join("plan.json");
+    let info_file = build_dir.join("info.json");
 
     // Set up cleanup guards
-    let _plan_guard = CleanupGuard {
-        path: plan_file.clone(),
+    // If we created the directory, clean up the entire directory
+    // Otherwise, just clean up the individual files
+    let _cleanup_guard = if !dir_existed {
+        CleanupGuard {
+            path: build_dir,
+            is_directory: true,
+        }
+    } else {
+        // When directory existed, we'll clean up files individually
+        // Store the first file in the guard, we'll use a separate guard for the second
+        CleanupGuard {
+            path: plan_file.clone(),
+            is_directory: false,
+        }
     };
-    let _info_guard = CleanupGuard {
-        path: info_file.clone(),
+
+    let _info_guard = if dir_existed {
+        Some(CleanupGuard {
+            path: info_file.clone(),
+            is_directory: false,
+        })
+    } else {
+        None
     };
 
     info!("Running railpack prepare for: {}", app_path);
@@ -1607,11 +1638,6 @@ fn build_with_buildctl(
     }
 
     info!("Building image with buildctl: {}", image_tag);
-
-    println!(
-        "Plafile contents: {}",
-        std::fs::read_to_string(plan_file).unwrap_or_default()
-    );
 
     let mut cmd = Command::new("buildctl");
     cmd.arg("build")
