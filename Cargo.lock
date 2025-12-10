@@ -3413,7 +3413,7 @@ dependencies = [
 
 [[package]]
 name = "rise-backend"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3460,7 +3460,7 @@ dependencies = [
 
 [[package]]
 name = "rise-cli"
-version = "0.3.0"
+version = "0.3.1"
 dependencies = [
  "anyhow",
  "axum",
