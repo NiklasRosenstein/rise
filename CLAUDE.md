@@ -197,6 +197,18 @@ rise build myapp:latest --backend railpack:buildctl
 rise deployment create myproject --backend railpack:buildctl
 ```
 
+**Troubleshooting**: If railpack builds fail with the error:
+```
+ERROR: failed to build: failed to solve: requested experimental feature mergeop has been disabled on the build server: only enabled with containerd image store backend
+```
+
+This occurs when using Docker Desktop's default builder. Create a custom buildx builder to work around this:
+```bash
+docker buildx create --use
+```
+
+After creating the custom builder, railpack builds should work correctly.
+
 **Auto-detection**: When `--backend` is omitted, the CLI automatically detects the build method:
 - If `Dockerfile` exists → uses `docker` backend
 - Otherwise → uses `pack` backend
