@@ -468,7 +468,7 @@ pub async fn show_project(
     Ok(())
 }
 
-// Update project (name, visibility, status, or transfer ownership)
+#[allow(clippy::too_many_arguments)]
 pub async fn update_project(
     http_client: &Client,
     backend_url: &str,

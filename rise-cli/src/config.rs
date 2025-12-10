@@ -95,6 +95,7 @@ impl Config {
     }
 
     /// Set the container CLI
+    #[allow(dead_code)]
     pub fn set_container_cli(&mut self, cli: String) -> Result<()> {
         self.container_cli = Some(cli);
         self.save()

@@ -219,16 +219,18 @@ pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<(
     let backend = Arc::new(deployment::controller::KubernetesController::new(
         controller_state.clone(),
         kube_client,
-        k8s_settings.ingress_class,
-        k8s_settings.production_ingress_url_template,
-        k8s_settings.staging_ingress_url_template,
-        registry_provider,
-        registry_url,
-        k8s_settings.auth_backend_url,
-        k8s_settings.auth_signin_url,
-        k8s_settings.namespace_annotations,
-        k8s_settings.ingress_annotations,
-        k8s_settings.ingress_tls_secret_name,
+        deployment::controller::KubernetesControllerConfig {
+            ingress_class: k8s_settings.ingress_class,
+            production_ingress_url_template: k8s_settings.production_ingress_url_template,
+            staging_ingress_url_template: k8s_settings.staging_ingress_url_template,
+            registry_provider,
+            registry_url,
+            auth_backend_url: k8s_settings.auth_backend_url,
+            auth_signin_url: k8s_settings.auth_signin_url,
+            namespace_annotations: k8s_settings.namespace_annotations,
+            ingress_annotations: k8s_settings.ingress_annotations,
+            ingress_tls_secret_name: k8s_settings.ingress_tls_secret_name,
+        },
     )?);
 
     let controller = Arc::new(deployment::controller::DeploymentController::new(

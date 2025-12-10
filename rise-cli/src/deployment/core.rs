@@ -73,8 +73,8 @@ pub(super) fn parse_duration(s: &str) -> Result<Duration> {
         bail!("Duration string is empty");
     }
 
-    let (num_str, unit) = if s.ends_with("ms") {
-        (&s[..s.len() - 2], "ms")
+    let (num_str, unit) = if let Some(num_str) = s.strip_suffix("ms") {
+        (num_str, "ms")
     } else {
         let num_str = &s[..s.len() - 1];
         let unit = &s[s.len() - 1..];
@@ -351,7 +351,7 @@ pub async fn show_deployment(
             .context("Not logged in. Please run 'rise login' first.")?;
 
         let deployment =
-            fetch_deployment(http_client, backend_url, &token, project, deployment_id).await?;
+            fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
 
         // Use the same UI as follow mode
         super::follow_ui::print_deployment_snapshot(&deployment);
@@ -625,7 +625,7 @@ struct CreateDeploymentResponse {
     image_tag: String,
     credentials: RegistryCredentials,
 }
-
+#[allow(clippy::too_many_arguments)]
 pub async fn create_deployment(
     http_client: &Client,
     backend_url: &str,
@@ -888,7 +888,7 @@ pub async fn create_deployment(
 
     Ok(())
 }
-
+#[allow(clippy::too_many_arguments)]
 async fn call_create_deployment_api(
     http_client: &Client,
     backend_url: &str,

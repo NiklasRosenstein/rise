@@ -142,23 +142,28 @@ impl OAuthClient {
         let http_client = HttpClient::new();
 
         // If either URL is missing, attempt OIDC discovery
-        let (final_authorize_url, final_token_url, device_endpoint) = if authorize_url.is_none()
-            || token_url.is_none()
-        {
-            tracing::info!("One or both OAuth endpoints not configured, attempting OIDC discovery");
-            let (discovered_auth, discovered_token, discovered_device) =
-                Self::discover_endpoints(&http_client, &issuer).await?;
+        let (final_authorize_url, final_token_url, device_endpoint) =
+            match (authorize_url, token_url) {
+                (Some(auth), Some(token)) => {
+                    // If both URLs are explicitly configured, assume device endpoint follows standard pattern
+                    let device_endpoint =
+                        Some(format!("{}/device/code", issuer.trim_end_matches('/')));
+                    (auth, token, device_endpoint)
+                }
+                (auth_opt, token_opt) => {
+                    tracing::info!(
+                        "One or both OAuth endpoints not configured, attempting OIDC discovery"
+                    );
+                    let (discovered_auth, discovered_token, discovered_device) =
+                        Self::discover_endpoints(&http_client, &issuer).await?;
 
-            (
-                authorize_url.unwrap_or(discovered_auth),
-                token_url.unwrap_or(discovered_token),
-                discovered_device,
-            )
-        } else {
-            // If both URLs are explicitly configured, assume device endpoint follows standard pattern
-            let device_endpoint = Some(format!("{}/device/code", issuer.trim_end_matches('/')));
-            (authorize_url.unwrap(), token_url.unwrap(), device_endpoint)
-        };
+                    (
+                        auth_opt.unwrap_or(discovered_auth),
+                        token_opt.unwrap_or(discovered_token),
+                        discovered_device,
+                    )
+                }
+            };
 
         tracing::info!(
             "OAuth2 client initialized with authorize_url={}, token_url={}, device_endpoint={:?}",

@@ -6,6 +6,19 @@ use uuid::Uuid;
 use crate::db::models::{Deployment, DeploymentStatus, TerminationReason};
 use crate::deployment::state_machine;
 
+/// Parameters for creating a new deployment
+pub struct CreateDeploymentParams<'a> {
+    pub deployment_id: &'a str,
+    pub project_id: Uuid,
+    pub created_by_id: Uuid,
+    pub status: DeploymentStatus,
+    pub image: Option<&'a str>,
+    pub image_digest: Option<&'a str>,
+    pub deployment_group: &'a str,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub http_port: i32,
+}
+
 /// List deployments for a project
 pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(
@@ -97,19 +110,8 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Deployment>> {
 }
 
 /// Create a new deployment
-pub async fn create(
-    pool: &PgPool,
-    deployment_id: &str,
-    project_id: Uuid,
-    created_by_id: Uuid,
-    status: DeploymentStatus,
-    image: Option<&str>,
-    image_digest: Option<&str>,
-    deployment_group: &str,
-    expires_at: Option<DateTime<Utc>>,
-    http_port: i32,
-) -> Result<Deployment> {
-    let status_str = status.to_string();
+pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result<Deployment> {
+    let status_str = params.status.to_string();
 
     let deployment = sqlx::query_as!(
         Deployment,
@@ -128,15 +130,15 @@ pub async fn create(
             http_port,
             created_at, updated_at
         "#,
-        deployment_id,
-        project_id,
-        created_by_id,
+        params.deployment_id,
+        params.project_id,
+        params.created_by_id,
         status_str,
-        image,
-        image_digest,
-        deployment_group,
-        expires_at,
-        http_port
+        params.image,
+        params.image_digest,
+        params.deployment_group,
+        params.expires_at,
+        params.http_port
     )
     .fetch_one(pool)
     .await

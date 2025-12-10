@@ -201,7 +201,7 @@ impl RegistryProvider for EcrProvider {
         // Create ECR client with scoped credentials
         // Convert AWS DateTime to SystemTime
         let expiration: Option<std::time::SystemTime> =
-            std::time::SystemTime::try_from(creds.expiration().clone()).ok();
+            std::time::SystemTime::try_from(*creds.expiration()).ok();
 
         let scoped_creds = aws_sdk_ecr::config::Credentials::new(
             creds.access_key_id(),
@@ -254,7 +254,7 @@ impl RegistryProvider for EcrProvider {
 
         // Create ECR client with assumed role credentials
         let expiration: Option<std::time::SystemTime> =
-            std::time::SystemTime::try_from(creds.expiration().clone()).ok();
+            std::time::SystemTime::try_from(*creds.expiration()).ok();
 
         let assumed_creds = aws_sdk_ecr::config::Credentials::new(
             creds.access_key_id(),

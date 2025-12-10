@@ -379,7 +379,7 @@ pub fn print_deployment_snapshot(deployment: &Deployment) {
 
     // Error message if present
     if let Some(ref error) = deployment.error_message {
-        println!("   {}Error:{} {}", "\x1B[31m", ansi::RESET, error);
+        println!("   \x1B[31mError:{} {}", ansi::RESET, error);
     }
 }
 
@@ -530,7 +530,7 @@ async fn follow_deployment_simple(
 
     loop {
         let deployment =
-            fetch_deployment(http_client, backend_url, &token, project, deployment_id).await?;
+            fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
 
         // Parse controller metadata
         let controller_phase =
@@ -555,7 +555,7 @@ async fn follow_deployment_simple(
                 && deployment.deployment_group == "default"
             {
                 if let Ok(project_info) =
-                    fetch_project_info(http_client, backend_url, &token, project).await
+                    fetch_project_info(http_client, backend_url, token, project).await
                 {
                     if let Some(url) = project_info.project_url {
                         println!();

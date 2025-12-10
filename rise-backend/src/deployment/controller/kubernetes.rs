@@ -78,6 +78,20 @@ struct IngressUrl {
     path_prefix: Option<String>,
 }
 
+/// Configuration parameters for the Kubernetes controller
+pub struct KubernetesControllerConfig {
+    pub ingress_class: String,
+    pub production_ingress_url_template: String,
+    pub staging_ingress_url_template: Option<String>,
+    pub registry_provider: Option<Arc<dyn RegistryProvider>>,
+    pub registry_url: Option<String>,
+    pub auth_backend_url: String,
+    pub auth_signin_url: String,
+    pub namespace_annotations: std::collections::HashMap<String, String>,
+    pub ingress_annotations: std::collections::HashMap<String, String>,
+    pub ingress_tls_secret_name: Option<String>,
+}
+
 /// Kubernetes controller implementation
 pub struct KubernetesController {
     state: ControllerState,
@@ -99,30 +113,21 @@ impl KubernetesController {
     pub fn new(
         state: ControllerState,
         kube_client: Client,
-        ingress_class: String,
-        production_ingress_url_template: String,
-        staging_ingress_url_template: Option<String>,
-        registry_provider: Option<Arc<dyn RegistryProvider>>,
-        registry_url: Option<String>,
-        auth_backend_url: String,
-        auth_signin_url: String,
-        namespace_annotations: std::collections::HashMap<String, String>,
-        ingress_annotations: std::collections::HashMap<String, String>,
-        ingress_tls_secret_name: Option<String>,
+        config: KubernetesControllerConfig,
     ) -> Result<Self> {
         Ok(Self {
             state,
             kube_client,
-            ingress_class,
-            production_ingress_url_template,
-            staging_ingress_url_template,
-            registry_provider,
-            registry_url,
-            auth_backend_url,
-            auth_signin_url,
-            namespace_annotations,
-            ingress_annotations,
-            ingress_tls_secret_name,
+            ingress_class: config.ingress_class,
+            production_ingress_url_template: config.production_ingress_url_template,
+            staging_ingress_url_template: config.staging_ingress_url_template,
+            registry_provider: config.registry_provider,
+            registry_url: config.registry_url,
+            auth_backend_url: config.auth_backend_url,
+            auth_signin_url: config.auth_signin_url,
+            namespace_annotations: config.namespace_annotations,
+            ingress_annotations: config.ingress_annotations,
+            ingress_tls_secret_name: config.ingress_tls_secret_name,
         })
     }
 

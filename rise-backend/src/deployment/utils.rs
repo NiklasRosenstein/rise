@@ -51,8 +51,9 @@ pub fn get_deployment_image_tag(
     if let Some(ref registry_provider) = state.registry_provider {
         let registry_url = registry_provider.registry_url();
         format!(
-            "{}:{}",
-            format!("{}/{}", registry_url.trim_end_matches('/'), project.name),
+            "{}/{}:{}",
+            registry_url.trim_end_matches('/'),
+            project.name,
             deployment.deployment_id
         )
     } else {

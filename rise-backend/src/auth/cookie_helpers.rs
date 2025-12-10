@@ -59,11 +59,9 @@ pub fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
         .split(';')
         .find_map(|cookie| {
             let cookie = cookie.trim();
-            if let Some(value) = cookie.strip_prefix(&format!("{}=", COOKIE_NAME)) {
-                Some(value.to_string())
-            } else {
-                None
-            }
+            cookie
+                .strip_prefix(&format!("{}=", COOKIE_NAME))
+                .map(|value| value.to_string())
         })
 }
 
@@ -139,11 +137,9 @@ pub fn extract_ingress_jwt_cookie(headers: &HeaderMap) -> Option<String> {
         .split(';')
         .find_map(|cookie| {
             let cookie = cookie.trim();
-            if let Some(value) = cookie.strip_prefix(&format!("{}=", INGRESS_JWT_COOKIE_NAME)) {
-                Some(value.to_string())
-            } else {
-                None
-            }
+            cookie
+                .strip_prefix(&format!("{}=", INGRESS_JWT_COOKIE_NAME))
+                .map(|value| value.to_string())
         })
 }
 

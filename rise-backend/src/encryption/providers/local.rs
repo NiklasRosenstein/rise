@@ -97,7 +97,7 @@ mod tests {
         use rand::RngCore;
         let mut key = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut key);
-        let key_base64 = BASE64.encode(&key);
+        let key_base64 = BASE64.encode(key);
 
         let provider = LocalEncryptionProvider::new(&key_base64).unwrap();
 
@@ -114,7 +114,7 @@ mod tests {
         use rand::RngCore;
         let mut key = [0u8; 32];
         rand::thread_rng().fill_bytes(&mut key);
-        let key_base64 = BASE64.encode(&key);
+        let key_base64 = BASE64.encode(key);
         let provider = LocalEncryptionProvider::new(&key_base64).unwrap();
 
         let plaintext = "same message";

@@ -202,7 +202,7 @@ mod tests {
         let similar = find_similar_teams("devop", &teams, 0.85);
 
         // Should match "devops" but not the others
-        assert!(similar.len() >= 1);
+        assert!(!similar.is_empty());
         assert_eq!(similar[0], "devops");
     }
 

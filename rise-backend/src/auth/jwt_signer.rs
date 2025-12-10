@@ -178,7 +178,7 @@ mod tests {
 
     fn create_test_signer() -> JwtSigner {
         // Exactly 32 bytes encoded as base64
-        let secret = BASE64.encode(&[0u8; 32]);
+        let secret = BASE64.encode([0u8; 32]);
         JwtSigner::new(
             &secret,
             "https://rise.test".to_string(),

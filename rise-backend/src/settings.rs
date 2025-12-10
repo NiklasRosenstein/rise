@@ -363,7 +363,7 @@ impl Settings {
             }
             ValueKind::Array(arr) => {
                 let vec: Vec<serde_json::Value> =
-                    arr.iter().map(|v| Self::config_value_to_json(v)).collect();
+                    arr.iter().map(Self::config_value_to_json).collect();
                 serde_json::Value::Array(vec)
             }
         }

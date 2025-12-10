@@ -55,8 +55,7 @@ mod tests {
             .merge(crate::auth::routes::routes())
             .merge(crate::project::routes::routes())
             .merge(crate::team::routes::team_routes())
-            .with_state(state)
-            .into();
+            .with_state(state);
 
         // If we get here, the router built successfully
     }

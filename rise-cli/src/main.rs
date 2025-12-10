@@ -403,11 +403,8 @@ async fn main() -> Result<()> {
 
     // Backend commands don't need CLI config (they use Settings from TOML/env vars)
     // Only client commands (login, project, team, deployment, service-account) need it
-    match &cli.command {
-        Commands::Backend(backend_cmd) => {
-            return backend::handle_backend_command(backend_cmd.clone()).await;
-        }
-        _ => {}
+    if let Commands::Backend(backend_cmd) = &cli.command {
+        return backend::handle_backend_command(backend_cmd.clone()).await;
     }
 
     // Load CLI config for client commands
@@ -478,14 +475,12 @@ async fn main() -> Result<()> {
                 visibility,
                 owner,
             } => {
-                let visibility_enum = if let Some(v) = visibility {
-                    Some(v.parse().unwrap_or_else(|e: anyhow::Error| {
+                let visibility_enum = visibility.as_ref().map(|v| {
+                    v.parse().unwrap_or_else(|e: anyhow::Error| {
                         eprintln!("Error: {}", e);
                         std::process::exit(1);
-                    }))
-                } else {
-                    None
-                };
+                    })
+                });
 
                 project::update_project(
                     &http_client,

@@ -382,7 +382,7 @@ pub async fn show_team(
     Ok(())
 }
 
-// Update team (add/remove members and owners)
+#[allow(clippy::too_many_arguments)]
 pub async fn update_team(
     http_client: &Client,
     backend_url: &str,

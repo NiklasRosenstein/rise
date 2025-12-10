@@ -18,7 +18,7 @@ fn generate_pkce_challenge() -> (String, String) {
     let mut hasher = Sha256::new();
     hasher.update(code_verifier.as_bytes());
     let hash = hasher.finalize();
-    let code_challenge = URL_SAFE_NO_PAD.encode(&hash);
+    let code_challenge = URL_SAFE_NO_PAD.encode(hash);
 
     (code_verifier, code_challenge)
 }

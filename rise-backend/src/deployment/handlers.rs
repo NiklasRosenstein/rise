@@ -92,12 +92,12 @@ fn is_valid_group_name(name: &str) -> bool {
 /// Parse expiration duration string (e.g., "7d", "2h", "30m") to DateTime
 fn parse_expiration(expires_in: &str) -> Result<DateTime<Utc>, String> {
     let s = expires_in.trim();
-    let (num_str, unit) = if s.ends_with('d') {
-        (&s[..s.len() - 1], "d")
-    } else if s.ends_with('h') {
-        (&s[..s.len() - 1], "h")
-    } else if s.ends_with('m') {
-        (&s[..s.len() - 1], "m")
+    let (num_str, unit) = if let Some(num_str) = s.strip_suffix('d') {
+        (num_str, "d")
+    } else if let Some(num_str) = s.strip_suffix('h') {
+        (num_str, "h")
+    } else if let Some(num_str) = s.strip_suffix('m') {
+        (num_str, "m")
     } else {
         return Err("Duration must end with d, h, or m".to_string());
     };
@@ -400,15 +400,17 @@ pub async fn create_deployment(
         // Create deployment record with image fields set
         let deployment = db_deployments::create(
             &state.db_pool,
-            &deployment_id,
-            project.id,
-            user.id,
-            DbDeploymentStatus::Pushed, // Pre-built images skip build/push, go straight to Pushed
-            Some(user_image),           // Store original user input
-            Some(&image_digest),        // Store resolved digest
-            &payload.group,             // deployment_group
-            expires_at,                 // expires_at
-            payload.http_port as i32,   // http_port
+            db_deployments::CreateDeploymentParams {
+                deployment_id: &deployment_id,
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DbDeploymentStatus::Pushed, // Pre-built images skip build/push, go straight to Pushed
+                image: Some(user_image),            // Store original user input
+                image_digest: Some(&image_digest),  // Store resolved digest
+                deployment_group: &payload.group,   // deployment_group
+                expires_at,                         // expires_at
+                http_port: payload.http_port as i32, // http_port
+            },
         )
         .await
         .map_err(|e| {
@@ -484,15 +486,17 @@ pub async fn create_deployment(
         // Create deployment record in database (image fields are NULL)
         let deployment = db_deployments::create(
             &state.db_pool,
-            &deployment_id,
-            project.id,
-            user.id,
-            DbDeploymentStatus::Pending,
-            None,                     // image - NULL for build-from-source
-            None,                     // image_digest - NULL for build-from-source
-            &payload.group,           // deployment_group
-            expires_at,               // expires_at
-            payload.http_port as i32, // http_port
+            db_deployments::CreateDeploymentParams {
+                deployment_id: &deployment_id,
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DbDeploymentStatus::Pending,
+                image: None,                         // image - NULL for build-from-source
+                image_digest: None,                  // image_digest - NULL for build-from-source
+                deployment_group: &payload.group,    // deployment_group
+                expires_at,                          // expires_at
+                http_port: payload.http_port as i32, // http_port
+            },
         )
         .await
         .map_err(|e| {
@@ -1012,15 +1016,17 @@ pub async fn rollback_deployment(
     // For build-from-source: both are NULL, helper constructs tag from deployment_id
     let new_deployment = db_deployments::create(
         &state.db_pool,
-        &new_deployment_id,
-        project.id,
-        user.id,
-        DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
-        source_deployment.image.as_deref(), // Copy image from source if present
-        source_deployment.image_digest.as_deref(), // Copy digest from source if present
-        &source_deployment.deployment_group, // Copy group from source
-        None,                       // expires_at - rollbacks don't inherit expiration
-        source_deployment.http_port, // Copy http_port from source
+        db_deployments::CreateDeploymentParams {
+            deployment_id: &new_deployment_id,
+            project_id: project.id,
+            created_by_id: user.id,
+            status: DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
+            image: source_deployment.image.as_deref(), // Copy image from source if present
+            image_digest: source_deployment.image_digest.as_deref(), // Copy digest from source if present
+            deployment_group: &source_deployment.deployment_group,   // Copy group from source
+            expires_at: None, // expires_at - rollbacks don't inherit expiration
+            http_port: source_deployment.http_port, // Copy http_port from source
+        },
     )
     .await
     .map_err(|e| {
