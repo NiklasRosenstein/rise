@@ -35,7 +35,6 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 
 # Copy workspace and package files
 COPY Cargo.toml Cargo.lock ./
-COPY .sqlx ./.sqlx
 COPY rise-backend ./rise-backend
 COPY rise-cli ./rise-cli
 
