@@ -4,6 +4,8 @@ use comfy_table::{
 };
 use reqwest::Client;
 use serde::Deserialize;
+use sha2::{Digest, Sha256};
+use std::fs;
 use std::path::Path;
 use std::process::Command;
 use std::time::Duration;
@@ -64,28 +66,37 @@ fn requires_buildkit(method: &BuildMethod) -> bool {
     matches!(method, BuildMethod::Docker | BuildMethod::Railpack { .. })
 }
 
-/// Get the SSL_CERT_FILE path from daemon labels
-fn get_daemon_cert_label(container_cli: &str, daemon_name: &str) -> Result<String> {
+/// Compute SHA256 hash of a file
+fn compute_file_hash(path: &Path) -> Result<String> {
+    let contents = fs::read(path).context("Failed to read certificate file")?;
+    let mut hasher = Sha256::new();
+    hasher.update(&contents);
+    let result = hasher.finalize();
+    Ok(format!("{:x}", result))
+}
+
+/// Get the SSL_CERT_FILE hash from daemon labels
+fn get_daemon_cert_hash(container_cli: &str, daemon_name: &str) -> Result<String> {
     let output = Command::new(container_cli)
         .args([
             "inspect",
             "--format",
-            "{{index .Config.Labels \"rise.ssl_cert_file\"}}",
+            "{{index .Config.Labels \"rise.ssl_cert_hash\"}}",
             daemon_name,
         ])
         .output()
         .context("Failed to inspect BuildKit daemon")?;
 
     if !output.status.success() {
-        bail!("Failed to get daemon certificate label");
+        bail!("Failed to get daemon certificate hash label");
     }
 
-    let cert_path = String::from_utf8(output.stdout)
+    let cert_hash = String::from_utf8(output.stdout)
         .context("Invalid UTF-8 in daemon label")?
         .trim()
         .to_string();
 
-    Ok(cert_path)
+    Ok(cert_hash)
 }
 
 /// Stop BuildKit daemon
@@ -131,6 +142,9 @@ fn create_buildkit_daemon(
         .to_str()
         .context("SSL certificate path contains invalid UTF-8")?;
 
+    // Compute hash of certificate file
+    let cert_hash = compute_file_hash(&cert_path)?;
+
     let status = Command::new(container_cli)
         .args([
             "run",
@@ -143,6 +157,8 @@ fn create_buildkit_daemon(
             "-d",
             "--label",
             &format!("rise.ssl_cert_file={}", cert_str),
+            "--label",
+            &format!("rise.ssl_cert_hash={}", cert_hash),
             "--volume",
             &format!("{}:/etc/ssl/certs/ca-certificates.crt:ro", cert_str),
             "moby/buildkit",
@@ -176,17 +192,16 @@ fn ensure_managed_buildkit_daemon(ssl_cert_file: &Path, container_cli: &str) -> 
         .context("Failed to check for existing BuildKit daemon")?;
 
     if status.status.success() {
-        // Daemon exists, verify SSL_CERT_FILE hasn't changed
-        match get_daemon_cert_label(container_cli, daemon_name) {
-            Ok(current_cert) => {
-                let expected_cert = ssl_cert_file
+        // Daemon exists, verify SSL_CERT_FILE hash hasn't changed
+        match get_daemon_cert_hash(container_cli, daemon_name) {
+            Ok(current_hash) => {
+                // Resolve and compute hash of current certificate file
+                let cert_path = ssl_cert_file
                     .canonicalize()
                     .context("Failed to resolve SSL certificate path")?;
-                let expected_cert_str = expected_cert
-                    .to_str()
-                    .context("SSL certificate path contains invalid UTF-8")?;
+                let expected_hash = compute_file_hash(&cert_path)?;
 
-                if current_cert == expected_cert_str {
+                if current_hash == expected_hash {
                     debug!("BuildKit daemon is up-to-date with current SSL_CERT_FILE");
                     // Set BUILDKIT_HOST for this session
                     std::env::set_var(
@@ -196,15 +211,12 @@ fn ensure_managed_buildkit_daemon(ssl_cert_file: &Path, container_cli: &str) -> 
                     return Ok(());
                 }
 
-                info!(
-                    "SSL_CERT_FILE has changed (was: {}, now: {}), recreating daemon",
-                    current_cert, expected_cert_str
-                );
+                info!("SSL certificate has changed (hash mismatch), recreating daemon");
                 stop_buildkit_daemon(container_cli, daemon_name)?;
             }
             Err(e) => {
                 warn!(
-                    "Failed to get daemon certificate label: {}, recreating daemon",
+                    "Failed to get daemon certificate hash: {}, recreating daemon",
                     e
                 );
                 stop_buildkit_daemon(container_cli, daemon_name)?;
