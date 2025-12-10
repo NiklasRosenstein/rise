@@ -65,7 +65,7 @@ enum Commands {
         /// Path to the directory containing the application
         #[arg(default_value = ".")]
         path: String,
-        /// Build backend (docker, pack, railpack, railpack:buildctl)
+        /// Build backend (docker, pack, railpack[:buildx], railpack:buildctl)
         #[arg(long)]
         backend: Option<String>,
         /// Buildpack builder to use (only for pack backend)
