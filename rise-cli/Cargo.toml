@@ -36,4 +36,4 @@ rsa = "0.9"
 # UUID for temp file naming
 uuid = { version = "1.0", features = ["v4"] }
 # Backend dependency for shared models
-rise-backend = { path = "../rise-backend", version = "0.2.0" }
+rise-backend = { path = "../rise-backend", version = "0.3.0" }
