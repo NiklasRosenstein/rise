@@ -76,7 +76,7 @@ enum Commands {
         container_cli: Option<String>,
         /// Enable managed BuildKit daemon with SSL certificate support
         #[arg(long)]
-        managed_buildkit: Option<bool>,
+        managed_buildkit: bool,
     },
 }
 
@@ -240,7 +240,7 @@ enum DeploymentCommands {
         container_cli: Option<String>,
         /// Enable managed BuildKit daemon with SSL certificate support
         #[arg(long)]
-        managed_buildkit: Option<bool>,
+        managed_buildkit: bool,
     },
     /// List deployments for a project
     #[command(visible_alias = "ls")]

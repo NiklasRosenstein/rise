@@ -737,7 +737,7 @@ pub fn build_image(
     backend: Option<&str>,
     builder: Option<&str>,
     container_cli: Option<&str>,
-    managed_buildkit: Option<bool>,
+    managed_buildkit: bool,
 ) -> Result<()> {
     // Resolve container CLI
     let container_cli = container_cli
@@ -760,7 +760,8 @@ pub fn build_image(
     let build_method = select_build_method(path, backend)?;
 
     // Check if managed BuildKit daemon should be used
-    let use_managed_buildkit = managed_buildkit.unwrap_or_else(|| config.get_managed_buildkit());
+    // If flag is present, use it; otherwise check config
+    let use_managed_buildkit = managed_buildkit || config.get_managed_buildkit();
 
     // Handle SSL certificate and BuildKit daemon management
     let buildkit_host = if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
@@ -846,7 +847,7 @@ pub async fn create_deployment(
     backend: Option<&str>,
     builder: Option<&str>,
     container_cli: Option<&str>,
-    managed_buildkit: Option<bool>,
+    managed_buildkit: bool,
 ) -> Result<()> {
     // Resolve which container CLI to use
     let container_cli = container_cli
@@ -873,7 +874,8 @@ pub async fn create_deployment(
     }
 
     // Check if managed BuildKit daemon should be used
-    let use_managed_buildkit = managed_buildkit.unwrap_or_else(|| config.get_managed_buildkit());
+    // If flag is present, use it; otherwise check config
+    let use_managed_buildkit = managed_buildkit || config.get_managed_buildkit();
 
     // Handle SSL certificate and BuildKit daemon management (only when building, not for pre-built images)
     let buildkit_host = if image.is_none() {
