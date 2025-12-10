@@ -5,11 +5,8 @@ use crate::dev_oidc_issuer;
 
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum BackendCommands {
-    /// Start the HTTP server
+    /// Start the HTTP server with all controllers
     Server,
-    /// Start a controller
-    #[command(subcommand)]
-    Controller(ControllerCommands),
     /// Run a local OIDC issuer for testing service accounts
     DevOidcIssuer {
         /// Port to listen on
@@ -21,40 +18,12 @@ pub enum BackendCommands {
     },
 }
 
-#[derive(Debug, Clone, clap::Subcommand)]
-pub enum ControllerCommands {
-    /// Start the deployment controller (Docker backend)
-    DeploymentDocker,
-    /// Start the deployment controller (Kubernetes backend)
-    DeploymentKubernetes,
-    /// Start the project controller
-    Project,
-    /// Start the ECR controller (requires ECR registry configuration)
-    Ecr,
-}
-
 pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
     match cmd {
-        BackendCommands::DevOidcIssuer { port, token } => dev_oidc_issuer::run(port, token).await,
-        _ => {
-            // Other commands need settings
+        BackendCommands::Server => {
             let settings = Settings::new()?;
-            match cmd {
-                BackendCommands::Server => rise_backend::run_server(settings).await,
-                BackendCommands::Controller(controller_cmd) => match controller_cmd {
-                    ControllerCommands::DeploymentDocker => {
-                        rise_backend::run_deployment_controller(settings).await
-                    }
-                    ControllerCommands::DeploymentKubernetes => {
-                        rise_backend::run_kubernetes_controller(settings).await
-                    }
-                    ControllerCommands::Project => {
-                        rise_backend::run_project_controller(settings).await
-                    }
-                    ControllerCommands::Ecr => rise_backend::run_ecr_controller(settings).await,
-                },
-                BackendCommands::DevOidcIssuer { .. } => unreachable!(),
-            }
+            rise_backend::run_server(settings).await
         }
+        BackendCommands::DevOidcIssuer { port, token } => dev_oidc_issuer::run(port, token).await,
     }
 }

@@ -30,16 +30,13 @@ All services use Docker volumes for persistence and are configured for developme
 
 ### Procfile Processes
 
-The `Procfile.dev` defines the Rise backend processes managed by `overmind`:
+The `Procfile.dev` defines the Rise backend process managed by `overmind`:
 
 | Process | Command | Purpose |
 |---------|---------|---------|
-| **backend-server** | `cargo run --bin rise -- backend server` | HTTP API server (port 3000) |
-| **backend-deployment** | `cargo run --bin rise -- backend controller deployment-docker` | Deployment reconciliation controller |
-| **backend-project** | `cargo run --bin rise -- backend controller project` | Project lifecycle controller |
-| **backend-ecr** | `cargo run --bin rise -- backend controller ecr` | ECR authentication controller |
+| **server** | `cargo run --bin rise -- backend server` | HTTP API server + all controllers (port 3000) |
 
-This multi-process architecture allows independent scaling and clearer separation of concerns. Each process has distinct logs with process name prefixes.
+The backend runs as a single process with all controllers (deployment, project, ECR) running as concurrent tasks within the same process. Controllers are automatically enabled based on the configuration.
 
 ### Mise Tasks
 
@@ -98,14 +95,14 @@ mise rr
 This command:
 1. Ensures docker-compose services are running (`backend:deps`)
 2. Runs database migrations (`db:migrate`)
-3. Starts all processes defined in `Procfile.dev` using `overmind`
+3. Starts the backend server (with all controllers) using `overmind`
 
-You'll see log output from all four processes with prefixes like:
+You'll see log output from the server process with controller activity logged inline:
 ```
-backend-server    | ...
-backend-deployment| ...
-backend-project   | ...
-backend-ecr       | ...
+server | HTTP server listening on http://0.0.0.0:3000
+server | Starting deployment controller (backend: docker)
+server | Starting project controller
+server | Starting ECR controller
 ```
 
 ### 5. Verify Services Are Running
@@ -190,9 +187,9 @@ docker-compose logs -f dex
 docker-compose logs -f registry
 ```
 
-**Individual process logs** (when using overmind):
+**Connect to the process** (when using overmind):
 ```bash
-overmind connect backend-server
+overmind connect server
 # Press Ctrl+B then D to detach
 ```
 

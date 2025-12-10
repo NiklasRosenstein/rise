@@ -32,7 +32,7 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       containers:
-      # Server container (always present)
+      # Single server container with all controllers running in the same process
       - name: server
         securityContext:
           {{- toYaml .Values.securityContext | nindent 12 }}
@@ -80,99 +80,6 @@ spec:
           readOnly: true
         - name: tmp
           mountPath: /tmp
-      {{- if .Values.controllers.project.enabled }}
-      # Project controller container
-      - name: project
-        securityContext:
-          {{- toYaml .Values.securityContext | nindent 12 }}
-        image: {{ include "rise.image" . }}
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
-        args:
-          - "backend"
-          - "controller"
-          - "project"
-        env:
-        - name: RISE_CONFIG_DIR
-          value: "/config"
-        {{- if .Values.postgresql.enabled }}
-        - name: DATABASE_URL
-          value: "postgres://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "rise.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
-        {{- end }}
-        {{- with .Values.envFrom }}
-        envFrom:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        resources:
-          {{- toYaml .Values.controllers.project.resources | nindent 12 }}
-        volumeMounts:
-        - name: config
-          mountPath: /config
-          readOnly: true
-        - name: tmp
-          mountPath: /tmp
-      {{- end }}
-      {{- if .Values.controllers.ecr.enabled }}
-      # ECR controller container
-      - name: ecr
-        securityContext:
-          {{- toYaml .Values.securityContext | nindent 12 }}
-        image: {{ include "rise.image" . }}
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
-        args:
-          - "backend"
-          - "controller"
-          - "ecr"
-        env:
-        - name: RISE_CONFIG_DIR
-          value: "/config"
-        {{- if .Values.postgresql.enabled }}
-        - name: DATABASE_URL
-          value: "postgres://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "rise.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
-        {{- end }}
-        {{- with .Values.envFrom }}
-        envFrom:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        resources:
-          {{- toYaml .Values.controllers.ecr.resources | nindent 12 }}
-        volumeMounts:
-        - name: config
-          mountPath: /config
-          readOnly: true
-        - name: tmp
-          mountPath: /tmp
-      {{- end }}
-      {{- if .Values.controllers.deployment.enabled }}
-      # Deployment controller container (Kubernetes)
-      - name: kubernetes
-        securityContext:
-          {{- toYaml .Values.securityContext | nindent 12 }}
-        image: {{ include "rise.image" . }}
-        imagePullPolicy: {{ .Values.image.pullPolicy }}
-        args:
-          - "backend"
-          - "controller"
-          - {{ .Values.controllers.deployment.type | quote }}
-        env:
-        - name: RISE_CONFIG_DIR
-          value: "/config"
-        {{- if .Values.postgresql.enabled }}
-        - name: DATABASE_URL
-          value: "postgres://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "rise.fullname" . }}-postgresql:5432/{{ .Values.postgresql.auth.database }}"
-        {{- end }}
-        {{- with .Values.envFrom }}
-        envFrom:
-          {{- toYaml . | nindent 10 }}
-        {{- end }}
-        resources:
-          {{- toYaml .Values.controllers.deployment.resources | nindent 12 }}
-        volumeMounts:
-        - name: config
-          mountPath: /config
-          readOnly: true
-        - name: tmp
-          mountPath: /tmp
-      {{- end }}
       volumes:
       - name: config
         configMap:

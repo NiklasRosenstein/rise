@@ -25,9 +25,58 @@ use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
 use tracing::info;
 
-/// Run the HTTP server process
+/// Run the HTTP server process with all enabled controllers
 pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let state = AppState::new_for_server(&settings).await?;
+
+    // Spawn enabled controllers as background tasks
+    let mut controller_handles = vec![];
+
+    // Start deployment controller (always enabled)
+    let is_kubernetes = settings.kubernetes.is_some();
+    info!(
+        "Starting deployment controller (backend: {})",
+        if is_kubernetes {
+            "kubernetes"
+        } else {
+            "docker"
+        }
+    );
+
+    let settings_clone = settings.clone();
+    let handle = tokio::spawn(async move {
+        let result = if is_kubernetes {
+            run_kubernetes_controller_loop(settings_clone).await
+        } else {
+            run_deployment_controller_loop(settings_clone).await
+        };
+        if let Err(e) = result {
+            tracing::error!("Deployment controller error: {}", e);
+        }
+    });
+    controller_handles.push(handle);
+
+    // Start project controller (always enabled)
+    info!("Starting project controller");
+    let settings_clone = settings.clone();
+    let handle = tokio::spawn(async move {
+        if let Err(e) = run_project_controller_loop(settings_clone).await {
+            tracing::error!("Project controller error: {}", e);
+        }
+    });
+    controller_handles.push(handle);
+
+    // Start ECR controller if ECR registry is configured
+    if let Some(settings::RegistrySettings::Ecr { .. }) = &settings.registry {
+        info!("Starting ECR controller");
+        let settings_clone = settings.clone();
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_ecr_controller_loop(settings_clone).await {
+                tracing::error!("ECR controller error: {}", e);
+            }
+        });
+        controller_handles.push(handle);
+    }
 
     // Public routes (no authentication)
     let public_routes = Router::new()
@@ -64,11 +113,17 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .await?;
 
     info!("HTTP server shutdown complete");
+
+    // Wait for all controller tasks to complete
+    for handle in controller_handles {
+        let _ = handle.await;
+    }
+
     Ok(())
 }
 
-/// Run the deployment controller process
-pub async fn run_deployment_controller(settings: settings::Settings) -> Result<()> {
+/// Run the deployment controller loop (for embedding in server process)
+async fn run_deployment_controller_loop(settings: settings::Settings) -> Result<()> {
     let app_state = state::AppState::new_for_controller(&settings).await?;
 
     // Create minimal controller state for the base controller
@@ -113,8 +168,8 @@ pub async fn run_deployment_controller(settings: settings::Settings) -> Result<(
     Ok(())
 }
 
-/// Run the project controller process
-pub async fn run_project_controller(settings: settings::Settings) -> Result<()> {
+/// Run the project controller loop (for embedding in server process)
+async fn run_project_controller_loop(settings: settings::Settings) -> Result<()> {
     let state =
         ControllerState::new(&settings.database.url, 2, settings.encryption.as_ref()).await?;
 
@@ -128,12 +183,12 @@ pub async fn run_project_controller(settings: settings::Settings) -> Result<()> 
     Ok(())
 }
 
-/// Run the ECR controller process
+/// Run the ECR controller loop (for embedding in server process)
 ///
 /// Manages ECR repository lifecycle:
 /// - Creates repositories for new projects
 /// - Cleans up repositories when projects are deleted
-pub async fn run_ecr_controller(settings: settings::Settings) -> Result<()> {
+async fn run_ecr_controller_loop(settings: settings::Settings) -> Result<()> {
     use crate::registry::models::EcrConfig;
     use crate::settings::RegistrySettings;
 
@@ -177,8 +232,8 @@ pub async fn run_ecr_controller(settings: settings::Settings) -> Result<()> {
     Ok(())
 }
 
-/// Run the Kubernetes deployment controller process
-pub async fn run_kubernetes_controller(settings: settings::Settings) -> Result<()> {
+/// Run the Kubernetes deployment controller loop (for embedding in server process)
+async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<()> {
     // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
     rustls::crypto::ring::default_provider()
         .install_default()

@@ -34,7 +34,6 @@ securityContext:
   allowPrivilegeEscalation: false
 
 # Environment variables from ConfigMaps and Secrets
-# Applied to all containers (server and controllers)
 envFrom: []
   # - secretRef:
   #     name: rise-env-secrets
@@ -178,44 +177,6 @@ postgresql:
     limits:
       cpu: 500m
       memory: 512Mi
-
-# Controllers configuration
-# All controllers run as sidecar containers in the main deployment pod
-controllers:
-  # Deployment controller - manages application deployments
-  deployment:
-    enabled: true
-    # Type can be "deployment-kubernetes" or "deployment-docker"
-    type: "deployment-kubernetes"
-    resources:
-      limits:
-        cpu: 500m
-        memory: 256Mi
-      requests:
-        cpu: 50m
-        memory: 64Mi
-
-  # Project controller - handles project lifecycle
-  project:
-    enabled: true
-    resources:
-      limits:
-        cpu: 200m
-        memory: 128Mi
-      requests:
-        cpu: 20m
-        memory: 32Mi
-
-  # ECR controller - manages ECR repository credentials
-  ecr:
-    enabled: true
-    resources:
-      limits:
-        cpu: 200m
-        memory: 128Mi
-      requests:
-        cpu: 20m
-        memory: 32Mi
 
 # Dex OIDC provider (optional)
 dex:

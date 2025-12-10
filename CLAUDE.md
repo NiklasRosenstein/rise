@@ -125,39 +125,42 @@ apps to container runtimes using a user-friendly CLI.
 
 ## Process Architecture
 
-The Rise backend uses a multi-process architecture where the HTTP server and controllers run as separate processes:
+The Rise backend runs as a single process with all controllers running as concurrent tasks within the same process:
 
-- **HTTP Server** (`rise backend server`): Handles API requests, authentication, and user interactions
-- **Deployment Controller** (`rise backend controller deployment-docker`): Background process that reconciles deployment state, monitors health, and manages Docker containers
-- **Project Controller** (`rise backend controller project`): Background process that handles project lifecycle (deletion and cleanup)
+- **HTTP Server + Controllers** (`rise backend server`): Single process that handles API requests, authentication, and runs all controller loops concurrently
 
-### Benefits of Multi-Process Design
+### Controllers
 
-1. **Better Log Separation**: Each process has distinct logs with process name prefixes
-2. **Independent Scaling**: Controllers can run multiple instances independently
-3. **Resource Optimization**: Each process only allocates resources it needs (e.g., controllers don't initialize auth/registry components)
-4. **Clearer Operations**: Start/stop/restart components independently
-5. **No God Objects**: Components get only the state they need (ControllerState vs AppState)
+All controllers run automatically as background tokio tasks when the server starts:
 
-### State Design
+- **Deployment Controller**: Reconciles deployment state, monitors health, and manages deployments (Docker or Kubernetes backend based on configuration)
+- **Project Controller**: Handles project lifecycle (deletion and cleanup)
+- **ECR Controller**: Manages ECR repository lifecycle (only enabled when ECR registry is configured)
 
-- **AppState**: Full state for HTTP server (db_pool, jwt_validator, oauth_client, registry_provider, oci_client)
-- **ControllerState**: Minimal state for controllers (db_pool only)
+Controllers are enabled automatically based on configuration:
+- **Deployment**: Always enabled (backend determined by presence of `kubernetes` config)
+- **Project**: Always enabled
+- **ECR**: Enabled only when `registry.type = "ecr"`
+
+### Benefits of Single-Process Design
+
+1. **Simpler Deployment**: Only one process to manage and monitor
+2. **Easier Local Development**: Start everything with a single command
+3. **Shared Resources**: Controllers can share state and connections efficiently
+4. **Unified Logging**: All logs in one stream with component prefixes
 
 ### Running Locally
 
-All processes are defined in `Procfile.dev` and can be started together:
+Start the backend with all controllers:
 
 ```bash
-mise run start  # Starts all processes via overmind
+mise run start  # Starts server via overmind using Procfile.dev
 ```
 
-Or individually:
+Or directly:
 
 ```bash
-cargo run --bin rise -- backend server                          # HTTP server
-cargo run --bin rise -- backend controller deployment-docker    # Deployment controller
-cargo run --bin rise -- backend controller project              # Project controller
+cargo run --bin rise -- backend server  # HTTP server + all controllers
 ```
 
 Environment variables are centralized in `.envrc` (loaded by direnv):
@@ -260,7 +263,6 @@ The project `visibility` field (Public/Private) is currently stored but not enfo
 - The authentication layer will validate both user identity AND project access permissions before proxying requests to the application
 
 This feature is specifically for the Kubernetes controller and will not be implemented for the Docker controller.
-- Keep the ECR controller disabled by default in Procfile.dev, we only currently have it enabled for development
 - When removing a feature, do a comprehensive check on the codebase to ensure any remaining references to that feature are removed or updated. This includes documentation files/READMEs, config files, code comments, etc.
 - Run `mise sqlx:check` and `mise sqlx:prepare` (if needed) as part of the finalizing steps
 - The CLI should first and foremost always accept the names of things (e.g. project names, or project names + deployment timestamp). The UUIDs in our tables are only for internal book-keeping.
