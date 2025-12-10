@@ -1702,6 +1702,19 @@ impl DeploymentBackend for KubernetesController {
             .namespace
             .ok_or_else(|| anyhow::anyhow!("No namespace"))?;
 
+        // 1. Check for pod-level errors FIRST
+        // This prevents race conditions where ReplicaSet reports ready_replicas
+        // but pods are actually in CrashLoopBackOff or other error states
+        let (has_errors, error_msg) = self.check_pod_errors(&namespace, &rs_name).await?;
+        if has_errors {
+            return Ok(HealthStatus {
+                healthy: false,
+                message: error_msg,
+                last_check: Utc::now(),
+            });
+        }
+
+        // 2. Then check ReplicaSet readiness
         let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
 
         // Get ReplicaSet, handling 404 errors gracefully
