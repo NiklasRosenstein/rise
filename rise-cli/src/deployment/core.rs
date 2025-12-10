@@ -1051,6 +1051,8 @@ fn build_image_with_buildpacks(
         .arg("host")
         .arg("--builder")
         .arg(builder_image)
+        .arg("--platform")
+        .arg("linux/amd64")
         .env("DOCKER_API_VERSION", "1.44");
 
     // Never use --publish - always build locally and push separately
@@ -1157,6 +1159,9 @@ fn build_image_with_dockerfile(
     }
 
     cmd.arg("build").arg("-t").arg(image_tag).arg(app_path);
+
+    // Add platform flag for consistent architecture
+    cmd.arg("--platform").arg("linux/amd64");
 
     if push && supports_push_flag {
         // Only use --push with buildx
@@ -1300,7 +1305,9 @@ fn build_with_buildx(
         .arg("-f")
         .arg(plan_file)
         .arg("-t")
-        .arg(image_tag);
+        .arg(image_tag)
+        .arg("--platform")
+        .arg("linux/amd64");
 
     if push {
         cmd.arg("--push");
@@ -1343,23 +1350,32 @@ fn build_with_buildctl(
 
     info!("Building image with buildctl: {}", image_tag);
 
+    println!(
+        "Plafile contents: {}",
+        std::fs::read_to_string(plan_file).unwrap_or_default()
+    );
+
     let mut cmd = Command::new("buildctl");
     cmd.arg("build")
-        .arg("--frontend")
-        .arg("dockerfile.v0")
         .arg("--local")
         .arg(format!("context={}", app_path))
         .arg("--local")
-        .arg(format!(
-            "dockerfile={}",
-            plan_file.parent().unwrap().display()
-        ))
+        .arg(format!("dockerfile={}", plan_file.display()))
+        .arg("--frontend=gateway.v0")
+        .arg("--opt")
+        .arg("source=ghcr.io/railwayapp/railpack-frontend")
         .arg("--output");
 
     if push {
-        cmd.arg(format!("type=image,name={},push=true", image_tag));
+        cmd.arg(format!(
+            "type=image,name={},push=true,platform=linux/amd64",
+            image_tag
+        ));
     } else {
-        cmd.arg(format!("type=image,name={}", image_tag));
+        cmd.arg(format!(
+            "type=image,name={},platform=linux/amd64",
+            image_tag
+        ));
     }
 
     debug!("Executing command: {:?}", cmd);
