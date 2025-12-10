@@ -47,8 +47,7 @@ The `mise.toml` file defines convenient tasks for development:
 | `mise docs:serve` | Serve documentation with live reload on port 3001 |
 | `mise db:migrate` | Run database migrations (auto-run before backend starts) |
 | `mise backend:deps` | Start all docker-compose services |
-| `mise backend:run` (alias: `mise rr`) | Start all backend processes with overmind |
-| `mise backend:reload` (alias: `mise re`) | Restart backend processes after code changes |
+| `mise backend:run` (alias: `mise br`) | Start all backend processes with overmind |
 | `mise minikube:launch` | Start minikube with local registry access |
 
 ## Getting Started
@@ -89,7 +88,7 @@ mise db:migrate
 mise backend:run
 
 # Or use the alias
-mise rr
+mise br
 ```
 
 This command:
@@ -169,7 +168,7 @@ source .envrc
 1. **Edit code** in your editor
 2. **Reload the backend**:
    ```bash
-   mise backend:reload  # or: mise rr
+   mise backend:reload  # or:br
    ```
 3. **Check logs** in the overmind terminal for errors
 4. **Test changes** using the CLI or web UI

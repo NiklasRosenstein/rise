@@ -1,6 +1,5 @@
 [tools]
 minikube = "1.37.0"
-overmind = "2.5.1"
 pack = "0.39.0"
 "ubi:railwayapp/railpack" = "0.15.1"
 
@@ -39,16 +38,10 @@ description = "Start all backend dependencies with docker compose."
 run = "docker compose up -d"
 
 [tasks."backend:run"]
-description = "Run the backend with overmind."
+description = "Run the backend server."
 depends = ["backend:deps", "db:migrate"]
-run = "overmind start -f Procfile.dev"
-alias = "rr"
-
-[tasks."backend:reload"]
-description = "Reload the backend services with overmind."
-depends = ["backend:deps", "db:migrate"]
-run = "overmind restart"
-alias = "re"
+run = "cargo run --bin rise -- backend server"
+alias = "br"
 
 [tasks."minikube:launch"]
 description = "Start minikube, preconfigured with access to the local Docker registry (rise-registry)."

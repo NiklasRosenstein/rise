@@ -1,2 +1,0 @@
-# Single process backend server with all controllers running in the same process
-server: cargo run --bin rise -- backend server
