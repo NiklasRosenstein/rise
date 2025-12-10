@@ -8,8 +8,7 @@ repository.workspace = true
 include = [
     "src/**/*",
     "migrations/**/*",
-    "templates/**/*",
-    "frontend/**/*",
+    "static/**/*",
     ".sqlx/**/*",
     "Cargo.toml",
 ]

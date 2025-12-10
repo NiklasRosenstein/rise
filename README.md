@@ -51,7 +51,7 @@ Services will be available at:
 ### Build and Use CLI
 
 ```bash
-# Build the CLI
+# Build the CLI from source
 cargo build --bin rise
 
 # The CLI is now available as 'rise' (if using direnv)
@@ -60,6 +60,18 @@ cargo build --bin rise
 rise login
 rise project create my-app
 rise deployment create my-app --image nginx:latest
+```
+
+### Install from crates.io
+
+```bash
+# Install the CLI and backend from crates.io
+# Note: SQLX_OFFLINE=true is required because the backend uses compile-time
+# verified SQL queries that need the query cache during compilation
+SQLX_OFFLINE=true cargo install rise-cli rise-backend
+
+# Verify installation
+rise --version
 ```
 
 ## Documentation
