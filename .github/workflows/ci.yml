@@ -33,6 +33,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: rust cargo:sqlx-cli
 
       - name: Check SQLX offline data is up to date
         run: mise run sqlx:check
@@ -48,6 +49,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: rust
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -63,6 +65,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: rust
 
       - name: Run Clippy
         run: cargo clippy --all-targets --workspace -- -D warnings
@@ -94,6 +97,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: rust cargo:sqlx-cli
 
       - name: Run database migrations
         run: |
@@ -119,6 +123,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: rust
 
       - name: Build all targets
         run: cargo build --workspace --all-targets
@@ -138,6 +143,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: helm
 
       - name: Set up chart-testing
         uses: helm/chart-testing-action@v2.6.1
@@ -160,6 +166,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: helm
 
       - name: Set up chart-testing
         uses: helm/chart-testing-action@v2.6.1
@@ -183,6 +190,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: helm
 
       - name: Package Helm chart
         run: helm package helm/rise -d .helm-packages
@@ -204,6 +212,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: cargo:mdbook
 
       - name: Build book
         run: mdbook build
@@ -338,6 +347,7 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
+          tools: rust
 
       - name: Verify version matches tag
         run: |
