@@ -271,7 +271,7 @@ fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) -> Result<Str
             "--driver",
             "docker-container",
             "--driver-opt",
-            &format!("network=host"),
+            "network=host",
             buildkit_host,
         ])
         .status()
