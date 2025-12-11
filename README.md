@@ -2,6 +2,17 @@
 
 A Rust-based platform for deploying containerized applications with minimal configuration.
 
+> [!WARNING]
+> **Early Work in Progress**
+>
+> This project is in a **very early experimental stage**. It is approximately **99% coded by Claude AI** (under technical guidance), which means:
+> - The codebase is actively evolving and may contain bugs or incomplete features
+> - APIs and interfaces may change frequently without notice
+> - Documentation may be out of sync with the current implementation
+> - Production use is **not recommended** at this stage
+>
+> If you choose to use or experiment with Rise, please be aware that you're working with experimental software. Contributions, bug reports, and feedback are welcome, but please set expectations accordingly.
+
 ## What is Rise?
 
 Rise simplifies container deployment by providing:
