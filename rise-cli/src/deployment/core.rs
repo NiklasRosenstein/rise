@@ -589,7 +589,7 @@ pub async fn create_deployment(
         // Step 2: Login to registry if credentials provided
         if !deployment_info.credentials.username.is_empty() {
             info!("Logging into registry");
-            if let Err(e) = build::login_to_registry(
+            if let Err(e) = build::docker_login(
                 &build_args
                     .container_cli
                     .clone()

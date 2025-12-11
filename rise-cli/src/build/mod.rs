@@ -14,6 +14,7 @@ mod ssl;
 
 pub use method::BuildArgs;
 pub(crate) use method::{BuildMethod, BuildOptions};
+pub(crate) use registry::docker_login;
 
 use anyhow::{bail, Result};
 use std::path::Path;
@@ -112,14 +113,4 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
 
     info!("✓ Successfully built image '{}'", options.image_tag);
     Ok(())
-}
-
-/// Login to a registry (for use by deployment module)
-pub(crate) fn login_to_registry(
-    container_cli: &str,
-    registry: &str,
-    username: &str,
-    password: &str,
-) -> Result<()> {
-    registry::docker_login(container_cli, registry, username, password)
 }
