@@ -249,3 +249,26 @@ pub struct DeploymentEnvVar {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// Snowflake OAuth session - tracks authenticated users with Snowflake
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SnowflakeSession {
+    pub session_id: String,
+    pub user_email: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Snowflake OAuth token - stores encrypted tokens per session+project
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct SnowflakeAppToken {
+    pub session_id: String,
+    pub project_name: String,
+    /// Encrypted access token
+    pub access_token_encrypted: String,
+    /// Encrypted refresh token
+    pub refresh_token_encrypted: String,
+    pub token_expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

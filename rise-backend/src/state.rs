@@ -3,6 +3,7 @@ use crate::auth::{
     jwt::JwtValidator,
     jwt_signer::JwtSigner,
     oauth::OAuthClient,
+    snowflake_oauth::SnowflakeOAuthClient,
     token_storage::{InMemoryTokenStore, TokenStore},
 };
 use crate::encryption::EncryptionProvider;
@@ -12,7 +13,7 @@ use crate::registry::{
     RegistryProvider,
 };
 use crate::settings::{
-    AuthSettings, EncryptionSettings, RegistrySettings, ServerSettings, Settings,
+    AuthSettings, EncryptionSettings, RegistrySettings, ServerSettings, Settings, SnowflakeSettings,
 };
 use anyhow::{Context, Result};
 use sqlx::postgres::PgPoolOptions;
@@ -43,6 +44,10 @@ pub struct AppState {
     pub cookie_settings: CookieSettings,
     pub public_url: String,
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
+    /// Snowflake OAuth client (optional - only if snowflake settings are configured)
+    pub snowflake_oauth_client: Option<Arc<SnowflakeOAuthClient>>,
+    /// Snowflake settings for reference (optional)
+    pub snowflake_settings: Option<Arc<SnowflakeSettings>>,
 }
 
 /// Initialize encryption provider from settings
@@ -318,6 +323,28 @@ impl AppState {
         // Initialize encryption provider
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
 
+        // Initialize Snowflake OAuth client if configured
+        let (snowflake_oauth_client, snowflake_settings) =
+            if let Some(ref sf_settings) = settings.snowflake {
+                tracing::info!(
+                    "Initializing Snowflake OAuth client for account: {}",
+                    sf_settings.account
+                );
+                let client = SnowflakeOAuthClient::new(
+                    sf_settings.account.clone(),
+                    sf_settings.client_id.clone(),
+                    sf_settings.client_secret.clone(),
+                    sf_settings.redirect_uri.clone(),
+                    sf_settings.scopes.clone(),
+                );
+                (Some(Arc::new(client)), Some(Arc::new(sf_settings.clone())))
+            } else {
+                tracing::info!(
+                    "Snowflake OAuth not configured - projects with snowflake_enabled will not work"
+                );
+                (None, None)
+            };
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -332,6 +359,8 @@ impl AppState {
             cookie_settings,
             public_url,
             encryption_provider,
+            snowflake_oauth_client,
+            snowflake_settings,
         })
     }
 
@@ -461,6 +490,10 @@ impl AppState {
         // Initialize encryption provider
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
 
+        // Controller doesn't use Snowflake OAuth
+        let snowflake_oauth_client = None;
+        let snowflake_settings = None;
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -475,6 +508,8 @@ impl AppState {
             cookie_settings,
             public_url,
             encryption_provider,
+            snowflake_oauth_client,
+            snowflake_settings,
         })
     }
 }

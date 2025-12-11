@@ -6,4 +6,6 @@ pub mod jwt_signer;
 pub mod middleware;
 pub mod oauth;
 pub mod routes;
+pub mod snowflake_handlers;
+pub mod snowflake_oauth;
 pub mod token_storage;
