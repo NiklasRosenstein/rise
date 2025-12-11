@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO projects (name, status, visibility, owner_user_id, owner_team_id)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id, active_deployment_id,\n            project_url, finalizers,\n            created_at, updated_at\n        ",
+  "query": "\n        UPDATE projects\n        SET active_deployment_id = $2\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id, active_deployment_id,\n            project_url, finalizers, snowflake_enabled,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -50,20 +50,22 @@
       },
       {
         "ordinal": 9,
+        "name": "snowflake_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Text",
         "Uuid",
         "Uuid"
       ]
@@ -79,8 +81,9 @@
       true,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "3e977104f2e8666b2f2af4f92c14fa6566ad598abd4bf3dfb2c8b750abc5888f"
+  "hash": "c3f5f0247e41d36164c53ec683f04f946955737e935b80135e1b187756be5e09"
 }

@@ -26,6 +26,8 @@ pub struct Project {
     /// Finalizers that must be removed before the project can be deleted.
     /// Each controller adds its own finalizer when it creates external resources.
     pub finalizers: Vec<String>,
+    /// When true, Rise handles Snowflake OAuth and injects X-Snowflake-Token header
+    pub snowflake_enabled: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

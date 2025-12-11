@@ -17,7 +17,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
                 owner_user_id, owner_team_id, active_deployment_id,
-                project_url, finalizers,
+                project_url, finalizers, snowflake_enabled,
                 created_at, updated_at
             FROM projects
             WHERE owner_user_id = $1
@@ -36,7 +36,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
                 owner_user_id, owner_team_id, active_deployment_id,
-                project_url, finalizers,
+                project_url, finalizers, snowflake_enabled,
                 created_at, updated_at
             FROM projects
             ORDER BY created_at DESC
@@ -59,7 +59,7 @@ pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
             p.status as "status: ProjectStatus",
             p.visibility as "visibility: ProjectVisibility",
             p.owner_user_id, p.owner_team_id, p.active_deployment_id,
-            p.project_url, p.finalizers,
+            p.project_url, p.finalizers, p.snowflake_enabled,
             p.created_at, p.updated_at
         FROM projects p
         WHERE
@@ -96,7 +96,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         FROM projects
         WHERE name = $1
@@ -120,7 +120,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         FROM projects
         WHERE id = $1
@@ -142,6 +142,7 @@ pub async fn create(
     visibility: ProjectVisibility,
     owner_user_id: Option<Uuid>,
     owner_team_id: Option<Uuid>,
+    snowflake_enabled: bool,
 ) -> Result<Project> {
     let status_str = status.to_string();
     let visibility_str = visibility.to_string();
@@ -149,21 +150,22 @@ pub async fn create(
     let project = sqlx::query_as!(
         Project,
         r#"
-        INSERT INTO projects (name, status, visibility, owner_user_id, owner_team_id)
-        VALUES ($1, $2, $3, $4, $5)
+        INSERT INTO projects (name, status, visibility, owner_user_id, owner_team_id, snowflake_enabled)
+        VALUES ($1, $2, $3, $4, $5, $6)
         RETURNING
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         "#,
         name,
         status_str,
         visibility_str,
         owner_user_id,
-        owner_team_id
+        owner_team_id,
+        snowflake_enabled
     )
     .fetch_one(pool)
     .await
@@ -187,7 +189,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         "#,
         id,
@@ -219,7 +221,7 @@ pub async fn update_visibility(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         "#,
         id,
@@ -250,7 +252,7 @@ pub async fn update_owner(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         "#,
         id,
@@ -260,6 +262,36 @@ pub async fn update_owner(
     .fetch_one(pool)
     .await
     .context("Failed to update project owner")?;
+
+    Ok(project)
+}
+
+/// Update project snowflake_enabled setting
+pub async fn update_snowflake_enabled(
+    pool: &PgPool,
+    id: Uuid,
+    snowflake_enabled: bool,
+) -> Result<Project> {
+    let project = sqlx::query_as!(
+        Project,
+        r#"
+        UPDATE projects
+        SET snowflake_enabled = $2
+        WHERE id = $1
+        RETURNING
+            id, name,
+            status as "status: ProjectStatus",
+            visibility as "visibility: ProjectVisibility",
+            owner_user_id, owner_team_id, active_deployment_id,
+            project_url, finalizers, snowflake_enabled,
+            created_at, updated_at
+        "#,
+        id,
+        snowflake_enabled
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to update project snowflake_enabled")?;
 
     Ok(project)
 }
@@ -317,7 +349,7 @@ pub async fn set_active_deployment(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         "#,
         project_id,
@@ -633,7 +665,7 @@ pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         "#,
         id
@@ -656,7 +688,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting'
@@ -686,7 +718,7 @@ pub async fn update_project_url(pool: &PgPool, project_id: Uuid, url: &str) -> R
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         "#,
         project_id,
@@ -757,7 +789,7 @@ pub async fn find_deleting_with_finalizer(
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting' AND $1 = ANY(finalizers)
@@ -802,7 +834,7 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url, finalizers,
+            project_url, finalizers, snowflake_enabled,
             created_at, updated_at
         FROM projects
         WHERE status NOT IN ('Deleting', 'Terminated')

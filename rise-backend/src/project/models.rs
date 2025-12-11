@@ -98,6 +98,9 @@ pub struct Project {
     pub project_url: Option<String>, // Stable project URL
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_groups: Option<Vec<String>>, // Active deployment groups
+    /// When true, Rise handles Snowflake OAuth and injects X-Snowflake-Token header
+    #[serde(default)]
+    pub snowflake_enabled: bool,
     // Timestamps
     #[serde(default)]
     pub created: String,
@@ -128,6 +131,9 @@ pub struct CreateProjectRequest {
     pub name: String,
     pub visibility: ProjectVisibility,
     pub owner: ProjectOwner,
+    /// When true, Rise handles Snowflake OAuth and injects X-Snowflake-Token header
+    #[serde(default)]
+    pub snowflake_enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -141,6 +147,8 @@ pub struct UpdateProjectRequest {
     pub visibility: Option<ProjectVisibility>,
     pub status: Option<ProjectStatus>,
     pub owner: Option<ProjectOwner>,
+    /// When true, Rise handles Snowflake OAuth and injects X-Snowflake-Token header
+    pub snowflake_enabled: Option<bool>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -186,6 +194,8 @@ pub struct ProjectWithOwnerInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_url: Option<String>,
     pub finalizers: Vec<String>,
+    /// When true, Rise handles Snowflake OAuth and injects X-Snowflake-Token header
+    pub snowflake_enabled: bool,
     pub created: String,
     pub updated: String,
 }

@@ -19,7 +19,7 @@ pub async fn create(
         Project,
         r#"
         SELECT id, name, status as "status: _", visibility as "visibility: _",
-               owner_user_id, owner_team_id, active_deployment_id, project_url, finalizers,
+               owner_user_id, owner_team_id, active_deployment_id, project_url, finalizers, snowflake_enabled,
                created_at, updated_at
         FROM projects
         WHERE id = $1
@@ -252,6 +252,7 @@ mod tests {
             ProjectVisibility::Public,
             Some(user.id),
             None,
+            false,
         )
         .await?;
 
@@ -285,6 +286,7 @@ mod tests {
             ProjectVisibility::Public,
             Some(user.id),
             None,
+            false,
         )
         .await?;
 
@@ -311,6 +313,7 @@ mod tests {
             ProjectVisibility::Public,
             Some(user.id),
             None,
+            false,
         )
         .await?;
 
@@ -337,6 +340,7 @@ mod tests {
             ProjectVisibility::Public,
             Some(user.id),
             None,
+            false,
         )
         .await?;
         let project2 = projects::create(
@@ -346,6 +350,7 @@ mod tests {
             ProjectVisibility::Public,
             Some(user.id),
             None,
+            false,
         )
         .await?;
 
@@ -373,6 +378,7 @@ mod tests {
             ProjectVisibility::Public,
             Some(user.id),
             None,
+            false,
         )
         .await?;
 
@@ -404,6 +410,7 @@ mod tests {
             ProjectVisibility::Public,
             Some(regular_user.id),
             None,
+            false,
         )
         .await?;
 

@@ -15,6 +15,11 @@ pub struct Settings {
     pub kubernetes: Option<KubernetesSettings>,
     #[serde(default)]
     pub encryption: Option<EncryptionSettings>,
+    /// Snowflake OAuth integration settings (optional)
+    /// When configured, projects with snowflake_enabled=true will have
+    /// Rise handle Snowflake OAuth and inject X-Snowflake-Token header
+    #[serde(default)]
+    pub snowflake: Option<SnowflakeSettings>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -328,6 +333,47 @@ pub enum EncryptionSettings {
         #[serde(default)]
         secret_access_key: Option<String>,
     },
+}
+
+/// Snowflake OAuth integration configuration
+///
+/// When configured, Rise can handle Snowflake OAuth for apps with snowflake_enabled=true.
+/// Rise will:
+/// 1. Redirect unauthenticated users to Snowflake OAuth
+/// 2. Store encrypted tokens in the database
+/// 3. Inject X-Snowflake-Token header into requests
+///
+/// # Example Configuration
+///
+/// ```toml
+/// [snowflake]
+/// account = "xy12345.eu-west-1"
+/// client_id = "${SNOWFLAKE_CLIENT_ID}"
+/// client_secret = "${SNOWFLAKE_CLIENT_SECRET}"
+/// redirect_uri = "https://rise.dev/.rise/oauth/callback"
+/// ```
+#[derive(Debug, Clone, Deserialize)]
+pub struct SnowflakeSettings {
+    /// Snowflake account identifier (e.g., "xy12345.eu-west-1")
+    pub account: String,
+
+    /// OAuth client ID from Snowflake security integration
+    pub client_id: String,
+
+    /// OAuth client secret from Snowflake security integration
+    pub client_secret: String,
+
+    /// OAuth redirect URI (must match Snowflake integration config)
+    /// Example: "https://rise.dev/.rise/oauth/callback"
+    pub redirect_uri: String,
+
+    /// OAuth scopes to request (default: "session:role-any")
+    #[serde(default = "default_snowflake_scopes")]
+    pub scopes: String,
+}
+
+fn default_snowflake_scopes() -> String {
+    "session:role-any".to_string()
 }
 
 impl Settings {

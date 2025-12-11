@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE projects\n        SET status = 'Deleting', updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            active_deployment_id,\n            project_url, finalizers,\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT id, name, status as \"status: _\", visibility as \"visibility: _\",\n               owner_user_id, owner_team_id, active_deployment_id, project_url, finalizers, snowflake_enabled,\n               created_at, updated_at\n        FROM projects\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -15,12 +15,12 @@
       },
       {
         "ordinal": 2,
-        "name": "status: ProjectStatus",
+        "name": "status: _",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "visibility: ProjectVisibility",
+        "name": "visibility: _",
         "type_info": "Text"
       },
       {
@@ -50,11 +50,16 @@
       },
       {
         "ordinal": 9,
+        "name": "snowflake_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -75,8 +80,9 @@
       true,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "180da22cfaf48dcaa54274f5c6bc309457b8a7c22e75cf8e9e79fb4ad6df4abc"
+  "hash": "cc6bdd084b357b03aac2cc8e48b569404a80a2b22df6d291af1434976a738d7c"
 }

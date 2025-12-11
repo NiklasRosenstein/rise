@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id, active_deployment_id,\n            project_url, finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            active_deployment_id,\n            project_url, finalizers, snowflake_enabled,\n            created_at, updated_at\n        FROM projects\n        WHERE status = 'Deleting' AND $1 = ANY(finalizers)\n        ORDER BY updated_at ASC\n        LIMIT $2\n        ",
   "describe": {
     "columns": [
       {
@@ -50,18 +50,24 @@
       },
       {
         "ordinal": 9,
+        "name": "snowflake_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text",
+        "Int8"
       ]
     },
     "nullable": [
@@ -75,8 +81,9 @@
       true,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "d7320b4e6b15f766e40bfb3916c8307c5829d1daf2ab4b47b6521f73d06f8aab"
+  "hash": "4846f32812949ad43a12938159a40bcff26b5506c43c3615e754f82b58dc9753"
 }

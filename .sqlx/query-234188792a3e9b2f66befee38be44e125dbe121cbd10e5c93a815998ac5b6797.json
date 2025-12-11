@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            active_deployment_id,\n            project_url, finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE status = 'Deleting'\n        ORDER BY updated_at ASC\n        LIMIT $1\n        ",
+  "query": "\n        SELECT DISTINCT\n            p.id, p.name,\n            p.status as \"status: ProjectStatus\",\n            p.visibility as \"visibility: ProjectVisibility\",\n            p.owner_user_id, p.owner_team_id, p.active_deployment_id,\n            p.project_url, p.finalizers, p.snowflake_enabled,\n            p.created_at, p.updated_at\n        FROM projects p\n        WHERE\n            p.owner_user_id = $1\n            OR EXISTS(\n                SELECT 1 FROM team_members tm\n                WHERE tm.team_id = p.owner_team_id\n                AND tm.user_id = $1\n            )\n            OR EXISTS(\n                SELECT 1 FROM service_accounts sa\n                WHERE sa.project_id = p.id\n                AND sa.user_id = $1\n                AND sa.deleted_at IS NULL\n            )\n        ORDER BY p.created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -50,18 +50,23 @@
       },
       {
         "ordinal": 9,
+        "name": "snowflake_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -75,8 +80,9 @@
       true,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "06716da4c3d4d7c77a36845f771e0956a5ca98a1291073ee860c040d61f462e1"
+  "hash": "234188792a3e9b2f66befee38be44e125dbe121cbd10e5c93a815998ac5b6797"
 }
