@@ -1671,6 +1671,11 @@ fn build_image_with_railpacks(
         );
     }
 
+    // Debug log plan contents
+    if let Ok(plan_contents) = fs::read_to_string(&plan_file) {
+        debug!("Railpack plan.json contents:\n{}", plan_contents);
+    }
+
     // Build with buildx or buildctl
     if use_buildctl {
         build_with_buildctl(app_path, &plan_file, image_tag, push, buildkit_host)?;
