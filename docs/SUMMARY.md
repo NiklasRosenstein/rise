@@ -1,5 +1,9 @@
 # Summary
 
+[Project Overview](../README.md)
+
+---
+
 - [Setup](setup.md)
 - [Local Development](development.md)
 - [CLI Guide](cli.md)
