@@ -1,4 +1,3 @@
-{{- if and .Values.controllers.deployment.enabled (eq .Values.controllers.deployment.type "deployment-kubernetes") }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -7,7 +6,7 @@ metadata:
     {{- include "rise.labels" . | nindent 4 }}
   annotations:
     description: |
-      ClusterRole for Rise deployment controller.
+      ClusterRole for Rise backend when Kubernetes deployment is enabled.
 
       SECURITY NOTE: This grants cluster-wide permissions to manage namespaces and
       deploy applications. Kubernetes RBAC does not support namespace wildcard patterns.
@@ -57,4 +56,3 @@ rules:
 - apiGroups: [""]
   resources: ["pods/log"]
   verbs: ["get"]
-{{- end }}

@@ -34,10 +34,4 @@ Get the application URL by running these commands:
 {{- end }}
 
 Components deployed:
-  - Server: {{ .Values.replicaCount }} replica(s)
-{{- if .Values.controllers.deployment.enabled }}
-  - Deployment Controller: {{ .Values.controllers.deployment.replicaCount }} replica(s)
-{{- end }}
-{{- if .Values.controllers.project.enabled }}
-  - Project Controller: {{ .Values.controllers.project.replicaCount }} replica(s)
-{{- end }}
+  - Rise Backend: {{ .Values.replicaCount }} replica(s)

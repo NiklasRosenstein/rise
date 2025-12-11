@@ -1,6 +1,6 @@
 # Rise Helm Chart
 
-This Helm chart deploys the Rise application on Kubernetes, including the backend API server, controllers, and optionally Dex for OIDC authentication.
+This Helm chart deploys the Rise application on Kubernetes, including the backend API server and optionally Dex for OIDC authentication.
 
 ## Prerequisites
 
@@ -78,16 +78,6 @@ server:
       cpu: 500m
       memory: 256Mi
 
-# Controllers run as sidecar containers
-controllers:
-  deployment:
-    enabled: true
-    type: "deployment-kubernetes"
-  project:
-    enabled: true
-  ecr:
-    enabled: true
-
 # Optional: Enable Dex for OIDC authentication
 dex:
   enabled: true
@@ -155,20 +145,6 @@ The following table lists the configurable parameters of the Rise chart and thei
 |-----------|-------------|---------|
 | `server.resources` | Server container resource requests/limits | See values.yaml |
 
-### Controllers
-
-All controllers run as sidecar containers in the main deployment pod.
-
-| Parameter | Description | Default |
-|-----------|-------------|---------|
-| `controllers.deployment.enabled` | Enable deployment controller | `true` |
-| `controllers.deployment.type` | Controller type (`deployment-kubernetes` or `deployment-docker`) | `deployment-kubernetes` |
-| `controllers.deployment.resources` | Deployment controller container resources | See values.yaml |
-| `controllers.project.enabled` | Enable project controller | `true` |
-| `controllers.project.resources` | Project controller container resources | See values.yaml |
-| `controllers.ecr.enabled` | Enable ECR controller | `true` |
-| `controllers.ecr.resources` | ECR controller container resources | See values.yaml |
-
 ### Dex (Optional OIDC Provider)
 
 | Parameter | Description | Default |
@@ -222,18 +198,12 @@ To use an external PostgreSQL database instead, keep `postgresql.enabled: false`
 
 ## Architecture
 
-The chart uses a multi-container pod architecture where all Rise components run as containers in a single deployment:
+The Rise backend runs as a single process that includes:
 
-1. **Server Container**: Handles API requests and user interactions (always present)
-2. **Project Controller Container**: Handles project lifecycle management (optional, enabled by default)
-3. **ECR Controller Container**: Manages ECR repository credentials (optional, enabled by default)
-4. **Deployment Controller Container**: Manages application deployments to Kubernetes or Docker (optional, enabled by default)
+1. **API Server**: Handles HTTP requests and user interactions
+2. **Background Controllers**: Manage project lifecycle, deployments, and registry credentials
 
-All containers share the same configuration and secrets, reducing resource overhead and simplifying management.
-
-### Separate Deployments
-
-The chart also supports deploying these components separately:
+The backend can optionally be deployed alongside:
 
 - **Dex**: OIDC provider for authentication (optional, disabled by default, runs as a separate deployment)
 
@@ -241,7 +211,7 @@ The chart also supports deploying these components separately:
 
 ### RBAC and Namespace Management
 
-When the Kubernetes deployment controller is enabled (`controllers.deployment.type: deployment-kubernetes`), Rise requires cluster-wide permissions via ClusterRole and ClusterRoleBinding to:
+When Kubernetes deployment is configured (via `config.kubernetes`), Rise requires cluster-wide permissions via ClusterRole and ClusterRoleBinding to:
 
 - Create, manage, and delete namespaces
 - Deploy applications (Deployments, Services, Ingresses) within those namespaces
@@ -366,7 +336,7 @@ dex:
 
 ### Environment Variables from Secrets/ConfigMaps
 
-The `envFrom` parameter allows you to inject environment variables from Secrets and ConfigMaps into all Rise containers (server and controllers). This is useful for:
+The `envFrom` parameter allows you to inject environment variables from Secrets and ConfigMaps into the Rise backend container. This is useful for:
 
 - Injecting sensitive configuration that shouldn't be in the TOML config
 - Overriding specific configuration values
