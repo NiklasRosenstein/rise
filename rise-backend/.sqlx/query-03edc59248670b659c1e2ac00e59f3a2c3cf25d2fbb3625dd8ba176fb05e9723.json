@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT DISTINCT deployment_group\n        FROM deployments\n        WHERE project_id = $1\n          AND status = 'Healthy'\n        ORDER BY deployment_group\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "deployment_group",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "03edc59248670b659c1e2ac00e59f3a2c3cf25d2fbb3625dd8ba176fb05e9723"
+}

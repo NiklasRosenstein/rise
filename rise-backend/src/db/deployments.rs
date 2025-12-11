@@ -1019,6 +1019,25 @@ pub async fn list_for_project_and_group(
     Ok(deployments)
 }
 
+/// Get all active deployment groups for a project
+/// Returns a list of unique deployment group names that have at least one healthy deployment
+pub async fn get_active_deployment_groups(pool: &PgPool, project_id: Uuid) -> Result<Vec<String>> {
+    let groups = sqlx::query_scalar!(
+        r#"
+        SELECT DISTINCT deployment_group
+        FROM deployments
+        WHERE project_id = $1
+          AND status = 'Healthy'
+        ORDER BY deployment_group
+        "#,
+        project_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(groups)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

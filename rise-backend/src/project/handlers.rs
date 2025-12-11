@@ -186,6 +186,7 @@ pub async fn list_projects(
                 active_deployment_status,
                 deployment_url,
                 project_url: project.project_url,
+                deployment_groups: None, // Not populated in list view for performance
             }
         })
         .collect();
@@ -256,8 +257,28 @@ pub async fn get_project(
         expanded.deployment_url = deployment_url;
         Ok(Json(serde_json::to_value(expanded).unwrap()))
     } else {
-        let mut api_project = convert_project(project);
+        let mut api_project = convert_project(project.clone());
         api_project.deployment_url = deployment_url;
+
+        // Get active deployment groups
+        let deployment_groups =
+            crate::db::deployments::get_active_deployment_groups(&state.db_pool, project.id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ProjectErrorResponse {
+                            error: format!("Failed to get deployment groups: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+        api_project.deployment_groups = if deployment_groups.is_empty() {
+            None
+        } else {
+            Some(deployment_groups)
+        };
+
         Ok(Json(serde_json::to_value(api_project).unwrap()))
     }
 }
@@ -729,6 +750,7 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         active_deployment_status: None, // Will be populated by caller if needed
         deployment_url: None,           // Will be populated by caller
         project_url: project.project_url,
+        deployment_groups: None, // Will be populated by caller if needed
     }
 }
 

@@ -155,6 +155,8 @@ struct ProjectWithOwnerInfo {
     owner: Option<OwnerInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deployment_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    deployment_groups: Option<Vec<String>>,
     #[serde(default)]
     finalizers: Vec<String>,
 }
@@ -430,6 +432,16 @@ pub async fn show_project(
             }
         } else {
             println!("  (none)");
+        }
+
+        // Display deployment groups if any exist
+        if let Some(groups) = &project.deployment_groups {
+            if !groups.is_empty() {
+                println!("\nDeployment Groups:");
+                for group in groups {
+                    println!("  - {}", group);
+                }
+            }
         }
 
         // Display finalizers if any exist

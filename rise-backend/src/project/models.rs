@@ -96,6 +96,8 @@ pub struct Project {
     pub deployment_url: Option<String>, // DEPRECATED: use project_url
     #[serde(skip_serializing_if = "Option::is_none")]
     pub project_url: Option<String>, // Stable project URL
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_groups: Option<Vec<String>>, // Active deployment groups
     // Timestamps
     #[serde(default)]
     pub created: String,
