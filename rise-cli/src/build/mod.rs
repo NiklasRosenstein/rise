@@ -12,6 +12,7 @@ mod railpack;
 mod registry;
 mod ssl;
 
+pub use method::BuildArgs;
 pub(crate) use method::{BuildMethod, BuildOptions};
 
 use anyhow::{bail, Result};
@@ -111,11 +112,6 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
 
     info!("✓ Successfully built image '{}'", options.image_tag);
     Ok(())
-}
-
-/// Push an image to a registry (for use by deployment module)
-pub(crate) fn push_image(container_cli: &str, image_tag: &str) -> Result<()> {
-    registry::docker_push(container_cli, image_tag)
 }
 
 /// Login to a registry (for use by deployment module)

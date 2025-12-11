@@ -68,21 +68,8 @@ enum Commands {
         /// Push image to registry after building
         #[arg(long)]
         push: bool,
-        /// Build backend (docker, pack, railpack[:buildx], railpack:buildctl)
-        #[arg(long)]
-        backend: Option<String>,
-        /// Buildpack builder to use (only for pack backend)
-        #[arg(long)]
-        builder: Option<String>,
-        /// Container CLI to use (docker or podman)
-        #[arg(long)]
-        container_cli: Option<String>,
-        /// Enable managed BuildKit daemon with SSL certificate support
-        #[arg(long)]
-        managed_buildkit: bool,
-        /// Embed SSL certificate into Railpack build plan for build-time RUN command support
-        #[arg(long)]
-        railpack_embed_ssl_cert: bool,
+        #[command(flatten)]
+        build_args: build::BuildArgs,
     },
 }
 
@@ -234,22 +221,8 @@ enum DeploymentCommands {
         /// Required when using --image. Defaults to 8080 for buildpack builds.
         #[arg(long)]
         http_port: Option<u16>,
-        /// Build backend (docker, pack, railpack, railpack:buildctl)
-        #[arg(long)]
-        backend: Option<String>,
-        /// Buildpack builder to use (e.g., 'paketobuildpacks/builder:base', 'heroku/buildpacks:22').
-        /// Defaults to 'paketobuildpacks/builder:base'. Only used with pack backend.
-        #[arg(long)]
-        builder: Option<String>,
-        /// Container CLI to use (docker or podman). Falls back to RISE_CONTAINER_CLI env var, then auto-detection.
-        #[arg(long)]
-        container_cli: Option<String>,
-        /// Enable managed BuildKit daemon with SSL certificate support
-        #[arg(long)]
-        managed_buildkit: bool,
-        /// Embed SSL certificate into Railpack build plan for build-time RUN command support
-        #[arg(long)]
-        railpack_embed_ssl_cert: bool,
+        #[command(flatten)]
+        build_args: build::BuildArgs,
     },
     /// List deployments for a project
     #[command(visible_alias = "ls")]
@@ -620,11 +593,7 @@ async fn main() -> Result<()> {
                 group,
                 expire,
                 http_port,
-                backend,
-                builder,
-                container_cli,
-                managed_buildkit,
-                railpack_embed_ssl_cert,
+                build_args,
             } => {
                 // Validate http_port requirements
                 let port = match (image.as_ref(), http_port) {
@@ -661,11 +630,7 @@ async fn main() -> Result<()> {
                     group.as_deref(),
                     expire.as_deref(),
                     port,
-                    backend.as_deref(),
-                    builder.as_deref(),
-                    container_cli.as_deref(),
-                    *managed_buildkit,
-                    *railpack_embed_ssl_cert,
+                    build_args,
                 )
                 .await?;
             }
@@ -841,25 +806,15 @@ async fn main() -> Result<()> {
             tag,
             path,
             push,
-            backend,
-            builder,
-            container_cli,
-            managed_buildkit,
-            railpack_embed_ssl_cert,
+            build_args,
         } => {
-            let options = build::BuildOptions::from_config(&config, tag.clone(), path.clone())
-                .with_push(*push)
-                .with_backend(backend.clone())
-                .with_builder(builder.clone())
-                .with_managed_buildkit(*managed_buildkit)
-                .with_railpack_embed_ssl_cert(*railpack_embed_ssl_cert);
-
-            // Override container_cli if provided
-            let options = if let Some(cli) = container_cli {
-                options.with_container_cli(cli.clone())
-            } else {
-                options
-            };
+            let options = build::BuildOptions::from_build_args(
+                &config,
+                tag.clone(),
+                path.clone(),
+                build_args,
+            )
+            .with_push(*push);
 
             build::build_image(options)?;
         }

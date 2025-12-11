@@ -510,7 +510,6 @@ struct CreateDeploymentResponse {
     image_tag: String,
     credentials: RegistryCredentials,
 }
-#[allow(clippy::too_many_arguments)]
 pub async fn create_deployment(
     http_client: &Client,
     backend_url: &str,
@@ -521,11 +520,7 @@ pub async fn create_deployment(
     group: Option<&str>,
     expires_in: Option<&str>,
     http_port: u16,
-    backend: Option<&str>,
-    builder: Option<&str>,
-    container_cli: Option<&str>,
-    managed_buildkit: bool,
-    railpack_embed_ssl_cert: bool,
+    build_args: &build::BuildArgs,
 ) -> Result<()> {
     if let Some(image_ref) = image {
         info!(
@@ -595,8 +590,9 @@ pub async fn create_deployment(
         if !deployment_info.credentials.username.is_empty() {
             info!("Logging into registry");
             if let Err(e) = build::login_to_registry(
-                &container_cli
-                    .map(String::from)
+                &build_args
+                    .container_cli
+                    .clone()
                     .unwrap_or_else(|| config.get_container_cli()),
                 &deployment_info.credentials.registry_url,
                 &deployment_info.credentials.username,
@@ -627,18 +623,13 @@ pub async fn create_deployment(
         .await?;
 
         // Step 4: Build and push image using build module
-        let mut options =
-            BuildOptions::from_config(config, deployment_info.image_tag.clone(), path.to_string())
-                .with_push(true)
-                .with_backend(backend.map(String::from))
-                .with_builder(builder.map(String::from))
-                .with_managed_buildkit(managed_buildkit)
-                .with_railpack_embed_ssl_cert(railpack_embed_ssl_cert);
-
-        // Override container_cli if provided
-        if let Some(cli) = container_cli {
-            options = options.with_container_cli(cli.to_string());
-        }
+        let options = BuildOptions::from_build_args(
+            config,
+            deployment_info.image_tag.clone(),
+            path.to_string(),
+            build_args,
+        )
+        .with_push(true);
 
         if let Err(e) = build::build_image(options) {
             update_deployment_status(

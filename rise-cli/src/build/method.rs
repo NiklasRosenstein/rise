@@ -1,6 +1,7 @@
 // Build method selection and configuration
 
 use anyhow::{bail, Result};
+use clap::Args;
 use std::path::Path;
 use tracing::info;
 
@@ -12,6 +13,30 @@ pub(crate) enum BuildMethod {
     Docker,
     Pack,
     Railpack { use_buildctl: bool },
+}
+
+/// Build-related CLI arguments that can be flattened into command structs
+#[derive(Debug, Clone, Args)]
+pub struct BuildArgs {
+    /// Build backend (docker, pack, railpack[:buildx], railpack:buildctl)
+    #[arg(long)]
+    pub backend: Option<String>,
+
+    /// Buildpack builder to use (only for pack backend)
+    #[arg(long)]
+    pub builder: Option<String>,
+
+    /// Container CLI to use (docker or podman)
+    #[arg(long)]
+    pub container_cli: Option<String>,
+
+    /// Enable managed BuildKit daemon with SSL certificate support
+    #[arg(long)]
+    pub managed_buildkit: bool,
+
+    /// Embed SSL certificate into Railpack build plan for build-time RUN command support
+    #[arg(long)]
+    pub railpack_embed_ssl_cert: bool,
 }
 
 /// Options for building container images
@@ -28,16 +53,24 @@ pub(crate) struct BuildOptions {
 }
 
 impl BuildOptions {
-    /// Create BuildOptions from Config with defaults
-    pub(crate) fn from_config(config: &Config, image_tag: String, app_path: String) -> Self {
+    /// Create BuildOptions from BuildArgs and Config
+    pub(crate) fn from_build_args(
+        config: &Config,
+        image_tag: String,
+        app_path: String,
+        build_args: &BuildArgs,
+    ) -> Self {
         Self {
             image_tag,
             app_path,
-            backend: None,
-            builder: None,
-            container_cli: config.get_container_cli(),
-            managed_buildkit: config.get_managed_buildkit(),
-            railpack_embed_ssl_cert: config.get_railpack_embed_ssl_cert(),
+            backend: build_args.backend.clone(),
+            builder: build_args.builder.clone(),
+            container_cli: build_args
+                .container_cli
+                .clone()
+                .unwrap_or_else(|| config.get_container_cli()),
+            managed_buildkit: build_args.managed_buildkit,
+            railpack_embed_ssl_cert: build_args.railpack_embed_ssl_cert,
             push: false,
         }
     }
@@ -45,36 +78,6 @@ impl BuildOptions {
     /// Builder method to set push flag
     pub(crate) fn with_push(mut self, push: bool) -> Self {
         self.push = push;
-        self
-    }
-
-    /// Builder method to set backend
-    pub(crate) fn with_backend(mut self, backend: Option<String>) -> Self {
-        self.backend = backend;
-        self
-    }
-
-    /// Builder method to set builder
-    pub(crate) fn with_builder(mut self, builder: Option<String>) -> Self {
-        self.builder = builder;
-        self
-    }
-
-    /// Builder method to set container CLI
-    pub(crate) fn with_container_cli(mut self, container_cli: String) -> Self {
-        self.container_cli = container_cli;
-        self
-    }
-
-    /// Builder method to set managed buildkit
-    pub(crate) fn with_managed_buildkit(mut self, managed_buildkit: bool) -> Self {
-        self.managed_buildkit = managed_buildkit;
-        self
-    }
-
-    /// Builder method to set railpack embed SSL cert
-    pub(crate) fn with_railpack_embed_ssl_cert(mut self, railpack_embed_ssl_cert: bool) -> Self {
-        self.railpack_embed_ssl_cert = railpack_embed_ssl_cert;
         self
     }
 }

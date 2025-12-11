@@ -122,6 +122,7 @@ impl Config {
     /// Get whether to use managed BuildKit daemon
     /// Checks RISE_MANAGED_BUILDKIT environment variable first, then falls back to config file
     /// Returns false by default (opt-in feature)
+    #[allow(dead_code)]
     pub fn get_managed_buildkit(&self) -> bool {
         // Check environment variable first
         if let Ok(val) = std::env::var("RISE_MANAGED_BUILDKIT") {
@@ -141,6 +142,7 @@ impl Config {
     /// Get whether to embed SSL certificate in Railpack builds
     /// Checks RISE_RAILPACK_EMBED_SSL_CERT environment variable first, then falls back to config file
     /// Returns false by default (opt-in feature)
+    #[allow(dead_code)]
     pub fn get_railpack_embed_ssl_cert(&self) -> bool {
         // Check environment variable first
         if let Ok(val) = std::env::var("RISE_RAILPACK_EMBED_SSL_CERT") {
