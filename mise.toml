@@ -5,6 +5,7 @@ pack = "0.39.0"
 "cargo:sqlx-cli" = "latest"
 "cargo:mdbook" = "latest"
 helm = "latest"
+rust = "1.91.1"
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
