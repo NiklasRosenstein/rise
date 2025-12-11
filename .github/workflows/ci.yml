@@ -8,6 +8,11 @@ on:
     branches:
       - main
 
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
 env:
   RUST_VERSION: stable
 
@@ -24,48 +29,13 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Setup mise
+        uses: jdx/mise-action@v2
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-target-sqlx-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-target-sqlx-
-
-      - name: Install sqlx-cli
-        run: cargo install sqlx-cli --no-default-features --features postgres
+          cache: true
 
       - name: Check SQLX offline data is up to date
-        run: |
-          echo "Checking if SQLX offline query data is up to date..."
-
-          # Run sqlx prepare in check mode (doesn't modify files)
-          if ! cargo sqlx prepare --workspace --check -- --all-targets; then
-            echo ""
-            echo "❌ SQLX offline query data is out of date!"
-            echo ""
-            echo "The .sqlx/*.json files need to be regenerated."
-            echo ""
-            echo "To fix this, run the following commands locally:"
-            echo "  1. Start a local PostgreSQL database (e.g., via docker-compose)"
-            echo "  2. Run: cargo sqlx prepare --workspace"
-            echo "  3. Commit the updated .sqlx/*.json files"
-            echo ""
-            exit 1
-          fi
-
-          echo "✓ SQLX offline query data is up to date"
+        run: mise run sqlx:check
 
   fmt:
     name: Check code formatting
@@ -79,6 +49,11 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
           components: rustfmt
+
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -96,24 +71,10 @@ jobs:
           toolchain: ${{ env.RUST_VERSION }}
           components: clippy
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Setup mise
+        uses: jdx/mise-action@v2
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-target-clippy-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-target-clippy-
+          cache: true
 
       - name: Run Clippy
         run: cargo clippy --all-targets --workspace -- -D warnings
@@ -146,27 +107,10 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Setup mise
+        uses: jdx/mise-action@v2
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-target-test-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-target-test-
-
-      - name: Install sqlx-cli
-        run: cargo install sqlx-cli --no-default-features --features postgres
+          cache: true
 
       - name: Run database migrations
         run: |
@@ -193,26 +137,118 @@ jobs:
         with:
           toolchain: ${{ env.RUST_VERSION }}
 
-      - name: Cache cargo registry
-        uses: actions/cache@v4
+      - name: Setup mise
+        uses: jdx/mise-action@v2
         with:
-          path: |
-            ~/.cargo/registry/index
-            ~/.cargo/registry/cache
-            ~/.cargo/git/db
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      - name: Cache target directory
-        uses: actions/cache@v4
-        with:
-          path: target
-          key: ${{ runner.os }}-target-build-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-target-build-
+          cache: true
 
       - name: Build all targets
         run: cargo build --workspace --all-targets
         env:
           SQLX_OFFLINE: true
+
+  helm-lint:
+    name: Lint Helm charts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2.6.1
+
+      - name: Run chart-testing (lint)
+        run: ct lint --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise --validate-maintainers=false
+
+  helm-test:
+    name: Test Helm charts
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: helm-lint
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Set up chart-testing
+        uses: helm/chart-testing-action@v2.6.1
+
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+
+      - name: Run chart-testing (install)
+        run: ct install --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise --validate-maintainers=false
+
+  helm-package:
+    name: Package Helm charts
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: helm-lint
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Package Helm chart
+        run: helm package helm/rise -d .helm-packages
+
+      - name: Upload Helm chart package
+        uses: actions/upload-artifact@v4
+        with:
+          name: helm-chart
+          path: .helm-packages/*.tgz
+
+  docs-build:
+    name: Build documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+
+      - name: Build book
+        run: mdbook build
+
+      - name: Setup Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v4
+
+      - name: Upload artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: './book'
+
+  docs-deploy:
+    name: Deploy documentation
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: docs-build
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
