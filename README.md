@@ -87,33 +87,21 @@ rise --version
 
 ## Documentation
 
-Comprehensive documentation is available in [`/docs`](./docs):
+Full documentation is available in [`/docs`](./docs):
 
-**Getting Started**:
-- [Quick Start](docs/getting-started/README.md) - Setup and first steps
-- [Local Development](docs/getting-started/local-development.md) - mise, docker-compose, Procfile
-- [CLI Basics](docs/getting-started/cli-basics.md) - Common CLI workflows
-
-**Core Concepts**:
-- [Authentication](docs/core-concepts/authentication.md) - OAuth2 flows, tokens
-- [Projects & Teams](docs/core-concepts/projects-teams.md) - Organizing applications
-- [Deployments](docs/core-concepts/deployments.md) - Deployment lifecycle
-
-**Features**:
-- [Service Accounts](docs/features/service-accounts.md) - CI/CD integration
-- [Container Registry](docs/features/registry.md) - Multi-registry support
-- [Web Frontend](docs/features/web-frontend.md) - Embedded web UI
-
-**Deployment**:
-- [Configuration Guide](docs/deployment/configuration.md) - Environment variables and config files
-- [AWS ECR](docs/deployment/aws-ecr.md) - Production ECR setup with Terraform
-- [Docker (Local)](docs/deployment/docker-local.md) - Local registry
-- [Production Setup](docs/deployment/production.md) - Security, monitoring, HA
-
-**Development**:
-- [Contributing](docs/development/contributing.md) - Development guidelines
-- [Database](docs/development/database.md) - PostgreSQL, migrations, SQLX
-- [Testing](docs/development/testing.md) - Testing strategies
+- [Setup](docs/setup.md) - Quick start guide
+- [Local Development](docs/development.md) - Development workflow
+- [CLI Guide](docs/cli.md) - Command-line usage
+- [Authentication](docs/authentication.md) - OAuth2 & service accounts
+- [Deployments](docs/deployments.md) - Deployment lifecycle
+- [Building Images](docs/builds.md) - Docker, pack, railpack
+- [Configuration](docs/configuration.md) - Backend configuration
+- [Container Registries](docs/registries.md) - ECR, Docker, local
+- [Kubernetes](docs/kubernetes.md) - K8s deployment backend
+- [Production Deployment](docs/production.md) - Production setup
+- [Database](docs/database.md) - PostgreSQL & migrations
+- [Testing](docs/testing.md) - Testing strategies
+- [Troubleshooting](docs/troubleshooting.md) - Common issues
 
 ## Architecture
 
@@ -147,11 +135,7 @@ See [Architecture](docs/introduction/architecture.md) for details.
 
 ## Contributing
 
-Contributions are welcome! See [Contributing](docs/development/contributing.md) for:
-- Development environment setup
-- Code style guidelines
-- Testing requirements
-- Commit conventions
+Contributions are welcome! See [Local Development](docs/development.md) for development setup, code style, testing, and commit conventions.
 
 ## License
 
