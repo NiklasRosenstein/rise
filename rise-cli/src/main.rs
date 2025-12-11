@@ -5,6 +5,7 @@ use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 mod backend;
+mod build;
 mod config;
 mod deployment;
 mod dev_oidc_issuer;
@@ -62,9 +63,11 @@ enum Commands {
     Build {
         /// Tag for the built image (e.g., myapp:latest, registry.io/org/app:v1.0)
         tag: String,
-        /// Path to the directory containing the application
-        #[arg(default_value = ".")]
+        /// Path to the directory containing the application (REQUIRED)
         path: String,
+        /// Push image to registry after building
+        #[arg(long)]
+        push: bool,
         /// Build backend (docker, pack, railpack[:buildx], railpack:buildctl)
         #[arg(long)]
         backend: Option<String>,
@@ -837,22 +840,28 @@ async fn main() -> Result<()> {
         Commands::Build {
             tag,
             path,
+            push,
             backend,
             builder,
             container_cli,
             managed_buildkit,
             railpack_embed_ssl_cert,
         } => {
-            deployment::build_image(
-                &config,
-                tag,
-                path,
-                backend.as_deref(),
-                builder.as_deref(),
-                container_cli.as_deref(),
-                *managed_buildkit,
-                *railpack_embed_ssl_cert,
-            )?;
+            let options = build::BuildOptions::from_config(&config, tag.clone(), path.clone())
+                .with_push(*push)
+                .with_backend(backend.clone())
+                .with_builder(builder.clone())
+                .with_managed_buildkit(*managed_buildkit)
+                .with_railpack_embed_ssl_cert(*railpack_embed_ssl_cert);
+
+            // Override container_cli if provided
+            let options = if let Some(cli) = container_cli {
+                options.with_container_cli(cli.clone())
+            } else {
+                options
+            };
+
+            build::build_image(options)?;
         }
     }
 
