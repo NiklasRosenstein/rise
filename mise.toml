@@ -20,6 +20,14 @@ cp -r .sqlx rise-backend/.sqlx
 description = "Check that all SQLX queries are valid."
 run = "cargo sqlx prepare --workspace --check -- --all-targets"
 
+[tasks.lint]
+description = "Run all linting checks (clippy, formatting, sqlx)."
+run = """
+cargo clippy --all-targets --workspace -- -D warnings
+cargo fmt --all -- --check
+mise sqlx:check
+"""
+
 [tasks."docs:serve"]
 description = "Serve documentation with live reload in port 3001."
 run = "mdbook serve -p 3001 --open"

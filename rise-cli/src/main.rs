@@ -624,13 +624,15 @@ async fn main() -> Result<()> {
                     &http_client,
                     &backend_url,
                     &config,
-                    project,
-                    path,
-                    image.as_deref(),
-                    group.as_deref(),
-                    expire.as_deref(),
-                    port,
-                    build_args,
+                    deployment::DeploymentOptions {
+                        project_name: project,
+                        path,
+                        image: image.as_deref(),
+                        group: group.as_deref(),
+                        expires_in: expire.as_deref(),
+                        http_port: port,
+                        build_args,
+                    },
                 )
                 .await?;
             }

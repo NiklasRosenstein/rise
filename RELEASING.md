@@ -10,15 +10,9 @@ Rise uses a workspace-based versioning system where both `rise-backend` and `ris
 
 ### One-Time Setup
 
-1. **Add crates.io API token to GitHub secrets:**
-   - Generate a token at https://crates.io/me/tokens
-   - Add it to your repository: Settings → Secrets and variables → Actions → New repository secret
-   - Name: `CARGO_REGISTRY_TOKEN`
+**Trusted publishing is already configured!** This repository uses GitHub OIDC tokens for authentication via the `rust-lang/crates-io-auth-action@v1`.
 
-2. **Configure trusted publishing (future):**
-   - Once crates.io's trusted publishing is fully available, configure it at https://crates.io/settings/tokens
-   - Add this repository as a trusted publisher
-   - Remove the `CARGO_REGISTRY_TOKEN` secret and environment variables from the workflow
+No manual token setup is required. The workflow automatically obtains a temporary token from crates.io using the GitHub Actions OIDC identity.
 
 ## Release Steps
 
@@ -82,12 +76,14 @@ git push origin :refs/tags/v0.2.0
 ### Publish Failures
 
 If `rise` fails to publish because it can't find the new `rise-backend` version:
-- The workflow waits 60 seconds for crates.io to update
-- If this isn't enough, you may need to manually publish `rise`:
+- The workflow uses `cargo publish --workspace` which handles dependency ordering automatically
+- If you need to manually publish, ensure you're authenticated first:
 
 ```bash
-cd rise-cli
-cargo publish --token YOUR_CRATES_IO_TOKEN
+# Manual publish (only needed in rare cases)
+cargo publish -p rise-backend
+# Wait for crates.io index to update...
+cargo publish -p rise
 ```
 
 ### Duplicate Version Error
@@ -127,13 +123,13 @@ repository.workspace = true
 
 This ensures both crates always have the same version number, simplifying releases.
 
-## Future: Trusted Publishing
+## Trusted Publishing
 
-Once crates.io's trusted publishing is fully documented and stable:
+This repository uses **trusted publishing** via GitHub Actions OIDC tokens, providing better security by eliminating long-lived credentials.
 
-1. Configure the trusted publisher on crates.io for this repository
-2. Remove the `CARGO_REGISTRY_TOKEN` environment variable from `.github/workflows/publish-crates.yml`
-3. cargo will automatically use the GitHub OIDC token for authentication
-4. No API tokens needed in GitHub secrets
+The CI workflow (`.github/workflows/ci.yml`) automatically:
+1. Authenticates with crates.io using the `rust-lang/crates-io-auth-action@v1`
+2. Obtains a temporary publish token via GitHub's OIDC identity
+3. Publishes both workspace crates in dependency order
 
-This will provide better security by eliminating long-lived credentials.
+No manual API tokens or secrets are required.

@@ -510,25 +510,34 @@ struct CreateDeploymentResponse {
     image_tag: String,
     credentials: RegistryCredentials,
 }
+
+/// Options for creating a deployment
+pub struct DeploymentOptions<'a> {
+    pub project_name: &'a str,
+    pub path: &'a str,
+    pub image: Option<&'a str>,
+    pub group: Option<&'a str>,
+    pub expires_in: Option<&'a str>,
+    pub http_port: u16,
+    pub build_args: &'a build::BuildArgs,
+}
+
 pub async fn create_deployment(
     http_client: &Client,
     backend_url: &str,
     config: &Config,
-    project_name: &str,
-    path: &str,
-    image: Option<&str>,
-    group: Option<&str>,
-    expires_in: Option<&str>,
-    http_port: u16,
-    build_args: &build::BuildArgs,
+    deploy_opts: DeploymentOptions<'_>,
 ) -> Result<()> {
-    if let Some(image_ref) = image {
+    if let Some(image_ref) = deploy_opts.image {
         info!(
             "Deploying project '{}' with pre-built image '{}'",
-            project_name, image_ref
+            deploy_opts.project_name, image_ref
         );
     } else {
-        info!("Deploying project '{}' from path '{}'", project_name, path);
+        info!(
+            "Deploying project '{}' from path '{}'",
+            deploy_opts.project_name, deploy_opts.path
+        );
     }
 
     // Get authentication token
@@ -537,16 +546,19 @@ pub async fn create_deployment(
         .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run 'rise login' first."))?;
 
     // Step 1: Create deployment and get deployment ID + credentials
-    info!("Creating deployment for project '{}'", project_name);
+    info!(
+        "Creating deployment for project '{}'",
+        deploy_opts.project_name
+    );
     let deployment_info = call_create_deployment_api(
         http_client,
         backend_url,
         &token,
-        project_name,
-        image,
-        group,
-        expires_in,
-        http_port,
+        deploy_opts.project_name,
+        deploy_opts.image,
+        deploy_opts.group,
+        deploy_opts.expires_in,
+        deploy_opts.http_port,
     )
     .await?;
 
@@ -581,7 +593,7 @@ pub async fn create_deployment(
         }
     });
 
-    if image.is_some() {
+    if deploy_opts.image.is_some() {
         // Pre-built image path: Skip build/push, backend already marked as Pushed
         info!("✓ Pre-built image deployment created");
     } else {
@@ -590,7 +602,8 @@ pub async fn create_deployment(
         if !deployment_info.credentials.username.is_empty() {
             info!("Logging into registry");
             if let Err(e) = build::docker_login(
-                &build_args
+                &deploy_opts
+                    .build_args
                     .container_cli
                     .clone()
                     .unwrap_or_else(|| config.get_container_cli()),
@@ -626,8 +639,8 @@ pub async fn create_deployment(
         let options = BuildOptions::from_build_args(
             config,
             deployment_info.image_tag.clone(),
-            path.to_string(),
-            build_args,
+            deploy_opts.path.to_string(),
+            deploy_opts.build_args,
         )
         .with_push(true);
 
@@ -657,7 +670,7 @@ pub async fn create_deployment(
 
         info!(
             "✓ Successfully pushed {} to {}",
-            project_name, deployment_info.image_tag
+            deploy_opts.project_name, deployment_info.image_tag
         );
     }
     info!("  Deployment ID: {}", deployment_info.deployment_id);
@@ -668,7 +681,7 @@ pub async fn create_deployment(
         http_client,
         backend_url,
         config,
-        project_name,
+        deploy_opts.project_name,
         &deployment_info.deployment_id,
         true,  // follow
         "10m", // timeout
