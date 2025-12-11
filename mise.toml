@@ -2,9 +2,10 @@
 minikube = "1.37.0"
 pack = "0.39.0"
 "ubi:railwayapp/railpack" = "0.15.1"
+"cargo:sqlx-cli" = "latest"
 "cargo:mdbook" = "latest"
 helm = "latest"
-rust = "1.91.1"
+rust = { version = "1.91.1", profile = "default" }
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
