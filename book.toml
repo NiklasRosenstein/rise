@@ -9,4 +9,4 @@ build-dir = "book"
 
 [output.html]
 default-theme = "rust"
-git-repository-url = "https://github.com/your-org/rise"
+git-repository-url = "https://github.com/NiklasRosenstein/rise"
