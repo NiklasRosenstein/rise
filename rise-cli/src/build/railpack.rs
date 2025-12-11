@@ -188,6 +188,13 @@ fn build_with_buildx(
         container_cli, image_tag
     );
 
+    // If buildkit_host is provided, we need to create/use a builder pointing to it
+    let builder_name = if let Some(host) = buildkit_host {
+        Some(ensure_buildx_builder(container_cli, host)?)
+    } else {
+        None
+    };
+
     let mut cmd = Command::new(container_cli);
     cmd.arg("buildx")
         .arg("build")
@@ -200,9 +207,9 @@ fn build_with_buildx(
         .arg("--platform")
         .arg("linux/amd64");
 
-    // Set BUILDKIT_HOST if provided
-    if let Some(host) = buildkit_host {
-        cmd.env("BUILDKIT_HOST", host);
+    // Use the managed builder if available
+    if let Some(builder) = builder_name {
+        cmd.arg("--builder").arg(builder);
     }
 
     if push {
@@ -229,6 +236,53 @@ fn build_with_buildx(
     }
 
     Ok(())
+}
+
+/// Ensure buildx builder exists for the given BuildKit daemon
+/// Returns the builder name to use
+fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) -> Result<String> {
+    let builder_name = "rise-buildx";
+
+    // Check if builder already exists
+    let inspect_status = Command::new(container_cli)
+        .args(["buildx", "inspect", builder_name])
+        .output();
+
+    match inspect_status {
+        Ok(output) if output.status.success() => {
+            debug!("Buildx builder '{}' already exists", builder_name);
+            return Ok(builder_name.to_string());
+        }
+        _ => {
+            info!(
+                "Creating buildx builder '{}' for BuildKit daemon: {}",
+                builder_name, buildkit_host
+            );
+        }
+    }
+
+    // Create new builder pointing to the BuildKit daemon
+    let status = Command::new(container_cli)
+        .args([
+            "buildx",
+            "create",
+            "--name",
+            builder_name,
+            "--driver",
+            "docker-container",
+            "--driver-opt",
+            &format!("network=host"),
+            buildkit_host,
+        ])
+        .status()
+        .context("Failed to create buildx builder")?;
+
+    if !status.success() {
+        bail!("Failed to create buildx builder '{}'", builder_name);
+    }
+
+    info!("Buildx builder '{}' created successfully", builder_name);
+    Ok(builder_name.to_string())
 }
 
 /// Build with buildctl
