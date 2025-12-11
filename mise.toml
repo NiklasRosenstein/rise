@@ -21,11 +21,12 @@ description = "Check that all SQLX queries are valid."
 run = "cargo sqlx prepare --workspace --check -- --all-targets"
 
 [tasks.lint]
-description = "Run all linting checks (clippy, formatting, sqlx)."
+description = "Run all linting checks (clippy, formatting, sqlx, helm)."
 run = """
 cargo clippy --all-targets --workspace -- -D warnings
 cargo fmt --all -- --check
 mise sqlx:check
+helm lint helm/rise
 """
 
 [tasks."docs:serve"]
