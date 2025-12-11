@@ -309,6 +309,50 @@ rise build myapp:latest --backend railpack
 
 For more details, see [Issue #18](https://github.com/NiklasRosenstein/rise/issues/18).
 
+### Build-Time SSL Certificate Embedding (Railpack)
+
+The `--railpack-embed-ssl-cert` flag embeds SSL certificates directly into the Railpack build plan for use during RUN commands. This complements `--managed-buildkit` by handling build-time SSL requirements.
+
+**Important differences:**
+- `--managed-buildkit`: Injects SSL certs into BuildKit daemon (for pulling images, registry access). Does NOT embed cert into final image.
+- `--railpack-embed-ssl-cert`: Embeds SSL certs into railpack plan.json as build assets (for RUN commands during build). DOES embed cert into final image.
+
+Both flags can be used together for comprehensive SSL support.
+
+**When to use:**
+- Application builds need SSL certificates (pip install, npm install, git clone, curl requests)
+- Running behind corporate proxies with certificate inspection
+- Custom or self-signed certificates
+
+**Usage:**
+```bash
+export SSL_CERT_FILE=/path/to/ca-certificates.crt
+
+# Embed certificate for build-time use
+rise build myapp:latest --backend railpack --railpack-embed-ssl-cert
+
+# Combine with managed BuildKit for comprehensive SSL support
+rise build myapp:latest --backend railpack --managed-buildkit --railpack-embed-ssl-cert
+```
+
+**Environment variable support:**
+```bash
+export RISE_RAILPACK_EMBED_SSL_CERT=true
+rise build myapp:latest --backend railpack
+# Embedding is enabled via env var
+```
+
+**Config file support:**
+```bash
+rise config set railpack_embed_ssl_cert true
+rise build myapp:latest --backend railpack
+# Embedding is enabled via config
+```
+
+**Precedence order:** CLI flag > Environment variable > Config file > Default (false)
+
+**Warning:** If `SSL_CERT_FILE` is set but `--railpack-embed-ssl-cert` is not specified, a warning will be logged to alert you that build-time SSL errors may occur.
+
 ## Guidelines
 
 - You must focus on building any given feature at a time in small increments and commit your changes often.

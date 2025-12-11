@@ -225,22 +225,119 @@ fn ensure_managed_buildkit_daemon(ssl_cert_file: &Path, container_cli: &str) -> 
 fn check_ssl_cert_and_warn(method: &BuildMethod, managed_buildkit: bool) {
     if let Ok(_ssl_cert) = std::env::var("SSL_CERT_FILE") {
         if requires_buildkit(method) && !managed_buildkit {
-            eprintln!("\nWarning: SSL_CERT_FILE is set but managed BuildKit daemon is disabled.");
-            eprintln!();
-            eprintln!(
-                "Railpack builds may fail with SSL certificate errors in corporate environments."
+            warn!(
+                "SSL_CERT_FILE is set but managed BuildKit daemon is disabled. \
+                 Railpack builds may fail with SSL certificate errors in corporate environments."
             );
-            eprintln!();
-            eprintln!("To enable automatic BuildKit daemon management:");
-            eprintln!("  rise build --managed-buildkit ...");
-            eprintln!();
-            eprintln!("Or set environment variable:");
-            eprintln!("  export RISE_MANAGED_BUILDKIT=true");
-            eprintln!();
-            eprintln!("For manual setup, see: https://github.com/NiklasRosenstein/rise/issues/18");
-            eprintln!();
+            warn!("To enable automatic BuildKit daemon management:");
+            warn!("  rise build --managed-buildkit ...");
+            warn!("Or set environment variable:");
+            warn!("  export RISE_MANAGED_BUILDKIT=true");
+            warn!("For manual setup, see: https://github.com/NiklasRosenstein/rise/issues/18");
         }
     }
+}
+
+/// Embed SSL certificate into railpack plan.json
+fn embed_ssl_cert_in_plan(plan_file: &Path, ssl_cert_file: &Path) -> Result<()> {
+    use serde_json::Value;
+
+    debug!(
+        "Embedding SSL certificate from {} into {}",
+        ssl_cert_file.display(),
+        plan_file.display()
+    );
+
+    // Read and parse plan.json
+    let plan_contents = fs::read_to_string(plan_file)
+        .with_context(|| format!("Failed to read plan file: {}", plan_file.display()))?;
+
+    let mut plan: Value = serde_json::from_str(&plan_contents)
+        .with_context(|| format!("Failed to parse plan.json: {}", plan_file.display()))?;
+
+    // Read SSL certificate contents
+    let cert_contents = fs::read_to_string(ssl_cert_file).with_context(|| {
+        format!(
+            "Failed to read SSL certificate file: {}",
+            ssl_cert_file.display()
+        )
+    })?;
+
+    // Get the steps array
+    let steps = plan
+        .get_mut("steps")
+        .and_then(|s| s.as_array_mut())
+        .context("plan.json missing 'steps' array")?;
+
+    if steps.is_empty() {
+        bail!("plan.json has empty 'steps' array");
+    }
+
+    // Get the first step
+    let first_step = &mut steps[0];
+
+    // Add or update assets in the first step
+    if !first_step.is_object() {
+        bail!("First step in plan.json is not an object");
+    }
+
+    let first_step_obj = first_step.as_object_mut().unwrap();
+
+    // Get or create assets object
+    let assets = if let Some(assets) = first_step_obj.get_mut("assets") {
+        assets
+            .as_object_mut()
+            .context("'assets' field is not an object")?
+    } else {
+        first_step_obj.insert("assets".to_string(), Value::Object(serde_json::Map::new()));
+        first_step_obj
+            .get_mut("assets")
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+    };
+
+    // Add certificate to assets
+    assets.insert("ssl_ca_cert".to_string(), Value::String(cert_contents));
+
+    // Get or create commands array
+    let commands = if let Some(commands) = first_step_obj.get_mut("commands") {
+        commands
+            .as_array_mut()
+            .context("'commands' field is not an array")?
+    } else {
+        first_step_obj.insert("commands".to_string(), Value::Array(vec![]));
+        first_step_obj
+            .get_mut("commands")
+            .unwrap()
+            .as_array_mut()
+            .unwrap()
+    };
+
+    // Create certificate installation command
+    let cert_command = serde_json::json!({
+        "name": "ssl_ca_cert",
+        "path": "/etc/ssl/certs/ca-certificates.crt",
+        "customName": "install SSL certificate"
+    });
+
+    // Insert at the beginning of commands array
+    commands.insert(0, cert_command);
+
+    // Write modified plan back
+    let modified_plan =
+        serde_json::to_string_pretty(&plan).context("Failed to serialize modified plan.json")?;
+
+    fs::write(plan_file, modified_plan).with_context(|| {
+        format!(
+            "Failed to write modified plan.json: {}",
+            plan_file.display()
+        )
+    })?;
+
+    info!("✓ Embedded SSL certificate into railpack plan");
+
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -730,6 +827,7 @@ pub async fn stop_deployments_by_group(
 /// This function selects the build method based on explicit backend or auto-detection
 /// and builds the image locally. For railpack buildx builds, the --load flag is
 /// automatically added to ensure the image is available in the local daemon.
+#[allow(clippy::too_many_arguments)]
 pub fn build_image(
     config: &Config,
     tag: &str,
@@ -738,6 +836,7 @@ pub fn build_image(
     builder: Option<&str>,
     container_cli: Option<&str>,
     managed_buildkit: bool,
+    railpack_embed_ssl_cert: bool,
 ) -> Result<()> {
     // Resolve container CLI
     let container_cli = container_cli
@@ -762,6 +861,7 @@ pub fn build_image(
     // Check if managed BuildKit daemon should be used
     // If flag is present, use it; otherwise check config
     let use_managed_buildkit = managed_buildkit || config.get_managed_buildkit();
+    let use_embed_ssl_cert = railpack_embed_ssl_cert || config.get_railpack_embed_ssl_cert();
 
     // Handle SSL certificate and BuildKit daemon management
     let buildkit_host = if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
@@ -810,6 +910,7 @@ pub fn build_image(
                 use_buildctl,
                 false, // push=false for local build
                 buildkit_host.as_deref(),
+                use_embed_ssl_cert,
             )?;
         }
     }
@@ -848,6 +949,7 @@ pub async fn create_deployment(
     builder: Option<&str>,
     container_cli: Option<&str>,
     managed_buildkit: bool,
+    railpack_embed_ssl_cert: bool,
 ) -> Result<()> {
     // Resolve which container CLI to use
     let container_cli = container_cli
@@ -876,6 +978,7 @@ pub async fn create_deployment(
     // Check if managed BuildKit daemon should be used
     // If flag is present, use it; otherwise check config
     let use_managed_buildkit = managed_buildkit || config.get_managed_buildkit();
+    let use_embed_ssl_cert = railpack_embed_ssl_cert || config.get_railpack_embed_ssl_cert();
 
     // Handle SSL certificate and BuildKit daemon management (only when building, not for pre-built images)
     let buildkit_host = if image.is_none() {
@@ -1075,6 +1178,7 @@ pub async fn create_deployment(
                     use_buildctl,
                     true, // push: true for deployment
                     buildkit_host.as_deref(),
+                    use_embed_ssl_cert,
                 ) {
                     update_deployment_status(
                         http_client,
@@ -1462,6 +1566,7 @@ fn build_image_with_railpacks(
     use_buildctl: bool,
     push: bool,
     buildkit_host: Option<&str>,
+    embed_ssl_cert: bool,
 ) -> Result<()> {
     // Check railpack CLI availability
     let railpack_check = Command::new("railpack").arg("--version").output();
@@ -1539,6 +1644,32 @@ fn build_image_with_railpacks(
     }
 
     info!("✓ Railpack prepare completed");
+
+    // Embed SSL certificate if requested
+    if embed_ssl_cert {
+        if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
+            let cert_path = Path::new(&ssl_cert_file);
+            if cert_path.exists() {
+                embed_ssl_cert_in_plan(&plan_file, cert_path)?;
+            } else {
+                warn!(
+                    "SSL_CERT_FILE set to '{}' but file not found",
+                    ssl_cert_file
+                );
+            }
+        } else {
+            warn!(
+                "--railpack-embed-ssl-cert specified but SSL_CERT_FILE environment variable not set"
+            );
+        }
+    } else if std::env::var("SSL_CERT_FILE").is_ok() {
+        // SSL_CERT_FILE is set but flag not used - warn user
+        warn!(
+            "SSL_CERT_FILE is set but --railpack-embed-ssl-cert not specified. \
+             Build-time RUN commands may fail with SSL errors. \
+             Use --railpack-embed-ssl-cert to embed certificate into build plan."
+        );
+    }
 
     // Build with buildx or buildctl
     if use_buildctl {

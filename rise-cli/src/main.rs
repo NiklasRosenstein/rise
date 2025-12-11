@@ -77,6 +77,9 @@ enum Commands {
         /// Enable managed BuildKit daemon with SSL certificate support
         #[arg(long)]
         managed_buildkit: bool,
+        /// Embed SSL certificate into Railpack build plan for build-time RUN command support
+        #[arg(long)]
+        railpack_embed_ssl_cert: bool,
     },
 }
 
@@ -241,6 +244,9 @@ enum DeploymentCommands {
         /// Enable managed BuildKit daemon with SSL certificate support
         #[arg(long)]
         managed_buildkit: bool,
+        /// Embed SSL certificate into Railpack build plan for build-time RUN command support
+        #[arg(long)]
+        railpack_embed_ssl_cert: bool,
     },
     /// List deployments for a project
     #[command(visible_alias = "ls")]
@@ -615,6 +621,7 @@ async fn main() -> Result<()> {
                 builder,
                 container_cli,
                 managed_buildkit,
+                railpack_embed_ssl_cert,
             } => {
                 // Validate http_port requirements
                 let port = match (image.as_ref(), http_port) {
@@ -655,6 +662,7 @@ async fn main() -> Result<()> {
                     builder.as_deref(),
                     container_cli.as_deref(),
                     *managed_buildkit,
+                    *railpack_embed_ssl_cert,
                 )
                 .await?;
             }
@@ -833,6 +841,7 @@ async fn main() -> Result<()> {
             builder,
             container_cli,
             managed_buildkit,
+            railpack_embed_ssl_cert,
         } => {
             deployment::build_image(
                 &config,
@@ -842,6 +851,7 @@ async fn main() -> Result<()> {
                 builder.as_deref(),
                 container_cli.as_deref(),
                 *managed_buildkit,
+                *railpack_embed_ssl_cert,
             )?;
         }
     }

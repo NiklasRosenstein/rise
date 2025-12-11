@@ -15,6 +15,7 @@ pub struct Config {
     pub backend_url: Option<String>,
     pub container_cli: Option<String>,
     pub managed_buildkit: Option<bool>,
+    pub railpack_embed_ssl_cert: Option<bool>,
 }
 
 impl Config {
@@ -136,6 +137,25 @@ impl Config {
         self.managed_buildkit = Some(enabled);
         self.save()
     }
+
+    /// Get whether to embed SSL certificate in Railpack builds
+    /// Checks RISE_RAILPACK_EMBED_SSL_CERT environment variable first, then falls back to config file
+    /// Returns false by default (opt-in feature)
+    pub fn get_railpack_embed_ssl_cert(&self) -> bool {
+        // Check environment variable first
+        if let Ok(val) = std::env::var("RISE_RAILPACK_EMBED_SSL_CERT") {
+            return val.to_lowercase() == "true" || val == "1";
+        }
+        // Fall back to config file, default to false
+        self.railpack_embed_ssl_cert.unwrap_or(false)
+    }
+
+    /// Set whether to embed SSL certificate in Railpack builds
+    #[allow(dead_code)]
+    pub fn set_railpack_embed_ssl_cert(&mut self, enabled: bool) -> Result<()> {
+        self.railpack_embed_ssl_cert = Some(enabled);
+        self.save()
+    }
 }
 
 /// Auto-detect which container CLI is available
@@ -179,6 +199,7 @@ mod tests {
             backend_url: None,
             container_cli: None,
             managed_buildkit: None,
+            railpack_embed_ssl_cert: None,
         };
         assert_eq!(config.get_backend_url(), "http://localhost:3000");
 
@@ -188,6 +209,7 @@ mod tests {
             backend_url: Some("https://api.example.com".to_string()),
             container_cli: None,
             managed_buildkit: None,
+            railpack_embed_ssl_cert: None,
         };
         assert_eq!(config.get_backend_url(), "https://api.example.com");
 
@@ -204,6 +226,7 @@ mod tests {
             backend_url: None,
             container_cli: None,
             managed_buildkit: None,
+            railpack_embed_ssl_cert: None,
         };
         // When RISE_TOKEN env var is not set, should use config file token
         if std::env::var("RISE_TOKEN").is_err() {
@@ -219,6 +242,7 @@ mod tests {
             backend_url: None,
             container_cli: None,
             managed_buildkit: None,
+            railpack_embed_ssl_cert: None,
         };
         assert!(!config.get_managed_buildkit());
 
@@ -228,6 +252,7 @@ mod tests {
             backend_url: None,
             container_cli: None,
             managed_buildkit: Some(true),
+            railpack_embed_ssl_cert: None,
         };
         assert!(config.get_managed_buildkit());
     }
