@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_ecr::Client as EcrClient;
+use sqlx::PgPool;
+use std::collections::HashMap;
+use tracing::{error, info, warn};
 
 use crate::server::registry::models::EcrConfig;
 
@@ -260,8 +263,162 @@ impl EcrRepoManager {
         Ok(true)
     }
 
+    /// Tag a repository with a custom key-value pair
+    ///
+    /// This is a generic tagging method that can be used to add any tag to a repository.
+    /// The repository name should be the full repository name (with prefix).
+    pub async fn tag_repository(&self, repo_name: &str, key: &str, value: &str) -> Result<()> {
+        // Build the repository ARN
+        let repo_arn = format!(
+            "arn:aws:ecr:{}:{}:repository/{}",
+            self.config.region, self.config.account_id, repo_name
+        );
+
+        tracing::debug!(
+            "Tagging ECR repository {} with {}={}",
+            repo_name,
+            key,
+            value
+        );
+
+        let tag = aws_sdk_ecr::types::Tag::builder()
+            .key(key)
+            .value(value)
+            .build()
+            .context("Failed to build tag")?;
+
+        self.ecr_client
+            .tag_resource()
+            .resource_arn(&repo_arn)
+            .tags(tag)
+            .send()
+            .await
+            .map_err(|e| {
+                anyhow::anyhow!(
+                    "Failed to tag ECR repository '{}': {}",
+                    repo_name,
+                    format_sdk_error(&e)
+                )
+            })?;
+
+        Ok(())
+    }
+
     /// Get whether auto_remove is enabled
     pub fn auto_remove(&self) -> bool {
         self.config.auto_remove
+    }
+
+    /// List all Rise-managed ECR repositories
+    ///
+    /// Returns a map of project name -> repository name
+    pub async fn list_managed_repositories(&self) -> Result<HashMap<String, String>> {
+        let mut repos = HashMap::new();
+        let mut next_token: Option<String> = None;
+
+        loop {
+            let mut request = self.ecr_client.describe_repositories();
+            if let Some(token) = next_token {
+                request = request.next_token(token);
+            }
+
+            let response = request.send().await.map_err(|e| {
+                anyhow::anyhow!("Failed to list ECR repositories: {}", format_sdk_error(&e))
+            })?;
+
+            for repo in response.repositories() {
+                // Check if this repo has our prefix
+                if let Some(name) = repo.repository_name() {
+                    if name.starts_with(&self.config.repo_prefix) {
+                        // Extract project name by removing prefix
+                        let project = name.strip_prefix(&self.config.repo_prefix).unwrap();
+                        repos.insert(project.to_string(), name.to_string());
+                    }
+                }
+            }
+
+            next_token = response.next_token().map(String::from);
+            if next_token.is_none() {
+                break;
+            }
+        }
+
+        Ok(repos)
+    }
+
+    /// Check for orphaned ECR repositories and clean them up
+    ///
+    /// An orphaned repository is one that exists in ECR but has no corresponding
+    /// project in the database. This can happen if a project is deleted but the
+    /// ECR repository cleanup failed, or if repositories were created externally.
+    ///
+    /// If auto_remove is enabled, orphaned repositories will be deleted.
+    /// Otherwise, they will be tagged as orphaned for manual review.
+    pub async fn check_orphaned_repositories(&self, db_pool: &PgPool) -> Result<()> {
+        info!("Starting orphaned ECR repository check");
+
+        // Get all managed ECR repositories
+        let ecr_repos = self.list_managed_repositories().await?;
+        info!(
+            "Found {} ECR repositories with prefix '{}'",
+            ecr_repos.len(),
+            self.config.repo_prefix
+        );
+
+        // Get all project names from database
+        let project_names: Vec<String> = sqlx::query_scalar!("SELECT name FROM projects")
+            .fetch_all(db_pool)
+            .await
+            .context("Failed to query project names from database")?;
+
+        let project_set: std::collections::HashSet<String> = project_names.into_iter().collect();
+        info!("Found {} active projects in database", project_set.len());
+
+        // Find orphaned repositories
+        let mut orphaned = Vec::new();
+        for (project_name, repo_name) in &ecr_repos {
+            if !project_set.contains(project_name) {
+                orphaned.push((project_name.clone(), repo_name.clone()));
+            }
+        }
+
+        if orphaned.is_empty() {
+            info!("No orphaned ECR repositories found");
+            return Ok(());
+        }
+
+        warn!("Found {} orphaned ECR repositories", orphaned.len());
+
+        // Handle orphaned repositories based on auto_remove setting
+        for (project_name, repo_name) in orphaned {
+            if self.config.auto_remove {
+                info!("Auto-removing orphaned repository: {}", repo_name);
+                match self.delete_repository(&repo_name).await {
+                    Ok(_) => info!("Successfully deleted orphaned repository: {}", repo_name),
+                    Err(e) => error!("Failed to delete orphaned repository {}: {}", repo_name, e),
+                }
+            } else {
+                info!(
+                    "Tagging orphaned repository for manual review: {}",
+                    repo_name
+                );
+                match self.tag_repository(&repo_name, "orphaned", "true").await {
+                    Ok(_) => info!("Successfully tagged orphaned repository: {}", repo_name),
+                    Err(e) => error!("Failed to tag orphaned repository {}: {}", repo_name, e),
+                }
+                match self
+                    .tag_repository(&repo_name, "orphaned_project", &project_name)
+                    .await
+                {
+                    Ok(_) => {}
+                    Err(e) => error!(
+                        "Failed to tag orphaned repository {} with project name: {}",
+                        repo_name, e
+                    ),
+                }
+            }
+        }
+
+        Ok(())
     }
 }

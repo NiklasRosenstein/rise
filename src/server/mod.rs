@@ -20,7 +20,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
-use tracing::info;
+use tracing::{error, info};
 
 /// Run the HTTP server process with all enabled controllers
 pub async fn run_server(settings: settings::Settings) -> Result<()> {
@@ -242,6 +242,35 @@ async fn run_ecr_controller_loop(settings: settings::Settings) -> Result<()> {
     let state =
         ControllerState::new(&settings.database.url, 2, settings.encryption.as_ref()).await?;
     let manager = Arc::new(ecr::EcrRepoManager::new(ecr_config).await?);
+
+    // Spawn orphaned repository check background task
+    let orphan_check_manager = manager.clone();
+    let orphan_check_pool = state.db_pool.clone();
+    tokio::spawn(async move {
+        use tokio::time::{interval, Duration};
+
+        info!("Starting ECR orphaned repository check loop");
+
+        // Run check immediately on startup
+        if let Err(e) = orphan_check_manager
+            .check_orphaned_repositories(&orphan_check_pool)
+            .await
+        {
+            error!("Failed to check orphaned repositories on startup: {}", e);
+        }
+
+        // Then run every 10 minutes
+        let mut ticker = interval(Duration::from_secs(600)); // 10 minutes
+        loop {
+            ticker.tick().await;
+            if let Err(e) = orphan_check_manager
+                .check_orphaned_repositories(&orphan_check_pool)
+                .await
+            {
+                error!("Failed to check orphaned repositories: {}", e);
+            }
+        }
+    });
 
     let controller = Arc::new(ecr::EcrController::new(Arc::new(state), manager));
     controller.start();
