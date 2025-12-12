@@ -350,7 +350,8 @@ pub enum EncryptionSettings {
 /// account = "xy12345.eu-west-1"
 /// client_id = "${SNOWFLAKE_CLIENT_ID}"
 /// client_secret = "${SNOWFLAKE_CLIENT_SECRET}"
-/// redirect_uri = "https://rise.dev/.rise/oauth/callback"
+/// redirect_uri = "https://rise.dev/.rise/oauth/snowflake/callback"
+/// scopes = "session:role:PUBLIC"  # Or session:role:ROLE_NAME for specific role
 /// ```
 #[derive(Debug, Clone, Deserialize)]
 pub struct SnowflakeSettings {
@@ -364,16 +365,16 @@ pub struct SnowflakeSettings {
     pub client_secret: String,
 
     /// OAuth redirect URI (must match Snowflake integration config)
-    /// Example: "https://rise.dev/.rise/oauth/callback"
+    /// Example: "https://rise.dev/.rise/oauth/snowflake/callback"
     pub redirect_uri: String,
 
-    /// OAuth scopes to request (default: "session:role-any")
+    /// OAuth scopes to request (default: "session:role:PUBLIC")
     #[serde(default = "default_snowflake_scopes")]
     pub scopes: String,
 }
 
 fn default_snowflake_scopes() -> String {
-    "session:role-any".to_string()
+    "session:role:PUBLIC".to_string()
 }
 
 impl Settings {

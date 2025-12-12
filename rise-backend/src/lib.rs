@@ -343,12 +343,13 @@ async fn run_snowflake_refresh_controller_loop(settings: settings::Settings) -> 
         .ok_or_else(|| anyhow::anyhow!("Snowflake settings required"))?;
 
     // Get encryption provider (required)
-    let encryption_provider = match crate::encryption::init_provider(settings.encryption.as_ref()).await? {
-        Some(provider) => provider,
-        None => {
-            anyhow::bail!("Encryption provider required for Snowflake refresh controller");
-        }
-    };
+    let encryption_provider =
+        match crate::encryption::init_provider(settings.encryption.as_ref()).await? {
+            Some(provider) => provider,
+            None => {
+                anyhow::bail!("Encryption provider required for Snowflake refresh controller");
+            }
+        };
 
     // Connect to database
     let db_pool = PgPoolOptions::new()

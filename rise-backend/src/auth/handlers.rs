@@ -11,7 +11,6 @@ use crate::db::{
 };
 use crate::frontend::StaticAssets;
 use crate::state::AppState;
-use chrono::{Duration, Utc};
 use axum::{
     extract::{Extension, Query, State},
     http::{HeaderMap, StatusCode},
@@ -19,6 +18,7 @@ use axum::{
     Json,
 };
 use base64::Engine;
+use chrono::{Duration, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tera::Tera;
@@ -1055,26 +1055,25 @@ async fn get_snowflake_token_for_ingress(
     };
 
     // Look up token for this session + project
-    let token = match snowflake_sessions::get_app_token(&state.db_pool, &session_id, project_name)
-        .await
-    {
-        Ok(Some(t)) => t,
-        Ok(None) => {
-            tracing::debug!(
-                "No Snowflake token for session/project: {}/{}",
-                &session_id[..8.min(session_id.len())],
-                project_name
-            );
-            return Ok(None);
-        }
-        Err(e) => {
-            tracing::error!("Failed to get Snowflake token: {}", e);
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            ));
-        }
-    };
+    let token =
+        match snowflake_sessions::get_app_token(&state.db_pool, &session_id, project_name).await {
+            Ok(Some(t)) => t,
+            Ok(None) => {
+                tracing::debug!(
+                    "No Snowflake token for session/project: {}/{}",
+                    &session_id[..8.min(session_id.len())],
+                    project_name
+                );
+                return Ok(None);
+            }
+            Err(e) => {
+                tracing::error!("Failed to get Snowflake token: {}", e);
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                ));
+            }
+        };
 
     // Check if token needs refresh (expiring within 5 minutes)
     let now = Utc::now();
@@ -1141,7 +1140,10 @@ async fn get_snowflake_token_for_ingress(
                     // Continue with old token if update fails
                     (token.access_token_encrypted, false)
                 } else {
-                    tracing::info!("Successfully refreshed Snowflake token for '{}'", project_name);
+                    tracing::info!(
+                        "Successfully refreshed Snowflake token for '{}'",
+                        project_name
+                    );
                     (new_access_encrypted, false)
                 }
             }

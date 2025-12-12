@@ -183,5 +183,5 @@ registry:
 #   account: "xy12345.eu-west-1"  # Snowflake account identifier
 #   client_id: "${SNOWFLAKE_CLIENT_ID}"
 #   client_secret: "${SNOWFLAKE_CLIENT_SECRET}"
-#   redirect_uri: "https://rise.dev/.rise/oauth/callback"
-#   scopes: "session:role-any"  # Optional, default shown
+#   redirect_uri: "https://rise.dev/.rise/oauth/snowflake/callback"
+#   scopes: "session:role:PUBLIC"  # Optional, default shown (use session:role:ROLE_NAME for specific role)

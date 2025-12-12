@@ -222,8 +222,8 @@ mod tests {
             "test-account.eu-west-1".to_string(),
             "test-client-id".to_string(),
             "test-secret".to_string(),
-            "https://rise.dev/.rise/oauth/callback".to_string(),
-            "session:role-any".to_string(),
+            "https://rise.dev/.rise/oauth/snowflake/callback".to_string(),
+            "session:role:PUBLIC".to_string(),
         );
 
         let url = client.build_authorize_url("test-state-123");
@@ -233,8 +233,10 @@ mod tests {
         assert!(url.contains("client_id=test-client-id"));
         assert!(url.contains("response_type=code"));
         assert!(url.contains("state=test-state-123"));
-        assert!(url.contains("scope=session%3Arole-any"));
-        assert!(url.contains("redirect_uri=https%3A%2F%2Frise.dev%2F.rise%2Foauth%2Fcallback"));
+        assert!(url.contains("scope=session%3Arole%3APUBLIC"));
+        assert!(url.contains(
+            "redirect_uri=https%3A%2F%2Frise.dev%2F.rise%2Foauth%2Fsnowflake%2Fcallback"
+        ));
     }
 
     #[test]
@@ -244,7 +246,7 @@ mod tests {
             "client".to_string(),
             "secret".to_string(),
             "https://example.com/callback".to_string(),
-            "session:role-any".to_string(),
+            "session:role:PUBLIC".to_string(),
         );
 
         assert_eq!(
