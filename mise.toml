@@ -44,7 +44,7 @@ docker compose up postgres -d
 [tasks."db:migrate"]
 description = "Run database migrations. Run before building the backend."
 dir = "rise-backend"
-run = "docker compose up postgres -d && sqlx migrate run"
+run = "docker compose up postgres -d && sleep 2 && sqlx migrate run"
 
 [tasks."backend:deps"]
 description = "Start all backend dependencies with docker compose."
