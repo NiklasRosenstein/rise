@@ -19,7 +19,7 @@ Uses `pack build` with Cloud Native Buildpacks:
 
 ```bash
 rise build myapp:latest --backend pack
-rise build myapp:latest --backend pack --builder paketobuildpacks/builder:base
+rise build myapp:latest --backend pack --builder paketobuildpacks/builder-jammy-base
 rise deployment create myproject --backend pack
 ```
 

@@ -23,8 +23,7 @@ pub(crate) fn build_image_with_buildpacks(
         );
     }
 
-    // Default to paketobuildpacks/builder:base if no builder specified
-    let builder_image = builder.unwrap_or("paketobuildpacks/builder:base");
+    let builder_image = builder.unwrap_or("paketobuildpacks/builder-jammy-base");
     info!("Using builder: {}", builder_image);
 
     let mut cmd = Command::new("pack");

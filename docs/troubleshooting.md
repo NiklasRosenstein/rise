@@ -26,7 +26,7 @@ Rise CLI automatically injects the certificate into the pack lifecycle container
 **Manual workaround (pack CLI directly):**
 ```bash
 pack build my-image \
-  --builder paketobuildpacks/builder:base \
+  --builder paketobuildpacks/builder-jammy-base \
   --env SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
   --volume $SSL_CERT_FILE:/etc/ssl/certs/ca-certificates.crt:ro
 ```
