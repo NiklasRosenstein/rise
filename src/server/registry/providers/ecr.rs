@@ -286,10 +286,6 @@ impl RegistryProvider for EcrProvider {
         &self.registry_host
     }
 
-    fn registry_type(&self) -> &str {
-        "ecr"
-    }
-
     fn registry_url(&self) -> &str {
         &self.registry_url
     }

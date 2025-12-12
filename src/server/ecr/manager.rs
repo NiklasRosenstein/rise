@@ -1,8 +1,6 @@
 use anyhow::{Context, Result};
 use aws_config::BehaviorVersion;
 use aws_sdk_ecr::Client as EcrClient;
-use aws_sdk_sts::Client as StsClient;
-use std::collections::HashMap;
 
 use crate::server::registry::models::EcrConfig;
 
@@ -46,7 +44,6 @@ fn format_sdk_error<E: std::fmt::Debug>(err: &E) -> String {
 pub struct EcrRepoManager {
     config: EcrConfig,
     ecr_client: EcrClient,
-    sts_client: StsClient,
 }
 
 impl EcrRepoManager {
@@ -73,13 +70,8 @@ impl EcrRepoManager {
         };
 
         let ecr_client = EcrClient::new(&aws_config);
-        let sts_client = StsClient::new(&aws_config);
 
-        Ok(Self {
-            config,
-            ecr_client,
-            sts_client,
-        })
+        Ok(Self { config, ecr_client })
     }
 
     /// Get the full ECR repository name for a project
@@ -268,55 +260,8 @@ impl EcrRepoManager {
         Ok(true)
     }
 
-    /// List all Rise-managed ECR repositories
-    ///
-    /// Returns a map of project name -> repository name
-    pub async fn list_managed_repositories(&self) -> Result<HashMap<String, String>> {
-        let mut repos = HashMap::new();
-        let mut next_token: Option<String> = None;
-
-        loop {
-            let mut request = self.ecr_client.describe_repositories();
-            if let Some(token) = next_token {
-                request = request.next_token(token);
-            }
-
-            let response = request.send().await.map_err(|e| {
-                anyhow::anyhow!("Failed to list ECR repositories: {}", format_sdk_error(&e))
-            })?;
-
-            for repo in response.repositories() {
-                // Check if this repo has our prefix
-                if let Some(name) = repo.repository_name() {
-                    if name.starts_with(&self.config.repo_prefix) {
-                        // Extract project name by removing prefix
-                        let project = name.strip_prefix(&self.config.repo_prefix).unwrap();
-                        repos.insert(project.to_string(), name.to_string());
-                    }
-                }
-            }
-
-            next_token = response.next_token().map(String::from);
-            if next_token.is_none() {
-                break;
-            }
-        }
-
-        Ok(repos)
-    }
-
     /// Get whether auto_remove is enabled
     pub fn auto_remove(&self) -> bool {
         self.config.auto_remove
-    }
-
-    /// Get the role ARN used for ECR operations
-    pub fn role_arn(&self) -> &str {
-        &self.config.role_arn
-    }
-
-    /// Get the STS client for additional operations
-    pub fn sts_client(&self) -> &StsClient {
-        &self.sts_client
     }
 }

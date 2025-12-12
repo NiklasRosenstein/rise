@@ -11,7 +11,4 @@ pub trait EncryptionProvider: Send + Sync {
 
     /// Decrypt base64-encoded ciphertext and return plaintext
     async fn decrypt(&self, ciphertext: &str) -> Result<String>;
-
-    /// Get provider name for logging
-    fn provider_name(&self) -> &str;
 }

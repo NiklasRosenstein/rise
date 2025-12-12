@@ -105,8 +105,4 @@ impl EncryptionProvider for AwsKmsEncryptionProvider {
 
         Ok(plaintext)
     }
-
-    fn provider_name(&self) -> &str {
-        "aws-kms"
-    }
 }

@@ -105,24 +105,6 @@ pub struct Project {
     pub updated: String,
 }
 
-impl Project {
-    /// Compute the URL for this project based on its name
-    pub fn url(&self) -> String {
-        format!("https://{}.rise.dev", self.name)
-    }
-
-    /// Get the owner as a ProjectOwner enum
-    pub fn owner(&self) -> Option<ProjectOwner> {
-        if let Some(ref user_id) = self.owner_user {
-            Some(ProjectOwner::User(user_id.clone()))
-        } else {
-            self.owner_team
-                .as_ref()
-                .map(|team_id| ProjectOwner::Team(team_id.clone()))
-        }
-    }
-}
-
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CreateProjectRequest {
     pub name: String,

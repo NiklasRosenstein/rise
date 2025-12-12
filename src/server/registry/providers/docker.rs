@@ -69,10 +69,6 @@ impl RegistryProvider for OciClientAuthProvider {
         &self.registry_host
     }
 
-    fn registry_type(&self) -> &str {
-        "oci-client-auth"
-    }
-
     fn registry_url(&self) -> &str {
         &self.registry_url
     }

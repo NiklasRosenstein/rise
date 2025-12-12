@@ -36,9 +36,6 @@ pub trait RegistryProvider: Send + Sync {
     /// (e.g., "459109751375.dkr.ecr.eu-west-1.amazonaws.com")
     fn registry_host(&self) -> &str;
 
-    /// Get the registry type identifier
-    fn registry_type(&self) -> &str;
-
     /// Get the base registry URL
     fn registry_url(&self) -> &str;
 }

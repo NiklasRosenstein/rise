@@ -5,13 +5,6 @@ use axum::{
     Router,
 };
 
-pub fn routes() -> Router<AppState> {
-    Router::new()
-        .route("/auth/code/exchange", post(handlers::code_exchange))
-        .route("/me", get(handlers::me))
-        .route("/users/lookup", post(handlers::users_lookup))
-}
-
 /// Public routes that don't require authentication
 pub fn public_routes() -> Router<AppState> {
     Router::new()

@@ -81,10 +81,6 @@ impl EncryptionProvider for LocalEncryptionProvider {
 
         Ok(plaintext)
     }
-
-    fn provider_name(&self) -> &str {
-        "local-aes-256-gcm"
-    }
 }
 
 #[cfg(test)]

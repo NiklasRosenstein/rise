@@ -75,14 +75,6 @@ pub trait DeploymentBackend: Send + Sync {
     /// A HealthStatus indicating if the deployment is healthy
     async fn health_check(&self, deployment: &Deployment) -> anyhow::Result<HealthStatus>;
 
-    /// Stop a running deployment
-    ///
-    /// Called when a deployment needs to be stopped (e.g., during cleanup or rollback)
-    ///
-    /// # Arguments
-    /// * `deployment` - The deployment to stop
-    async fn stop(&self, deployment: &Deployment) -> anyhow::Result<()>;
-
     /// Cancel a deployment that hasn't provisioned infrastructure yet
     ///
     /// Called when deployment is in Cancelling state (pre-infrastructure).

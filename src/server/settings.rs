@@ -284,8 +284,6 @@ pub enum RegistrySettings {
         /// Literal prefix for ECR repository names (e.g., "rise/" → repos named "rise/{project}")
         #[serde(default = "default_repo_prefix")]
         repo_prefix: String,
-        /// IAM role ARN for ECR controller operations (create/delete/tag repositories)
-        role_arn: String,
         /// IAM role ARN for push operations (assumed to generate scoped credentials)
         push_role_arn: String,
         /// Whether to automatically delete ECR repos when projects are deleted

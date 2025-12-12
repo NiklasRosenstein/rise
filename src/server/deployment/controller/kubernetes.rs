@@ -1748,16 +1748,6 @@ impl DeploymentBackend for KubernetesController {
         }
     }
 
-    async fn stop(&self, deployment: &Deployment) -> Result<()> {
-        // For Kubernetes, we can scale the ReplicaSet to 0
-        // But this is optional - we could also just leave it running
-        info!(
-            "Stop requested for deployment {} (no-op for Kubernetes)",
-            deployment.deployment_id
-        );
-        Ok(())
-    }
-
     async fn cancel(&self, deployment: &Deployment) -> Result<()> {
         info!(
             "Cancelling deployment {} (pre-infrastructure)",

@@ -827,17 +827,6 @@ impl DeploymentBackend for DockerController {
         }
     }
 
-    /// Stop a running deployment
-    async fn stop(&self, deployment: &Deployment) -> anyhow::Result<()> {
-        let metadata: DockerMetadata =
-            serde_json::from_value(deployment.controller_metadata.clone())?;
-        if let Some(container_id) = metadata.container_id {
-            info!("Stopping container {}", container_id);
-            self.docker.stop_container(&container_id, None).await?;
-        }
-        Ok(())
-    }
-
     /// Cancel a deployment (pre-infrastructure)
     async fn cancel(&self, deployment: &Deployment) -> anyhow::Result<()> {
         info!(
