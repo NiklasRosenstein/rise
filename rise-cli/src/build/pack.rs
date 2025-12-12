@@ -38,8 +38,7 @@ pub(crate) fn build_image_with_buildpacks(
         .arg("--builder")
         .arg(builder_image)
         .arg("--platform")
-        .arg("linux/amd64")
-        .env("DOCKER_API_VERSION", "1.44");
+        .arg("linux/amd64");
 
     // Add buildpacks if specified
     if !buildpacks.is_empty() {

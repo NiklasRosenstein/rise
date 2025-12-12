@@ -73,7 +73,6 @@ rise login  # If using direnv, 'rise' is in PATH
 ```bash
 DATABASE_URL="postgres://rise:rise123@localhost:5432/rise"
 RISE_CONFIG_RUN_MODE="development"
-DOCKER_API_VERSION=1.44
 PATH="$PATH:$PWD/target/debug"
 ```
 

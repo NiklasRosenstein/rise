@@ -117,9 +117,6 @@ RISE_KUBERNETES__HOSTNAME_FORMAT="{project_name}.apps.rise.dev"
 RISE_KUBERNETES__NONDEFAULT_HOSTNAME_FORMAT="{project_name}-{deployment_group}.preview.rise.dev"
 RISE_KUBERNETES__NAMESPACE_FORMAT="rise-{project_name}"
 # RISE_KUBERNETES__KUBECONFIG="/path/to/kubeconfig"  # Optional, defaults to in-cluster
-
-# Docker API version (if using Docker backend)
-DOCKER_API_VERSION=1.44
 ```
 
 ## Database Setup
