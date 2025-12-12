@@ -26,6 +26,10 @@ pub struct BuildArgs {
     #[arg(long)]
     pub builder: Option<String>,
 
+    /// Buildpack(s) to use (only for pack backend). Can be specified multiple times.
+    #[arg(long = "buildpack", short = 'b')]
+    pub buildpacks: Vec<String>,
+
     /// Container CLI to use (docker or podman)
     #[arg(long)]
     pub container_cli: Option<String>,
@@ -46,6 +50,7 @@ pub(crate) struct BuildOptions {
     pub app_path: String,
     pub backend: Option<String>,
     pub builder: Option<String>,
+    pub buildpacks: Vec<String>,
     pub container_cli: String,
     pub managed_buildkit: bool,
     pub railpack_embed_ssl_cert: bool,
@@ -65,6 +70,7 @@ impl BuildOptions {
             app_path,
             backend: build_args.backend.clone(),
             builder: build_args.builder.clone(),
+            buildpacks: build_args.buildpacks.clone(),
             container_cli: build_args
                 .container_cli
                 .clone()

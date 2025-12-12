@@ -10,6 +10,7 @@ pub(crate) fn build_image_with_buildpacks(
     app_path: &str,
     image_tag: &str,
     builder: Option<&str>,
+    buildpacks: &[String],
 ) -> Result<()> {
     // Check if pack CLI is available
     let pack_check = Command::new("pack").arg("version").output();
@@ -40,6 +41,14 @@ pub(crate) fn build_image_with_buildpacks(
         .arg("--platform")
         .arg("linux/amd64")
         .env("DOCKER_API_VERSION", "1.44");
+
+    // Add buildpacks if specified
+    if !buildpacks.is_empty() {
+        info!("Using buildpacks: {:?}", buildpacks);
+        for buildpack in buildpacks {
+            cmd.arg("--buildpack").arg(buildpack);
+        }
+    }
 
     // Never use --publish - always build locally and push separately
     // This avoids code bifurcation and allows CA certificate injection

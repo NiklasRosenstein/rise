@@ -72,6 +72,9 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if options.builder.is_some() {
                 warn!("--builder flag is ignored when using docker build method");
             }
+            if !options.buildpacks.is_empty() {
+                warn!("--buildpack flags are ignored when using docker build method");
+            }
 
             build_image_with_dockerfile(
                 &options.app_path,
@@ -87,6 +90,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 &options.app_path,
                 &options.image_tag,
                 options.builder.as_deref(),
+                &options.buildpacks,
             )?;
 
             // Pack doesn't support push during build, so push separately if requested
@@ -97,6 +101,9 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
         BuildMethod::Railpack { use_buildctl } => {
             if options.builder.is_some() {
                 warn!("--builder flag is ignored when using railpack build method");
+            }
+            if !options.buildpacks.is_empty() {
+                warn!("--buildpack flags are ignored when using railpack build method");
             }
 
             build_image_with_railpacks(
