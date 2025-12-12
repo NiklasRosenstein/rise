@@ -1,6 +1,6 @@
 use chrono::Utc;
 
-use crate::server::db::models::{Deployment, Project};
+use crate::db::models::{Deployment, Project};
 use crate::server::state::AppState;
 
 /// Generate deployment ID in format YYYYMMDD-HHMMSS

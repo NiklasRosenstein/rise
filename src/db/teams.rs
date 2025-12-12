@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::server::db::models::{Team, TeamMember, TeamRole, User};
+use crate::db::models::{Team, TeamMember, TeamRole, User};
 
 /// List all teams
 pub async fn list(pool: &PgPool) -> Result<Vec<Team>> {

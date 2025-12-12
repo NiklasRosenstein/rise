@@ -5,8 +5,8 @@ use axum::{
 };
 
 use super::models::{GetRegistryCredsRequest, GetRegistryCredsResponse};
-use crate::server::db::models::User;
-use crate::server::db::{projects, teams as db_teams};
+use crate::db::models::User;
+use crate::db::{projects, teams as db_teams};
 use crate::server::state::AppState;
 use uuid::Uuid;
 

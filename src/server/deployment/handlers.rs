@@ -11,8 +11,8 @@ use tracing::{debug, error, info};
 use super::models::{self, *};
 use super::state_machine;
 use super::utils::generate_deployment_id;
-use crate::server::db::models::{DeploymentStatus as DbDeploymentStatus, User};
-use crate::server::db::{
+use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
+use crate::db::{
     deployments as db_deployments, projects, service_accounts, teams as db_teams, users,
 };
 use crate::server::state::AppState;
@@ -167,12 +167,12 @@ fn normalize_image_reference(image: &str) -> String {
 /// # Errors
 /// Returns error if image doesn't exist, requires authentication, or registry is unreachable
 async fn resolve_image_digest(
-    oci_client: &crate::oci::OciClient,
-    registry_provider: Option<&std::sync::Arc<dyn crate::registry::RegistryProvider>>,
+    oci_client: &crate::server::oci::OciClient,
+    registry_provider: Option<&std::sync::Arc<dyn crate::server::registry::RegistryProvider>>,
     normalized_image: &str,
 ) -> anyhow::Result<String> {
     // Build credentials map from registry provider
-    let mut credentials = crate::oci::RegistryCredentialsMap::new();
+    let mut credentials = crate::server::oci::RegistryCredentialsMap::new();
 
     if let Some(provider) = registry_provider {
         match provider.get_pull_credentials().await {
@@ -447,7 +447,7 @@ pub async fn create_deployment(
         Ok(Json(CreateDeploymentResponse {
             deployment_id,
             image_tag: image_digest, // Return digest for consistency
-            credentials: crate::registry::models::RegistryCredentials {
+            credentials: crate::server::registry::models::RegistryCredentials {
                 registry_url: String::new(),
                 username: String::new(),
                 password: String::new(),
@@ -1038,7 +1038,7 @@ pub async fn rollback_deployment(
 
     // Use helper to determine image tag (for logging/response only)
     let image_tag =
-        crate::deployment::utils::get_deployment_image_tag(&state, &new_deployment, &project);
+        crate::server::deployment::utils::get_deployment_image_tag(&state, &new_deployment, &project);
 
     info!(
         "Created rollback deployment {} from {} (image: {})",

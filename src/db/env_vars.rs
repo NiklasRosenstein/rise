@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::server::db::models::{DeploymentEnvVar, ProjectEnvVar};
+use crate::db::models::{DeploymentEnvVar, ProjectEnvVar};
 
 /// Create a new project environment variable
 pub async fn create_project_env_var(
@@ -189,7 +189,7 @@ pub async fn list_deployment_env_vars(
 pub async fn load_deployment_env_vars_decrypted(
     pool: &PgPool,
     deployment_id: Uuid,
-    encryption_provider: Option<&dyn crate::encryption::EncryptionProvider>,
+    encryption_provider: Option<&dyn crate::server::encryption::EncryptionProvider>,
 ) -> Result<Vec<(String, String)>> {
     // Fetch deployment environment variables from database
     let db_env_vars = list_deployment_env_vars(pool, deployment_id).await?;

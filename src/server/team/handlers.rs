@@ -3,8 +3,8 @@ use super::models::{
     CreateTeamRequest, CreateTeamResponse, GetTeamParams, Team as ApiTeam, TeamErrorResponse,
     TeamWithEmails, UpdateTeamRequest, UpdateTeamResponse, UserInfo,
 };
-use crate::server::db::models::{TeamRole, User};
-use crate::server::db::{service_accounts, teams as db_teams};
+use crate::db::models::{TeamRole, User};
+use crate::db::{service_accounts, teams as db_teams};
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Path, Query, State},

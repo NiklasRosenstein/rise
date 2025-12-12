@@ -3,7 +3,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-use crate::server::db::projects as db_projects;
+use crate::db::projects as db_projects;
 use crate::server::ecr::{EcrRepoManager, ECR_FINALIZER};
 use crate::server::state::ControllerState;
 

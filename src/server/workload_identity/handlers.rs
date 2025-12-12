@@ -5,7 +5,7 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::server::db::{projects, service_accounts, users, User};
+use crate::db::{projects, service_accounts, users, User};
 use crate::server::project::handlers::{check_read_permission, check_write_permission};
 use crate::server::state::AppState;
 use crate::server::workload_identity::models::{

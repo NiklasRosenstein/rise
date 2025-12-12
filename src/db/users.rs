@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::server::db::models::User;
+use crate::db::models::User;
 
 /// Find user by email address
 pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<User>> {

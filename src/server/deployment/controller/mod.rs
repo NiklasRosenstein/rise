@@ -11,8 +11,8 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-use crate::server::db::models::{Deployment, DeploymentStatus, Project};
-use crate::server::db::{deployments as db_deployments, projects};
+use crate::db::models::{Deployment, DeploymentStatus, Project};
+use crate::db::{deployments as db_deployments, projects};
 use crate::server::deployment::state_machine;
 use crate::server::state::ControllerState;
 
@@ -369,7 +369,7 @@ impl DeploymentController {
             }
 
             // If default group, update active_deployment_id and project_url for backward compatibility
-            if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            if deployment.deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
                 projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id)
                     .await?;
 

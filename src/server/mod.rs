@@ -188,8 +188,8 @@ async fn run_project_controller_loop(settings: settings::Settings) -> Result<()>
 /// - Creates repositories for new projects
 /// - Cleans up repositories when projects are deleted
 async fn run_ecr_controller_loop(settings: settings::Settings) -> Result<()> {
-    use crate::server::server::registry::models::EcrConfig;
-    use crate::server::server::settings::RegistrySettings;
+    use crate::server::registry::models::EcrConfig;
+    use crate::server::settings::RegistrySettings;
 
     // Extract ECR config from registry settings
     let ecr_config = match &settings.registry {

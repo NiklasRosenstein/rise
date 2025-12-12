@@ -3,7 +3,7 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::server::db::models::{Project, ServiceAccount, User};
+use crate::db::models::{Project, ServiceAccount, User};
 
 /// Create a new service account for a project
 pub async fn create(
@@ -236,7 +236,7 @@ pub async fn soft_delete(pool: &PgPool, id: Uuid) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::server::db::{
+    use crate::db::{
         models::{ProjectStatus, ProjectVisibility},
         projects, users,
     };

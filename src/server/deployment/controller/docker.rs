@@ -12,7 +12,7 @@ use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
 
 use super::{DeploymentBackend, HealthStatus, ReconcileResult};
-use crate::server::db::models::{Deployment, DeploymentStatus, Project};
+use crate::db::models::{Deployment, DeploymentStatus, Project};
 use crate::server::registry::OptionalCredentialsProvider;
 use crate::server::state::ControllerState;
 

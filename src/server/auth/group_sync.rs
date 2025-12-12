@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::server::db::{models::TeamRole, teams};
+use crate::db::{models::TeamRole, teams};
 
 /// Synchronize user's team memberships based on IdP groups claim
 ///

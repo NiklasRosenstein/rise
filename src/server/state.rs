@@ -35,7 +35,7 @@ pub struct AppState {
     pub jwt_signer: Arc<JwtSigner>,
     pub oauth_client: Arc<OAuthClient>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
-    pub oci_client: Arc<crate::oci::OciClient>,
+    pub oci_client: Arc<crate::server::oci::OciClient>,
     pub admin_users: Arc<Vec<String>>,
     pub auth_settings: Arc<AuthSettings>,
     pub server_settings: Arc<ServerSettings>,
@@ -277,7 +277,7 @@ impl AppState {
 
         // Initialize OCI client for direct registry interaction
         let oci_client =
-            Arc::new(crate::oci::OciClient::new().context("Failed to initialize OCI client")?);
+            Arc::new(crate::server::oci::OciClient::new().context("Failed to initialize OCI client")?);
         tracing::info!("Initialized OCI client for registry digest resolution");
 
         // Store admin users list
@@ -419,7 +419,7 @@ impl AppState {
 
         // Initialize OCI client (needed for pre-built image deployments)
         let oci_client =
-            Arc::new(crate::oci::OciClient::new().context("Failed to initialize OCI client")?);
+            Arc::new(crate::server::oci::OciClient::new().context("Failed to initialize OCI client")?);
 
         // Dummy auth components (not used by controller)
         let jwt_validator = Arc::new(JwtValidator::new());

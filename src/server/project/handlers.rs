@@ -4,8 +4,8 @@ use super::models::{
     Project as ApiProject, ProjectErrorResponse, ProjectOwner, ProjectStatus, ProjectVisibility,
     ProjectWithOwnerInfo, TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
 };
-use crate::server::db::models::User;
-use crate::server::db::{projects, service_accounts, teams as db_teams, users as db_users};
+use crate::db::models::User;
+use crate::db::{projects, service_accounts, teams as db_teams, users as db_users};
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Path, Query, State},

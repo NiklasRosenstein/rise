@@ -21,9 +21,9 @@ use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
 use super::{DeploymentBackend, HealthStatus, ReconcileHint, ReconcileResult};
-use crate::server::db::deployments as db_deployments;
-use crate::server::db::models::{Deployment, DeploymentStatus, Project, ProjectVisibility};
-use crate::server::db::projects as db_projects;
+use crate::db::deployments as db_deployments;
+use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectVisibility};
+use crate::db::projects as db_projects;
 use crate::server::registry::RegistryProvider;
 use crate::server::state::ControllerState;
 
@@ -443,7 +443,7 @@ impl KubernetesController {
 
     /// Get the escaped deployment group name for use in resource names
     fn escaped_group_name(deployment_group: &str) -> String {
-        if deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+        if deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
             "default".to_string()
         } else {
             Self::sanitize_label_value(deployment_group)
@@ -491,7 +491,7 @@ impl KubernetesController {
 
     /// Get fully resolved ingress URL with placeholders replaced
     fn resolved_ingress_url(&self, project: &Project, deployment: &Deployment) -> String {
-        if deployment.deployment_group == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+        if deployment.deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
             self.production_ingress_url_template
                 .replace("{project_name}", &project.name)
         } else if let Some(ref staging_template) = self.staging_ingress_url_template {
@@ -546,7 +546,7 @@ impl KubernetesController {
             .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
         // Check if there are other active deployments in this group
-        use crate::server::db::deployments as db_deployments;
+        use crate::db::deployments as db_deployments;
         let other_in_group = db_deployments::list_for_project_and_group(
             &self.state.db_pool,
             deployment.project_id,
@@ -580,7 +580,7 @@ impl KubernetesController {
             );
 
             // Get project info to construct resource names
-            use crate::server::db::projects as db_projects;
+            use crate::db::projects as db_projects;
             let project = db_projects::find_by_id(&self.state.db_pool, deployment.project_id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
@@ -1823,7 +1823,7 @@ impl DeploymentBackend for KubernetesController {
             }
 
             // For non-default deployment groups, check if we should clean up group-specific resources
-            if deployment.deployment_group != crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            if deployment.deployment_group != crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
                 // Check if there are any other active deployments in this group
                 if let Err(e) = self
                     .cleanup_group_resources_if_empty(deployment, &metadata)

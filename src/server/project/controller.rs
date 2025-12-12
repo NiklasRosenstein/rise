@@ -3,8 +3,8 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info};
 
-use crate::server::db::models::DeploymentStatus;
-use crate::server::db::{deployments as db_deployments, projects as db_projects};
+use crate::db::models::DeploymentStatus;
+use crate::db::{deployments as db_deployments, projects as db_projects};
 use crate::server::deployment::state_machine;
 use crate::server::state::ControllerState;
 

@@ -3,8 +3,8 @@ use sqlx::PgPool;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-use crate::server::db::deployments;
-use crate::server::db::models::{Deployment, Project, ProjectStatus, ProjectVisibility};
+use crate::db::deployments;
+use crate::db::models::{Deployment, Project, ProjectStatus, ProjectVisibility};
 
 /// List all projects (optionally filtered by owner)
 pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Project>> {
@@ -332,7 +332,7 @@ pub async fn set_active_deployment(
 
 /// Calculate and update project status based on active deployment and last deployment
 pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result<Project> {
-    use crate::server::db::models::DeploymentStatus;
+    use crate::db::models::DeploymentStatus;
 
     // Get current project to check if it's in a protected lifecycle state
     let project = find_by_id(pool, project_id)
@@ -353,7 +353,7 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
     let last_deployment = deployments::find_last_for_project_and_group(
         pool,
         project_id,
-        crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP,
+        crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP,
     )
     .await?;
 
@@ -369,7 +369,7 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
         match active_deployment {
             Some(deployment)
                 if deployment.deployment_group
-                    == crate::deployment::models::DEFAULT_DEPLOYMENT_GROUP =>
+                    == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP =>
             {
                 // Only use active deployment status if it's in the "default" group
                 match deployment.status {

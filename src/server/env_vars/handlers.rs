@@ -1,6 +1,6 @@
 use super::models::{EnvVarResponse, EnvVarsResponse, SetEnvVarRequest};
-use crate::server::db::models::User;
-use crate::server::db::{env_vars as db_env_vars, projects};
+use crate::db::models::User;
+use crate::db::{env_vars as db_env_vars, projects};
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Path, State},

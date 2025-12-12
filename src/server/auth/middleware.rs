@@ -9,7 +9,7 @@ use jsonwebtoken::decode_header;
 use serde::Deserialize;
 use std::collections::HashMap;
 
-use crate::server::db::{service_accounts, users, User};
+use crate::db::{service_accounts, users, User};
 use crate::server::state::AppState;
 
 /// Extract Bearer token from Authorization header
@@ -238,7 +238,7 @@ pub async fn auth_middleware(
         tracing::debug!("Auth middleware: JWT validation successful");
 
         // Deserialize to typed Claims to get email
-        let claims: crate::auth::jwt::Claims =
+        let claims: crate::server::auth::jwt::Claims =
             serde_json::from_value(claims_value).map_err(|e| {
                 tracing::warn!("Failed to parse user claims: {}", e);
                 (
@@ -291,7 +291,7 @@ pub async fn optional_auth_middleware(
             .validate(&token, &state.auth_settings.issuer, &expected_claims)
             .await
         {
-            if let Ok(claims) = serde_json::from_value::<crate::auth::jwt::Claims>(claims_value) {
+            if let Ok(claims) = serde_json::from_value::<crate::server::auth::jwt::Claims>(claims_value) {
                 if let Ok(user) = users::find_or_create(&state.db_pool, &claims.email).await {
                     req.extensions_mut().insert(user);
                 }

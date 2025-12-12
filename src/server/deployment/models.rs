@@ -109,7 +109,7 @@ pub struct CreateDeploymentRequest {
 pub struct CreateDeploymentResponse {
     pub deployment_id: String,
     pub image_tag: String, // Full tag: registry_url/namespace/project:deployment_id
-    pub credentials: crate::registry::models::RegistryCredentials,
+    pub credentials: crate::server::registry::models::RegistryCredentials,
 }
 
 // Request to update deployment status

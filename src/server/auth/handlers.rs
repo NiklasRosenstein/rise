@@ -4,7 +4,7 @@ use crate::server::auth::{
         generate_code_challenge, generate_code_verifier, generate_state_token, OAuth2State,
     },
 };
-use crate::server::db::{
+use crate::db::{
     models::{ProjectVisibility, User},
     projects, users,
 };
@@ -50,7 +50,7 @@ async fn sync_groups_after_login(
         })?;
 
     // Parse claims
-    let claims: crate::auth::jwt::Claims = serde_json::from_value(claims_value).map_err(|e| {
+    let claims: crate::server::auth::jwt::Claims = serde_json::from_value(claims_value).map_err(|e| {
         tracing::warn!("Failed to parse claims for group sync: {}", e);
         (
             StatusCode::UNAUTHORIZED,
@@ -79,7 +79,7 @@ async fn sync_groups_after_login(
             );
 
             if let Err(e) =
-                crate::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups).await
+                crate::server::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups).await
             {
                 // Log error but don't fail login
                 tracing::error!(
@@ -195,7 +195,7 @@ pub async fn authorize(
             })?;
 
             // Build authorization URL with typed parameters
-            let params = crate::auth::oauth::AuthorizeParams {
+            let params = crate::server::auth::oauth::AuthorizeParams {
                 client_id: &state.auth_settings.client_id,
                 redirect_uri: &redirect_uri,
                 response_type: "code",
@@ -567,7 +567,7 @@ pub async fn oauth_signin_start(
     // Build OAuth2 authorization URL
     let callback_url = format!("{}/auth/callback", state.public_url.trim_end_matches('/'));
 
-    let params = crate::auth::oauth::AuthorizeParams {
+    let params = crate::server::auth::oauth::AuthorizeParams {
         client_id: &state.auth_settings.client_id,
         redirect_uri: &callback_url,
         response_type: "code",

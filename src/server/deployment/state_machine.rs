@@ -1,4 +1,4 @@
-use crate::server::db::models::DeploymentStatus;
+use crate::db::models::DeploymentStatus;
 use anyhow::{bail, Result};
 
 /// Check if a deployment status is terminal (no further transitions allowed)

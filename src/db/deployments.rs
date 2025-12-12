@@ -3,7 +3,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::server::db::models::{Deployment, DeploymentStatus, TerminationReason};
+use crate::db::models::{Deployment, DeploymentStatus, TerminationReason};
 use crate::server::deployment::state_machine;
 
 /// Parameters for creating a new deployment
