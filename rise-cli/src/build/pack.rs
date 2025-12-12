@@ -83,14 +83,28 @@ pub(crate) fn build_image_with_buildpacks(
             .ok_or_else(|| anyhow::anyhow!("Certificate path contains invalid UTF-8"))?;
 
         // Mount the CA certificate into the lifecycle container
-        cmd.arg("--volume").arg(format!(
-            "{}:/etc/ssl/certs/ca-certificates.crt:ro",
-            resolved_path_str
-        ));
+        for ssl_path in vec![
+            "/etc/ssl/certs/ca-certificates.crt", // Debian, Ubuntu, Arch, Gentoo, Slackware
+            "/etc/pki/tls/certs/ca-bundle.crt",   // RedHat, CentOS, Fedora
+            "/etc/ssl/ca-bundle.pem",             // OpenSUSE, SLES
+            "/etc/ssl/cert.pem",                  // Alpine Linux
+            "/usr/lib/ssl/cert.pem",              // OpenSSL (Default)
+        ] {
+            cmd.arg("--volume")
+                .arg(format!("{resolved_path_str}:{ssl_path}:ro"));
+        }
 
         // Tell the lifecycle container where to find the certificate
-        cmd.arg("--env")
-            .arg("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt");
+        for ssl_env_name in vec![
+            "SSL_CERT_FILE",
+            "NIX_SSL_CERT_FILE",
+            "NODE_EXTRA_CA_CERTS",
+            "REQUESTS_CA_BUNDLE",
+            "AWS_CA_BUNDLE",
+        ] {
+            cmd.arg("--env")
+                .arg(format!("{ssl_env_name}=/etc/ssl/certs/ca-certificates.crt"));
+        }
 
         info!(
             "Injecting CA certificate from: {} (resolved from: {})",
