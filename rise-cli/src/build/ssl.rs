@@ -5,6 +5,22 @@ use std::fs;
 use std::path::Path;
 use tracing::{debug, info};
 
+pub(crate) const SSL_CERT_PATHS: &[&str] = &[
+    "/etc/ssl/certs/ca-certificates.crt", // Debian, Ubuntu, Arch, Gentoo, Slackware
+    "/etc/pki/tls/certs/ca-bundle.crt",   // RedHat, CentOS, Fedora
+    "/etc/ssl/ca-bundle.pem",             // OpenSUSE, SLES
+    "/etc/ssl/cert.pem",                  // Alpine Linux
+    "/usr/lib/ssl/cert.pem",              // OpenSSL (Default)
+];
+
+pub(crate) const SSL_ENV_VARS: &[&str] = &[
+    "SSL_CERT_FILE",
+    "NIX_SSL_CERT_FILE",
+    "NODE_EXTRA_CA_CERTS",
+    "REQUESTS_CA_BUNDLE",
+    "AWS_CA_BUNDLE",
+];
+
 /// Embed SSL certificate into railpack plan.json
 pub(crate) fn embed_ssl_cert_in_plan(plan_file: &Path, ssl_cert_file: &Path) -> Result<()> {
     use serde_json::Value;

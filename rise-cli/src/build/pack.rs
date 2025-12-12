@@ -5,6 +5,8 @@ use std::path::Path;
 use std::process::Command;
 use tracing::{debug, info};
 
+use super::ssl::{SSL_CERT_PATHS, SSL_ENV_VARS};
+
 /// Build image using Cloud Native Buildpacks (pack CLI)
 pub(crate) fn build_image_with_buildpacks(
     app_path: &str,
@@ -81,26 +83,16 @@ pub(crate) fn build_image_with_buildpacks(
             .to_str()
             .ok_or_else(|| anyhow::anyhow!("Certificate path contains invalid UTF-8"))?;
 
-        // Mount the CA certificate into the lifecycle container
-        for ssl_path in vec![
-            "/etc/ssl/certs/ca-certificates.crt", // Debian, Ubuntu, Arch, Gentoo, Slackware
-            "/etc/pki/tls/certs/ca-bundle.crt",   // RedHat, CentOS, Fedora
-            "/etc/ssl/ca-bundle.pem",             // OpenSUSE, SLES
-            "/etc/ssl/cert.pem",                  // Alpine Linux
-            "/usr/lib/ssl/cert.pem",              // OpenSSL (Default)
-        ] {
+        // Mount the CA certificate to all common system CA paths since we can't predict
+        // which base image/distro the buildpack will use (Debian, Alpine, RedHat, etc.)
+        for ssl_path in SSL_CERT_PATHS {
             cmd.arg("--volume")
                 .arg(format!("{resolved_path_str}:{ssl_path}:ro"));
         }
 
-        // Tell the lifecycle container where to find the certificate
-        for ssl_env_name in vec![
-            "SSL_CERT_FILE",
-            "NIX_SSL_CERT_FILE",
-            "NODE_EXTRA_CA_CERTS",
-            "REQUESTS_CA_BUNDLE",
-            "AWS_CA_BUNDLE",
-        ] {
+        // Set multiple SSL environment variables to ensure CA trust works across different
+        // language ecosystems (Node.js, Python, Nix, AWS SDK, etc.)
+        for ssl_env_name in SSL_ENV_VARS {
             cmd.arg("--env")
                 .arg(format!("{ssl_env_name}=/etc/ssl/certs/ca-certificates.crt"));
         }
