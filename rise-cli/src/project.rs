@@ -123,6 +123,8 @@ struct Project {
     deployment_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     project_url: Option<String>,
+    #[serde(default)]
+    snowflake_enabled: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -159,6 +161,8 @@ struct ProjectWithOwnerInfo {
     deployment_groups: Option<Vec<String>>,
     #[serde(default)]
     finalizers: Vec<String>,
+    #[serde(default)]
+    snowflake_enabled: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -202,6 +206,7 @@ pub async fn create_project(
     name: &str,
     visibility: ProjectVisibility,
     owner: Option<String>,
+    snowflake_enabled: bool,
 ) -> Result<()> {
     let token = config
         .get_token()
@@ -243,12 +248,14 @@ pub async fn create_project(
         name: String,
         visibility: ProjectVisibility,
         owner: OwnerType,
+        snowflake_enabled: bool,
     }
 
     let request = CreateRequest {
         name: name.to_string(),
         visibility,
         owner: owner_payload,
+        snowflake_enabled,
     };
 
     let url = format!("{}/projects", backend_url);
@@ -412,6 +419,14 @@ pub async fn show_project(
         println!("ID: {}", project.id);
         println!("Status: {}", project.status);
         println!("Visibility: {}", project.visibility);
+        println!(
+            "Snowflake OAuth: {}",
+            if project.snowflake_enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        );
         if let Some(url) = project.deployment_url {
             println!("URL: {}", url);
         } else {
@@ -490,6 +505,7 @@ pub async fn update_project(
     name: Option<String>,
     visibility: Option<ProjectVisibility>,
     owner: Option<String>,
+    snowflake_enabled: Option<bool>,
 ) -> Result<()> {
     let token = config
         .get_token()
@@ -521,12 +537,15 @@ pub async fn update_project(
         visibility: Option<ProjectVisibility>,
         #[serde(skip_serializing_if = "Option::is_none")]
         owner: Option<OwnerType>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        snowflake_enabled: Option<bool>,
     }
 
     let request = UpdateRequest {
         name,
         visibility,
         owner: owner_payload,
+        snowflake_enabled,
     };
 
     let url = format!(

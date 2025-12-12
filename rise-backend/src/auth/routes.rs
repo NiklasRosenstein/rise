@@ -1,4 +1,4 @@
-use super::handlers;
+use super::{handlers, snowflake_handlers};
 use crate::state::AppState;
 use axum::{
     routing::{get, post},
@@ -23,6 +23,23 @@ pub fn public_routes() -> Router<AppState> {
         .route("/auth/callback", get(handlers::oauth_callback))
         .route("/auth/ingress", get(handlers::ingress_auth))
         .route("/auth/logout", get(handlers::oauth_logout))
+        // Snowflake OAuth routes
+        .route(
+            "/.rise/oauth/snowflake/start",
+            get(snowflake_handlers::snowflake_oauth_start),
+        )
+        .route(
+            "/.rise/oauth/snowflake/callback",
+            get(snowflake_handlers::snowflake_oauth_callback),
+        )
+        .route(
+            "/.rise/oauth/snowflake/me",
+            get(snowflake_handlers::snowflake_auth_me),
+        )
+        .route(
+            "/.rise/oauth/snowflake/logout",
+            post(snowflake_handlers::snowflake_auth_logout),
+        )
 }
 
 /// Protected routes that require authentication

@@ -87,6 +87,9 @@ enum ProjectCommands {
         /// Owner (format: "user:email" or "team:name", defaults to current user)
         #[arg(long)]
         owner: Option<String>,
+        /// Enable Snowflake OAuth integration (Rise handles OAuth and injects X-Snowflake-Token header)
+        #[arg(long)]
+        snowflake_enabled: bool,
     },
     /// List all projects
     #[command(visible_alias = "ls")]
@@ -119,6 +122,9 @@ enum ProjectCommands {
         /// Transfer ownership (format: "user:email" or "team:name")
         #[arg(long)]
         owner: Option<String>,
+        /// Enable Snowflake OAuth integration (Rise handles OAuth and injects X-Snowflake-Token header)
+        #[arg(long)]
+        snowflake_enabled: Option<bool>,
     },
     /// Delete a project
     #[command(visible_alias = "del")]
@@ -433,6 +439,7 @@ async fn main() -> Result<()> {
                 name,
                 visibility,
                 owner,
+                snowflake_enabled,
             } => {
                 let visibility_enum: project::ProjectVisibility =
                     visibility.parse().unwrap_or_else(|e| {
@@ -447,6 +454,7 @@ async fn main() -> Result<()> {
                     name,
                     visibility_enum,
                     owner.clone(),
+                    *snowflake_enabled,
                 )
                 .await?;
             }
@@ -462,6 +470,7 @@ async fn main() -> Result<()> {
                 name,
                 visibility,
                 owner,
+                snowflake_enabled,
             } => {
                 let visibility_enum = visibility.as_ref().map(|v| {
                     v.parse().unwrap_or_else(|e: anyhow::Error| {
@@ -479,6 +488,7 @@ async fn main() -> Result<()> {
                     name.clone(),
                     visibility_enum,
                     owner.clone(),
+                    *snowflake_enabled,
                 )
                 .await?;
             }

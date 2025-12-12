@@ -37,6 +37,7 @@ mod tests {
             registry: None,
             kubernetes: None,
             encryption: None,
+            snowflake: None,
         };
 
         // This test requires PostgreSQL and Dex to be running

@@ -64,6 +64,7 @@ pub async fn create_project(
         crate::db::models::ProjectVisibility::from(payload.visibility),
         owner_user_id,
         owner_team_id,
+        payload.snowflake_enabled,
     )
     .await
     .map_err(|e| {
@@ -187,6 +188,7 @@ pub async fn list_projects(
                 deployment_url,
                 project_url: project.project_url,
                 deployment_groups: None, // Not populated in list view for performance
+                snowflake_enabled: project.snowflake_enabled,
             }
         })
         .collect();
@@ -513,6 +515,25 @@ pub async fn update_project(
         })?;
     }
 
+    // Update snowflake_enabled if provided
+    if let Some(snowflake_enabled) = payload.snowflake_enabled {
+        updated_project = projects::update_snowflake_enabled(
+            &state.db_pool,
+            updated_project.id,
+            snowflake_enabled,
+        )
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to update project snowflake_enabled: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+    }
+
     Ok(Json(UpdateProjectResponse {
         project: convert_project(updated_project),
     }))
@@ -664,6 +685,7 @@ async fn expand_project_with_owner(
         deployment_url: None, // Will be populated by caller
         project_url: project.project_url,
         finalizers: project.finalizers.clone(),
+        snowflake_enabled: project.snowflake_enabled,
         created: project.created_at.to_rfc3339(),
         updated: project.updated_at.to_rfc3339(),
     })
@@ -751,6 +773,7 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         deployment_url: None,           // Will be populated by caller
         project_url: project.project_url,
         deployment_groups: None, // Will be populated by caller if needed
+        snowflake_enabled: project.snowflake_enabled,
     }
 }
 

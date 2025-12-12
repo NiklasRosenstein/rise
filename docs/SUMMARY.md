@@ -16,4 +16,5 @@
 - [Production Deployment](production.md)
 - [Database](database.md)
 - [Testing](testing.md)
+- [Snowflake OAuth](snowflake-oauth.md)
 - [Troubleshooting](troubleshooting.md)
