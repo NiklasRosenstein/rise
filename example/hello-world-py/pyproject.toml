@@ -1,0 +1,8 @@
+[project]
+name = "python-hello-world"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "flask>=3.0.0",
+    "gunicorn>=23.0.0",
+]
