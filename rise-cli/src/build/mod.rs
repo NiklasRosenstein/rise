@@ -28,7 +28,10 @@ use railpack::build_image_with_railpacks;
 
 /// Main entry point for building container images
 pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
-    debug!("Using container CLI: {}", options.container_cli);
+    // Resolve container CLI - use explicit value or default to "docker"
+    let container_cli = options.container_cli.as_deref().unwrap_or("docker");
+
+    debug!("Using container CLI: {}", container_cli);
     info!(
         "Building image '{}' from path '{}'",
         options.image_tag, options.app_path
@@ -51,10 +54,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
         if requires_buildkit(&build_method) {
             if options.managed_buildkit {
                 let cert_path = Path::new(&ssl_cert_file);
-                Some(ensure_managed_buildkit_daemon(
-                    cert_path,
-                    &options.container_cli,
-                )?)
+                Some(ensure_managed_buildkit_daemon(cert_path, container_cli)?)
             } else {
                 check_ssl_cert_and_warn(&build_method, options.managed_buildkit);
                 None
@@ -75,17 +75,30 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if !options.buildpacks.is_empty() {
                 warn!("--buildpack flags are ignored when using docker build method");
             }
+            if options.railpack_embed_ssl_cert {
+                warn!("--railpack-embed-ssl-cert flag is ignored when using docker build method");
+            }
 
             build_image_with_dockerfile(
                 &options.app_path,
                 &options.image_tag,
-                &options.container_cli,
+                container_cli,
                 false, // use_buildx: always false for docker backend (use railpack:buildx for buildx)
                 options.push,
                 buildkit_host.as_deref(),
             )?;
         }
         BuildMethod::Pack => {
+            if options.container_cli.is_some() {
+                warn!("--container-cli flag is ignored when using pack build method");
+            }
+            if options.managed_buildkit {
+                warn!("--managed-buildkit flag is ignored when using pack build method");
+            }
+            if options.railpack_embed_ssl_cert {
+                warn!("--railpack-embed-ssl-cert flag is ignored when using pack build method");
+            }
+
             build_image_with_buildpacks(
                 &options.app_path,
                 &options.image_tag,
@@ -95,7 +108,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
 
             // Pack doesn't support push during build, so push separately if requested
             if options.push {
-                registry::docker_push(&options.container_cli, &options.image_tag)?;
+                registry::docker_push(container_cli, &options.image_tag)?;
             }
         }
         BuildMethod::Railpack { use_buildctl } => {
@@ -105,11 +118,14 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if !options.buildpacks.is_empty() {
                 warn!("--buildpack flags are ignored when using railpack build method");
             }
+            if use_buildctl && options.container_cli.is_some() {
+                warn!("--container-cli flag is ignored when using railpack:buildctl build method");
+            }
 
             build_image_with_railpacks(
                 &options.app_path,
                 &options.image_tag,
-                &options.container_cli,
+                container_cli,
                 use_buildctl,
                 options.push,
                 buildkit_host.as_deref(),

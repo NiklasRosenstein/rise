@@ -51,7 +51,7 @@ pub(crate) struct BuildOptions {
     pub backend: Option<String>,
     pub builder: Option<String>,
     pub buildpacks: Vec<String>,
-    pub container_cli: String,
+    pub container_cli: Option<String>,
     pub managed_buildkit: bool,
     pub railpack_embed_ssl_cert: bool,
     pub push: bool,
@@ -60,7 +60,7 @@ pub(crate) struct BuildOptions {
 impl BuildOptions {
     /// Create BuildOptions from BuildArgs and Config
     pub(crate) fn from_build_args(
-        config: &Config,
+        _config: &Config,
         image_tag: String,
         app_path: String,
         build_args: &BuildArgs,
@@ -71,10 +71,7 @@ impl BuildOptions {
             backend: build_args.backend.clone(),
             builder: build_args.builder.clone(),
             buildpacks: build_args.buildpacks.clone(),
-            container_cli: build_args
-                .container_cli
-                .clone()
-                .unwrap_or_else(|| config.get_container_cli()),
+            container_cli: build_args.container_cli.clone(),
             managed_buildkit: build_args.managed_buildkit,
             railpack_embed_ssl_cert: build_args.railpack_embed_ssl_cert,
             push: false,
