@@ -98,15 +98,19 @@ rise config set managed_buildkit true
 
 ### How It Works
 
-When `--managed-buildkit` is enabled and `SSL_CERT_FILE` environment variable is set:
-1. Rise CLI creates a `rise-buildkit` daemon container with the certificate mounted at `/etc/ssl/certs/ca-certificates.crt`
-2. The daemon is configured with `--platform linux/amd64` for Mac compatibility
-3. Subsequent builds use this managed daemon via `BUILDKIT_HOST` environment variable
-4. If `SSL_CERT_FILE` changes, the daemon is automatically recreated
+When `--managed-buildkit` is enabled, Rise CLI follows this priority order:
+
+1. **Existing BUILDKIT_HOST**: If the `BUILDKIT_HOST` environment variable is already set, Rise uses your existing buildkit daemon
+2. **Managed daemon**: Otherwise, Rise creates a `rise-buildkit` daemon container:
+   - With SSL certificate mounted at `/etc/ssl/certs/ca-certificates.crt` if `SSL_CERT_FILE` is set
+   - Without SSL certificate if `SSL_CERT_FILE` is not set
+   - Configured with `--platform linux/amd64` for Mac compatibility
+3. **Automatic updates**: If `SSL_CERT_FILE` is added, removed, or changed, the daemon is automatically recreated
 
 ### Warning When Not Enabled
 
-If `SSL_CERT_FILE` is set but managed BuildKit is disabled, you'll see:
+If `SSL_CERT_FILE` is set but `--managed-buildkit` is not enabled, you'll see a warning during builds that require BuildKit (docker, railpack):
+
 ```
 Warning: SSL_CERT_FILE is set but managed BuildKit daemon is disabled.
 
@@ -120,6 +124,8 @@ Or set environment variable:
 
 For manual setup, see: https://github.com/NiklasRosenstein/rise/issues/18
 ```
+
+Note: The managed BuildKit feature works with or without `SSL_CERT_FILE` - it simply mounts the certificate when available.
 
 ### Affected Build Backends
 

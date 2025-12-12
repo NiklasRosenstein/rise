@@ -17,7 +17,7 @@ pub(crate) use method::{BuildMethod, BuildOptions};
 pub(crate) use registry::docker_login;
 
 use anyhow::{bail, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
 use buildkit::{check_ssl_cert_and_warn, ensure_managed_buildkit_daemon};
@@ -49,20 +49,26 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
     // Select build method
     let build_method = select_build_method(&options.app_path, options.backend.as_deref())?;
 
-    // Handle SSL certificate and BuildKit daemon management
-    let buildkit_host = if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
-        if requires_buildkit(&build_method) {
-            if options.managed_buildkit {
-                let cert_path = Path::new(&ssl_cert_file);
-                Some(ensure_managed_buildkit_daemon(cert_path, container_cli)?)
-            } else {
-                check_ssl_cert_and_warn(&build_method, options.managed_buildkit);
-                None
-            }
+    // Handle BuildKit daemon management
+    let buildkit_host = if requires_buildkit(&build_method) && options.managed_buildkit {
+        // Priority 1: Use existing BUILDKIT_HOST if set
+        if let Ok(existing_host) = std::env::var("BUILDKIT_HOST") {
+            info!("Using existing BUILDKIT_HOST: {}", existing_host);
+            Some(existing_host)
         } else {
-            None
+            // Priority 2: Create/manage our own buildkit daemon
+            let ssl_cert_path = std::env::var("SSL_CERT_FILE")
+                .ok()
+                .map(PathBuf::from);
+
+            Some(ensure_managed_buildkit_daemon(
+                ssl_cert_path.as_deref(),
+                container_cli,
+            )?)
         }
     } else {
+        // Managed buildkit not enabled, warn if SSL cert is set
+        check_ssl_cert_and_warn(&build_method, options.managed_buildkit);
         None
     };
 

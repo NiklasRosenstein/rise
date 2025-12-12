@@ -18,28 +18,73 @@ pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
     Ok(format!("{:x}", result))
 }
 
-/// Get the SSL_CERT_FILE hash from daemon labels
-fn get_daemon_cert_hash(container_cli: &str, daemon_name: &str) -> Result<String> {
-    let output = Command::new(container_cli)
+/// Represents the SSL certificate state of a BuildKit daemon
+#[derive(Debug, PartialEq)]
+enum DaemonState {
+    /// Daemon has an SSL certificate with the given hash
+    HasCert(String),
+    /// Daemon was intentionally created without an SSL certificate
+    NoCert,
+    /// Daemon does not exist
+    NotFound,
+}
+
+/// Get the current state of the BuildKit daemon
+fn get_daemon_state(container_cli: &str, daemon_name: &str) -> DaemonState {
+    // Check if daemon exists
+    let inspect_status = Command::new(container_cli)
+        .args(["inspect", daemon_name])
+        .output();
+
+    let Ok(output) = inspect_status else {
+        return DaemonState::NotFound;
+    };
+
+    if !output.status.success() {
+        return DaemonState::NotFound;
+    }
+
+    // Daemon exists, check for no_ssl_cert label
+    let no_cert_output = Command::new(container_cli)
+        .args([
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"rise.no_ssl_cert\"}}",
+            daemon_name,
+        ])
+        .output();
+
+    if let Ok(output) = no_cert_output {
+        if output.status.success() {
+            let label_value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if label_value == "true" {
+                return DaemonState::NoCert;
+            }
+        }
+    }
+
+    // Check for SSL cert hash label
+    let cert_hash_output = Command::new(container_cli)
         .args([
             "inspect",
             "--format",
             "{{index .Config.Labels \"rise.ssl_cert_hash\"}}",
             daemon_name,
         ])
-        .output()
-        .context("Failed to inspect BuildKit daemon")?;
+        .output();
 
-    if !output.status.success() {
-        bail!("Failed to get daemon certificate hash label");
+    if let Ok(output) = cert_hash_output {
+        if output.status.success() {
+            let cert_hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
+            if !cert_hash.is_empty() {
+                return DaemonState::HasCert(cert_hash);
+            }
+        }
     }
 
-    let cert_hash = String::from_utf8(output.stdout)
-        .context("Invalid UTF-8 in daemon label")?
-        .trim()
-        .to_string();
-
-    Ok(cert_hash)
+    // Daemon exists but has no labels (old daemon or created externally)
+    // Treat as NoCert to avoid assuming anything
+    DaemonState::NoCert
 }
 
 /// Stop BuildKit daemon
@@ -58,57 +103,75 @@ fn stop_buildkit_daemon(container_cli: &str, daemon_name: &str) -> Result<()> {
     Ok(())
 }
 
-/// Create BuildKit daemon with SSL certificate mounted
+/// Create BuildKit daemon with optional SSL certificate mounted
 /// Returns the BUILDKIT_HOST value to be used with this daemon
 fn create_buildkit_daemon(
     container_cli: &str,
     daemon_name: &str,
-    ssl_cert_file: &Path,
+    ssl_cert_file: Option<&Path>,
 ) -> Result<String> {
-    info!(
-        "Creating managed BuildKit daemon '{}' with SSL certificate: {}",
-        daemon_name,
-        ssl_cert_file.display()
-    );
-
-    // Resolve certificate path to absolute path
-    let cert_path = if ssl_cert_file.is_absolute() {
-        ssl_cert_file.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(ssl_cert_file)
-    };
-
-    let cert_path = cert_path
-        .canonicalize()
-        .context("Failed to resolve SSL certificate path")?;
-
-    let cert_str = cert_path
-        .to_str()
-        .context("SSL certificate path contains invalid UTF-8")?;
-
-    // Compute hash of certificate file
-    let cert_hash = compute_file_hash(&cert_path)?;
-
-    let status = Command::new(container_cli)
-        .args([
-            "run",
-            "--platform",
-            "linux/amd64",
-            "--privileged",
-            "--name",
+    if let Some(cert_path) = ssl_cert_file {
+        info!(
+            "Creating managed BuildKit daemon '{}' with SSL certificate: {}",
             daemon_name,
-            "--rm",
-            "-d",
-            "--label",
-            &format!("rise.ssl_cert_file={}", cert_str),
-            "--label",
-            &format!("rise.ssl_cert_hash={}", cert_hash),
-            "--volume",
-            &format!("{}:/etc/ssl/certs/ca-certificates.crt:ro", cert_str),
-            "moby/buildkit",
-        ])
-        .status()
-        .context("Failed to start BuildKit daemon")?;
+            cert_path.display()
+        );
+    } else {
+        info!(
+            "Creating managed BuildKit daemon '{}' without SSL certificate",
+            daemon_name
+        );
+    }
+
+    let mut cmd = Command::new(container_cli);
+    cmd.args([
+        "run",
+        "--platform",
+        "linux/amd64",
+        "--privileged",
+        "--name",
+        daemon_name,
+        "--rm",
+        "-d",
+    ]);
+
+    // Add labels and volume mount based on SSL cert presence
+    if let Some(cert_path) = ssl_cert_file {
+        // Resolve certificate path to absolute path
+        let cert_path_abs = if cert_path.is_absolute() {
+            cert_path.to_path_buf()
+        } else {
+            std::env::current_dir()?.join(cert_path)
+        };
+
+        let cert_path_abs = cert_path_abs
+            .canonicalize()
+            .context("Failed to resolve SSL certificate path")?;
+
+        let cert_str = cert_path_abs
+            .to_str()
+            .context("SSL certificate path contains invalid UTF-8")?;
+
+        // Compute hash of certificate file
+        let cert_hash = compute_file_hash(&cert_path_abs)?;
+
+        cmd.arg("--label")
+            .arg(format!("rise.ssl_cert_file={}", cert_str))
+            .arg("--label")
+            .arg(format!("rise.ssl_cert_hash={}", cert_hash))
+            .arg("--volume")
+            .arg(format!(
+                "{}:/etc/ssl/certs/ca-certificates.crt:ro",
+                cert_str
+            ));
+    } else {
+        // No SSL cert, add label to track this state
+        cmd.arg("--label").arg("rise.no_ssl_cert=true");
+    }
+
+    cmd.arg("moby/buildkit");
+
+    let status = cmd.status().context("Failed to start BuildKit daemon")?;
 
     if !status.success() {
         bail!("Failed to create BuildKit daemon");
@@ -123,47 +186,57 @@ fn create_buildkit_daemon(
 /// Ensure managed BuildKit daemon is running with correct SSL certificate
 /// Returns the BUILDKIT_HOST value to be used with this daemon
 pub(crate) fn ensure_managed_buildkit_daemon(
-    ssl_cert_file: &Path,
+    ssl_cert_file: Option<&Path>,
     container_cli: &str,
 ) -> Result<String> {
     let daemon_name = "rise-buildkit";
 
-    // Check if daemon exists
-    let status = Command::new(container_cli)
-        .args(["inspect", daemon_name])
-        .output()
-        .context("Failed to check for existing BuildKit daemon")?;
+    // Get current daemon state
+    let current_state = get_daemon_state(container_cli, daemon_name);
 
-    if status.status.success() {
-        // Daemon exists, verify SSL_CERT_FILE hash hasn't changed
-        match get_daemon_cert_hash(container_cli, daemon_name) {
-            Ok(current_hash) => {
-                // Resolve and compute hash of current certificate file
-                let cert_path = ssl_cert_file
-                    .canonicalize()
-                    .context("Failed to resolve SSL certificate path")?;
-                let expected_hash = compute_file_hash(&cert_path)?;
+    match (ssl_cert_file, &current_state) {
+        // Certificate provided, daemon has matching cert
+        (Some(cert_path), DaemonState::HasCert(current_hash)) => {
+            // Verify hash matches
+            let cert_path_abs = cert_path
+                .canonicalize()
+                .context("Failed to resolve SSL certificate path")?;
+            let expected_hash = compute_file_hash(&cert_path_abs)?;
 
-                if current_hash == expected_hash {
-                    debug!("BuildKit daemon is up-to-date with current SSL_CERT_FILE");
-                    // Return BUILDKIT_HOST for this daemon
-                    return Ok(format!("docker-container://{}", daemon_name));
-                }
-
-                info!("SSL certificate has changed (hash mismatch), recreating daemon");
-                stop_buildkit_daemon(container_cli, daemon_name)?;
+            if current_hash == &expected_hash {
+                debug!("BuildKit daemon is up-to-date with current SSL_CERT_FILE");
+                return Ok(format!("docker-container://{}", daemon_name));
             }
-            Err(e) => {
-                warn!(
-                    "Failed to get daemon certificate hash: {}, recreating daemon",
-                    e
-                );
-                stop_buildkit_daemon(container_cli, daemon_name)?;
-            }
+
+            info!("SSL certificate has changed (hash mismatch), recreating daemon");
+            stop_buildkit_daemon(container_cli, daemon_name)?;
+        }
+
+        // Certificate provided, but daemon has no cert label
+        (Some(_), DaemonState::NoCert) => {
+            info!("SSL certificate now available, recreating daemon with certificate");
+            stop_buildkit_daemon(container_cli, daemon_name)?;
+        }
+
+        // No certificate, daemon has no cert label (matches)
+        (None, DaemonState::NoCert) => {
+            debug!("BuildKit daemon is up-to-date (no SSL certificate)");
+            return Ok(format!("docker-container://{}", daemon_name));
+        }
+
+        // No certificate, but daemon has cert (mismatch)
+        (None, DaemonState::HasCert(_)) => {
+            info!("SSL certificate removed, recreating daemon without certificate");
+            stop_buildkit_daemon(container_cli, daemon_name)?;
+        }
+
+        // Daemon doesn't exist
+        (_, DaemonState::NotFound) => {
+            // Will create new daemon below
         }
     }
 
-    // Create new daemon with certificate and return its BUILDKIT_HOST
+    // Create new daemon with or without certificate and return its BUILDKIT_HOST
     create_buildkit_daemon(container_cli, daemon_name, ssl_cert_file)
 }
 

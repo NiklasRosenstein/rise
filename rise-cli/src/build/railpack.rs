@@ -241,7 +241,7 @@ fn build_with_buildx(
 /// Ensure buildx builder exists for the given BuildKit daemon
 /// Returns the builder name to use
 fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) -> Result<String> {
-    let builder_name = "rise-buildx";
+    let builder_name = "rise-buildkit";
 
     // Check if builder already exists
     let inspect_status = Command::new(container_cli)
@@ -250,8 +250,27 @@ fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) -> Result<Str
 
     match inspect_status {
         Ok(output) if output.status.success() => {
-            debug!("Buildx builder '{}' already exists", builder_name);
-            return Ok(builder_name.to_string());
+            // Builder exists, check if it's pointing to the correct endpoint
+            let inspect_output = String::from_utf8_lossy(&output.stdout);
+
+            // Check if the buildkit_host appears in the inspect output
+            // The output contains lines like "Endpoint: docker-container://rise-buildkit"
+            if inspect_output.contains(buildkit_host) {
+                debug!(
+                    "Buildx builder '{}' already exists with correct endpoint",
+                    builder_name
+                );
+                return Ok(builder_name.to_string());
+            }
+
+            // Builder exists but points to wrong endpoint, remove and recreate
+            info!(
+                "Buildx builder '{}' exists but points to different endpoint, recreating",
+                builder_name
+            );
+            let _ = Command::new(container_cli)
+                .args(["buildx", "rm", builder_name])
+                .status();
         }
         _ => {
             info!(
@@ -263,17 +282,7 @@ fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) -> Result<Str
 
     // Create new builder pointing to the BuildKit daemon
     let status = Command::new(container_cli)
-        .args([
-            "buildx",
-            "create",
-            "--name",
-            builder_name,
-            "--driver",
-            "docker-container",
-            "--driver-opt",
-            "network=host",
-            buildkit_host,
-        ])
+        .args(["buildx", "create", "--name", builder_name, buildkit_host])
         .status()
         .context("Failed to create buildx builder")?;
 
