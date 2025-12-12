@@ -240,6 +240,62 @@ pub(crate) fn ensure_managed_buildkit_daemon(
     create_buildkit_daemon(container_cli, daemon_name, ssl_cert_file)
 }
 
+/// Ensure buildx builder exists for the given BuildKit daemon
+/// Returns the builder name to use
+pub(crate) fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) -> Result<String> {
+    let builder_name = "rise-buildkit";
+
+    // Check if builder already exists
+    let inspect_status = Command::new(container_cli)
+        .args(["buildx", "inspect", builder_name])
+        .output();
+
+    match inspect_status {
+        Ok(output) if output.status.success() => {
+            // Builder exists, check if it's pointing to the correct endpoint
+            let inspect_output = String::from_utf8_lossy(&output.stdout);
+
+            // Check if the buildkit_host appears in the inspect output
+            // The output contains lines like "Endpoint: docker-container://rise-buildkit"
+            if inspect_output.contains(buildkit_host) {
+                debug!(
+                    "Buildx builder '{}' already exists with correct endpoint",
+                    builder_name
+                );
+                return Ok(builder_name.to_string());
+            }
+
+            // Builder exists but points to wrong endpoint, remove and recreate
+            info!(
+                "Buildx builder '{}' exists but points to different endpoint, recreating",
+                builder_name
+            );
+            let _ = Command::new(container_cli)
+                .args(["buildx", "rm", builder_name])
+                .status();
+        }
+        _ => {
+            info!(
+                "Creating buildx builder '{}' for BuildKit daemon: {}",
+                builder_name, buildkit_host
+            );
+        }
+    }
+
+    // Create new builder pointing to the BuildKit daemon
+    let status = Command::new(container_cli)
+        .args(["buildx", "create", "--name", builder_name, buildkit_host])
+        .status()
+        .context("Failed to create buildx builder")?;
+
+    if !status.success() {
+        bail!("Failed to create buildx builder '{}'", builder_name);
+    }
+
+    info!("Buildx builder '{}' created successfully", builder_name);
+    Ok(builder_name.to_string())
+}
+
 /// Warn user about SSL certificate issues when managed BuildKit is disabled
 pub(crate) fn check_ssl_cert_and_warn(method: &BuildMethod, managed_buildkit: bool) {
     if let Ok(_ssl_cert) = std::env::var("SSL_CERT_FILE") {

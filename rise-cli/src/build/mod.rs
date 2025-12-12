@@ -57,9 +57,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             Some(existing_host)
         } else {
             // Priority 2: Create/manage our own buildkit daemon
-            let ssl_cert_path = std::env::var("SSL_CERT_FILE")
-                .ok()
-                .map(PathBuf::from);
+            let ssl_cert_path = std::env::var("SSL_CERT_FILE").ok().map(PathBuf::from);
 
             Some(ensure_managed_buildkit_daemon(
                 ssl_cert_path.as_deref(),
