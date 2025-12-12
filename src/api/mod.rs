@@ -7,5 +7,3 @@
 // For now, this is a placeholder structure
 
 pub mod models;
-
-pub use models::*;

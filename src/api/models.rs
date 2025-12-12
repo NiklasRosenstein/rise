@@ -3,8 +3,6 @@
 //! These types are used by both the CLI (client) and server for API communication.
 //! They are always available regardless of feature flags.
 
-use serde::{Deserialize, Serialize};
-
 // Re-export from server deployment models when server feature is enabled
 #[cfg(feature = "server")]
 pub use crate::server::deployment::models::*;
@@ -15,7 +13,7 @@ pub use self::client_models::*;
 
 #[cfg(not(feature = "server"))]
 mod client_models {
-    use super::*;
+    use serde::{Deserialize, Serialize};
 
     #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
     pub enum DeploymentStatus {

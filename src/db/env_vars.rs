@@ -4,33 +4,6 @@ use uuid::Uuid;
 
 use crate::db::models::{DeploymentEnvVar, ProjectEnvVar};
 
-/// Create a new project environment variable
-pub async fn create_project_env_var(
-    pool: &PgPool,
-    project_id: Uuid,
-    key: &str,
-    value: &str,
-    is_secret: bool,
-) -> Result<ProjectEnvVar> {
-    let env_var = sqlx::query_as!(
-        ProjectEnvVar,
-        r#"
-        INSERT INTO project_env_vars (project_id, key, value, is_secret)
-        VALUES ($1, $2, $3, $4)
-        RETURNING id, project_id, key, value, is_secret, created_at, updated_at
-        "#,
-        project_id,
-        key,
-        value,
-        is_secret
-    )
-    .fetch_one(pool)
-    .await
-    .context("Failed to create project environment variable")?;
-
-    Ok(env_var)
-}
-
 /// List all environment variables for a project
 pub async fn list_project_env_vars(pool: &PgPool, project_id: Uuid) -> Result<Vec<ProjectEnvVar>> {
     let env_vars = sqlx::query_as!(
@@ -121,39 +94,6 @@ pub async fn copy_project_env_vars_to_deployment(
     .context("Failed to copy project environment variables to deployment")?;
 
     Ok(result.rows_affected())
-}
-
-/// Create or update a deployment environment variable (upsert)
-/// Used for deployment-specific overrides
-pub async fn upsert_deployment_env_var(
-    pool: &PgPool,
-    deployment_id: Uuid,
-    key: &str,
-    value: &str,
-    is_secret: bool,
-) -> Result<DeploymentEnvVar> {
-    let env_var = sqlx::query_as!(
-        DeploymentEnvVar,
-        r#"
-        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (deployment_id, key)
-        DO UPDATE SET
-            value = EXCLUDED.value,
-            is_secret = EXCLUDED.is_secret,
-            updated_at = NOW()
-        RETURNING id, deployment_id, key, value, is_secret, created_at, updated_at
-        "#,
-        deployment_id,
-        key,
-        value,
-        is_secret
-    )
-    .fetch_one(pool)
-    .await
-    .context("Failed to upsert deployment environment variable")?;
-
-    Ok(env_var)
 }
 
 /// List all environment variables for a deployment

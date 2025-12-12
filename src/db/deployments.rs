@@ -81,34 +81,6 @@ pub async fn find_by_deployment_id(
     Ok(deployment)
 }
 
-/// Find deployment by UUID
-pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Deployment>> {
-    let deployment = sqlx::query_as!(
-        Deployment,
-        r#"
-        SELECT
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            deployment_group, expires_at,
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            deployment_url,
-            image, image_digest,
-            http_port,
-            termination_reason as "termination_reason: _",
-            created_at, updated_at
-        FROM deployments
-        WHERE id = $1
-        "#,
-        id
-    )
-    .fetch_optional(pool)
-    .await
-    .context("Failed to find deployment by ID")?;
-
-    Ok(deployment)
-}
-
 /// Create a new deployment
 pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result<Deployment> {
     let status_str = params.status.to_string();
@@ -256,66 +228,6 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
     Ok(deployment)
 }
 
-/// Update deployment build logs
-pub async fn update_build_logs(pool: &PgPool, id: Uuid, build_logs: &str) -> Result<Deployment> {
-    let deployment = sqlx::query_as!(
-        Deployment,
-        r#"
-        UPDATE deployments
-        SET build_logs = $2
-        WHERE id = $1
-        RETURNING
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            deployment_group, expires_at,
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            deployment_url,
-            image, image_digest,
-            http_port,
-            termination_reason as "termination_reason: _",
-            created_at, updated_at
-        "#,
-        id,
-        build_logs
-    )
-    .fetch_one(pool)
-    .await
-    .context("Failed to update deployment build logs")?;
-
-    Ok(deployment)
-}
-
-/// Get latest deployment for a project
-pub async fn get_latest_for_project(pool: &PgPool, project_id: Uuid) -> Result<Option<Deployment>> {
-    let deployment = sqlx::query_as!(
-        Deployment,
-        r#"
-        SELECT
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            deployment_group, expires_at,
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            deployment_url,
-            image, image_digest,
-            http_port,
-            termination_reason as "termination_reason: _",
-            created_at, updated_at
-        FROM deployments
-        WHERE project_id = $1
-        ORDER BY created_at DESC
-        LIMIT 1
-        "#,
-        project_id
-    )
-    .fetch_optional(pool)
-    .await
-    .context("Failed to get latest deployment")?;
-
-    Ok(deployment)
-}
-
 /// Find deployments in non-terminal states for reconciliation
 /// Excludes terminal states using is_terminal() PostgreSQL function
 pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
@@ -343,39 +255,6 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
     .fetch_all(pool)
     .await
     .context("Failed to find non-terminal deployments")?;
-
-    Ok(deployments)
-}
-
-/// Find all non-terminal deployments for a specific project
-pub async fn find_non_terminal_for_project(
-    pool: &PgPool,
-    project_id: Uuid,
-) -> Result<Vec<Deployment>> {
-    let deployments = sqlx::query_as!(
-        Deployment,
-        r#"
-        SELECT
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            deployment_group, expires_at,
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            deployment_url,
-            image, image_digest,
-            http_port,
-            termination_reason as "termination_reason: _",
-            created_at, updated_at
-        FROM deployments
-        WHERE project_id = $1
-          AND NOT is_terminal(status)
-        ORDER BY created_at DESC
-        "#,
-        project_id
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to find non-terminal deployments for project")?;
 
     Ok(deployments)
 }
@@ -753,57 +632,6 @@ pub async fn mark_cancelling(pool: &PgPool, id: Uuid) -> Result<Deployment> {
     .context("Failed to mark deployment as cancelling")?;
 
     Ok(deployment)
-}
-
-/// Find all cancellable deployments for a project (for auto-cancellation)
-pub async fn find_cancellable_for_project(
-    pool: &PgPool,
-    project_id: Uuid,
-) -> Result<Vec<Deployment>> {
-    let deployments = sqlx::query_as!(
-        Deployment,
-        r#"
-        SELECT
-            id, deployment_id, project_id, created_by_id,
-            status as "status: DeploymentStatus",
-            deployment_group, expires_at,
-            termination_reason as "termination_reason: _",
-            completed_at, error_message, build_logs,
-            controller_metadata as "controller_metadata: serde_json::Value",
-            deployment_url,
-            image, image_digest,
-            http_port,
-            created_at, updated_at
-        FROM deployments
-        WHERE project_id = $1
-          AND is_cancellable(status)
-        ORDER BY created_at DESC
-        "#,
-        project_id
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to find cancellable deployments")?;
-
-    Ok(deployments)
-}
-
-/// Update deployment status with transition validation
-pub async fn update_status_checked(
-    pool: &PgPool,
-    id: Uuid,
-    new_status: DeploymentStatus,
-) -> Result<Deployment> {
-    // Get current deployment
-    let current = find_by_id(pool, id)
-        .await?
-        .context("Deployment not found")?;
-
-    // Validate transition
-    state_machine::validate_transition(&current.status, &new_status)?;
-
-    // Update status
-    update_status(pool, id, new_status).await
 }
 
 /// Find active deployment for a project in a specific group
