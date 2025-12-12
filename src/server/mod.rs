@@ -12,9 +12,6 @@ pub mod state;
 pub mod team;
 pub mod workload_identity;
 
-#[cfg(test)]
-mod lib_tests;
-
 use anyhow::Result;
 use axum::{middleware, Router};
 use state::{AppState, ControllerState};

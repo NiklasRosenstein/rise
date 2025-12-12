@@ -276,8 +276,9 @@ impl AppState {
             };
 
         // Initialize OCI client for direct registry interaction
-        let oci_client =
-            Arc::new(crate::server::oci::OciClient::new().context("Failed to initialize OCI client")?);
+        let oci_client = Arc::new(
+            crate::server::oci::OciClient::new().context("Failed to initialize OCI client")?,
+        );
         tracing::info!("Initialized OCI client for registry digest resolution");
 
         // Store admin users list
@@ -418,8 +419,9 @@ impl AppState {
             };
 
         // Initialize OCI client (needed for pre-built image deployments)
-        let oci_client =
-            Arc::new(crate::server::oci::OciClient::new().context("Failed to initialize OCI client")?);
+        let oci_client = Arc::new(
+            crate::server::oci::OciClient::new().context("Failed to initialize OCI client")?,
+        );
 
         // Dummy auth components (not used by controller)
         let jwt_validator = Arc::new(JwtValidator::new());

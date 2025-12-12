@@ -1,12 +1,12 @@
+use crate::db::{
+    models::{ProjectVisibility, User},
+    projects, users,
+};
 use crate::server::auth::{
     cookie_helpers,
     token_storage::{
         generate_code_challenge, generate_code_verifier, generate_state_token, OAuth2State,
     },
-};
-use crate::db::{
-    models::{ProjectVisibility, User},
-    projects, users,
 };
 use crate::server::frontend::StaticAssets;
 use crate::server::state::AppState;
@@ -50,13 +50,14 @@ async fn sync_groups_after_login(
         })?;
 
     // Parse claims
-    let claims: crate::server::auth::jwt::Claims = serde_json::from_value(claims_value).map_err(|e| {
-        tracing::warn!("Failed to parse claims for group sync: {}", e);
-        (
-            StatusCode::UNAUTHORIZED,
-            format!("Invalid token claims: {}", e),
-        )
-    })?;
+    let claims: crate::server::auth::jwt::Claims =
+        serde_json::from_value(claims_value).map_err(|e| {
+            tracing::warn!("Failed to parse claims for group sync: {}", e);
+            (
+                StatusCode::UNAUTHORIZED,
+                format!("Invalid token claims: {}", e),
+            )
+        })?;
 
     // Get or create user
     let user = users::find_or_create(&state.db_pool, &claims.email)
@@ -79,7 +80,8 @@ async fn sync_groups_after_login(
             );
 
             if let Err(e) =
-                crate::server::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups).await
+                crate::server::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups)
+                    .await
             {
                 // Log error but don't fail login
                 tracing::error!(

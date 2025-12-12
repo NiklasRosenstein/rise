@@ -53,51 +53,93 @@ Let's outline the architecture and components needed for this Rust-based project
 
 ## Architecture Overview
 
-1. **Backend Service**:
-   - **Authentication Module**: Uses **PostgreSQL** database with **Dex OAuth2/OIDC** for user management and authentication. Handles JWT validation from Dex.
-   - **Project Management Module**: Manages project creation, listing, and ownership using **PostgreSQL** as the data store.
-   - **Container Registry Module**: Generates temporary credentials for pushing images to a container registry that
-      the CLI can use. The container registry itself is out of scope, but access to a container registry with
-      permissions to manage credentials will be supplied to the backend.
-   - **Deployment Module**: Interfaces with Kubernetes (and future runtimes) to deploy applications.
-   - **API Layer**: Exposes RESTful endpoints for the CLI to interact with.
-   - **Configuration Module**: Handles deserialization and validation of the backend server configuration.
-   - **Database**: **PostgreSQL** is used as the primary database with **SQLX** for compile-time verified queries and migrations. **Dex** handles OAuth2/OIDC authentication.
+**Note**: The project is structured as a **single consolidated Rust crate** (`rise-deploy`) that produces the `rise` binary with both CLI and server capabilities enabled via feature flags.
 
-2. **CLI Tool**:
-    - **Authentication Commands**: Implements the `login` command to authenticate users against the backend (which authenticates via Dex OAuth2/OIDC).
-    - **Project Commands**: Implements `project` (alias: `p`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `update/u/edit`, `delete/del/rm`.
-    - **Team Commands**: Implements `team` (alias: `t`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `update/u/edit`, `delete/del/rm`.
-    - **Deployment Commands**: Implements `deployment` (alias: `d`) with subcommands: `create/c/new`, `list/ls/l`, `show/s`, `rollback`, `stop`.
-    - **Build Module**: Supports building container images using buildpacks, Dockerfiles, and Railpacks with automatic detection or explicit backend selection.
-    - **Configuration Module**: Handles reading and writing of `.rise.toml` configuration files.
+### Crate Structure (`rise-deploy`)
+
+The codebase is organized into functional modules:
+
+- **`src/db/`**: Database access layer (PostgreSQL via SQLX) - shared by server modules
+- **`src/server/`**: Backend server implementation with feature-gated modules:
+   - **Authentication Module** (`auth/`): OAuth2/OIDC with Dex, JWT validation
+   - **Project Management** (`project/`): Project CRUD and lifecycle management
+   - **Team Management** (`team/`): Team and membership management
+   - **Container Registry** (`registry/`): Temporary credentials for Docker/ECR registries
+   - **Deployment Module** (`deployment/`): Controllers for Docker and Kubernetes runtimes
+   - **ECR Integration** (`ecr/`): AWS ECR repository management (feature: `aws`)
+   - **Encryption** (`encryption/`): Local AES-GCM and AWS KMS providers
+   - **OCI Client** (`oci/`): OCI registry interaction
+   - **Frontend** (`frontend/`): Static web UI assets
+   - **API Layer**: RESTful endpoints via Axum
+- **`src/cli/`**: CLI command handlers (feature: `cli`)
+   - Authentication, project, team, deployment, environment variable commands
+   - Local dev OIDC issuer for testing
+- **`src/build/`**: Container image build orchestration (feature: `cli`)
+   - Support for Docker, Pack (buildpacks), and Railpack backends
+   - BuildKit daemon management, SSL certificate handling
+- **`src/api/`**: Client-side API interface for server communication (feature: `cli`)
+
+### Feature Flags
+
+The crate uses granular Cargo features for modular compilation:
+
+- **`cli`** (default): CLI commands and client-side functionality
+- **`server`**: HTTP server, controllers, and backend logic
+- **`aws`**: AWS ECR registry and KMS encryption (requires `server`)
+- **`docker`**: Docker deployment controller (requires `server`)
+- **`k8s`**: Kubernetes deployment controller (requires `server`)
+
+Examples:
+```bash
+cargo build                           # CLI-only build (smallest binary)
+cargo build --features server,docker  # Server with Docker backend
+cargo build --all-features            # Full build with all capabilities
+```
 
 ## Implementation Steps
 
-1. **Set Up the Backend**:
-   - [x] Initialize a new Rust project for the backend using `cargo new rise-backend`.
-   - [x] **Infrastructure**: Create a `docker-compose.yml` to run local PostgreSQL and Dex instances.
-   - [x] **Database & Auth**: Integrate SQLX for PostgreSQL and implement JWT validation for Dex.
-   - [x] Implement the authentication module with Dex OAuth2/OIDC integration.
-   - [x] Create the project management module using PostgreSQL with SQLX migrations.
-   - [x] Integrate with a container registry to generate temporary credentials (Docker registry with DockerProvider).
-   - [x] Implement the deployment module with Docker controller (MVP runtime, Kubernetes future).
-   - [x] Set up the API layer using a web framework like Actix-web or Rocket (using Axum).
-   - [x] Implement configuration handling for the backend server.
-   - [x] Add deployment controller with reconciliation loop and health checks.
-   - [x] Support for pre-built image deployments with digest pinning.
-   - [x] Implement deployment rollback functionality.
-   - [x] Replace custom device flow with standard OAuth2 flows:
-     - [x] Implement OAuth2 authorization code flow with PKCE
-     - [x] Remove custom backend device flow implementation
-     - [x] Remove password grant flow (deprecated in OAuth 2.1)
-     - [x] Add `/auth/code/exchange` endpoint for PKCE flow
+**Project Structure**: Consolidated into single `rise-deploy` crate (formerly separate `rise-backend` and `rise-cli` crates)
 
-2. **Set Up the CLI**:
-    - [x] Initialize a new Rust project for the CLI using `cargo new rise-cli`.
-    - [x] Implement authentication commands to interact with the backend.
-    - [x] Implement standard OAuth2 authentication flows:
-      - [x] OAuth2 authorization code flow with PKCE (default) ✅ **WORKING**
+### Completed Implementation
+
+1. **Core Infrastructure** ✅
+   - [x] Single consolidated crate with feature flags (`cli`, `server`, `aws`, `docker`, `k8s`)
+   - [x] PostgreSQL database with SQLX (compile-time verified queries and migrations)
+   - [x] Dex OAuth2/OIDC integration for authentication
+   - [x] Docker Compose setup for local development (PostgreSQL, Dex, Registry)
+
+2. **Server Implementation** (`--features server`) ✅
+   - [x] Axum-based HTTP API with RESTful endpoints
+   - [x] Authentication: OAuth2/OIDC with Dex, JWT validation, PKCE flow
+   - [x] Project management: CRUD operations, ownership, visibility
+   - [x] Team management: Team creation, membership, role-based access
+   - [x] Deployment controllers:
+     - [x] Docker controller (`--features docker`) - local container deployments
+     - [x] Kubernetes controller (`--features k8s`) - K8s deployments with Ingress
+   - [x] Container registry integration:
+     - [x] Docker registry provider
+     - [x] AWS ECR provider (`--features aws`) with repository lifecycle management
+   - [x] Encryption providers: Local AES-GCM and AWS KMS (`--features aws`)
+   - [x] OCI client for image digest resolution
+   - [x] Frontend static web UI
+
+3. **CLI Implementation** (`--features cli`, default) ✅
+   - [x] OAuth2 authorization code flow with PKCE (browser-based, default)
+   - [x] Project commands: `create`, `list`, `show`, `update`, `delete`
+   - [x] Team commands: `create`, `list`, `show`, `update`, `delete`
+   - [x] Deployment commands: `create`, `list`, `show`, `rollback`, `stop`
+   - [x] Environment variable management
+   - [x] Service account (workload identity) management
+   - [x] Local dev OIDC issuer for testing
+
+4. **Build System** (`--features cli`) ✅
+   - [x] Docker backend: Standard Dockerfile builds
+   - [x] Pack backend: Cloud Native Buildpacks integration
+   - [x] Railpack backend: Schema.org Railpacks with BuildKit/Buildx
+   - [x] Automatic build method detection
+   - [x] BuildKit daemon management with SSL certificate handling
+   - [x] `rise build` command for local image builds without deployment
+   - [x] Pre-built image deployment support (`--image` flag)
       - [x] Native Dex device authorization flow (via `--device` flag) ⚠️ **NOT COMPATIBLE WITH DEX**
         - Note: Dex's device flow implementation doesn't follow RFC 8628 properly
         - Dex uses a hybrid approach incompatible with pure CLI implementation

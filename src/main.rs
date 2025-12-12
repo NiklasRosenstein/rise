@@ -8,9 +8,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 #[cfg(feature = "cli")]
 mod api;
 #[cfg(feature = "cli")]
-mod cli;
-#[cfg(feature = "cli")]
 mod build;
+#[cfg(feature = "cli")]
+mod cli;
 
 #[cfg(feature = "server")]
 mod db;

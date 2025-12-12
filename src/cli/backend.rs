@@ -1,6 +1,6 @@
-use anyhow::Result;
 #[cfg(feature = "server")]
 use crate::server::settings::Settings;
+use anyhow::Result;
 
 use crate::dev_oidc_issuer;
 

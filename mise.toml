@@ -9,21 +9,16 @@ rust = { version = "1.91.1", profile = "default" }
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
-run = """
-cargo sqlx prepare --workspace -- --all-targets
-# Copy workspace .sqlx to rise-backend for cargo publish compatibility
-rm -rf rise-backend/.sqlx
-cp -r .sqlx rise-backend/.sqlx
-"""
+run = "cargo sqlx prepare --features server,aws,docker,k8s -- --all-targets"
 
 [tasks."sqlx:check"]
 description = "Check that all SQLX queries are valid."
-run = "cargo sqlx prepare --workspace --check -- --all-targets"
+run = "cargo sqlx prepare --features server,aws,docker,k8s --check -- --all-targets"
 
 [tasks.lint]
 description = "Run all linting checks (clippy, formatting, sqlx, helm)."
 run = """
-cargo clippy --all-targets --workspace -- -D warnings
+cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 mise sqlx:check
 helm lint helm/rise
@@ -43,7 +38,6 @@ docker compose up postgres -d
 
 [tasks."db:migrate"]
 description = "Run database migrations. Run before building the backend."
-dir = "rise-backend"
 run = "docker compose up postgres -d && sleep 2 && sqlx migrate run"
 
 [tasks."backend:deps"]
@@ -53,7 +47,7 @@ run = "docker compose up -d"
 [tasks."backend:run"]
 description = "Run the backend server."
 depends = ["backend:deps", "db:migrate"]
-run = "cargo run --bin rise -- backend server"
+run = "cargo run --features server,docker -- backend server"
 alias = "br"
 
 [tasks."minikube:launch"]

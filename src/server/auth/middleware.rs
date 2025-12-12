@@ -238,8 +238,8 @@ pub async fn auth_middleware(
         tracing::debug!("Auth middleware: JWT validation successful");
 
         // Deserialize to typed Claims to get email
-        let claims: crate::server::auth::jwt::Claims =
-            serde_json::from_value(claims_value).map_err(|e| {
+        let claims: crate::server::auth::jwt::Claims = serde_json::from_value(claims_value)
+            .map_err(|e| {
                 tracing::warn!("Failed to parse user claims: {}", e);
                 (
                     StatusCode::UNAUTHORIZED,
@@ -291,7 +291,9 @@ pub async fn optional_auth_middleware(
             .validate(&token, &state.auth_settings.issuer, &expected_claims)
             .await
         {
-            if let Ok(claims) = serde_json::from_value::<crate::server::auth::jwt::Claims>(claims_value) {
+            if let Ok(claims) =
+                serde_json::from_value::<crate::server::auth::jwt::Claims>(claims_value)
+            {
                 if let Ok(user) = users::find_or_create(&state.db_pool, &claims.email).await {
                     req.extensions_mut().insert(user);
                 }

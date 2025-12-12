@@ -369,7 +369,9 @@ impl DeploymentController {
             }
 
             // If default group, update active_deployment_id and project_url for backward compatibility
-            if deployment.deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            if deployment.deployment_group
+                == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP
+            {
                 projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id)
                     .await?;
 

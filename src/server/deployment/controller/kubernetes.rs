@@ -491,7 +491,9 @@ impl KubernetesController {
 
     /// Get fully resolved ingress URL with placeholders replaced
     fn resolved_ingress_url(&self, project: &Project, deployment: &Deployment) -> String {
-        if deployment.deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+        if deployment.deployment_group
+            == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP
+        {
             self.production_ingress_url_template
                 .replace("{project_name}", &project.name)
         } else if let Some(ref staging_template) = self.staging_ingress_url_template {
@@ -1823,7 +1825,9 @@ impl DeploymentBackend for KubernetesController {
             }
 
             // For non-default deployment groups, check if we should clean up group-specific resources
-            if deployment.deployment_group != crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            if deployment.deployment_group
+                != crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP
+            {
                 // Check if there are any other active deployments in this group
                 if let Err(e) = self
                     .cleanup_group_resources_if_empty(deployment, &metadata)

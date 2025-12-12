@@ -1037,8 +1037,11 @@ pub async fn rollback_deployment(
     })?;
 
     // Use helper to determine image tag (for logging/response only)
-    let image_tag =
-        crate::server::deployment::utils::get_deployment_image_tag(&state, &new_deployment, &project);
+    let image_tag = crate::server::deployment::utils::get_deployment_image_tag(
+        &state,
+        &new_deployment,
+        &project,
+    );
 
     info!(
         "Created rollback deployment {} from {} (image: {})",
