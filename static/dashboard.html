@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rise Dashboard</title>
+    <link rel="stylesheet" href="/css/pico.min.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+    <header>
+        <nav class="container">
+            <ul>
+                <li class="dashboard-header">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                    <strong>Rise Dashboard</strong>
+                </li>
+            </ul>
+            <ul>
+                <li><a href="#" onclick="showView('projects')">Projects</a></li>
+                <li><a href="#" onclick="showView('teams')">Teams</a></li>
+                <li><span id="user-email"></span></li>
+                <li><a href="#" onclick="logout()">Logout</a></li>
+            </ul>
+        </nav>
+    </header>
+
+    <main class="container">
+        <!-- Projects View -->
+        <section id="projects-view" style="display: none;">
+            <h2>Projects</h2>
+            <div id="projects-list"></div>
+        </section>
+
+        <!-- Teams View -->
+        <section id="teams-view" style="display: none;">
+            <h2>Teams</h2>
+            <div id="teams-list"></div>
+        </section>
+
+        <!-- Project Detail View -->
+        <section id="project-detail-view" style="display: none;">
+            <a href="#" class="back-button" onclick="showView('projects'); return false;">Back to Projects</a>
+            <div id="project-detail"></div>
+            <h3>Service Accounts</h3>
+            <div id="service-account-list"></div>
+            <h3>Environment Variables</h3>
+            <div id="project-env-vars-list"></div>
+            <h3>Deployments</h3>
+            <div id="deployment-filters" style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                <label for="deployment-group-filter" style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                    <span style="white-space: nowrap;">Filter by group:</span>
+                    <input type="text" id="deployment-group-filter" placeholder="Leave empty for all groups" style="width: 250px; margin: 0;">
+                </label>
+                <button onclick="applyDeploymentFilter()" style="margin: 0; padding: 0.5rem 1rem;">Apply</button>
+                <button onclick="clearDeploymentFilter()" style="margin: 0; padding: 0.5rem 1rem;" class="secondary">Clear</button>
+            </div>
+            <div id="deployment-list"></div>
+            <div id="deployment-pagination" style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                <button id="prev-page" onclick="prevPage()" disabled style="padding: 0.5rem 1rem;">Previous</button>
+                <span id="page-info" style="font-size: 0.9rem;"></span>
+                <button id="next-page" onclick="nextPage()" style="padding: 0.5rem 1rem;">Next</button>
+            </div>
+        </section>
+
+        <!-- Team Detail View -->
+        <section id="team-detail-view" style="display: none;">
+            <a href="#" class="back-button" onclick="showView('teams'); return false;">Back to Teams</a>
+            <div id="team-detail"></div>
+        </section>
+
+        <!-- Deployment Detail View -->
+        <section id="deployment-detail-view" style="display: none;">
+            <a href="#" class="back-button" onclick="goBack(); return false;">Back</a>
+            <div id="deployment-detail"></div>
+            <h3>Environment Variables</h3>
+            <div id="deployment-env-vars-list"></div>
+        </section>
+    </main>
+
+    <script src="/js/auth.js"></script>
+    <script src="/js/api.js"></script>
+    <script src="/js/app.js"></script>
+</body>
+</html>

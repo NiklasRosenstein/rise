@@ -3412,7 +3412,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "rise-backend"
+name = "rise-deploy"
 version = "0.3.2"
 dependencies = [
  "aes-gcm",
@@ -3427,7 +3427,10 @@ dependencies = [
  "base64ct",
  "bollard",
  "chrono",
+ "clap",
+ "comfy-table",
  "config",
+ "dirs",
  "futures-util",
  "jsonwebtoken",
  "k8s-openapi",
@@ -3441,6 +3444,7 @@ dependencies = [
  "rand",
  "regex",
  "reqwest 0.12.25",
+ "rsa",
  "rust-embed",
  "rustls 0.23.35",
  "serde",
@@ -3452,32 +3456,6 @@ dependencies = [
  "tokio",
  "tower 0.5.2",
  "tower-http 0.6.8",
- "tracing",
- "tracing-subscriber",
- "urlencoding",
- "uuid",
-]
-
-[[package]]
-name = "rise-cli"
-version = "0.3.2"
-dependencies = [
- "anyhow",
- "axum",
- "base64 0.22.1",
- "chrono",
- "clap",
- "comfy-table",
- "dirs",
- "jsonwebtoken",
- "rand",
- "reqwest 0.12.25",
- "rise-backend",
- "rsa",
- "serde",
- "serde_json",
- "sha2",
- "tokio",
  "tracing",
  "tracing-subscriber",
  "url",

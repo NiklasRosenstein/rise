@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rise - Container Deployment Platform</title>
+    <link rel="stylesheet" href="/css/pico.min.css">
+    <link rel="stylesheet" href="/css/app.css">
+</head>
+<body>
+    <main class="container">
+        <article id="login-card">
+            <header>
+                <h1>Rise</h1>
+                <p>Container Deployment Platform</p>
+            </header>
+            <section id="login-section">
+                <button id="login-btn" onclick="login()">Login with OAuth</button>
+                <p id="status-message"></p>
+            </section>
+        </article>
+    </main>
+
+    <script>
+        // Configuration injected from backend
+        window.RISE_CONFIG = {{ config | safe }};
+    </script>
+    <script src="/js/auth.js"></script>
+    <script>
+        // Check if we're returning from OAuth callback
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('code')) {
+            handleOAuthCallback();
+        } else if (isAuthenticated()) {
+            // Already logged in, redirect to dashboard
+            window.location.href = '/dashboard.html';
+        }
+    </script>
+</body>
+</html>
