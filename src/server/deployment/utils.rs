@@ -10,20 +10,6 @@ pub fn generate_deployment_id() -> String {
     Utc::now().format("%Y%m%d-%H%M%S").to_string()
 }
 
-/// Construct image tag from components
-/// Format: {registry_url}/{namespace}/{project}:{deployment_id}
-pub fn construct_image_tag(
-    registry_url: &str,
-    namespace: &str,
-    project_name: &str,
-    deployment_id: &str,
-) -> String {
-    format!(
-        "{}/{}/{}:{}",
-        registry_url, namespace, project_name, deployment_id
-    )
-}
-
 /// Get the image tag for a deployment
 ///
 /// This is the single source of truth for determining which image to use for a deployment.

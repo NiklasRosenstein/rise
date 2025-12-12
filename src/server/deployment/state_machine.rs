@@ -23,6 +23,7 @@ pub fn is_active(status: &DeploymentStatus) -> bool {
 
 /// Check if a deployment can be cancelled
 /// Only deployments in pre-infrastructure states can be cancelled
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn is_cancellable(status: &DeploymentStatus) -> bool {
     matches!(
         status,

@@ -273,6 +273,7 @@ pub async fn auth_middleware(
 }
 
 /// Optional authentication middleware - allows unauthenticated requests but injects User if token is present
+#[allow(dead_code)]
 pub async fn optional_auth_middleware(
     State(state): State<AppState>,
     headers: HeaderMap,

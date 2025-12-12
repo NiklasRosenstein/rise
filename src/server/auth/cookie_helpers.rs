@@ -51,6 +51,7 @@ pub fn create_session_cookie(
 /// Extract the session cookie value from request headers
 ///
 /// Parses the Cookie header and extracts the _rise_session value if present
+#[cfg_attr(not(test), allow(dead_code))]
 pub fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
     headers
         .get("cookie")?
@@ -146,6 +147,9 @@ pub fn extract_ingress_jwt_cookie(headers: &HeaderMap) -> Option<String> {
 /// Create a cookie that clears the ingress JWT
 ///
 /// Sets Max-Age=0 to immediately expire the cookie
+///
+/// Future feature: Kubernetes ingress authentication
+#[allow(dead_code)]
 pub fn clear_ingress_jwt_cookie(settings: &CookieSettings) -> String {
     let mut cookie_parts = vec![
         format!("{}=", INGRESS_JWT_COOKIE_NAME),

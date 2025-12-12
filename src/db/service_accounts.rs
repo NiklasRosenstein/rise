@@ -129,6 +129,7 @@ pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<ServiceAccount>
 }
 
 /// Get claims for a service account
+#[allow(dead_code)]
 pub async fn get_claims(
     pool: &PgPool,
     service_account_id: Uuid,

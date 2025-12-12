@@ -74,12 +74,3 @@ pub struct OciClientAuthConfig {
 fn default_namespace() -> String {
     String::new()
 }
-
-/// Registry provider configuration
-#[derive(Debug, Clone, Deserialize)]
-#[serde(tag = "type", rename_all = "kebab-case")]
-pub enum RegistryConfig {
-    Ecr(EcrConfig),
-    #[serde(rename = "oci-client-auth", alias = "docker")]
-    OciClientAuth(OciClientAuthConfig),
-}
