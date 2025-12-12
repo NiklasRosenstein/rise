@@ -10,9 +10,8 @@ use tracing::{debug, info, warn};
 use crate::build::{self, BuildOptions};
 use crate::config::Config;
 
-// Re-export models from backend to ensure consistency
-#[cfg(feature = "server")]
-pub use crate::server::deployment::models::{Deployment, DeploymentStatus};
+// Re-export models from API module (always available)
+pub use crate::api::models::{Deployment, DeploymentStatus};
 
 #[derive(Debug, Deserialize)]
 struct RollbackResponse {

@@ -1,5 +1,3 @@
-#[cfg(feature = "server")]
-use crate::server::settings::Settings;
 use anyhow::Result;
 
 use crate::dev_oidc_issuer;
@@ -7,6 +5,7 @@ use crate::dev_oidc_issuer;
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum BackendCommands {
     /// Start the HTTP server with all controllers
+    #[cfg(feature = "server")]
     Server,
     /// Run a local OIDC issuer for testing service accounts
     DevOidcIssuer {
@@ -21,8 +20,9 @@ pub enum BackendCommands {
 
 pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
     match cmd {
+        #[cfg(feature = "server")]
         BackendCommands::Server => {
-            let settings = Settings::new()?;
+            let settings = crate::server::settings::Settings::new()?;
             crate::server::run_server(settings).await
         }
         BackendCommands::DevOidcIssuer { port, token } => dev_oidc_issuer::run(port, token).await,

@@ -1,7 +1,13 @@
+#[cfg(feature = "docker")]
 mod docker;
+
+#[cfg(feature = "k8s")]
 mod kubernetes;
 
+#[cfg(feature = "docker")]
 pub use docker::DockerController;
+
+#[cfg(feature = "k8s")]
 pub use kubernetes::{KubernetesController, KubernetesControllerConfig};
 
 use async_trait::async_trait;

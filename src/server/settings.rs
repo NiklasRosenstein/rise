@@ -278,6 +278,7 @@ pub struct KubernetesSettings {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum RegistrySettings {
+    #[cfg(feature = "aws")]
     Ecr {
         region: String,
         account_id: String,
@@ -316,6 +317,7 @@ pub enum EncryptionSettings {
         key: String,
     },
     /// AWS KMS encryption
+    #[cfg(feature = "aws")]
     #[serde(rename = "aws-kms")]
     AwsKms {
         region: String,

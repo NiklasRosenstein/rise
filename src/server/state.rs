@@ -7,10 +7,11 @@ use crate::server::auth::{
 };
 use crate::server::encryption::EncryptionProvider;
 use crate::server::registry::{
-    models::{EcrConfig, OciClientAuthConfig},
-    providers::{EcrProvider, OciClientAuthProvider},
-    RegistryProvider,
+    models::OciClientAuthConfig, providers::OciClientAuthProvider, RegistryProvider,
 };
+
+#[cfg(feature = "aws")]
+use crate::server::registry::{models::EcrConfig, providers::EcrProvider};
 use crate::server::settings::{
     AuthSettings, EncryptionSettings, RegistrySettings, ServerSettings, Settings,
 };
@@ -63,6 +64,7 @@ async fn init_encryption_provider(
 
                 Ok(Some(Arc::new(provider)))
             }
+            #[cfg(feature = "aws")]
             EncryptionSettings::AwsKms {
                 region,
                 key_id,
@@ -211,6 +213,7 @@ impl AppState {
         let registry_provider: Option<Arc<dyn RegistryProvider>> =
             if let Some(ref registry_config) = settings.registry {
                 match registry_config {
+                    #[cfg(feature = "aws")]
                     RegistrySettings::Ecr {
                         region,
                         account_id,
@@ -356,6 +359,7 @@ impl AppState {
         let registry_provider: Option<Arc<dyn RegistryProvider>> =
             if let Some(ref registry_config) = settings.registry {
                 match registry_config {
+                    #[cfg(feature = "aws")]
                     RegistrySettings::Ecr {
                         region,
                         account_id,

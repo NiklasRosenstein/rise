@@ -5,9 +5,8 @@ use std::io::{self, IsTerminal, Write as _};
 use std::time::{Duration, Instant};
 use tracing::info;
 
+use crate::api::models::{Deployment, DeploymentStatus};
 use crate::config::Config;
-#[cfg(feature = "server")]
-use crate::server::deployment::models::{Deployment, DeploymentStatus};
 
 use super::core::{fetch_deployment, parse_duration};
 
