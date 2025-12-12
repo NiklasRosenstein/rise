@@ -97,6 +97,14 @@ async fn init_encryption_provider(
 
                 Ok(Some(Arc::new(provider)))
             }
+            #[cfg(not(feature = "aws"))]
+            EncryptionSettings::AwsKms { key_id, .. } => {
+                anyhow::bail!(
+                    "AWS KMS encryption is configured (key: {}) but the 'aws' feature is not enabled. \
+                     Please rebuild with --features aws or use a pre-built binary with AWS support.",
+                    key_id
+                )
+            }
         }
     } else {
         tracing::info!("No encryption provider configured - secret environment variables will not be available");
@@ -210,73 +218,81 @@ impl AppState {
         );
 
         // Initialize registry provider based on configuration
-        let registry_provider: Option<Arc<dyn RegistryProvider>> =
-            if let Some(ref registry_config) = settings.registry {
-                match registry_config {
-                    #[cfg(feature = "aws")]
-                    RegistrySettings::Ecr {
-                        region,
-                        account_id,
-                        repo_prefix,
-                        role_arn,
-                        push_role_arn,
-                        auto_remove,
-                        access_key_id,
-                        secret_access_key,
-                    } => {
-                        let ecr_config = EcrConfig {
-                            region: region.clone(),
-                            account_id: account_id.clone(),
-                            repo_prefix: repo_prefix.clone(),
-                            role_arn: role_arn.clone(),
-                            push_role_arn: push_role_arn.clone(),
-                            auto_remove: *auto_remove,
-                            access_key_id: access_key_id.clone(),
-                            secret_access_key: secret_access_key.clone(),
-                        };
-                        match EcrProvider::new(ecr_config).await {
-                            Ok(provider) => {
-                                tracing::info!("Initialized ECR registry provider");
-                                Some(Arc::new(provider))
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to initialize ECR provider: {}", e);
-                                None
-                            }
+        let registry_provider: Option<Arc<dyn RegistryProvider>> = if let Some(
+            ref registry_config,
+        ) = settings.registry
+        {
+            match registry_config {
+                #[cfg(feature = "aws")]
+                RegistrySettings::Ecr {
+                    region,
+                    account_id,
+                    repo_prefix,
+                    role_arn,
+                    push_role_arn,
+                    auto_remove,
+                    access_key_id,
+                    secret_access_key,
+                } => {
+                    let ecr_config = EcrConfig {
+                        region: region.clone(),
+                        account_id: account_id.clone(),
+                        repo_prefix: repo_prefix.clone(),
+                        role_arn: role_arn.clone(),
+                        push_role_arn: push_role_arn.clone(),
+                        auto_remove: *auto_remove,
+                        access_key_id: access_key_id.clone(),
+                        secret_access_key: secret_access_key.clone(),
+                    };
+                    match EcrProvider::new(ecr_config).await {
+                        Ok(provider) => {
+                            tracing::info!("Initialized ECR registry provider");
+                            Some(Arc::new(provider))
                         }
-                    }
-                    RegistrySettings::OciClientAuth {
-                        registry_url,
-                        namespace,
-                    } => {
-                        let oci_config = OciClientAuthConfig {
-                            registry_url: registry_url.clone(),
-                            namespace: namespace.clone(),
-                        };
-                        match OciClientAuthProvider::new(oci_config) {
-                            Ok(provider) => {
-                                tracing::info!(
-                                    "Initialized OCI client-auth registry provider at {}",
-                                    registry_url
-                                );
-                                Some(Arc::new(provider))
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Failed to initialize OCI client-auth provider: {}",
-                                    e
-                                );
-                                None
-                            }
+                        Err(e) => {
+                            tracing::error!("Failed to initialize ECR provider: {}", e);
+                            None
                         }
                     }
                 }
-            } else {
-                tracing::warn!(
-                    "No registry configured - registry credentials endpoint will not be available"
-                );
-                None
-            };
+                #[cfg(not(feature = "aws"))]
+                RegistrySettings::Ecr { account_id, .. } => {
+                    tracing::error!(
+                            "AWS ECR registry is configured (account: {}) but the 'aws' feature is not enabled. \
+                             Please rebuild with --features aws or use a pre-built binary with AWS support.",
+                            account_id
+                        );
+                    None
+                }
+                RegistrySettings::OciClientAuth {
+                    registry_url,
+                    namespace,
+                } => {
+                    let oci_config = OciClientAuthConfig {
+                        registry_url: registry_url.clone(),
+                        namespace: namespace.clone(),
+                    };
+                    match OciClientAuthProvider::new(oci_config) {
+                        Ok(provider) => {
+                            tracing::info!(
+                                "Initialized OCI client-auth registry provider at {}",
+                                registry_url
+                            );
+                            Some(Arc::new(provider))
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to initialize OCI client-auth provider: {}", e);
+                            None
+                        }
+                    }
+                }
+            }
+        } else {
+            tracing::warn!(
+                "No registry configured - registry credentials endpoint will not be available"
+            );
+            None
+        };
 
         // Initialize OCI client for direct registry interaction
         let oci_client = Arc::new(
@@ -356,71 +372,79 @@ impl AppState {
         tracing::info!("Successfully connected to PostgreSQL");
 
         // Initialize registry provider based on configuration
-        let registry_provider: Option<Arc<dyn RegistryProvider>> =
-            if let Some(ref registry_config) = settings.registry {
-                match registry_config {
-                    #[cfg(feature = "aws")]
-                    RegistrySettings::Ecr {
-                        region,
-                        account_id,
-                        repo_prefix,
-                        role_arn,
-                        push_role_arn,
-                        auto_remove,
-                        access_key_id,
-                        secret_access_key,
-                    } => {
-                        let ecr_config = EcrConfig {
-                            region: region.clone(),
-                            account_id: account_id.clone(),
-                            repo_prefix: repo_prefix.clone(),
-                            role_arn: role_arn.clone(),
-                            push_role_arn: push_role_arn.clone(),
-                            auto_remove: *auto_remove,
-                            access_key_id: access_key_id.clone(),
-                            secret_access_key: secret_access_key.clone(),
-                        };
-                        match EcrProvider::new(ecr_config).await {
-                            Ok(provider) => {
-                                tracing::info!("Initialized ECR registry provider");
-                                Some(Arc::new(provider))
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to initialize ECR provider: {}", e);
-                                None
-                            }
+        let registry_provider: Option<Arc<dyn RegistryProvider>> = if let Some(
+            ref registry_config,
+        ) = settings.registry
+        {
+            match registry_config {
+                #[cfg(feature = "aws")]
+                RegistrySettings::Ecr {
+                    region,
+                    account_id,
+                    repo_prefix,
+                    role_arn,
+                    push_role_arn,
+                    auto_remove,
+                    access_key_id,
+                    secret_access_key,
+                } => {
+                    let ecr_config = EcrConfig {
+                        region: region.clone(),
+                        account_id: account_id.clone(),
+                        repo_prefix: repo_prefix.clone(),
+                        role_arn: role_arn.clone(),
+                        push_role_arn: push_role_arn.clone(),
+                        auto_remove: *auto_remove,
+                        access_key_id: access_key_id.clone(),
+                        secret_access_key: secret_access_key.clone(),
+                    };
+                    match EcrProvider::new(ecr_config).await {
+                        Ok(provider) => {
+                            tracing::info!("Initialized ECR registry provider");
+                            Some(Arc::new(provider))
                         }
-                    }
-                    RegistrySettings::OciClientAuth {
-                        registry_url,
-                        namespace,
-                    } => {
-                        let oci_config = OciClientAuthConfig {
-                            registry_url: registry_url.clone(),
-                            namespace: namespace.clone(),
-                        };
-                        match OciClientAuthProvider::new(oci_config) {
-                            Ok(provider) => {
-                                tracing::info!(
-                                    "Initialized OCI client-auth registry provider at {}",
-                                    registry_url
-                                );
-                                Some(Arc::new(provider))
-                            }
-                            Err(e) => {
-                                tracing::error!(
-                                    "Failed to initialize OCI client-auth provider: {}",
-                                    e
-                                );
-                                None
-                            }
+                        Err(e) => {
+                            tracing::error!("Failed to initialize ECR provider: {}", e);
+                            None
                         }
                     }
                 }
-            } else {
-                tracing::warn!("No registry configured - image tag construction will use fallback");
-                None
-            };
+                #[cfg(not(feature = "aws"))]
+                RegistrySettings::Ecr { account_id, .. } => {
+                    tracing::error!(
+                            "AWS ECR registry is configured (account: {}) but the 'aws' feature is not enabled. \
+                             Please rebuild with --features aws or use a pre-built binary with AWS support.",
+                            account_id
+                        );
+                    None
+                }
+                RegistrySettings::OciClientAuth {
+                    registry_url,
+                    namespace,
+                } => {
+                    let oci_config = OciClientAuthConfig {
+                        registry_url: registry_url.clone(),
+                        namespace: namespace.clone(),
+                    };
+                    match OciClientAuthProvider::new(oci_config) {
+                        Ok(provider) => {
+                            tracing::info!(
+                                "Initialized OCI client-auth registry provider at {}",
+                                registry_url
+                            );
+                            Some(Arc::new(provider))
+                        }
+                        Err(e) => {
+                            tracing::error!("Failed to initialize OCI client-auth provider: {}", e);
+                            None
+                        }
+                    }
+                }
+            }
+        } else {
+            tracing::warn!("No registry configured - image tag construction will use fallback");
+            None
+        };
 
         // Initialize OCI client (needed for pre-built image deployments)
         let oci_client = Arc::new(
