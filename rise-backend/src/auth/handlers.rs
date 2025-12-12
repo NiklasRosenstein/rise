@@ -1,15 +1,17 @@
 use crate::auth::{
     cookie_helpers,
+    snowflake_handlers::SNOWFLAKE_SESSION_COOKIE,
     token_storage::{
         generate_code_challenge, generate_code_verifier, generate_state_token, OAuth2State,
     },
 };
 use crate::db::{
     models::{ProjectVisibility, User},
-    projects, users,
+    projects, snowflake_sessions, users,
 };
 use crate::frontend::StaticAssets;
 use crate::state::AppState;
+use chrono::{Duration, Utc};
 use axum::{
     extract::{Extension, Query, State},
     http::{HeaderMap, StatusCode},
@@ -882,61 +884,78 @@ pub async fn ingress_auth(
         })?;
 
     // Check if project is public - if so, allow access without further checks
-    if matches!(project.visibility, ProjectVisibility::Public) {
-        tracing::debug!(
-            project = %params.project,
-            user_id = %user.id,
-            user_email = %user.email,
-            "Public project access granted"
-        );
-        return Ok((
-            StatusCode::OK,
-            [
-                ("X-Auth-Request-Email", email),
-                ("X-Auth-Request-User", user.id.to_string()),
-            ],
-        )
-            .into_response());
-    }
+    let is_public = matches!(project.visibility, ProjectVisibility::Public);
 
     // For private projects, check access permissions
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Database error checking access: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            )
-        })?;
-
-    if has_access {
-        tracing::debug!(
-            project = %params.project,
-            user_id = %user.id,
-            user_email = %user.email,
-            "Private project access granted"
-        );
-        Ok((
-            StatusCode::OK,
-            [
-                ("X-Auth-Request-Email", email),
-                ("X-Auth-Request-User", user.id.to_string()),
-            ],
-        )
-            .into_response())
+    let has_access = if is_public {
+        true
     } else {
+        projects::user_can_access(&state.db_pool, project.id, user.id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Database error checking access: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?
+    };
+
+    if !has_access {
         tracing::warn!(
             project = %params.project,
             user_id = %user.id,
             user_email = %user.email,
             "Private project access denied"
         );
-        Err((
+        return Err((
             StatusCode::FORBIDDEN,
             "You do not have access to this project".to_string(),
-        ))
+        ));
     }
+
+    tracing::debug!(
+        project = %params.project,
+        user_id = %user.id,
+        user_email = %user.email,
+        visibility = ?project.visibility,
+        "Project access granted"
+    );
+
+    // Build response headers
+    let mut response_headers: Vec<(&str, String)> = vec![
+        ("X-Auth-Request-Email", email),
+        ("X-Auth-Request-User", user.id.to_string()),
+    ];
+
+    // If project has snowflake_enabled, try to inject Snowflake token
+    if project.snowflake_enabled {
+        match get_snowflake_token_for_ingress(&state, &headers, &params.project).await? {
+            Some(snowflake_token) => {
+                tracing::debug!(
+                    project = %params.project,
+                    "Injecting X-Snowflake-Token header"
+                );
+                response_headers.push(("X-Snowflake-Token", snowflake_token));
+            }
+            None => {
+                // No Snowflake token available - user needs to authenticate with Snowflake
+                // We still allow access to the app, but the app won't have a Snowflake token
+                tracing::debug!(
+                    project = %params.project,
+                    "No Snowflake token available - user may need to authenticate with Snowflake"
+                );
+            }
+        }
+    }
+
+    // Build response with all headers
+    let mut response = Response::builder().status(StatusCode::OK);
+    for (key, value) in response_headers {
+        response = response.header(key, value);
+    }
+
+    Ok(response.body(axum::body::Body::empty()).unwrap())
 }
 
 #[derive(Debug, Deserialize)]
@@ -974,4 +993,180 @@ pub async fn oauth_logout(
         .into_response();
 
     Ok(response)
+}
+
+/// Extract Snowflake session ID from cookie header
+fn extract_snowflake_session_id(headers: &HeaderMap) -> Option<String> {
+    let cookie_header = headers.get(axum::http::header::COOKIE)?.to_str().ok()?;
+
+    for cookie in cookie_header.split(';') {
+        let cookie = cookie.trim();
+        if let Some(value) = cookie.strip_prefix(&format!("{}=", SNOWFLAKE_SESSION_COOKIE)) {
+            return Some(value.to_string());
+        }
+    }
+
+    None
+}
+
+/// Get Snowflake access token for ingress auth
+///
+/// This function:
+/// 1. Extracts the Snowflake session cookie
+/// 2. Looks up the token for this session + project
+/// 3. Refreshes if expiring soon (within 5 minutes)
+/// 4. Decrypts and returns the access token
+async fn get_snowflake_token_for_ingress(
+    state: &AppState,
+    headers: &HeaderMap,
+    project_name: &str,
+) -> Result<Option<String>, (StatusCode, String)> {
+    // Check if Snowflake OAuth is configured
+    let snowflake_client = match &state.snowflake_oauth_client {
+        Some(client) => client,
+        None => {
+            tracing::warn!(
+                "Project '{}' has snowflake_enabled but Snowflake OAuth is not configured",
+                project_name
+            );
+            return Ok(None);
+        }
+    };
+
+    // Check if encryption is available
+    let encryption = match &state.encryption_provider {
+        Some(enc) => enc,
+        None => {
+            tracing::warn!("Encryption provider not configured - cannot decrypt Snowflake tokens");
+            return Ok(None);
+        }
+    };
+
+    // Extract Snowflake session cookie
+    let session_id = match extract_snowflake_session_id(headers) {
+        Some(id) => id,
+        None => {
+            tracing::debug!(
+                "No Snowflake session cookie for project '{}' - user needs to authenticate",
+                project_name
+            );
+            return Ok(None);
+        }
+    };
+
+    // Look up token for this session + project
+    let token = match snowflake_sessions::get_app_token(&state.db_pool, &session_id, project_name)
+        .await
+    {
+        Ok(Some(t)) => t,
+        Ok(None) => {
+            tracing::debug!(
+                "No Snowflake token for session/project: {}/{}",
+                &session_id[..8.min(session_id.len())],
+                project_name
+            );
+            return Ok(None);
+        }
+        Err(e) => {
+            tracing::error!("Failed to get Snowflake token: {}", e);
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            ));
+        }
+    };
+
+    // Check if token needs refresh (expiring within 5 minutes)
+    let now = Utc::now();
+    let refresh_threshold = now + Duration::minutes(5);
+
+    let (access_token_encrypted, needs_update) = if token.token_expires_at <= refresh_threshold {
+        tracing::info!(
+            "Snowflake token expiring soon, refreshing for project '{}'",
+            project_name
+        );
+
+        // Decrypt refresh token
+        let refresh_token = encryption
+            .decrypt(&token.refresh_token_encrypted)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to decrypt refresh token: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Token decryption failed".to_string(),
+                )
+            })?;
+
+        // Refresh the token
+        match snowflake_client.refresh_token(&refresh_token).await {
+            Ok(new_tokens) => {
+                // Encrypt new tokens
+                let new_access_encrypted = encryption
+                    .encrypt(&new_tokens.access_token)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Failed to encrypt new access token: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Token encryption failed".to_string(),
+                        )
+                    })?;
+
+                let new_refresh_encrypted = encryption
+                    .encrypt(&new_tokens.refresh_token)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Failed to encrypt new refresh token: {}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Token encryption failed".to_string(),
+                        )
+                    })?;
+
+                let new_expires_at = now + Duration::seconds(new_tokens.expires_in as i64);
+
+                // Update token in database
+                if let Err(e) = snowflake_sessions::upsert_app_token(
+                    &state.db_pool,
+                    &session_id,
+                    project_name,
+                    &new_access_encrypted,
+                    &new_refresh_encrypted,
+                    new_expires_at,
+                )
+                .await
+                {
+                    tracing::error!("Failed to update refreshed token: {}", e);
+                    // Continue with old token if update fails
+                    (token.access_token_encrypted, false)
+                } else {
+                    tracing::info!("Successfully refreshed Snowflake token for '{}'", project_name);
+                    (new_access_encrypted, false)
+                }
+            }
+            Err(e) => {
+                tracing::warn!("Failed to refresh Snowflake token: {}", e);
+                // Use existing token if refresh fails (might still be valid)
+                (token.access_token_encrypted, false)
+            }
+        }
+    } else {
+        (token.access_token_encrypted, false)
+    };
+    let _ = needs_update; // Silence unused variable warning
+
+    // Decrypt access token
+    let access_token = encryption
+        .decrypt(&access_token_encrypted)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to decrypt access token: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Token decryption failed".to_string(),
+            )
+        })?;
+
+    Ok(Some(access_token))
 }

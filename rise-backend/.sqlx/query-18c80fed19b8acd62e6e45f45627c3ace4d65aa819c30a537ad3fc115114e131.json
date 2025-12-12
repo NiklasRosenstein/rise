@@ -1,0 +1,18 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO snowflake_app_tokens\n            (session_id, project_name, access_token_encrypted, refresh_token_encrypted, token_expires_at)\n        VALUES ($1, $2, $3, $4, $5)\n        ON CONFLICT (session_id, project_name)\n        DO UPDATE SET\n            access_token_encrypted = EXCLUDED.access_token_encrypted,\n            refresh_token_encrypted = EXCLUDED.refresh_token_encrypted,\n            token_expires_at = EXCLUDED.token_expires_at,\n            updated_at = NOW()\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "18c80fed19b8acd62e6e45f45627c3ace4d65aa819c30a537ad3fc115114e131"
+}

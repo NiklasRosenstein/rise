@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO rise_snowflake_sessions (session_id, user_email)\n        VALUES ($1, $2)\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "a0f387b836dbe76e88c4a03cae888ef6ec2d3c1a16919450f6c08ad204b1dd41"
+}

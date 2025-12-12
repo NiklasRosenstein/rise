@@ -78,6 +78,18 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         controller_handles.push(handle);
     }
 
+    // Start Snowflake token refresh controller if Snowflake is configured
+    if settings.snowflake.is_some() && settings.encryption.is_some() {
+        info!("Starting Snowflake token refresh controller");
+        let settings_clone = settings.clone();
+        let handle = tokio::spawn(async move {
+            if let Err(e) = run_snowflake_refresh_controller_loop(settings_clone).await {
+                tracing::error!("Snowflake refresh controller error: {}", e);
+            }
+        });
+        controller_handles.push(handle);
+    }
+
     // Public routes (no authentication)
     let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
@@ -313,6 +325,58 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
     // Wait for shutdown signal
     shutdown_signal().await;
     info!("Kubernetes deployment controller shutdown complete");
+    Ok(())
+}
+
+/// Run the Snowflake OAuth token refresh controller loop (for embedding in server process)
+///
+/// Proactively refreshes Snowflake OAuth tokens before they expire.
+async fn run_snowflake_refresh_controller_loop(settings: settings::Settings) -> Result<()> {
+    use crate::auth::snowflake_oauth::SnowflakeOAuthClient;
+    use crate::auth::snowflake_refresh_controller::SnowflakeRefreshController;
+    use sqlx::postgres::PgPoolOptions;
+
+    // Get Snowflake settings
+    let sf_settings = settings
+        .snowflake
+        .clone()
+        .ok_or_else(|| anyhow::anyhow!("Snowflake settings required"))?;
+
+    // Get encryption provider (required)
+    let encryption_provider = match crate::encryption::init_provider(settings.encryption.as_ref()).await? {
+        Some(provider) => provider,
+        None => {
+            anyhow::bail!("Encryption provider required for Snowflake refresh controller");
+        }
+    };
+
+    // Connect to database
+    let db_pool = PgPoolOptions::new()
+        .max_connections(2)
+        .connect(&settings.database.url)
+        .await?;
+
+    // Create Snowflake OAuth client
+    let snowflake_client = Arc::new(SnowflakeOAuthClient::new(
+        sf_settings.account,
+        sf_settings.client_id,
+        sf_settings.client_secret,
+        sf_settings.redirect_uri,
+        sf_settings.scopes,
+    ));
+
+    // Create and start controller
+    let controller = Arc::new(SnowflakeRefreshController::new(
+        db_pool,
+        snowflake_client,
+        encryption_provider,
+    ));
+    controller.start();
+    info!("Snowflake token refresh controller started");
+
+    // Wait for shutdown signal
+    shutdown_signal().await;
+    info!("Snowflake refresh controller shutdown complete");
     Ok(())
 }
 

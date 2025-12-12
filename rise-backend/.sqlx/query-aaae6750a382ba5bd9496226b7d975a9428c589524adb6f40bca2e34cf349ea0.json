@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE projects\n        SET owner_user_id = $2, owner_team_id = $3\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id, active_deployment_id,\n            project_url, finalizers,\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            active_deployment_id,\n            project_url, finalizers, snowflake_enabled,\n            created_at, updated_at\n        FROM projects\n        WHERE status = 'Deleting'\n        ORDER BY updated_at ASC\n        LIMIT $1\n        ",
   "describe": {
     "columns": [
       {
@@ -50,20 +50,23 @@
       },
       {
         "ordinal": 9,
+        "name": "snowflake_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Uuid",
-        "Uuid"
+        "Int8"
       ]
     },
     "nullable": [
@@ -77,8 +80,9 @@
       true,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "1c27fa906f3e1d89801076fed3e32b96674cf7d9a9f82827471d327b09aecb79"
+  "hash": "aaae6750a382ba5bd9496226b7d975a9428c589524adb6f40bca2e34cf349ea0"
 }

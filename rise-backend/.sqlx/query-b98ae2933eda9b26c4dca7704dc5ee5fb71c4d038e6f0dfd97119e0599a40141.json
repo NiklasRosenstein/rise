@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, name, status as \"status: _\", visibility as \"visibility: _\",\n               owner_user_id, owner_team_id, active_deployment_id, project_url, finalizers,\n               created_at, updated_at\n        FROM projects\n        WHERE id = $1\n        ",
+  "query": "\n            SELECT\n                id, name,\n                status as \"status: ProjectStatus\",\n                visibility as \"visibility: ProjectVisibility\",\n                owner_user_id, owner_team_id, active_deployment_id,\n                project_url, finalizers, snowflake_enabled,\n                created_at, updated_at\n            FROM projects\n            ORDER BY created_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -15,12 +15,12 @@
       },
       {
         "ordinal": 2,
-        "name": "status: _",
+        "name": "status: ProjectStatus",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "visibility: _",
+        "name": "visibility: ProjectVisibility",
         "type_info": "Text"
       },
       {
@@ -50,19 +50,22 @@
       },
       {
         "ordinal": 9,
+        "name": "snowflake_enabled",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 10,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 10,
+        "ordinal": 11,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -75,8 +78,9 @@
       true,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "d4d840093c5def8e926846215200d39e5bb1bcba35ed66a675203eff2de48c0e"
+  "hash": "b98ae2933eda9b26c4dca7704dc5ee5fb71c4d038e6f0dfd97119e0599a40141"
 }
