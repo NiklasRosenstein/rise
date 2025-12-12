@@ -20,7 +20,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-use super::{DeploymentBackend, HealthStatus, ReconcileHint, ReconcileResult};
+use super::{DeploymentBackend, HealthStatus, ReconcileResult};
 use crate::db::deployments as db_deployments;
 use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectVisibility};
 use crate::db::projects as db_projects;
@@ -1046,7 +1046,6 @@ impl DeploymentBackend for KubernetesController {
                 deployment_url: None,
                 controller_metadata: deployment.controller_metadata.clone(),
                 error_message: None,
-                next_reconcile: ReconcileHint::Default,
             });
         }
 
@@ -1377,7 +1376,6 @@ impl DeploymentBackend for KubernetesController {
                         deployment_url: None,
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
-                        next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
                     });
                 }
 
@@ -1406,7 +1404,6 @@ impl DeploymentBackend for KubernetesController {
                             deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: error_msg,
-                            next_reconcile: ReconcileHint::Default,
                         });
                     }
 
@@ -1437,7 +1434,6 @@ impl DeploymentBackend for KubernetesController {
                             deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
-                            next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
                         });
                     }
                 }
@@ -1500,7 +1496,6 @@ impl DeploymentBackend for KubernetesController {
                             deployment_url: Some(deployment_url),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: health.message,
-                            next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
                         });
                     }
                 }
@@ -1537,7 +1532,6 @@ impl DeploymentBackend for KubernetesController {
                         deployment_url: Some(deployment_url),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
-                        next_reconcile: ReconcileHint::Default,
                     });
                 }
 
@@ -1637,7 +1631,6 @@ impl DeploymentBackend for KubernetesController {
                                     )),
                                     controller_metadata: serde_json::to_value(&metadata)?,
                                     error_message: None,
-                                    next_reconcile: ReconcileHint::After(Duration::from_secs(5)),
                                 });
                             } else {
                                 debug!(
@@ -1672,7 +1665,6 @@ impl DeploymentBackend for KubernetesController {
                                 )),
                                 controller_metadata: serde_json::to_value(&metadata)?,
                                 error_message: None,
-                                next_reconcile: ReconcileHint::After(Duration::from_secs(1)),
                             });
                         }
                         Err(e) => return Err(e.into()),
@@ -1686,7 +1678,6 @@ impl DeploymentBackend for KubernetesController {
                         deployment_url: Some(deployment_url),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
-                        next_reconcile: ReconcileHint::Default,
                     });
                 }
             }

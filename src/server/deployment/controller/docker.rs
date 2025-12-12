@@ -116,7 +116,6 @@ impl DockerController {
                             .map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&reset_metadata).ok()?,
                         error_message: None,
-                        next_reconcile: super::ReconcileHint::Immediate,
                     });
                 }
             }
@@ -357,7 +356,6 @@ impl DeploymentBackend for DockerController {
                                     .map(|p| format!("http://localhost:{}", p)),
                                 controller_metadata: serde_json::to_value(&metadata)?,
                                 error_message: None,
-                                next_reconcile: super::ReconcileHint::Default,
                             });
                         } else {
                             // Container exists but stopped - try to restart it
@@ -380,7 +378,6 @@ impl DeploymentBackend for DockerController {
                                             .map(|p| format!("http://localhost:{}", p)),
                                         controller_metadata: serde_json::to_value(&metadata)?,
                                         error_message: None, // Don't set error - we're attempting recovery
-                                        next_reconcile: super::ReconcileHint::Default,
                                     });
                                 }
                                 Err(e) => {
@@ -393,7 +390,6 @@ impl DeploymentBackend for DockerController {
                                             .map(|p| format!("http://localhost:{}", p)),
                                         controller_metadata: serde_json::to_value(&metadata)?,
                                         error_message: None,
-                                        next_reconcile: super::ReconcileHint::Default,
                                     });
                                 }
                             }
@@ -430,7 +426,6 @@ impl DeploymentBackend for DockerController {
                                 .map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
-                            next_reconcile: super::ReconcileHint::Default,
                         });
                     }
                 }
@@ -478,7 +473,6 @@ impl DeploymentBackend for DockerController {
                     deployment_url: None,
                     controller_metadata: serde_json::to_value(&metadata)?,
                     error_message: None,
-                    next_reconcile: super::ReconcileHint::Default,
                 })
             }
 
@@ -545,7 +539,6 @@ impl DeploymentBackend for DockerController {
                             deployment_url: Some(format!("http://localhost:{}", port)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
-                            next_reconcile: super::ReconcileHint::Default,
                         })
                     }
                     Err(e)
@@ -584,7 +577,6 @@ impl DeploymentBackend for DockerController {
                                     deployment_url: Some(format!("http://localhost:{}", port)),
                                     controller_metadata: serde_json::to_value(&metadata)?,
                                     error_message: None,
-                                    next_reconcile: super::ReconcileHint::Immediate,
                                 })
                             }
                             Err(inspect_err) => {
@@ -609,7 +601,6 @@ impl DeploymentBackend for DockerController {
                                         "Container exists but cannot inspect: {}",
                                         inspect_err
                                     )),
-                                    next_reconcile: super::ReconcileHint::Default,
                                 })
                             }
                         }
@@ -627,7 +618,6 @@ impl DeploymentBackend for DockerController {
                             status,
                             deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
-                            next_reconcile: super::ReconcileHint::Default,
                             error_message: Some(format!("Failed to create container: {}", e)),
                         })
                     }
@@ -661,7 +651,6 @@ impl DeploymentBackend for DockerController {
                             error_message: Some(
                                 "Internal error: missing container ID, retrying".to_string(),
                             ),
-                            next_reconcile: super::ReconcileHint::Immediate,
                         });
                     }
                 };
@@ -690,7 +679,6 @@ impl DeploymentBackend for DockerController {
                                 .map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
-                            next_reconcile: super::ReconcileHint::Default,
                         })
                     }
                     Err(e)
@@ -715,7 +703,6 @@ impl DeploymentBackend for DockerController {
                                 .map(|p| format!("http://localhost:{}", p)),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
-                            next_reconcile: super::ReconcileHint::Default,
                         })
                     }
                     Err(e) => {
@@ -731,7 +718,6 @@ impl DeploymentBackend for DockerController {
                             status,
                             deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
-                            next_reconcile: super::ReconcileHint::Default,
                             error_message: Some(format!("Failed to start container: {}", e)),
                         })
                     }
@@ -752,7 +738,6 @@ impl DeploymentBackend for DockerController {
                             .map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
-                        next_reconcile: super::ReconcileHint::Default,
                     })
                 } else {
                     // Still waiting for health
@@ -778,7 +763,6 @@ impl DeploymentBackend for DockerController {
                             .map(|p| format!("http://localhost:{}", p)),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
-                        next_reconcile: super::ReconcileHint::Default,
                     })
                 }
             }
@@ -792,7 +776,6 @@ impl DeploymentBackend for DockerController {
                         .map(|p| format!("http://localhost:{}", p)),
                     controller_metadata: serde_json::to_value(&metadata)?,
                     error_message: None,
-                    next_reconcile: super::ReconcileHint::Default,
                 })
             }
         }

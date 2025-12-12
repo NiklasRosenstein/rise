@@ -35,6 +35,16 @@ pub fn is_cancellable(status: &DeploymentStatus) -> bool {
     )
 }
 
+/// Check if a deployment can be terminated
+/// Only deployments with running infrastructure can be terminated
+#[cfg_attr(not(test), allow(dead_code))]
+pub fn is_terminable(status: &DeploymentStatus) -> bool {
+    matches!(
+        status,
+        DeploymentStatus::Healthy | DeploymentStatus::Unhealthy
+    )
+}
+
 /// Check if a deployment can be used as a rollback source
 /// Only Healthy and Superseded deployments can be rolled back to
 pub fn is_rollbackable(status: &DeploymentStatus) -> bool {

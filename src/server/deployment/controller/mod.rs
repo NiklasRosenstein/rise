@@ -22,24 +22,12 @@ use crate::db::{deployments as db_deployments, projects};
 use crate::server::deployment::state_machine;
 use crate::server::state::ControllerState;
 
-/// Hint for when to reconcile a deployment next
-#[derive(Debug, Clone)]
-pub enum ReconcileHint {
-    /// Reconcile again immediately (status changed)
-    Immediate,
-    /// Reconcile after specific duration (e.g., retry after 30s, poll after 10s)
-    After(Duration),
-    /// Use default reconciliation interval
-    Default,
-}
-
 /// Result of a reconciliation operation
 pub struct ReconcileResult {
     pub status: DeploymentStatus,
     pub deployment_url: Option<String>,
     pub controller_metadata: serde_json::Value,
     pub error_message: Option<String>,
-    pub next_reconcile: ReconcileHint,
 }
 
 /// Health status of a deployment
