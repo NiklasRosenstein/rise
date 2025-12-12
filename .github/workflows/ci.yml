@@ -57,6 +57,14 @@ jobs:
   clippy:
     name: Lint with Clippy
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features:
+          - "cli"
+          - "server,docker"
+          - "server,k8s"
+          - "server,aws"
+          - "server,docker,k8s,aws"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -67,8 +75,8 @@ jobs:
           cache: true
           tools: rust
 
-      - name: Run Clippy
-        run: cargo clippy --all-targets --workspace -- -D warnings
+      - name: Run Clippy (${{ matrix.features }})
+        run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
         env:
           SQLX_OFFLINE: true
 
@@ -101,20 +109,27 @@ jobs:
 
       - name: Run database migrations
         run: |
-          cd rise-backend
           sqlx database create
           sqlx migrate run
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rise_test
 
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --all-features
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rise_test
 
   build:
     name: Build all targets
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features:
+          - "cli"
+          - "server,docker"
+          - "server,k8s"
+          - "server,aws"
+          - "server,docker,k8s,aws"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -125,8 +140,8 @@ jobs:
           cache: true
           tools: rust
 
-      - name: Build all targets
-        run: cargo build --workspace --all-targets
+      - name: Build all targets (${{ matrix.features }})
+        run: cargo build --all-targets --features ${{ matrix.features }}
         env:
           SQLX_OFFLINE: true
 
@@ -279,7 +294,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./rise-backend/Dockerfile.backend
+          file: ./Dockerfile
           target: rise
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -317,7 +332,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./rise-backend/Dockerfile.backend
+          file: ./Dockerfile
           target: rise-builder
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-builder.outputs.tags }}
@@ -353,7 +368,7 @@ jobs:
       - name: Verify version matches tag
         run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
-          CARGO_VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.workspace_members[0]' | sed 's/.*#//')
+          CARGO_VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')
           echo "Tag version: $TAG_VERSION"
           echo "Cargo version: $CARGO_VERSION"
           if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
@@ -366,6 +381,6 @@ jobs:
         id: auth
 
       - name: Publish to crates.io
-        run: cargo publish --workspace
+        run: cargo publish --features cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
