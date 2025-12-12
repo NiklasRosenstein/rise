@@ -25,19 +25,19 @@ pub fn public_routes() -> Router<AppState> {
         .route("/auth/logout", get(handlers::oauth_logout))
         // Snowflake OAuth routes
         .route(
-            "/.rise/snowflake/oauth/start",
+            "/.rise/oauth/snowflake/start",
             get(snowflake_handlers::snowflake_oauth_start),
         )
         .route(
-            "/.rise/snowflake/oauth/callback",
+            "/.rise/oauth/snowflake/callback",
             get(snowflake_handlers::snowflake_oauth_callback),
         )
         .route(
-            "/.rise/snowflake/auth/me",
+            "/.rise/oauth/snowflake/me",
             get(snowflake_handlers::snowflake_auth_me),
         )
         .route(
-            "/.rise/snowflake/auth/logout",
+            "/.rise/oauth/snowflake/logout",
             post(snowflake_handlers::snowflake_auth_logout),
         )
 }
