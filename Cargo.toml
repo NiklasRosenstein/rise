@@ -1,12 +1,129 @@
-[workspace]
-members = [
-    "rise-backend",
-    "rise-cli",
-]
-resolver = "2"
-
-[workspace.package]
+[package]
+name = "rise-deploy"
 version = "0.3.2"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/NiklasRosenstein/rise"
+description = "A simple and powerful CLI for deploying containerized applications"
+
+[[bin]]
+name = "rise"
+path = "src/main.rs"
+
+[features]
+default = ["cli"]
+cli = [
+    "dep:clap",
+    "dep:comfy-table",
+    "dep:dirs",
+    "dep:rsa",
+    "dep:url",
+    "dep:webbrowser",
+]
+server = [
+    "dep:config",
+    "dep:oauth2",
+    "dep:openssl",
+    "dep:sqlx",
+    "dep:tower",
+    "dep:tower-http",
+    "dep:lazy_static",
+    "dep:regex",
+    "dep:aes-gcm",
+    "dep:moka",
+    "dep:base64ct",
+    "dep:async-trait",
+    "dep:oci-distribution",
+    "dep:thiserror",
+    "dep:rust-embed",
+    "dep:mime_guess",
+    "dep:tera",
+]
+aws = [
+    "server",  # AWS features require server
+    "dep:aws-config",
+    "dep:aws-sdk-ecr",
+    "dep:aws-sdk-kms",
+    "dep:aws-sdk-sts",
+]
+docker = [
+    "server",  # Docker controller requires server
+    "dep:bollard",
+    "dep:futures-util",
+]
+k8s = [
+    "server",  # Kubernetes controller requires server
+    "dep:kube",
+    "dep:k8s-openapi",
+    "dep:rustls",
+]
+
+[dependencies]
+# Common (always enabled - shared across features)
+anyhow = "1.0.100"
+base64 = "0.22"
+chrono = { version = "0.4.38", features = ["serde"] }
+rand = "0.8.5"
+reqwest = { version = "0.12.24", features = ["json"] }
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.145"
+tokio = { version = "1.48.0", features = ["full"] }
+tracing = "0.1.43"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+uuid = { version = "1.18.1", features = ["v4", "serde"] }
+
+# Shared: CLI + Server
+axum = "0.8.7"
+jsonwebtoken = "9.2"
+sha2 = "0.10"
+urlencoding = "2.1"
+
+# CLI-only dependencies
+clap = { version = "4.5.53", features = ["derive"], optional = true }
+comfy-table = { version = "7.1", optional = true }
+dirs = { version = "5.0", optional = true }
+rsa = { version = "0.9", optional = true }
+url = { version = "2.5", optional = true }
+webbrowser = { version = "1.0.2", optional = true }
+
+# Server core dependencies
+config = { version = "0.15.19", optional = true }
+oauth2 = { version = "4.4", optional = true }
+openssl = { version = "0.10.75", features = ["vendored"], optional = true }
+sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "uuid", "chrono", "migrate"], optional = true }
+tower = { version = "0.5.2", optional = true }
+tower-http = { version = "0.6.7", features = ["trace"], optional = true }
+lazy_static = { version = "1.5.0", optional = true }
+regex = { version = "1.11", optional = true }
+
+# Server: Encryption (non-KMS mode)
+aes-gcm = { version = "0.10", optional = true }
+
+# Server: OAuth2 proxy
+moka = { version = "0.12", features = ["sync"], optional = true }
+base64ct = { version = "1.6", features = ["alloc"], optional = true }
+
+# Server: OCI registry
+async-trait = { version = "0.1", optional = true }
+oci-distribution = { version = "0.11", optional = true }
+thiserror = { version = "2.0", optional = true }
+
+# Server: Frontend
+rust-embed = { version = "8.0", optional = true }
+mime_guess = { version = "2.0", optional = true }
+tera = { version = "1.20", optional = true }
+
+# AWS feature dependencies
+aws-config = { version = "1.5", features = ["behavior-version-latest"], optional = true }
+aws-sdk-ecr = { version = "1.80", optional = true }
+aws-sdk-kms = { version = "1.80", optional = true }
+aws-sdk-sts = { version = "1.80", optional = true }
+
+# Docker feature dependencies
+bollard = { version = "0.17", optional = true }
+futures-util = { version = "0.3", optional = true }
+
+# Kubernetes feature dependencies
+kube = { version = "0.95", features = ["client", "runtime", "derive"], optional = true }
+k8s-openapi = { version = "0.23", features = ["v1_30"], optional = true }
+rustls = { version = "0.23", features = ["ring"], optional = true }

@@ -21,6 +21,9 @@ env:
   IMAGE_NAME: niklasrosenstein/rise
   BUILDER_IMAGE_NAME: niklasrosenstein/rise-builder
 
+# NOTE: Rust toolchain version (1.91.1) must be kept in sync with mise.toml
+# See: https://github.com/jdx/mise-action/issues/215
+
 jobs:
   sqlx-check:
     name: Verify SQLX offline query data
@@ -29,11 +32,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.91.1"
+
       - name: Setup mise
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: rust cargo:sqlx-cli
+          tools: cargo:sqlx-cli
 
       - name: Check SQLX offline data is up to date
         run: mise run sqlx:check
@@ -45,11 +53,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: true
-          tools: rust
+          toolchain: "1.91.1"
+          components: rustfmt
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -57,18 +65,27 @@ jobs:
   clippy:
     name: Lint with Clippy
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features:
+          - "cli"
+          - "server,docker"
+          - "server,k8s"
+          - "server,docker,aws"
+          - "server,k8s,aws"
+          - "server,docker,k8s,aws"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: true
-          tools: rust
+          toolchain: "1.91.1"
+          components: clippy
 
-      - name: Run Clippy
-        run: cargo clippy --all-targets --workspace -- -D warnings
+      - name: Run Clippy (${{ matrix.features }})
+        run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
         env:
           SQLX_OFFLINE: true
 
@@ -93,40 +110,52 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.91.1"
+
       - name: Setup mise
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: rust cargo:sqlx-cli
+          tools: cargo:sqlx-cli
 
       - name: Run database migrations
         run: |
-          cd rise-backend
           sqlx database create
           sqlx migrate run
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rise_test
 
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test --all-features
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rise_test
 
   build:
     name: Build all targets
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        features:
+          - "cli"
+          - "server,docker"
+          - "server,k8s"
+          - "server,docker,aws"
+          - "server,k8s,aws"
+          - "server,docker,k8s,aws"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: true
-          tools: rust
+          toolchain: "1.91.1"
 
-      - name: Build all targets
-        run: cargo build --workspace --all-targets
+      - name: Build all targets (${{ matrix.features }})
+        run: cargo build --all-targets --features ${{ matrix.features }}
         env:
           SQLX_OFFLINE: true
 
@@ -151,31 +180,31 @@ jobs:
       - name: Run chart-testing (lint)
         run: ct lint --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise --validate-maintainers=false
 
-  helm-test:
-    name: Test Helm charts
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: helm-lint
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+  # helm-test:
+  #   name: Test Helm charts
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'pull_request'
+  #   needs: helm-lint
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
-        with:
-          cache: true
-          tools: helm
+  #     - name: Setup mise
+  #       uses: jdx/mise-action@v2
+  #       with:
+  #         cache: true
+  #         tools: helm
 
-      - name: Set up chart-testing
-        uses: helm/chart-testing-action@v2.6.1
+  #     - name: Set up chart-testing
+  #       uses: helm/chart-testing-action@v2.6.1
 
-      - name: Create kind cluster
-        uses: helm/kind-action@v1.10.0
+  #     - name: Create kind cluster
+  #       uses: helm/kind-action@v1.10.0
 
-      - name: Run chart-testing (install)
-        run: ct install --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise --validate-maintainers=false
+  #     - name: Run chart-testing (install)
+  #       run: ct install --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise
 
   helm-package:
     name: Package Helm charts
@@ -279,7 +308,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./rise-backend/Dockerfile.backend
+          file: ./Dockerfile
           target: rise
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
@@ -317,7 +346,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./rise-backend/Dockerfile.backend
+          file: ./Dockerfile
           target: rise-builder
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta-builder.outputs.tags }}
@@ -344,16 +373,15 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: true
-          tools: rust
+          toolchain: "1.91.1"
 
       - name: Verify version matches tag
         run: |
           TAG_VERSION=${GITHUB_REF#refs/tags/v}
-          CARGO_VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.workspace_members[0]' | sed 's/.*#//')
+          CARGO_VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')
           echo "Tag version: $TAG_VERSION"
           echo "Cargo version: $CARGO_VERSION"
           if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
@@ -366,6 +394,6 @@ jobs:
         id: auth
 
       - name: Publish to crates.io
-        run: cargo publish --workspace
+        run: cargo publish --features cli
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}

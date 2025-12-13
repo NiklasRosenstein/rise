@@ -19,12 +19,8 @@ fi
 
 echo "Updating version to ${VERSION}..."
 
-# Update version in workspace Cargo.toml
+# Update version in Cargo.toml
 sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
-
-# Update rise-backend dependency version in rise-cli/Cargo.toml
-echo "Updating rise-backend dependency to ${VERSION}..."
-sed -i "s/rise-backend = { path = \"\.\.\/rise-backend\", version = \"[^\"]*\" }/rise-backend = { path = \"..\/rise-backend\", version = \"${VERSION}\" }/" rise-cli/Cargo.toml
 
 # Update Cargo.lock
 echo "Updating Cargo.lock..."
@@ -33,20 +29,20 @@ cargo update --workspace
 # Show the changes
 echo ""
 echo "Changes to be committed:"
-git diff Cargo.toml rise-cli/Cargo.toml Cargo.lock
+git diff Cargo.toml Cargo.lock
 
 # Confirm before proceeding
 read -p "Proceed with commit and tag? (y/n) " -n 1 -r
 echo
 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     echo "Aborted. Rolling back changes..."
-    git checkout Cargo.toml rise-cli/Cargo.toml Cargo.lock
+    git checkout Cargo.toml Cargo.lock
     exit 1
 fi
 
 # Commit the changes
 echo "Committing version bump..."
-git add Cargo.toml rise-cli/Cargo.toml Cargo.lock
+git add Cargo.toml Cargo.lock
 git commit -m "chore: bump version to ${VERSION}"
 
 # Create the tag

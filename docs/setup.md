@@ -35,17 +35,6 @@ cargo build --bin rise
 # Or use: ./target/debug/rise
 ```
 
-## Install from crates.io
-
-```bash
-# Install the CLI and backend from crates.io
-# Note: SQLX_OFFLINE=true is required for compile-time SQL verification
-SQLX_OFFLINE=true cargo install rise-cli rise-backend
-
-# Verify installation
-rise --version
-```
-
 ## First Steps
 
 ### 1. Login
