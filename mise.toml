@@ -18,7 +18,7 @@ run = "cargo sqlx prepare --check -- --features server,aws,docker,k8s --all-targ
 [tasks.lint]
 description = "Run all linting checks (clippy, formatting, sqlx, helm)."
 run = """
-cargo clippy --all-targets --all-features -- -D warnings
+SQLX_OFFLINE=true cargo clippy --all-targets --all-features -- -D warnings
 cargo fmt --all -- --check
 mise sqlx:check
 helm lint helm/rise
