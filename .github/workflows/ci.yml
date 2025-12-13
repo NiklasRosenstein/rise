@@ -71,7 +71,8 @@ jobs:
           - "cli"
           - "server,docker"
           - "server,k8s"
-          - "server,aws"
+          - "server,docker,aws"
+          - "server,k8s,aws"
           - "server,docker,k8s,aws"
     steps:
       - name: Checkout repository
@@ -141,7 +142,8 @@ jobs:
           - "cli"
           - "server,docker"
           - "server,k8s"
-          - "server,aws"
+          - "server,docker,aws"
+          - "server,k8s,aws"
           - "server,docker,k8s,aws"
     steps:
       - name: Checkout repository
