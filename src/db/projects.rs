@@ -301,6 +301,7 @@ pub async fn user_can_access(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> 
 }
 
 /// Set the active deployment for a project
+#[cfg(any(feature = "docker", feature = "k8s", feature = "aws"))]
 pub async fn set_active_deployment(
     pool: &PgPool,
     project_id: Uuid,
@@ -640,6 +641,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
 }
 
 /// Update project URL
+#[cfg(any(feature = "docker", feature = "k8s", feature = "aws"))]
 pub async fn update_project_url(pool: &PgPool, project_id: Uuid, url: &str) -> Result<Project> {
     let project = sqlx::query_as!(
         Project,
@@ -669,6 +671,7 @@ pub async fn update_project_url(pool: &PgPool, project_id: Uuid, url: &str) -> R
 // ==================== Finalizer Operations ====================
 
 /// Add a finalizer to a project (idempotent - won't add if already exists)
+#[cfg(any(feature = "k8s", feature = "aws"))]
 pub async fn add_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<()> {
     sqlx::query!(
         r#"
@@ -692,6 +695,7 @@ pub async fn add_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<(
 }
 
 /// Remove a finalizer from a project
+#[cfg(any(feature = "k8s", feature = "aws"))]
 pub async fn remove_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<()> {
     sqlx::query!(
         r#"
@@ -710,6 +714,7 @@ pub async fn remove_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Resul
 }
 
 /// Find projects in Deleting status that have a specific finalizer
+#[cfg(any(feature = "k8s", feature = "aws"))]
 pub async fn find_deleting_with_finalizer(
     pool: &PgPool,
     finalizer: &str,
@@ -759,6 +764,7 @@ pub async fn has_finalizers(pool: &PgPool, id: Uuid) -> Result<bool> {
 }
 
 /// List all active projects (not in Deleting or Terminated status)
+#[cfg(feature = "aws")]
 pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
     let projects = sqlx::query_as!(
         Project,

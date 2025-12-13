@@ -1,4 +1,6 @@
+#[cfg(feature = "docker")]
 use async_trait::async_trait;
+#[cfg(feature = "docker")]
 use std::sync::Arc;
 
 /// Provider for registry authentication credentials
@@ -6,6 +8,7 @@ use std::sync::Arc;
 /// This trait allows components like Docker controller and OciClient
 /// to fetch credentials without being tightly coupled to RegistryProvider
 /// or AppState.
+#[cfg(feature = "docker")]
 #[async_trait]
 pub trait CredentialsProvider: Send + Sync {
     /// Get credentials for a specific registry host
@@ -19,19 +22,23 @@ pub trait CredentialsProvider: Send + Sync {
 }
 
 /// Optional credentials provider wrapper
+#[cfg(feature = "docker")]
 pub type OptionalCredentialsProvider = Option<Arc<dyn CredentialsProvider>>;
 
 /// Adapter that wraps a RegistryProvider to implement CredentialsProvider
+#[cfg(feature = "docker")]
 pub struct RegistryCredentialsAdapter {
     provider: Arc<dyn super::RegistryProvider>,
 }
 
+#[cfg(feature = "docker")]
 impl RegistryCredentialsAdapter {
     pub fn new(provider: Arc<dyn super::RegistryProvider>) -> Self {
         Self { provider }
     }
 }
 
+#[cfg(feature = "docker")]
 #[async_trait]
 impl CredentialsProvider for RegistryCredentialsAdapter {
     async fn get_credentials(

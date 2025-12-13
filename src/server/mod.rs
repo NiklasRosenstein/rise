@@ -17,6 +17,7 @@ use anyhow::Result;
 use axum::{middleware, Router};
 use state::{AppState, ControllerState};
 use std::sync::Arc;
+#[cfg(any(feature = "docker", feature = "k8s", feature = "aws"))]
 use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
@@ -42,7 +43,9 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 
     let settings_clone = settings.clone();
     let handle = tokio::spawn(async move {
-        async fn run_controller(settings: settings::Settings, is_k8s: bool) -> Result<()> {
+        async fn run_controller(_settings: settings::Settings, is_k8s: bool) -> Result<()> {
+            #[cfg(any(feature = "docker", feature = "k8s", feature = "aws"))]
+            let settings = _settings;
             if is_k8s {
                 #[cfg(feature = "k8s")]
                 {

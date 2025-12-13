@@ -4,6 +4,7 @@ pub mod models;
 pub mod providers;
 pub mod routes;
 
+#[cfg(feature = "docker")]
 pub use credentials::{
     CredentialsProvider, OptionalCredentialsProvider, RegistryCredentialsAdapter,
 };

@@ -102,6 +102,7 @@ pub struct ControllerSettings {
 
     /// Interval in seconds for refreshing Kubernetes image pull secrets (default: 3600)
     #[serde(default = "default_secret_refresh_interval")]
+    #[allow(dead_code)]
     pub secret_refresh_interval_secs: u64,
 }
 
@@ -210,10 +211,12 @@ fn default_node_selector() -> std::collections::HashMap<String, String> {
 pub struct KubernetesSettings {
     /// Optional kubeconfig path (defaults to in-cluster or ~/.kube/config)
     #[serde(default)]
+    #[allow(dead_code)]
     pub kubeconfig: Option<String>,
 
     /// Ingress class to use (e.g., "nginx")
     #[serde(default = "default_ingress_class")]
+    #[allow(dead_code)]
     pub ingress_class: String,
 
     /// Ingress URL template for production (default) deployment group
@@ -236,12 +239,14 @@ pub struct KubernetesSettings {
     /// Example: "http://rise-backend.default.svc.cluster.local:3000"
     /// This is the URL Nginx will use internally within the cluster to validate authentication.
     /// For Minikube development, use "http://172.17.0.1:3000" (Docker bridge IP) to reach host.
+    #[allow(dead_code)]
     pub auth_backend_url: String,
 
     /// Public backend URL for browser redirects during authentication
     /// Example: "https://rise.dev"
     /// This must be the public URL where the backend is accessible via Ingress.
     /// The domain should share a parent with app domains for cookie sharing (see struct docs).
+    #[allow(dead_code)]
     pub auth_signin_url: String,
 
     /// Namespace format template for deployed applications
@@ -254,23 +259,27 @@ pub struct KubernetesSettings {
     /// Annotations to apply to all managed namespaces
     /// Example: {"company.com/team": "platform", "cost-center": "engineering"}
     #[serde(default)]
+    #[allow(dead_code)]
     pub namespace_annotations: std::collections::HashMap<String, String>,
 
     /// Ingress annotations to apply to all deployed application ingresses
     /// Example: {"cert-manager.io/cluster-issuer": "letsencrypt-prod"}
     #[serde(default)]
+    #[allow(dead_code)]
     pub ingress_annotations: std::collections::HashMap<String, String>,
 
     /// TLS secret name for ingress certificates
     /// If set, enables TLS on all ingresses with this secret
     /// Example: "rise-apps-tls" (secret must exist in each namespace)
     #[serde(default)]
+    #[allow(dead_code)]
     pub ingress_tls_secret_name: Option<String>,
 
     /// Node selector for pod placement (controls which nodes pods can run on)
     /// Default: {"kubernetes.io/arch": "amd64"}
     /// Example: {"kubernetes.io/arch": "amd64", "node-type": "compute"}
     #[serde(default = "default_node_selector")]
+    #[allow(dead_code)]
     pub node_selector: std::collections::HashMap<String, String>,
 }
 
@@ -279,19 +288,25 @@ pub struct KubernetesSettings {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum RegistrySettings {
     Ecr {
+        #[allow(dead_code)]
         region: String,
         account_id: String,
         /// Literal prefix for ECR repository names (e.g., "rise/" → repos named "rise/{project}")
         #[serde(default = "default_repo_prefix")]
+        #[allow(dead_code)]
         repo_prefix: String,
         /// IAM role ARN for push operations (assumed to generate scoped credentials)
+        #[allow(dead_code)]
         push_role_arn: String,
         /// Whether to automatically delete ECR repos when projects are deleted
         #[serde(default)]
+        #[allow(dead_code)]
         auto_remove: bool,
         #[serde(default)]
+        #[allow(dead_code)]
         access_key_id: Option<String>,
         #[serde(default)]
+        #[allow(dead_code)]
         secret_access_key: Option<String>,
     },
     #[serde(rename = "oci-client-auth", alias = "docker")]
@@ -316,14 +331,17 @@ pub enum EncryptionSettings {
     /// AWS KMS encryption
     #[serde(rename = "aws-kms")]
     AwsKms {
+        #[allow(dead_code)]
         region: String,
         /// KMS key ID or ARN
         key_id: String,
         /// Optional static credentials (development only)
         #[serde(default)]
+        #[allow(dead_code)]
         access_key_id: Option<String>,
         /// Optional static credentials (development only)
         #[serde(default)]
+        #[allow(dead_code)]
         secret_access_key: Option<String>,
     },
 }

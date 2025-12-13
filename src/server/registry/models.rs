@@ -30,6 +30,7 @@ pub struct GetRegistryCredsResponse {
 }
 
 /// Configuration for AWS ECR registry
+#[cfg(feature = "aws")]
 #[derive(Debug, Clone, Deserialize)]
 pub struct EcrConfig {
     /// AWS region (e.g., "us-east-1")
@@ -51,6 +52,7 @@ pub struct EcrConfig {
     pub auto_remove: bool,
 }
 
+#[cfg(feature = "aws")]
 fn default_repo_prefix() -> String {
     "rise/".to_string()
 }
