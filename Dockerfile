@@ -34,6 +34,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
 COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
+COPY static ./static
 COPY .sqlx ./.sqlx
 
 # Build the application with server features
