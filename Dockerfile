@@ -28,7 +28,7 @@ FROM chef AS builder
 COPY --from=planner /usr/src/recipe.json recipe.json
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    cargo chef cook --release --features server,aws,docker,k8s --recipe-path recipe.json
+    cargo chef cook --release --all-features --recipe-path recipe.json
 
 # Copy project files
 COPY Cargo.toml Cargo.lock ./
@@ -39,7 +39,7 @@ COPY .sqlx ./.sqlx
 # Build the application with server features
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/usr/local/cargo/git \
-    SQLX_OFFLINE=true cargo build --release --features server,aws,docker,k8s --bin rise && \
+    SQLX_OFFLINE=true cargo build --release --all-features --bin rise && \
     cp target/release/rise /usr/local/bin/rise
 
 # Stage 4: Create the final, smaller image (match builder's Debian version)
