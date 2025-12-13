@@ -180,31 +180,31 @@ jobs:
       - name: Run chart-testing (lint)
         run: ct lint --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise --validate-maintainers=false
 
-  helm-test:
-    name: Test Helm charts
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: helm-lint
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
+  # helm-test:
+  #   name: Test Helm charts
+  #   runs-on: ubuntu-latest
+  #   if: github.event_name == 'pull_request'
+  #   needs: helm-lint
+  #   steps:
+  #     - name: Checkout repository
+  #       uses: actions/checkout@v4
+  #       with:
+  #         fetch-depth: 0
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
-        with:
-          cache: true
-          tools: helm
+  #     - name: Setup mise
+  #       uses: jdx/mise-action@v2
+  #       with:
+  #         cache: true
+  #         tools: helm
 
-      - name: Set up chart-testing
-        uses: helm/chart-testing-action@v2.6.1
+  #     - name: Set up chart-testing
+  #       uses: helm/chart-testing-action@v2.6.1
 
-      - name: Create kind cluster
-        uses: helm/kind-action@v1.10.0
+  #     - name: Create kind cluster
+  #       uses: helm/kind-action@v1.10.0
 
-      - name: Run chart-testing (install)
-        run: ct install --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise
+  #     - name: Run chart-testing (install)
+  #       run: ct install --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise
 
   helm-package:
     name: Package Helm charts

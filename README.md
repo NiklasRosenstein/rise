@@ -79,7 +79,7 @@ rise deployment create my-app --image nginx:latest
 # Install the CLI and backend from crates.io
 # Note: SQLX_OFFLINE=true is required because the backend uses compile-time
 # verified SQL queries that need the query cache during compilation
-SQLX_OFFLINE=true cargo install rise-cli rise-backend
+SQLX_OFFLINE=true cargo install rise-deploy
 
 # Verify installation
 rise --version
