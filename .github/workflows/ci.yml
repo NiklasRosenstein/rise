@@ -21,6 +21,9 @@ env:
   IMAGE_NAME: niklasrosenstein/rise
   BUILDER_IMAGE_NAME: niklasrosenstein/rise-builder
 
+# NOTE: Rust toolchain version (1.91.1) must be kept in sync with mise.toml
+# See: https://github.com/jdx/mise-action/issues/215
+
 jobs:
   sqlx-check:
     name: Verify SQLX offline query data
@@ -29,11 +32,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.91.1"
+
       - name: Setup mise
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: rust cargo:sqlx-cli
+          tools: cargo:sqlx-cli
 
       - name: Check SQLX offline data is up to date
         run: mise run sqlx:check
@@ -45,11 +53,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: true
-          tools: rust
+          toolchain: "1.91.1"
+          components: rustfmt
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -69,11 +77,11 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: true
-          tools: rust
+          toolchain: "1.91.1"
+          components: clippy
 
       - name: Run Clippy (${{ matrix.features }})
         run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
@@ -101,11 +109,16 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: "1.91.1"
+
       - name: Setup mise
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: rust cargo:sqlx-cli
+          tools: cargo:sqlx-cli
 
       - name: Run database migrations
         run: |
@@ -134,11 +147,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: true
-          tools: rust
+          toolchain: "1.91.1"
 
       - name: Build all targets (${{ matrix.features }})
         run: cargo build --all-targets --features ${{ matrix.features }}
@@ -359,11 +371,10 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Setup mise
-        uses: jdx/mise-action@v2
+      - name: Set up Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          cache: true
-          tools: rust
+          toolchain: "1.91.1"
 
       - name: Verify version matches tag
         run: |
