@@ -247,3 +247,120 @@ pub struct DeploymentEnvVar {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// Custom domain model - represents custom domains for projects
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CustomDomain {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub domain_name: String,
+    pub cname_target: String,
+    pub verification_status: DomainVerificationStatus,
+    pub verified_at: Option<DateTime<Utc>>,
+    pub certificate_status: CertificateStatus,
+    pub certificate_issued_at: Option<DateTime<Utc>>,
+    pub certificate_expires_at: Option<DateTime<Utc>>,
+    pub certificate_pem: Option<String>,
+    pub certificate_key_pem: Option<String>,
+    pub acme_order_url: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Domain verification status enum
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text")]
+pub enum DomainVerificationStatus {
+    Pending,
+    Verified,
+    Failed,
+}
+
+impl std::fmt::Display for DomainVerificationStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DomainVerificationStatus::Pending => write!(f, "Pending"),
+            DomainVerificationStatus::Verified => write!(f, "Verified"),
+            DomainVerificationStatus::Failed => write!(f, "Failed"),
+        }
+    }
+}
+
+/// Certificate status enum
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text")]
+pub enum CertificateStatus {
+    None,
+    Pending,
+    Issued,
+    Failed,
+    Expired,
+}
+
+impl std::fmt::Display for CertificateStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CertificateStatus::None => write!(f, "None"),
+            CertificateStatus::Pending => write!(f, "Pending"),
+            CertificateStatus::Issued => write!(f, "Issued"),
+            CertificateStatus::Failed => write!(f, "Failed"),
+            CertificateStatus::Expired => write!(f, "Expired"),
+        }
+    }
+}
+
+/// ACME challenge model - represents DNS-01 challenges for domain verification
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct AcmeChallenge {
+    pub id: Uuid,
+    pub domain_id: Uuid,
+    pub challenge_type: ChallengeType,
+    pub record_name: String,
+    pub record_value: String,
+    pub status: ChallengeStatus,
+    pub authorization_url: Option<String>,
+    pub validated_at: Option<DateTime<Utc>>,
+    pub expires_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Challenge type enum
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text")]
+pub enum ChallengeType {
+    #[sqlx(rename = "dns-01")]
+    Dns01,
+    #[sqlx(rename = "http-01")]
+    Http01,
+}
+
+impl std::fmt::Display for ChallengeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChallengeType::Dns01 => write!(f, "dns-01"),
+            ChallengeType::Http01 => write!(f, "http-01"),
+        }
+    }
+}
+
+/// Challenge status enum
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "text")]
+pub enum ChallengeStatus {
+    Pending,
+    Valid,
+    Invalid,
+    Expired,
+}
+
+impl std::fmt::Display for ChallengeStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ChallengeStatus::Pending => write!(f, "Pending"),
+            ChallengeStatus::Valid => write!(f, "Valid"),
+            ChallengeStatus::Invalid => write!(f, "Invalid"),
+            ChallengeStatus::Expired => write!(f, "Expired"),
+        }
+    }
+}

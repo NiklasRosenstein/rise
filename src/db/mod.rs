@@ -1,3 +1,5 @@
+pub mod acme_challenges;
+pub mod custom_domains;
 pub mod deployments;
 pub mod env_vars;
 pub mod models;
