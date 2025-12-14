@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use instant_acme::{
-    Account, ChallengeType, Identifier, LetsEncrypt,
-    NewAccount, NewOrder, OrderStatus,
+    Account, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderStatus,
 };
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use std::sync::Arc;
@@ -39,7 +38,10 @@ impl AcmeService {
 
     /// Initialize ACME account or load existing one
     async fn init_account(&self) -> Result<Account> {
-        info!("Initializing ACME account with {}", self.settings.directory_url);
+        info!(
+            "Initializing ACME account with {}",
+            self.settings.directory_url
+        );
 
         // For production use, we should persist account credentials to database
         // For now, create a new account each time (Let's Encrypt allows this)
@@ -65,12 +67,16 @@ impl AcmeService {
     }
 
     /// Request a certificate for a domain using DNS-01 challenge with CNAME delegation
-    /// 
+    ///
     /// This implements CNAME delegation workflow:
     /// 1. User creates CNAME: _acme-challenge.example.com -> _acme-challenge-delegation.rise.dev
     /// 2. We create TXT record at _acme-challenge-delegation.rise.dev with the challenge value
     /// 3. ACME server validates by following the CNAME and checking the TXT record
-    pub async fn request_certificate(&self, domain_id: uuid::Uuid, domain_name: &str) -> Result<()> {
+    pub async fn request_certificate(
+        &self,
+        domain_id: uuid::Uuid,
+        domain_name: &str,
+    ) -> Result<()> {
         info!("Requesting certificate for domain: {}", domain_name);
 
         // Get the domain from database
@@ -98,7 +104,10 @@ impl AcmeService {
         let service = self.clone_for_background();
         let domain_name_owned = domain_name.to_string();
         tokio::spawn(async move {
-            if let Err(e) = service.issue_certificate_background(domain_id, domain_name_owned).await {
+            if let Err(e) = service
+                .issue_certificate_background(domain_id, domain_name_owned)
+                .await
+            {
                 error!("Failed to issue certificate for {}: {}", domain_id, e);
                 // Mark certificate as failed
                 let _ = custom_domains::update_certificate_status(
@@ -128,7 +137,11 @@ impl AcmeService {
     }
 
     /// Background task for certificate issuance
-    async fn issue_certificate_background(&self, domain_id: uuid::Uuid, domain_name: String) -> Result<()> {
+    async fn issue_certificate_background(
+        &self,
+        domain_id: uuid::Uuid,
+        domain_name: String,
+    ) -> Result<()> {
         info!("Starting certificate issuance for {}", domain_name);
 
         // Step 1: Initialize ACME account
@@ -146,9 +159,7 @@ impl AcmeService {
 
         // Step 3: Get authorizations and find DNS-01 challenge
         let authorizations = order.authorizations().await?;
-        let authorization = authorizations
-            .first()
-            .context("No authorizations found")?;
+        let authorization = authorizations.first().context("No authorizations found")?;
 
         let challenge = authorization
             .challenges
@@ -158,7 +169,10 @@ impl AcmeService {
 
         let challenge_token = order.key_authorization(challenge).dns_value();
 
-        info!("Got DNS-01 challenge for {}: {}", domain_name, challenge_token);
+        info!(
+            "Got DNS-01 challenge for {}: {}",
+            domain_name, challenge_token
+        );
 
         // Step 4: Determine TXT record name based on CNAME delegation setting
         let txt_record_name = if self.settings.cname_delegation {
@@ -190,14 +204,21 @@ impl AcmeService {
             .await
             .context("Failed to create TXT record")?;
 
-        info!("Created TXT record: {} = {}", txt_record_name, challenge_token);
+        info!(
+            "Created TXT record: {} = {}",
+            txt_record_name, challenge_token
+        );
 
         // Step 6: Wait for DNS propagation (30-60 seconds is typical)
         info!("Waiting for DNS propagation...");
         sleep(Duration::from_secs(45)).await;
 
         // Verify DNS record is reachable
-        if let Err(e) = self.dns_provider.verify_txt_record(&txt_record_name, &challenge_token).await {
+        if let Err(e) = self
+            .dns_provider
+            .verify_txt_record(&txt_record_name, &challenge_token)
+            .await
+        {
             warn!("TXT record verification failed, but continuing: {}", e);
         }
 
@@ -252,7 +273,10 @@ impl AcmeService {
 
             match state.status {
                 OrderStatus::Valid => {
-                    let pem = order.certificate().await?.context("Certificate not available")?;
+                    let pem = order
+                        .certificate()
+                        .await?
+                        .context("Certificate not available")?;
                     info!("Downloaded certificate");
                     break pem;
                 }
@@ -320,8 +344,9 @@ impl AcmeService {
             .context("Domain not found")?;
 
         info!("Renewing certificate for {}", domain.domain_name);
-        
+
         // Certificate renewal is the same as initial issuance
-        self.request_certificate(domain_id, &domain.domain_name).await
+        self.request_certificate(domain_id, &domain.domain_name)
+            .await
     }
 }

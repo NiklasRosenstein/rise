@@ -275,8 +275,11 @@ async fn run_ecr_controller_loop(settings: settings::Settings) -> Result<()> {
 /// - Updates verification status when CNAME is properly configured
 /// - No manual intervention required by users
 async fn run_domain_verification_loop(settings: settings::Settings) -> Result<()> {
-    let state = ControllerState::new(&settings.database.url, 2, settings.encryption.as_ref()).await?;
-    let verification_loop = Arc::new(domain::verification_loop::DomainVerificationLoop::new(Arc::new(state)));
+    let state =
+        ControllerState::new(&settings.database.url, 2, settings.encryption.as_ref()).await?;
+    let verification_loop = Arc::new(domain::verification_loop::DomainVerificationLoop::new(
+        Arc::new(state),
+    ));
     verification_loop.start();
     info!("Domain verification loop started");
 

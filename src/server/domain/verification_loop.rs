@@ -4,8 +4,8 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info};
 
-use crate::db::{custom_domains, projects as db_projects};
 use crate::db::models::DomainVerificationStatus;
+use crate::db::{custom_domains, projects as db_projects};
 use crate::server::state::ControllerState;
 
 /// Domain verification loop - automatically verifies pending domains
@@ -32,12 +32,15 @@ impl DomainVerificationLoop {
 
     /// Main loop - processes pending domains and verifies them
     async fn run(&self) {
-        info!("Domain verification loop started (interval: {:?})", self.check_interval);
+        info!(
+            "Domain verification loop started (interval: {:?})",
+            self.check_interval
+        );
         let mut ticker = interval(self.check_interval);
 
         loop {
             ticker.tick().await;
-            
+
             if let Err(e) = self.verify_pending_domains().await {
                 error!("Error in domain verification loop: {}", e);
             }
@@ -71,7 +74,10 @@ impl DomainVerificationLoop {
             return Ok(());
         }
 
-        info!("Found {} pending domain(s) to verify", pending_domains.len());
+        info!(
+            "Found {} pending domain(s) to verify",
+            pending_domains.len()
+        );
 
         for domain in pending_domains {
             match self.verify_single_domain(&domain).await {
@@ -79,7 +85,10 @@ impl DomainVerificationLoop {
                     if verified {
                         info!("✓ Domain {} verified successfully", domain.domain_name);
                     } else {
-                        debug!("✗ Domain {} verification failed, will retry", domain.domain_name);
+                        debug!(
+                            "✗ Domain {} verification failed, will retry",
+                            domain.domain_name
+                        );
                     }
                 }
                 Err(e) => {
@@ -118,12 +127,8 @@ impl DomainVerificationLoop {
         };
 
         // Update domain verification status
-        custom_domains::update_verification_status(
-            &self.state.db_pool,
-            domain.id,
-            new_status,
-        )
-        .await?;
+        custom_domains::update_verification_status(&self.state.db_pool, domain.id, new_status)
+            .await?;
 
         Ok(verification_result)
     }
@@ -164,7 +169,10 @@ async fn verify_cname_async(domain_name: &str, expected_target: &str) -> bool {
     let target_ips: Vec<_> = target_lookup.iter().collect();
 
     if domain_ips.is_empty() {
-        debug!("Domain '{}' does not resolve to any IP addresses", domain_name);
+        debug!(
+            "Domain '{}' does not resolve to any IP addresses",
+            domain_name
+        );
         return false;
     }
 

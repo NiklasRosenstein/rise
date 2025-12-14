@@ -3,16 +3,10 @@ use chrono::Utc;
 use sqlx::PgPool;
 use uuid::Uuid;
 
-use crate::db::models::{
-    CertificateStatus, CustomDomain, DomainVerificationStatus,
-};
+use crate::db::models::{CertificateStatus, CustomDomain, DomainVerificationStatus};
 
 /// Create a new custom domain
-pub async fn create(
-    pool: &PgPool,
-    project_id: Uuid,
-    domain_name: &str,
-) -> Result<CustomDomain> {
+pub async fn create(pool: &PgPool, project_id: Uuid, domain_name: &str) -> Result<CustomDomain> {
     let domain = sqlx::query_as!(
         CustomDomain,
         r#"

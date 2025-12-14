@@ -194,7 +194,10 @@ pub async fn delete_domain(
     project: &str,
     domain_name: &str,
 ) -> Result<()> {
-    let url = format!("{}/projects/{}/domains/{}", backend_url, project, domain_name);
+    let url = format!(
+        "{}/projects/{}/domains/{}",
+        backend_url, project, domain_name
+    );
 
     let response = http_client
         .delete(&url)
@@ -209,7 +212,11 @@ pub async fn delete_domain(
             .text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!("Failed to delete domain (status {}): {}", status, error_text);
+        anyhow::bail!(
+            "Failed to delete domain (status {}): {}",
+            status,
+            error_text
+        );
     }
 
     println!("✅ Domain '{}' deleted successfully", domain_name);
@@ -244,7 +251,11 @@ pub async fn verify_domain(
             .text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!("Failed to verify domain (status {}): {}", status, error_text);
+        anyhow::bail!(
+            "Failed to verify domain (status {}): {}",
+            status,
+            error_text
+        );
     }
 
     let verify_response: VerifyDomainResponse = response
@@ -287,45 +298,24 @@ pub async fn handle_domain_command(
     subcommand: DomainSubcommand,
 ) -> Result<()> {
     let http_client = Client::new();
-    let token = config.get_token().ok_or_else(|| {
-        anyhow::anyhow!("Not authenticated. Please run 'rise login' first")
-    })?;
+    let token = config
+        .get_token()
+        .ok_or_else(|| anyhow::anyhow!("Not authenticated. Please run 'rise login' first"))?;
 
     let backend_url = config.get_backend_url();
-    
+
     match subcommand {
         DomainSubcommand::Add { domain } => {
-            add_domain(
-                &http_client,
-                &backend_url,
-                &token,
-                project,
-                &domain,
-            )
-            .await?;
+            add_domain(&http_client, &backend_url, &token, project, &domain).await?;
         }
         DomainSubcommand::List => {
             list_domains(&http_client, &backend_url, &token, project).await?;
         }
         DomainSubcommand::Delete { domain } => {
-            delete_domain(
-                &http_client,
-                &backend_url,
-                &token,
-                project,
-                &domain,
-            )
-            .await?;
+            delete_domain(&http_client, &backend_url, &token, project, &domain).await?;
         }
         DomainSubcommand::Verify { domain } => {
-            verify_domain(
-                &http_client,
-                &backend_url,
-                &token,
-                project,
-                &domain,
-            )
-            .await?;
+            verify_domain(&http_client, &backend_url, &token, project, &domain).await?;
         }
     }
 

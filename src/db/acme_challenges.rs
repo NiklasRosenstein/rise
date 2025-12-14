@@ -93,10 +93,7 @@ pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<AcmeChallenge>>
 }
 
 /// Get the latest pending challenge for a domain
-pub async fn get_latest_pending(
-    pool: &PgPool,
-    domain_id: Uuid,
-) -> Result<Option<AcmeChallenge>> {
+pub async fn get_latest_pending(pool: &PgPool, domain_id: Uuid) -> Result<Option<AcmeChallenge>> {
     let challenge = sqlx::query_as!(
         AcmeChallenge,
         r#"
@@ -122,11 +119,7 @@ pub async fn get_latest_pending(
 }
 
 /// Update challenge status
-pub async fn update_status(
-    pool: &PgPool,
-    id: Uuid,
-    status: ChallengeStatus,
-) -> Result<()> {
+pub async fn update_status(pool: &PgPool, id: Uuid, status: ChallengeStatus) -> Result<()> {
     let validated_at = if status == ChallengeStatus::Valid {
         Some(Utc::now())
     } else {

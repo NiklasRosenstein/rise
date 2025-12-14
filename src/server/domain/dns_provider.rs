@@ -1,24 +1,24 @@
-use async_trait::async_trait;
 use anyhow::Result;
+use async_trait::async_trait;
 
 /// DNS provider trait for managing TXT records for ACME DNS-01 challenges
 #[async_trait]
 pub trait DnsProvider: Send + Sync {
     /// Create or update a TXT record for ACME DNS-01 challenge
-    /// 
+    ///
     /// # Arguments
     /// * `record_name` - The full DNS record name (e.g., "_acme-challenge.example.com")
     /// * `record_value` - The TXT record value from ACME challenge
     async fn create_txt_record(&self, record_name: &str, record_value: &str) -> Result<()>;
 
     /// Delete a TXT record
-    /// 
+    ///
     /// # Arguments
     /// * `record_name` - The full DNS record name to delete
     async fn delete_txt_record(&self, record_name: &str) -> Result<()>;
 
     /// Check if a TXT record exists and has the expected value
-    /// 
+    ///
     /// # Arguments
     /// * `record_name` - The full DNS record name
     /// * `expected_value` - The expected TXT record value
@@ -35,10 +35,7 @@ pub struct CloudflareDnsProvider {
 #[cfg(feature = "server")]
 impl CloudflareDnsProvider {
     pub fn new(api_token: String, zone_id: String) -> Self {
-        Self {
-            api_token,
-            zone_id,
-        }
+        Self { api_token, zone_id }
     }
 
     /// Get the Cloudflare API client
@@ -46,7 +43,7 @@ impl CloudflareDnsProvider {
         let credentials = cloudflare::framework::auth::Credentials::UserAuthToken {
             token: self.api_token.clone(),
         };
-        
+
         Ok(cloudflare::framework::client::async_api::Client::new(
             credentials,
             Default::default(),
@@ -60,7 +57,7 @@ impl CloudflareDnsProvider {
         // For CNAME delegation, we typically use the challenge subdomain
         // e.g., for example.com with CNAME at _acme-challenge.example.com,
         // we need to create TXT record at the delegated location
-        
+
         // If the record already starts with the challenge prefix, use it as-is
         if full_name.starts_with("_acme-challenge") {
             full_name.split('.').next().unwrap_or(full_name).to_string()
@@ -84,24 +81,28 @@ impl DnsProvider for CloudflareDnsProvider {
             content: DnsContent::TXT {
                 content: record_value.to_string(),
             },
-            ttl: Some(120), // Short TTL for challenges
+            ttl: Some(120),       // Short TTL for challenges
             proxied: Some(false), // Don't proxy TXT records
             priority: None,
         };
 
         let zone_identifier = &self.zone_id;
-        
-        client.request(&CreateDnsRecord {
-            zone_identifier,
-            params,
-        }).await?;
+
+        client
+            .request(&CreateDnsRecord {
+                zone_identifier,
+                params,
+            })
+            .await?;
 
         tracing::info!("Created TXT record {} = {}", name, record_value);
         Ok(())
     }
 
     async fn delete_txt_record(&self, record_name: &str) -> Result<()> {
-        use cloudflare::endpoints::dns::dns::{DeleteDnsRecord, ListDnsRecords, ListDnsRecordsParams, DnsContent};
+        use cloudflare::endpoints::dns::dns::{
+            DeleteDnsRecord, DnsContent, ListDnsRecords, ListDnsRecordsParams,
+        };
 
         let client = self.get_client()?;
         let name = self.extract_record_name(record_name);
@@ -111,24 +112,31 @@ impl DnsProvider for CloudflareDnsProvider {
         // First, list records to find the TXT record ID
         let list_params = ListDnsRecordsParams {
             name: Some(name.clone()),
-            record_type: Some(DnsContent::TXT {
-                content: String::new(),
-            }.into()),
+            record_type: Some(
+                DnsContent::TXT {
+                    content: String::new(),
+                }
+                .into(),
+            ),
             ..Default::default()
         };
 
-        let records = client.request(&ListDnsRecords {
-            zone_identifier,
-            params: list_params,
-        }).await?;
+        let records = client
+            .request(&ListDnsRecords {
+                zone_identifier,
+                params: list_params,
+            })
+            .await?;
 
         // Delete all matching TXT records
         for record in records.result {
             let record_identifier = &record.id;
-            client.request(&DeleteDnsRecord {
-                zone_identifier,
-                identifier: record_identifier,
-            }).await?;
+            client
+                .request(&DeleteDnsRecord {
+                    zone_identifier,
+                    identifier: record_identifier,
+                })
+                .await?;
             tracing::info!("Deleted TXT record {}", name);
         }
 
@@ -136,7 +144,7 @@ impl DnsProvider for CloudflareDnsProvider {
     }
 
     async fn verify_txt_record(&self, record_name: &str, expected_value: &str) -> Result<bool> {
-        use cloudflare::endpoints::dns::dns::{ListDnsRecords, ListDnsRecordsParams, DnsContent};
+        use cloudflare::endpoints::dns::dns::{DnsContent, ListDnsRecords, ListDnsRecordsParams};
 
         let client = self.get_client()?;
         let name = self.extract_record_name(record_name);
@@ -145,16 +153,21 @@ impl DnsProvider for CloudflareDnsProvider {
 
         let list_params = ListDnsRecordsParams {
             name: Some(name.clone()),
-            record_type: Some(DnsContent::TXT {
-                content: String::new(),
-            }.into()),
+            record_type: Some(
+                DnsContent::TXT {
+                    content: String::new(),
+                }
+                .into(),
+            ),
             ..Default::default()
         };
 
-        let records = client.request(&ListDnsRecords {
-            zone_identifier,
-            params: list_params,
-        }).await?;
+        let records = client
+            .request(&ListDnsRecords {
+                zone_identifier,
+                params: list_params,
+            })
+            .await?;
 
         // Check if any record matches the expected value
         for record in records.result {
@@ -171,7 +184,9 @@ impl DnsProvider for CloudflareDnsProvider {
 
 /// Create a DNS provider based on configuration
 #[cfg(feature = "server")]
-pub fn create_dns_provider(config: &crate::server::settings::DnsProviderConfig) -> Result<Box<dyn DnsProvider>> {
+pub fn create_dns_provider(
+    config: &crate::server::settings::DnsProviderConfig,
+) -> Result<Box<dyn DnsProvider>> {
     match config {
         crate::server::settings::DnsProviderConfig::Cloudflare { api_token, zone_id } => {
             Ok(Box::new(CloudflareDnsProvider::new(

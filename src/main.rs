@@ -804,14 +804,16 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Domain(domain_cmd) => {
-            let config = config::Config::load()
-                .context("Not logged in. Run 'rise login' first.")?;
+            let config =
+                config::Config::load().context("Not logged in. Run 'rise login' first.")?;
             match domain_cmd {
                 DomainCommands::Add { project, domain } => {
                     domain::handle_domain_command(
                         &config,
                         project,
-                        domain::DomainSubcommand::Add { domain: domain.clone() },
+                        domain::DomainSubcommand::Add {
+                            domain: domain.clone(),
+                        },
                     )
                     .await?;
                 }
@@ -823,7 +825,9 @@ async fn main() -> Result<()> {
                     domain::handle_domain_command(
                         &config,
                         project,
-                        domain::DomainSubcommand::Delete { domain: domain.clone() },
+                        domain::DomainSubcommand::Delete {
+                            domain: domain.clone(),
+                        },
                     )
                     .await?;
                 }
@@ -831,7 +835,9 @@ async fn main() -> Result<()> {
                     domain::handle_domain_command(
                         &config,
                         project,
-                        domain::DomainSubcommand::Verify { domain: domain.clone() },
+                        domain::DomainSubcommand::Verify {
+                            domain: domain.clone(),
+                        },
                     )
                     .await?;
                 }

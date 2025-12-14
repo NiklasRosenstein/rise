@@ -1,5 +1,5 @@
 use super::models::{
-    AddDomainRequest, AddDomainResponse, AcmeChallenge as ApiAcmeChallenge, CnameRecord,
+    AcmeChallenge as ApiAcmeChallenge, AddDomainRequest, AddDomainResponse, CnameRecord,
     CustomDomain as ApiCustomDomain, DomainSetupInstructions, VerificationResult,
     VerifyDomainResponse,
 };
@@ -48,7 +48,10 @@ pub async fn add_domain(
     // Validate domain name format
     let domain_name = payload.domain_name.trim().to_lowercase();
     if domain_name.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "Domain name is required".to_string()));
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Domain name is required".to_string(),
+        ));
     }
 
     // Basic domain validation (allow alphanumeric, dots, and hyphens)
@@ -460,8 +463,8 @@ pub async fn request_certificate(
     })?;
 
     // Create ACME service
-    let dns_provider = super::dns_provider::create_dns_provider(dns_provider_config)
-        .map_err(|e| {
+    let dns_provider =
+        super::dns_provider::create_dns_provider(dns_provider_config).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to create DNS provider: {}", e),
@@ -486,8 +489,15 @@ pub async fn request_certificate(
     let domain_id = domain.id;
     let domain_name_clone = domain_name.clone();
     tokio::spawn(async move {
-        if let Err(e) = acme_service.request_certificate(domain_id, &domain_name_clone).await {
-            tracing::error!("Failed to request certificate for {}: {}", domain_name_clone, e);
+        if let Err(e) = acme_service
+            .request_certificate(domain_id, &domain_name_clone)
+            .await
+        {
+            tracing::error!(
+                "Failed to request certificate for {}: {}",
+                domain_name_clone,
+                e
+            );
         }
     });
 
@@ -548,7 +558,10 @@ async fn verify_cname(domain_name: &str, expected_target: &str) -> VerificationR
     if domain_ips.is_empty() {
         return VerificationResult {
             success: false,
-            message: format!("Domain '{}' does not resolve to any IP addresses", domain_name),
+            message: format!(
+                "Domain '{}' does not resolve to any IP addresses",
+                domain_name
+            ),
             expected_value: Some(format!("{:?}", target_ips)),
             actual_value: Some("[]".to_string()),
         };

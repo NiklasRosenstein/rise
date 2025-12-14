@@ -974,11 +974,18 @@ impl KubernetesController {
 
         // Get verified custom domains for this project
         // Custom domains only apply to the default deployment group
-        let custom_domains = if deployment.deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
-            self.get_verified_custom_domains(project.id).await.unwrap_or_else(|e| {
-                warn!("Failed to fetch custom domains for project {}: {}", project.id, e);
-                vec![]
-            })
+        let custom_domains = if deployment.deployment_group
+            == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP
+        {
+            self.get_verified_custom_domains(project.id)
+                .await
+                .unwrap_or_else(|e| {
+                    warn!(
+                        "Failed to fetch custom domains for project {}: {}",
+                        project.id, e
+                    );
+                    vec![]
+                })
         } else {
             vec![]
         };
@@ -986,11 +993,15 @@ impl KubernetesController {
         // Build list of all hosts
         // Default host is always included
         let mut all_hosts = vec![url_components.host.clone()];
-        
+
         // Custom domains are only added for default group and never have path prefix
-        if deployment.deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+        if deployment.deployment_group
+            == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP
+        {
             for domain in &custom_domains {
-                if domain.verification_status == crate::db::models::DomainVerificationStatus::Verified {
+                if domain.verification_status
+                    == crate::db::models::DomainVerificationStatus::Verified
+                {
                     all_hosts.push(domain.domain_name.clone());
                 }
             }
@@ -1000,7 +1011,7 @@ impl KubernetesController {
         let tls = if !custom_domains.is_empty() {
             // Create TLS entries for each domain with issued certificates
             let mut tls_entries = Vec::new();
-            
+
             // Default domain TLS (if configured)
             if let Some(default_secret) = &self.ingress_tls_secret_name {
                 tls_entries.push(k8s_openapi::api::networking::v1::IngressTLS {
@@ -1008,7 +1019,7 @@ impl KubernetesController {
                     secret_name: Some(default_secret.clone()),
                 });
             }
-            
+
             // Custom domain TLS (from certificates stored in database)
             for domain in &custom_domains {
                 if domain.certificate_status == crate::db::models::CertificateStatus::Issued {
@@ -1020,7 +1031,7 @@ impl KubernetesController {
                     });
                 }
             }
-            
+
             if !tls_entries.is_empty() {
                 Some(tls_entries)
             } else {
@@ -1093,7 +1104,7 @@ impl KubernetesController {
             ..Default::default()
         }
     }
-    
+
     /// Get verified custom domains for a project
     async fn get_verified_custom_domains(
         &self,

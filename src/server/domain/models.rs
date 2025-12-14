@@ -17,9 +17,7 @@ impl From<crate::db::models::DomainVerificationStatus> for DomainVerificationSta
             crate::db::models::DomainVerificationStatus::Verified => {
                 DomainVerificationStatus::Verified
             }
-            crate::db::models::DomainVerificationStatus::Failed => {
-                DomainVerificationStatus::Failed
-            }
+            crate::db::models::DomainVerificationStatus::Failed => DomainVerificationStatus::Failed,
         }
     }
 }
@@ -67,10 +65,7 @@ pub struct CustomDomain {
 
 impl CustomDomain {
     /// Create from database model with computed CNAME target
-    pub fn from_db(
-        domain: crate::db::models::CustomDomain,
-        cname_target: String,
-    ) -> Self {
+    pub fn from_db(domain: crate::db::models::CustomDomain, cname_target: String) -> Self {
         CustomDomain {
             id: domain.id.to_string(),
             project_id: domain.project_id.to_string(),
@@ -88,7 +83,11 @@ impl CustomDomain {
 }
 
 /// Helper to compute CNAME target from project URL
-pub fn compute_cname_target(project_url: Option<&str>, project_name: &str, default_domain: &str) -> String {
+pub fn compute_cname_target(
+    project_url: Option<&str>,
+    project_name: &str,
+    default_domain: &str,
+) -> String {
     match project_url {
         Some(url) => {
             // Extract hostname from project_url (e.g., "https://myapp.rise.dev" -> "myapp.rise.dev")
