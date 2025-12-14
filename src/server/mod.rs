@@ -103,6 +103,16 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         controller_handles.push(handle);
     }
 
+    // Start domain verification loop (always enabled)
+    info!("Starting domain verification loop");
+    let settings_clone = settings.clone();
+    let handle = tokio::spawn(async move {
+        if let Err(e) = run_domain_verification_loop(settings_clone).await {
+            tracing::error!("Domain verification loop error: {}", e);
+        }
+    });
+    controller_handles.push(handle);
+
     // Public routes (no authentication)
     let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
@@ -255,6 +265,24 @@ async fn run_ecr_controller_loop(settings: settings::Settings) -> Result<()> {
     // Wait for shutdown signal
     shutdown_signal().await;
     info!("ECR controller shutdown complete");
+    Ok(())
+}
+
+/// Run the domain verification loop (for embedding in server process)
+///
+/// Automatically verifies pending custom domains:
+/// - Checks DNS configuration every 5 minutes
+/// - Updates verification status when CNAME is properly configured
+/// - No manual intervention required by users
+async fn run_domain_verification_loop(settings: settings::Settings) -> Result<()> {
+    let state = ControllerState::new(&settings.database.url, 2, settings.encryption.as_ref()).await?;
+    let verification_loop = Arc::new(domain::verification_loop::DomainVerificationLoop::new(Arc::new(state)));
+    verification_loop.start();
+    info!("Domain verification loop started");
+
+    // Wait for shutdown signal
+    shutdown_signal().await;
+    info!("Domain verification loop shutdown complete");
     Ok(())
 }
 

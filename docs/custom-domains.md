@@ -39,9 +39,17 @@ TTL:   3600 (or as appropriate)
 
 **Note**: DNS propagation can take anywhere from a few minutes to 48 hours depending on your DNS provider.
 
-### 3. Verify the Domain
+### 3. Wait for Automatic Verification
 
-Once DNS is configured and propagated, verify the domain:
+Rise automatically verifies pending domains every 5 minutes. Once your DNS configuration propagates, the domain will be automatically verified without any manual action.
+
+You can check the current status:
+
+```bash
+rise domain list my-project
+```
+
+**Optional Manual Verification**: If you want to verify immediately without waiting:
 
 ```bash
 rise domain verify my-project example.com
