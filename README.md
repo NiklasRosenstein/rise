@@ -116,7 +116,6 @@ Rise uses a multi-process architecture:
 | **Dex** | OAuth2/OIDC provider for authentication |
 
 
-
 ## Project Status
 
 **Production Ready**:
@@ -125,13 +124,13 @@ Rise uses a multi-process architecture:
 - ✅ Service accounts (workload identity for CI/CD)
 - ✅ AWS ECR integration with Terraform module
 - ✅ Docker controller with health monitoring
+- ✅ Kubernetes controller with Ingress authentication
+- ✅ Build integrations (Docker, Buildpacks, Railpack)
 - ✅ Embedded web frontend
 - ✅ Deployment rollback and expiration
 
 **In Development**:
-- 🚧 Kubernetes controller
-- 🚧 Additional registry providers
-- 🚧 Build integrations (buildpacks, nixpacks)
+- 🚧 Additional registry providers (GCR, ACR, GHCR)
 
 ## Contributing
 
