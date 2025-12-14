@@ -108,11 +108,11 @@ jobs:
 ```bash
 rise sa create <project> \
   --issuer <issuer-url> \
-  --claim aud=<unique-value> \
+  --claim aud=<value> \
   --claim <key>=<value>
 ```
 
-**Requirements**: Must specify `aud` claim (unique identifier) + at least one additional claim for authorization.
+**Requirements**: Must specify `aud` claim + at least one additional claim for authorization.
 
 ### Common Use Cases
 
@@ -169,8 +169,8 @@ rise sa delete <project> <service-account-id>
 
 ### Service Accounts
 
-- **"The 'aud' claim is required"**: Add `--claim aud=<unique-value>`
+- **"The 'aud' claim is required"**: Add `--claim aud=<value>`
 - **"At least one additional claim required"**: Add authorization claims (e.g., `project_path`)
-- **"Multiple service accounts matched"**: Make claims more specific, ensure unique `aud`
+- **"Multiple service accounts matched"**: Make claims more specific to avoid ambiguity
 - **"No service account matched"**: Check token claims (case-sensitive), verify issuer URL (no trailing slash), ensure ALL claims present
 - **"403 Forbidden"**: Service accounts can only deploy, not manage projects
