@@ -972,10 +972,13 @@ impl KubernetesController {
             ("/".to_string(), "Prefix")
         };
 
-        // Get verified custom domains for this project (placeholder)
+        // Get verified custom domains for this project
         // Custom domains only apply to the default deployment group
         let custom_domains = if deployment.deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
-            self.get_verified_custom_domains(project.id)
+            self.get_verified_custom_domains(project.id).await.unwrap_or_else(|e| {
+                warn!("Failed to fetch custom domains for project {}: {}", project.id, e);
+                vec![]
+            })
         } else {
             vec![]
         };
@@ -1092,12 +1095,24 @@ impl KubernetesController {
     }
     
     /// Get verified custom domains for a project
-    /// Returns an empty vector as placeholder - full implementation requires async context
-    fn get_verified_custom_domains(&self, _project_id: uuid::Uuid) -> Vec<crate::db::models::CustomDomain> {
-        // TODO: Implement async domain lookup during reconciliation
-        // This requires passing database pool through controller state
-        // and fetching domains before calling create_ingress
-        vec![]
+    async fn get_verified_custom_domains(
+        &self,
+        project_id: uuid::Uuid,
+    ) -> Result<Vec<crate::db::models::CustomDomain>> {
+        use crate::db::custom_domains;
+
+        // Fetch all domains for the project
+        let domains = custom_domains::list_by_project(&self.state.db_pool, project_id).await?;
+
+        // Filter to only verified domains
+        let verified_domains: Vec<_> = domains
+            .into_iter()
+            .filter(|d| {
+                d.verification_status == crate::db::models::DomainVerificationStatus::Verified
+            })
+            .collect();
+
+        Ok(verified_domains)
     }
 }
 
