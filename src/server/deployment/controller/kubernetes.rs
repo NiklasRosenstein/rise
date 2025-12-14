@@ -972,12 +972,8 @@ impl KubernetesController {
             ("/".to_string(), "Prefix")
         };
 
-        // Get verified custom domains for this project
-        let custom_domains = if let Ok(domains) = self.get_verified_custom_domains(project.id) {
-            domains
-        } else {
-            vec![]
-        };
+        // Get verified custom domains for this project (placeholder)
+        let custom_domains = self.get_verified_custom_domains(project.id);
 
         // Build list of all hosts (default + custom domains)
         let mut all_hosts = vec![url_components.host.clone()];
@@ -1074,14 +1070,12 @@ impl KubernetesController {
     }
     
     /// Get verified custom domains for a project
-    /// Returns an empty vector on error to allow graceful degradation
-    fn get_verified_custom_domains(&self, project_id: uuid::Uuid) -> Result<Vec<crate::db::models::CustomDomain>> {
-        // This is a synchronous call in an async context
-        // In a real implementation, we would need to make this async or cache the domains
-        // For now, we'll return an empty vector and log an error
-        // TODO: Make this async by passing domains through the reconcile context
-        warn!("Custom domain lookup not yet implemented in Kubernetes controller");
-        Ok(vec![])
+    /// Returns an empty vector as placeholder - full implementation requires async context
+    fn get_verified_custom_domains(&self, _project_id: uuid::Uuid) -> Vec<crate::db::models::CustomDomain> {
+        // TODO: Implement async domain lookup during reconciliation
+        // This requires passing database pool through controller state
+        // and fetching domains before calling create_ingress
+        vec![]
     }
 }
 

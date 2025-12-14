@@ -401,48 +401,67 @@ async fn verify_cname(domain_name: &str, expected_target: &str) -> VerificationR
         }
     };
 
-    // Lookup CNAME record
-    match resolver.lookup_ip(domain_name).await {
-        Ok(lookup) => {
-            // Check if any of the resolved IPs match the target
-            // For a CNAME, we need to check if the domain resolves to the same IPs as the target
-            let target_ips = match resolver.lookup_ip(expected_target).await {
-                Ok(ips) => ips,
-                Err(e) => {
-                    return VerificationResult {
-                        success: false,
-                        message: format!("Failed to resolve target '{}': {}", expected_target, e),
-                        expected_value: Some(expected_target.to_string()),
-                        actual_value: None,
-                    };
-                }
+    // Verify domain resolves to the same IPs as the target
+    // This works for both CNAME and A records
+    let domain_lookup = match resolver.lookup_ip(domain_name).await {
+        Ok(lookup) => lookup,
+        Err(e) => {
+            return VerificationResult {
+                success: false,
+                message: format!("DNS lookup failed for '{}': {}", domain_name, e),
+                expected_value: Some(expected_target.to_string()),
+                actual_value: None,
             };
-
-            // Compare IP addresses
-            let domain_ips: Vec<_> = lookup.iter().collect();
-            let target_ips_vec: Vec<_> = target_ips.iter().collect();
-
-            if domain_ips.iter().any(|ip| target_ips_vec.contains(ip)) {
-                VerificationResult {
-                    success: true,
-                    message: "CNAME verification successful".to_string(),
-                    expected_value: Some(expected_target.to_string()),
-                    actual_value: Some(format!("{:?}", domain_ips)),
-                }
-            } else {
-                VerificationResult {
-                    success: false,
-                    message: "CNAME record points to different target".to_string(),
-                    expected_value: Some(format!("{:?}", target_ips_vec)),
-                    actual_value: Some(format!("{:?}", domain_ips)),
-                }
-            }
         }
-        Err(e) => VerificationResult {
+    };
+
+    let target_lookup = match resolver.lookup_ip(expected_target).await {
+        Ok(ips) => ips,
+        Err(e) => {
+            return VerificationResult {
+                success: false,
+                message: format!("Failed to resolve target '{}': {}", expected_target, e),
+                expected_value: Some(expected_target.to_string()),
+                actual_value: None,
+            };
+        }
+    };
+
+    // Compare IP addresses - domain should resolve to same IPs as target
+    let domain_ips: Vec<_> = domain_lookup.iter().collect();
+    let target_ips: Vec<_> = target_lookup.iter().collect();
+
+    if domain_ips.is_empty() {
+        return VerificationResult {
             success: false,
-            message: format!("DNS lookup failed: {}", e),
-            expected_value: Some(expected_target.to_string()),
-            actual_value: None,
-        },
+            message: format!("Domain '{}' does not resolve to any IP addresses", domain_name),
+            expected_value: Some(format!("{:?}", target_ips)),
+            actual_value: Some("[]".to_string()),
+        };
+    }
+
+    // Check if at least one IP from domain matches target IPs
+    let has_matching_ip = domain_ips.iter().any(|ip| target_ips.contains(ip));
+
+    if has_matching_ip {
+        VerificationResult {
+            success: true,
+            message: format!(
+                "Domain verification successful - '{}' resolves to same IPs as '{}'",
+                domain_name, expected_target
+            ),
+            expected_value: Some(format!("{:?}", target_ips)),
+            actual_value: Some(format!("{:?}", domain_ips)),
+        }
+    } else {
+        VerificationResult {
+            success: false,
+            message: format!(
+                "Domain '{}' does not resolve to target '{}' - IP addresses don't match",
+                domain_name, expected_target
+            ),
+            expected_value: Some(format!("{:?}", target_ips)),
+            actual_value: Some(format!("{:?}", domain_ips)),
+        }
     }
 }
