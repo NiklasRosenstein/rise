@@ -15,6 +15,10 @@ pub struct Settings {
     pub kubernetes: Option<KubernetesSettings>,
     #[serde(default)]
     pub encryption: Option<EncryptionSettings>,
+    #[serde(default)]
+    pub acme: Option<AcmeSettings>,
+    #[serde(default)]
+    pub dns_provider: Option<DnsProviderConfig>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -587,4 +591,42 @@ mod tests {
         let result = Settings::substitute_env_vars_in_string("plain_value");
         assert_eq!(result, "plain_value");
     }
+}
+
+/// ACME settings for Let's Encrypt certificate issuance
+#[derive(Debug, Deserialize, Clone)]
+pub struct AcmeSettings {
+    /// ACME directory URL (Let's Encrypt production or staging)
+    /// Production: https://acme-v02.api.letsencrypt.org/directory
+    /// Staging: https://acme-staging-v02.api.letsencrypt.org/directory
+    pub directory_url: String,
+
+    /// Contact email for ACME account
+    pub contact_email: String,
+
+    /// Whether to use CNAME delegation for DNS-01 challenges
+    /// When true, expects CNAME records at _acme-challenge.<domain> pointing to a delegation target
+    #[serde(default = "default_cname_delegation")]
+    pub cname_delegation: bool,
+
+    /// ACME account private key (PEM format, base64 encoded)
+    /// If not provided, a new account will be created and the key should be saved
+    #[serde(default)]
+    pub account_key: Option<String>,
+}
+
+fn default_cname_delegation() -> bool {
+    true
+}
+
+/// DNS provider configuration for ACME DNS-01 challenges
+#[derive(Debug, Deserialize, Clone)]
+#[serde(tag = "provider", rename_all = "lowercase")]
+pub enum DnsProviderConfig {
+    Cloudflare {
+        /// Cloudflare API token with DNS edit permissions
+        api_token: String,
+        /// Cloudflare Zone ID for the domain
+        zone_id: String,
+    },
 }

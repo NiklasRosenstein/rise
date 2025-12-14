@@ -384,6 +384,113 @@ pub async fn get_challenges(
     Ok(Json(api_challenges))
 }
 
+/// Request a certificate for a custom domain using ACME DNS-01 challenge
+pub async fn request_certificate(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((project_id_or_name, domain_name)): Path<(String, String)>,
+    Query(params): Query<GetProjectParams>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    // Resolve project by ID or name
+    let project = resolve_project(&state, &project_id_or_name, params.by_id)
+        .await
+        .map_err(|(status, json_err)| (status, json_err.error.clone()))?;
+
+    // Check write permission
+    let can_write = check_write_permission(&state, &project, &user)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to check permissions: {}", e),
+            )
+        })?;
+
+    if !can_write {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "You do not have permission to request certificates for this project".to_string(),
+        ));
+    }
+
+    info!(
+        "Requesting certificate for domain '{}' in project '{}' (user: {})",
+        domain_name, project.name, user.email
+    );
+
+    // Get domain to verify it belongs to this project
+    let domain = custom_domains::get_by_domain_name(&state.db_pool, &domain_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get domain: {}", e),
+            )
+        })?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, "Domain not found".to_string()))?;
+
+    // Verify domain belongs to this project
+    if domain.project_id != project.id {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Domain does not belong to this project".to_string(),
+        ));
+    }
+
+    // Check if ACME service is configured
+    let acme_settings = state.settings.acme.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "ACME is not configured on this server".to_string(),
+        )
+    })?;
+
+    let dns_provider_config = state.settings.dns_provider.as_ref().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "DNS provider is not configured on this server".to_string(),
+        )
+    })?;
+
+    // Create ACME service
+    let dns_provider = super::dns_provider::create_dns_provider(dns_provider_config)
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create DNS provider: {}", e),
+            )
+        })?;
+
+    let encryption_provider = state.encryption_provider.clone().ok_or_else(|| {
+        (
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Encryption provider is not configured on this server".to_string(),
+        )
+    })?;
+
+    let acme_service = super::acme_service::AcmeService::new(
+        acme_settings.clone(),
+        dns_provider.into(),
+        encryption_provider,
+        state.db_pool.clone(),
+    );
+
+    // Spawn certificate request in background
+    let domain_id = domain.id;
+    let domain_name_clone = domain_name.clone();
+    tokio::spawn(async move {
+        if let Err(e) = acme_service.request_certificate(domain_id, &domain_name_clone).await {
+            tracing::error!("Failed to request certificate for {}: {}", domain_name_clone, e);
+        }
+    });
+
+    Ok(Json(serde_json::json!({
+        "message": "Certificate request initiated",
+        "domain": domain_name,
+        "status": "pending"
+    })))
+}
+
 /// Verify CNAME record using DNS lookup
 async fn verify_cname(domain_name: &str, expected_target: &str) -> VerificationResult {
     use trust_dns_resolver::TokioAsyncResolver;

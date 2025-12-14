@@ -39,6 +39,8 @@ server = [
     "dep:mime_guess",
     "dep:tera",
     "dep:trust-dns-resolver",
+    "dep:acme2",
+    "dep:cloudflare",
 ]
 aws = [
     "server",  # AWS features require server
@@ -131,3 +133,9 @@ rustls = { version = "0.23", features = ["ring"], optional = true }
 
 # DNS resolution for domain verification
 trust-dns-resolver = { version = "0.23", optional = true }
+
+# ACME client for Let's Encrypt certificate issuance
+acme2 = { version = "0.5", optional = true }
+
+# Cloudflare API for DNS-01 challenge
+cloudflare = { version = "0.14", optional = true }

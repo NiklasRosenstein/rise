@@ -44,6 +44,7 @@ pub struct AppState {
     pub cookie_settings: CookieSettings,
     pub public_url: String,
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
+    pub settings: Arc<Settings>,
 }
 
 /// Initialize encryption provider from settings
@@ -350,6 +351,7 @@ impl AppState {
             cookie_settings,
             public_url,
             encryption_provider,
+            settings: Arc::new(settings.clone()),
         })
     }
 
@@ -501,6 +503,7 @@ impl AppState {
             cookie_settings,
             public_url,
             encryption_provider,
+            settings: Arc::new(settings.clone()),
         })
     }
 }

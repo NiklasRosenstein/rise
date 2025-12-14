@@ -28,4 +28,8 @@ pub fn domain_routes() -> Router<AppState> {
             "/projects/{project_id_or_name}/domains/{domain_name}/challenges",
             get(handlers::get_challenges),
         )
+        .route(
+            "/projects/{project_id_or_name}/domains/{domain_name}/certificate",
+            post(handlers::request_certificate),
+        )
 }

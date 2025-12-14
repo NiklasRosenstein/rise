@@ -281,6 +281,9 @@ pub async fn get_project(
 
     // Check if we should expand owner information
     if params.should_expand("owner") {
+        let project_id = project.id;
+        let project_for_urls = project.clone();
+        
         let mut expanded = expand_project_with_owner(&state, project)
             .await
             .map_err(|e| {
@@ -296,17 +299,19 @@ pub async fn get_project(
         expanded.deployment_url = deployment_url;
         
         // Get preferred project URL (custom domain or default)
-        let preferred_urls = get_preferred_project_urls_batch(&state.db_pool, &[project.id], &[project.clone()]).await;
-        expanded.project_url = preferred_urls.get(&project.id).and_then(|u| u.clone()).or(expanded.project_url);
+        let preferred_urls = get_preferred_project_urls_batch(&state.db_pool, &[project_id], &[project_for_urls]).await;
+        expanded.project_url = preferred_urls.get(&project_id).and_then(|u| u.clone()).or(expanded.project_url);
         
         Ok(Json(serde_json::to_value(expanded).unwrap()))
     } else {
-        let mut api_project = convert_project(project.clone());
+        let project_id = project.id;
+        let project_for_urls = project.clone();
+        let mut api_project = convert_project(project);
         api_project.deployment_url = deployment_url;
 
         // Get preferred project URL (custom domain or default)
-        let preferred_urls = get_preferred_project_urls_batch(&state.db_pool, &[project.id], &[project]).await;
-        api_project.project_url = preferred_urls.get(&project.id).and_then(|u| u.clone()).or(api_project.project_url);
+        let preferred_urls = get_preferred_project_urls_batch(&state.db_pool, &[project_id], &[project_for_urls]).await;
+        api_project.project_url = preferred_urls.get(&project_id).and_then(|u| u.clone()).or(api_project.project_url);
 
         // Get active deployment groups
         let deployment_groups =
