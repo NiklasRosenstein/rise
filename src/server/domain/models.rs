@@ -65,13 +65,17 @@ pub struct CustomDomain {
     pub updated: String,
 }
 
-impl From<crate::db::models::CustomDomain> for CustomDomain {
-    fn from(domain: crate::db::models::CustomDomain) -> Self {
+impl CustomDomain {
+    /// Create from database model with computed CNAME target
+    pub fn from_db(
+        domain: crate::db::models::CustomDomain,
+        cname_target: String,
+    ) -> Self {
         CustomDomain {
             id: domain.id.to_string(),
             project_id: domain.project_id.to_string(),
             domain_name: domain.domain_name,
-            cname_target: domain.cname_target,
+            cname_target,
             verification_status: DomainVerificationStatus::from(domain.verification_status),
             verified_at: domain.verified_at.map(|dt| dt.to_rfc3339()),
             certificate_status: CertificateStatus::from(domain.certificate_status),
@@ -79,6 +83,25 @@ impl From<crate::db::models::CustomDomain> for CustomDomain {
             certificate_expires_at: domain.certificate_expires_at.map(|dt| dt.to_rfc3339()),
             created: domain.created_at.to_rfc3339(),
             updated: domain.updated_at.to_rfc3339(),
+        }
+    }
+}
+
+/// Helper to compute CNAME target from project URL
+pub fn compute_cname_target(project_url: Option<&str>, project_name: &str, default_domain: &str) -> String {
+    match project_url {
+        Some(url) => {
+            // Extract hostname from project_url (e.g., "https://myapp.rise.dev" -> "myapp.rise.dev")
+            url.trim_start_matches("http://")
+                .trim_start_matches("https://")
+                .split('/')
+                .next()
+                .unwrap_or(project_name)
+                .to_string()
+        }
+        None => {
+            // Fall back to project name + default domain
+            format!("{}.{}", project_name, default_domain)
         }
     }
 }

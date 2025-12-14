@@ -12,18 +12,17 @@ pub async fn create(
     pool: &PgPool,
     project_id: Uuid,
     domain_name: &str,
-    cname_target: &str,
 ) -> Result<CustomDomain> {
     let domain = sqlx::query_as!(
         CustomDomain,
         r#"
         INSERT INTO custom_domains (
-            project_id, domain_name, cname_target,
+            project_id, domain_name,
             verification_status, certificate_status
         )
-        VALUES ($1, $2, $3, $4, $5)
+        VALUES ($1, $2, $3, $4)
         RETURNING
-            id, project_id, domain_name, cname_target,
+            id, project_id, domain_name,
             verification_status as "verification_status: DomainVerificationStatus",
             verified_at,
             certificate_status as "certificate_status: CertificateStatus",
@@ -33,7 +32,6 @@ pub async fn create(
         "#,
         project_id,
         domain_name,
-        cname_target,
         DomainVerificationStatus::Pending as DomainVerificationStatus,
         CertificateStatus::None as CertificateStatus,
     )
@@ -49,7 +47,7 @@ pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Cust
         CustomDomain,
         r#"
         SELECT
-            id, project_id, domain_name, cname_target,
+            id, project_id, domain_name,
             verification_status as "verification_status: DomainVerificationStatus",
             verified_at,
             certificate_status as "certificate_status: CertificateStatus",
@@ -74,7 +72,7 @@ pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<CustomDomain>> 
         CustomDomain,
         r#"
         SELECT
-            id, project_id, domain_name, cname_target,
+            id, project_id, domain_name,
             verification_status as "verification_status: DomainVerificationStatus",
             verified_at,
             certificate_status as "certificate_status: CertificateStatus",
@@ -98,7 +96,7 @@ pub async fn get_by_domain_name(pool: &PgPool, domain_name: &str) -> Result<Opti
         CustomDomain,
         r#"
         SELECT
-            id, project_id, domain_name, cname_target,
+            id, project_id, domain_name,
             verification_status as "verification_status: DomainVerificationStatus",
             verified_at,
             certificate_status as "certificate_status: CertificateStatus",
@@ -224,7 +222,7 @@ pub async fn list_expiring_certificates(pool: &PgPool) -> Result<Vec<CustomDomai
         CustomDomain,
         r#"
         SELECT
-            id, project_id, domain_name, cname_target,
+            id, project_id, domain_name,
             verification_status as "verification_status: DomainVerificationStatus",
             verified_at,
             certificate_status as "certificate_status: CertificateStatus",

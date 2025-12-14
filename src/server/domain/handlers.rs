@@ -62,30 +62,13 @@ pub async fn add_domain(
         ));
     }
 
-    // Determine CNAME target based on project URL
-    let cname_target = match &project.project_url {
-        Some(url) => {
-            // Extract hostname from project_url (e.g., "https://myapp.rise.dev" -> "myapp.rise.dev")
-            url.trim_start_matches("http://")
-                .trim_start_matches("https://")
-                .split('/')
-                .next()
-                .unwrap_or(&project.name)
-                .to_string()
-        }
-        None => {
-            // Fall back to project name + default domain (this is a placeholder)
-            format!("{}.rise.dev", project.name)
-        }
-    };
-
     info!(
         "Adding custom domain '{}' to project '{}' (user: {})",
         domain_name, project.name, user.email
     );
 
-    // Create domain in database
-    let domain = custom_domains::create(&state.db_pool, project.id, &domain_name, &cname_target)
+    // Create domain in database (CNAME target is computed dynamically, not stored)
+    let domain = custom_domains::create(&state.db_pool, project.id, &domain_name)
         .await
         .map_err(|e| {
             if e.to_string().contains("duplicate key")
@@ -103,7 +86,14 @@ pub async fn add_domain(
             }
         })?;
 
-    let api_domain = ApiCustomDomain::from(domain);
+    // Compute CNAME target dynamically
+    let cname_target = super::models::compute_cname_target(
+        project.project_url.as_deref(),
+        &project.name,
+        "rise.dev", // TODO: Make this configurable
+    );
+
+    let api_domain = ApiCustomDomain::from_db(domain, cname_target.clone());
 
     let instructions = DomainSetupInstructions {
         cname_record: CnameRecord {
@@ -161,7 +151,17 @@ pub async fn list_domains(
             )
         })?;
 
-    let api_domains: Vec<ApiCustomDomain> = domains.into_iter().map(ApiCustomDomain::from).collect();
+    // Compute CNAME target dynamically for each domain
+    let cname_target = super::models::compute_cname_target(
+        project.project_url.as_deref(),
+        &project.name,
+        "rise.dev", // TODO: Make this configurable
+    );
+
+    let api_domains: Vec<ApiCustomDomain> = domains
+        .into_iter()
+        .map(|d| ApiCustomDomain::from_db(d, cname_target.clone()))
+        .collect();
 
     Ok(Json(api_domains))
 }
@@ -285,8 +285,15 @@ pub async fn verify_domain(
         ));
     }
 
+    // Compute CNAME target dynamically for verification
+    let cname_target = super::models::compute_cname_target(
+        project.project_url.as_deref(),
+        &project.name,
+        "rise.dev", // TODO: Make this configurable
+    );
+
     // Perform DNS lookup to verify CNAME
-    let verification_result = verify_cname(&domain_name, &domain.cname_target).await;
+    let verification_result = verify_cname(&domain_name, &cname_target).await;
 
     // Update domain verification status
     let new_status = if verification_result.success {
@@ -316,7 +323,7 @@ pub async fn verify_domain(
         .ok_or_else(|| (StatusCode::NOT_FOUND, "Domain not found".to_string()))?;
 
     Ok(Json(VerifyDomainResponse {
-        domain: ApiCustomDomain::from(updated_domain),
+        domain: ApiCustomDomain::from_db(updated_domain, cname_target),
         verification_result,
     }))
 }

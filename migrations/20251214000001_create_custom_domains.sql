@@ -4,8 +4,6 @@ CREATE TABLE custom_domains (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     project_id UUID NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
     domain_name TEXT NOT NULL UNIQUE CHECK (domain_name ~ '^[a-zA-Z0-9]([a-zA-Z0-9\.\-]*[a-zA-Z0-9])?$'),
-    -- CNAME target that the user needs to configure (e.g., "my-project.rise.dev")
-    cname_target TEXT NOT NULL,
     -- Verification status
     verification_status TEXT NOT NULL CHECK (verification_status IN ('Pending', 'Verified', 'Failed')),
     verified_at TIMESTAMPTZ,
