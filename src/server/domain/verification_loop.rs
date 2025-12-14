@@ -94,7 +94,7 @@ impl DomainVerificationLoop {
     /// Verify a single domain
     async fn verify_single_domain(&self, domain: &crate::db::models::CustomDomain) -> Result<bool> {
         // Get the project to compute CNAME target
-        let project = db_projects::get_by_id(&self.state.db_pool, domain.project_id)
+        let project = db_projects::find_by_id(&self.state.db_pool, domain.project_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Project not found for domain"))?;
 

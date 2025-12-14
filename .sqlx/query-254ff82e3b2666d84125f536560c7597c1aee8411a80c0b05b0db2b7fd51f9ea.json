@@ -1,0 +1,19 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE custom_domains\n        SET certificate_status = $1,\n            certificate_issued_at = $2,\n            certificate_expires_at = $3,\n            certificate_pem = $4,\n            certificate_key_pem = $5\n        WHERE id = $6\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Timestamptz",
+        "Text",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "254ff82e3b2666d84125f536560c7597c1aee8411a80c0b05b0db2b7fd51f9ea"
+}

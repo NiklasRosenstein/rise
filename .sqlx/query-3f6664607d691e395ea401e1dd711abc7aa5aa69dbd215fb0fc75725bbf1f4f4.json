@@ -1,0 +1,88 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO acme_challenges (\n            domain_id, challenge_type, record_name, record_value,\n            status, authorization_url, expires_at\n        )\n        VALUES ($1, $2, $3, $4, $5, $6, $7)\n        RETURNING\n            id, domain_id,\n            challenge_type as \"challenge_type: ChallengeType\",\n            record_name, record_value,\n            status as \"status: ChallengeStatus\",\n            authorization_url, validated_at, expires_at,\n            created_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "domain_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "challenge_type: ChallengeType",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "record_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "record_value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status: ChallengeStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "authorization_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "validated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "3f6664607d691e395ea401e1dd711abc7aa5aa69dbd215fb0fc75725bbf1f4f4"
+}

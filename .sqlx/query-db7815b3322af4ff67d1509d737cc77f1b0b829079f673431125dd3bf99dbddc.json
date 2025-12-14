@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        DELETE FROM acme_challenges\n        WHERE domain_id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "db7815b3322af4ff67d1509d737cc77f1b0b829079f673431125dd3bf99dbddc"
+}

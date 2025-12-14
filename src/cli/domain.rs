@@ -291,11 +291,13 @@ pub async fn handle_domain_command(
         anyhow::anyhow!("Not authenticated. Please run 'rise login' first")
     })?;
 
+    let backend_url = config.get_backend_url();
+    
     match subcommand {
         DomainSubcommand::Add { domain } => {
             add_domain(
                 &http_client,
-                &config.backend_url,
+                &backend_url,
                 &token,
                 project,
                 &domain,
@@ -303,12 +305,12 @@ pub async fn handle_domain_command(
             .await?;
         }
         DomainSubcommand::List => {
-            list_domains(&http_client, &config.backend_url, &token, project).await?;
+            list_domains(&http_client, &backend_url, &token, project).await?;
         }
         DomainSubcommand::Delete { domain } => {
             delete_domain(
                 &http_client,
-                &config.backend_url,
+                &backend_url,
                 &token,
                 project,
                 &domain,
@@ -318,7 +320,7 @@ pub async fn handle_domain_command(
         DomainSubcommand::Verify { domain } => {
             verify_domain(
                 &http_client,
-                &config.backend_url,
+                &backend_url,
                 &token,
                 project,
                 &domain,

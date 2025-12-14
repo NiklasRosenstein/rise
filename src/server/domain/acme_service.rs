@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use base64::{engine::general_purpose, Engine as _};
 use instant_acme::{
     Account, ChallengeType, Identifier, LetsEncrypt,
     NewAccount, NewOrder, OrderStatus,
@@ -277,10 +276,9 @@ impl AcmeService {
         // Step 12: Encrypt private key
         let encrypted_key = self
             .encryption_provider
-            .encrypt(private_key_pem.as_bytes())
+            .encrypt(&private_key_pem)
             .await
             .context("Failed to encrypt private key")?;
-        let encrypted_key_b64 = general_purpose::STANDARD.encode(&encrypted_key);
 
         info!("Certificate issued successfully for {}", domain_name);
 
@@ -293,7 +291,7 @@ impl AcmeService {
             domain_id,
             crate::db::models::CertificateStatus::Issued,
             Some(cert_chain_pem.as_str()),
-            Some(encrypted_key_b64.as_str()),
+            Some(encrypted_key.as_str()),
             Some(expires_at),
         )
         .await?;

@@ -42,12 +42,12 @@ impl CloudflareDnsProvider {
     }
 
     /// Get the Cloudflare API client
-    fn get_client(&self) -> Result<cloudflare::framework::async_api::Client> {
+    fn get_client(&self) -> Result<cloudflare::framework::client::async_api::Client> {
         let credentials = cloudflare::framework::auth::Credentials::UserAuthToken {
             token: self.api_token.clone(),
         };
         
-        Ok(cloudflare::framework::async_api::Client::new(
+        Ok(cloudflare::framework::client::async_api::Client::new(
             credentials,
             Default::default(),
             cloudflare::framework::Environment::Production,
@@ -74,8 +74,7 @@ impl CloudflareDnsProvider {
 #[async_trait]
 impl DnsProvider for CloudflareDnsProvider {
     async fn create_txt_record(&self, record_name: &str, record_value: &str) -> Result<()> {
-        use cloudflare::endpoints::dns::{CreateDnsRecord, CreateDnsRecordParams, DnsContent};
-        use cloudflare::framework::async_api::ApiClient;
+        use cloudflare::endpoints::dns::dns::{CreateDnsRecord, CreateDnsRecordParams, DnsContent};
 
         let client = self.get_client()?;
         let name = self.extract_record_name(record_name);
@@ -90,7 +89,7 @@ impl DnsProvider for CloudflareDnsProvider {
             priority: None,
         };
 
-        let zone_identifier = &cloudflare::framework::async_api::ApiClient::zone_identifier(&self.zone_id);
+        let zone_identifier = &self.zone_id;
         
         client.request(&CreateDnsRecord {
             zone_identifier,
@@ -102,18 +101,17 @@ impl DnsProvider for CloudflareDnsProvider {
     }
 
     async fn delete_txt_record(&self, record_name: &str) -> Result<()> {
-        use cloudflare::endpoints::dns::{DeleteDnsRecord, ListDnsRecords, ListDnsRecordsParams};
-        use cloudflare::framework::async_api::ApiClient;
+        use cloudflare::endpoints::dns::dns::{DeleteDnsRecord, ListDnsRecords, ListDnsRecordsParams, DnsContent};
 
         let client = self.get_client()?;
         let name = self.extract_record_name(record_name);
 
-        let zone_identifier = &cloudflare::framework::async_api::ApiClient::zone_identifier(&self.zone_id);
+        let zone_identifier = &self.zone_id;
 
         // First, list records to find the TXT record ID
         let list_params = ListDnsRecordsParams {
             name: Some(name.clone()),
-            record_type: Some(cloudflare::endpoints::dns::DnsContent::TXT {
+            record_type: Some(DnsContent::TXT {
                 content: String::new(),
             }.into()),
             ..Default::default()
@@ -126,9 +124,10 @@ impl DnsProvider for CloudflareDnsProvider {
 
         // Delete all matching TXT records
         for record in records.result {
+            let record_identifier = &record.id;
             client.request(&DeleteDnsRecord {
                 zone_identifier,
-                identifier: &record.id,
+                identifier: record_identifier,
             }).await?;
             tracing::info!("Deleted TXT record {}", name);
         }
@@ -137,13 +136,12 @@ impl DnsProvider for CloudflareDnsProvider {
     }
 
     async fn verify_txt_record(&self, record_name: &str, expected_value: &str) -> Result<bool> {
-        use cloudflare::endpoints::dns::{ListDnsRecords, ListDnsRecordsParams, DnsContent};
-        use cloudflare::framework::async_api::ApiClient;
+        use cloudflare::endpoints::dns::dns::{ListDnsRecords, ListDnsRecordsParams, DnsContent};
 
         let client = self.get_client()?;
         let name = self.extract_record_name(record_name);
 
-        let zone_identifier = &cloudflare::framework::async_api::ApiClient::zone_identifier(&self.zone_id);
+        let zone_identifier = &self.zone_id;
 
         let list_params = ListDnsRecordsParams {
             name: Some(name.clone()),

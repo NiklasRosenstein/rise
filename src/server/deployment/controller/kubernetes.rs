@@ -907,7 +907,7 @@ impl KubernetesController {
     }
 
     /// Create or update Ingress resource
-    fn create_ingress(
+    async fn create_ingress(
         &self,
         project: &Project,
         deployment: &Deployment,
@@ -1544,7 +1544,7 @@ impl DeploymentBackend for KubernetesController {
                     let ingress_api: Api<Ingress> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
-                    let ingress = self.create_ingress(project, deployment, &metadata);
+                    let ingress = self.create_ingress(project, deployment, &metadata).await;
 
                     // Use server-side apply with force for idempotent ingress updates
                     let patch_params = PatchParams::apply("rise").force();
@@ -1659,7 +1659,7 @@ impl DeploymentBackend for KubernetesController {
                     let ingress_name = Self::ingress_name(project, deployment);
                     let ingress_api: Api<Ingress> =
                         Api::namespaced(self.kube_client.clone(), namespace);
-                    let ingress = self.create_ingress(project, deployment, &metadata);
+                    let ingress = self.create_ingress(project, deployment, &metadata).await;
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&ingress);
                     ingress_api

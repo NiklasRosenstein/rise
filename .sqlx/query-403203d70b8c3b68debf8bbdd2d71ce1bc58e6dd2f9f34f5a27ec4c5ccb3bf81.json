@@ -1,0 +1,82 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id, domain_id,\n            challenge_type as \"challenge_type: ChallengeType\",\n            record_name, record_value,\n            status as \"status: ChallengeStatus\",\n            authorization_url, validated_at, expires_at,\n            created_at, updated_at\n        FROM acme_challenges\n        WHERE domain_id = $1\n        ORDER BY created_at DESC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "domain_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "challenge_type: ChallengeType",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "record_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "record_value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 5,
+        "name": "status: ChallengeStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "authorization_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "validated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 10,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "403203d70b8c3b68debf8bbdd2d71ce1bc58e6dd2f9f34f5a27ec4c5ccb3bf81"
+}

@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE custom_domains\n        SET verification_status = $1, verified_at = $2\n        WHERE id = $3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "f31bdeaf4437ad80a4133061fbd1bb148f21b150ba2e43bd2dbcb4cdfdafb354"
+}

@@ -315,7 +315,7 @@ pub async fn get_project(
 
         // Get active deployment groups
         let deployment_groups =
-            crate::db::deployments::get_active_deployment_groups(&state.db_pool, project.id)
+            crate::db::deployments::get_active_deployment_groups(&state.db_pool, project_id)
                 .await
                 .map_err(|e| {
                     (
