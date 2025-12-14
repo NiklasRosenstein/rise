@@ -1,11 +1,11 @@
-use anyhow::Result;
 use std::sync::Arc;
 use std::time::Duration;
+
+use anyhow::Result;
 use tokio::time::interval;
 use tracing::{debug, error, info};
 
-use crate::db::models::DomainVerificationStatus;
-use crate::db::{custom_domains, projects as db_projects};
+use crate::db::{custom_domains, models::DomainVerificationStatus, projects as db_projects};
 use crate::server::state::ControllerState;
 
 /// Domain verification loop - automatically verifies pending domains

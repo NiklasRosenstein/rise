@@ -1,5 +1,6 @@
-use anyhow::Result;
 use async_trait::async_trait;
+
+use anyhow::Result;
 
 /// DNS provider trait for managing TXT records for ACME DNS-01 challenges
 #[async_trait]
