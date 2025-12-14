@@ -112,12 +112,9 @@ impl DnsProvider for CloudflareDnsProvider {
         // First, list records to find the TXT record ID
         let list_params = ListDnsRecordsParams {
             name: Some(name.clone()),
-            record_type: Some(
-                DnsContent::TXT {
-                    content: String::new(),
-                }
-                .into(),
-            ),
+            record_type: Some(DnsContent::TXT {
+                content: String::new(),
+            }),
             ..Default::default()
         };
 
@@ -153,12 +150,9 @@ impl DnsProvider for CloudflareDnsProvider {
 
         let list_params = ListDnsRecordsParams {
             name: Some(name.clone()),
-            record_type: Some(
-                DnsContent::TXT {
-                    content: String::new(),
-                }
-                .into(),
-            ),
+            record_type: Some(DnsContent::TXT {
+                content: String::new(),
+            }),
             ..Default::default()
         };
 

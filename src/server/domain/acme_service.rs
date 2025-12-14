@@ -338,6 +338,7 @@ impl AcmeService {
     }
 
     /// Renew a certificate that is expiring soon
+    #[allow(dead_code)]
     pub async fn renew_certificate(&self, domain_id: uuid::Uuid) -> Result<()> {
         let domain = custom_domains::get_by_id(&self.db_pool, domain_id)
             .await?

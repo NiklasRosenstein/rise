@@ -612,6 +612,7 @@ pub struct AcmeSettings {
     /// ACME account private key (PEM format, base64 encoded)
     /// If not provided, a new account will be created and the key should be saved
     #[serde(default)]
+    #[allow(dead_code)]
     pub account_key: Option<String>,
 }
 

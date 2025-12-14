@@ -70,6 +70,7 @@ pub async fn list_by_domain(pool: &PgPool, domain_id: Uuid) -> Result<Vec<AcmeCh
 }
 
 /// Get a challenge by ID
+#[allow(dead_code)]
 pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<AcmeChallenge>> {
     let challenge = sqlx::query_as!(
         AcmeChallenge,
@@ -93,6 +94,7 @@ pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<AcmeChallenge>>
 }
 
 /// Get the latest pending challenge for a domain
+#[allow(dead_code)]
 pub async fn get_latest_pending(pool: &PgPool, domain_id: Uuid) -> Result<Option<AcmeChallenge>> {
     let challenge = sqlx::query_as!(
         AcmeChallenge,
@@ -143,6 +145,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ChallengeStatus) -> 
 }
 
 /// Delete a challenge
+#[allow(dead_code)]
 pub async fn delete(pool: &PgPool, id: Uuid) -> Result<()> {
     sqlx::query!(
         r#"
@@ -158,6 +161,7 @@ pub async fn delete(pool: &PgPool, id: Uuid) -> Result<()> {
 }
 
 /// Delete all challenges for a domain
+#[allow(dead_code)]
 pub async fn delete_by_domain(pool: &PgPool, domain_id: Uuid) -> Result<()> {
     sqlx::query!(
         r#"

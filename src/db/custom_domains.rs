@@ -175,6 +175,7 @@ pub async fn update_certificate_status(
 }
 
 /// Update ACME order URL
+#[allow(dead_code)]
 pub async fn update_acme_order_url(
     pool: &PgPool,
     id: Uuid,
@@ -211,6 +212,7 @@ pub async fn delete(pool: &PgPool, id: Uuid) -> Result<()> {
 }
 
 /// List domains that need certificate renewal (expiring within 30 days)
+#[allow(dead_code)]
 pub async fn list_expiring_certificates(pool: &PgPool) -> Result<Vec<CustomDomain>> {
     let domains = sqlx::query_as!(
         CustomDomain,
