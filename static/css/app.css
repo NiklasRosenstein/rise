@@ -130,3 +130,67 @@ details summary {
 details[open] summary {
     margin-bottom: 1rem;
 }
+
+/* Project tabs */
+.project-tabs {
+    display: flex;
+    gap: 0.5rem;
+    margin-bottom: 0;
+    padding: 0;
+}
+
+.tab-button {
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    padding: 0.75rem 1rem;
+    cursor: pointer;
+    font-size: 1rem;
+    color: var(--color);
+    transition: border-color 0.2s, background-color 0.2s;
+    margin: 0;
+}
+
+.tab-button:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.tab-button.active {
+    border-bottom-color: var(--rise-primary);
+    font-weight: 600;
+}
+
+.tab-content {
+    margin-top: 1.5rem;
+}
+
+/* Domain verification badges */
+.verification-pending {
+    background-color: var(--rise-warning);
+    color: white;
+}
+
+.verification-verified {
+    background-color: var(--rise-success);
+    color: white;
+}
+
+.verification-failed {
+    background-color: var(--rise-danger);
+    color: white;
+}
+
+/* Domain setup instructions */
+.domain-instructions {
+    background: rgba(255, 255, 255, 0.05);
+    border-left: 3px solid var(--rise-primary);
+    padding: 1rem;
+    margin: 1rem 0;
+    border-radius: 0.25rem;
+}
+
+.domain-instructions code {
+    background: rgba(0, 0, 0, 0.2);
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.2rem;
+}

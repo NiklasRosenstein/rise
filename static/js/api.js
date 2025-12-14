@@ -87,6 +87,34 @@ class RiseAPI {
     async getDeploymentEnvVars(projectName, deploymentId) {
         return this.request(`/projects/${projectName}/deployments/${deploymentId}/env`);
     }
+
+    // Custom domain endpoints
+    async getProjectDomains(projectName) {
+        return this.request(`/projects/${projectName}/domains`);
+    }
+
+    async addProjectDomain(projectName, domainName) {
+        return this.request(`/projects/${projectName}/domains`, {
+            method: 'POST',
+            body: JSON.stringify({ domain_name: domainName }),
+        });
+    }
+
+    async deleteProjectDomain(projectName, domainName) {
+        return this.request(`/projects/${projectName}/domains/${domainName}`, {
+            method: 'DELETE',
+        });
+    }
+
+    async verifyProjectDomain(projectName, domainName) {
+        return this.request(`/projects/${projectName}/domains/${domainName}/verify`, {
+            method: 'POST',
+        });
+    }
+
+    async getDomainChallenges(projectName, domainName) {
+        return this.request(`/projects/${projectName}/domains/${domainName}/challenges`);
+    }
 }
 
 const api = new RiseAPI();

@@ -265,6 +265,9 @@ async function showProject(projectName) {
             </article>
         `;
 
+        // Load custom domains (default tab)
+        await loadCustomDomains(projectName);
+
         // Load service accounts
         await loadServiceAccounts(projectName);
 
@@ -278,6 +281,268 @@ async function showProject(projectName) {
         startAutoRefresh(() => loadDeployments(projectName, currentPage), 5000);
     } catch (error) {
         detailEl.innerHTML = `<p>Error loading project: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+// Switch between project tabs
+function switchProjectTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    event.target.classList.add('active');
+
+    // Hide all tab contents
+    document.querySelectorAll('.tab-content').forEach(content => {
+        content.style.display = 'none';
+    });
+
+    // Show selected tab
+    const tabContent = document.getElementById(`tab-${tabName}`);
+    if (tabContent) {
+        tabContent.style.display = 'block';
+    }
+
+    // Stop auto-refresh when not on deployments tab
+    if (tabName !== 'deployments') {
+        stopAutoRefresh();
+    } else {
+        // Restart auto-refresh for deployments
+        startAutoRefresh(() => loadDeployments(currentProject, currentPage), 5000);
+    }
+}
+
+// Load custom domains for a project
+async function loadCustomDomains(projectName) {
+    const listEl = document.getElementById('custom-domains-list');
+    listEl.innerHTML = '<p aria-busy="true">Loading custom domains...</p>';
+
+    try {
+        const domains = await api.getProjectDomains(projectName);
+
+        if (domains.length === 0) {
+            listEl.innerHTML = `
+                <p>No custom domains configured for this project.</p>
+                <button onclick="showAddDomainForm()">Add Custom Domain</button>
+            `;
+            return;
+        }
+
+        listEl.innerHTML = `
+            <button onclick="showAddDomainForm()" style="margin-bottom: 1rem;">Add Custom Domain</button>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Domain</th>
+                        <th>CNAME Target</th>
+                        <th>Verification</th>
+                        <th>Certificate</th>
+                        <th>Created</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${domains.map(d => {
+                        const verificationBadge = d.verification_status === 'Verified' ? 
+                            `<span class="status-badge verification-verified">✓ Verified</span>` :
+                            d.verification_status === 'Failed' ?
+                            `<span class="status-badge verification-failed">✗ Failed</span>` :
+                            `<span class="status-badge verification-pending">⏳ Pending</span>`;
+
+                        const certBadge = d.certificate_status === 'Issued' ?
+                            `<span class="status-badge status-healthy">✓ Issued</span>` :
+                            d.certificate_status === 'Pending' ?
+                            `<span class="status-badge status-deploying">⏳ Pending</span>` :
+                            d.certificate_status === 'Failed' ?
+                            `<span class="status-badge status-failed">✗ Failed</span>` :
+                            `<span class="status-badge status-stopped">-</span>`;
+
+                        return `
+                        <tr>
+                            <td><strong>${escapeHtml(d.domain_name)}</strong></td>
+                            <td><code>${escapeHtml(d.cname_target)}</code></td>
+                            <td>${verificationBadge}</td>
+                            <td>${certBadge}</td>
+                            <td>${formatDate(d.created)}</td>
+                            <td>
+                                ${d.verification_status !== 'Verified' ? 
+                                    `<button onclick="verifyDomain('${escapeHtml(projectName)}', '${escapeHtml(d.domain_name)}')" class="secondary" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Verify</button>` : ''}
+                                <button onclick="viewDomainDetails('${escapeHtml(projectName)}', '${escapeHtml(d.domain_name)}')" class="secondary" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Details</button>
+                                <button onclick="deleteDomain('${escapeHtml(projectName)}', '${escapeHtml(d.domain_name)}')" class="contrast" style="padding: 0.25rem 0.5rem; font-size: 0.875rem;">Delete</button>
+                            </td>
+                        </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+    } catch (error) {
+        listEl.innerHTML = `<p class="error">Error loading domains: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+// Show add domain form
+function showAddDomainForm() {
+    const listEl = document.getElementById('custom-domains-list');
+    const currentContent = listEl.innerHTML;
+    
+    listEl.innerHTML = `
+        <div style="background: rgba(255,255,255,0.05); padding: 1.5rem; border-radius: 0.5rem; margin-bottom: 1rem;">
+            <h4>Add Custom Domain</h4>
+            <label for="new-domain-name">
+                Domain Name
+                <input type="text" id="new-domain-name" placeholder="example.com or www.example.com" />
+            </label>
+            <div style="display: flex; gap: 0.5rem; margin-top: 1rem;">
+                <button onclick="addDomain('${currentProject}')">Add Domain</button>
+                <button onclick="loadCustomDomains('${currentProject}')" class="secondary">Cancel</button>
+            </div>
+        </div>
+        ${currentContent}
+    `;
+    
+    document.getElementById('new-domain-name').focus();
+}
+
+// Add a custom domain
+async function addDomain(projectName) {
+    const domainInput = document.getElementById('new-domain-name');
+    const domainName = domainInput.value.trim();
+
+    if (!domainName) {
+        alert('Please enter a domain name');
+        return;
+    }
+
+    try {
+        const response = await api.addProjectDomain(projectName, domainName);
+        
+        // Show success message with instructions
+        const listEl = document.getElementById('custom-domains-list');
+        listEl.innerHTML = `
+            <div class="domain-instructions">
+                <h4>✅ Domain Added Successfully!</h4>
+                <p><strong>Domain:</strong> ${escapeHtml(response.domain.domain_name)}</p>
+                <p style="margin-top: 1rem;"><strong>Next Steps:</strong></p>
+                <ol>
+                    <li>Configure a CNAME record for your domain:
+                        <ul style="list-style: none; margin-top: 0.5rem;">
+                            <li><strong>Name:</strong> <code>${escapeHtml(response.instructions.cname_record.name)}</code></li>
+                            <li><strong>Value:</strong> <code>${escapeHtml(response.instructions.cname_record.value)}</code></li>
+                        </ul>
+                    </li>
+                    <li style="margin-top: 0.5rem;">Wait for DNS propagation (this can take a few minutes)</li>
+                    <li style="margin-top: 0.5rem;">Click the "Verify" button to validate your DNS configuration</li>
+                </ol>
+                <button onclick="loadCustomDomains('${projectName}')" style="margin-top: 1rem;">Back to Domains List</button>
+            </div>
+        `;
+    } catch (error) {
+        alert(`Failed to add domain: ${error.message}`);
+    }
+}
+
+// Verify a custom domain
+async function verifyDomain(projectName, domainName) {
+    try {
+        const response = await api.verifyProjectDomain(projectName, domainName);
+        
+        if (response.verification_result.success) {
+            alert(`✅ Domain verified successfully!\n\n${response.verification_result.message}`);
+        } else {
+            alert(`❌ Domain verification failed\n\n${response.verification_result.message}\n\nExpected: ${response.verification_result.expected_value || 'N/A'}\nActual: ${response.verification_result.actual_value || 'N/A'}`);
+        }
+        
+        // Reload domains list
+        await loadCustomDomains(projectName);
+    } catch (error) {
+        alert(`Failed to verify domain: ${error.message}`);
+    }
+}
+
+// View domain details
+async function viewDomainDetails(projectName, domainName) {
+    const listEl = document.getElementById('custom-domains-list');
+    
+    try {
+        const domains = await api.getProjectDomains(projectName);
+        const domain = domains.find(d => d.domain_name === domainName);
+        
+        if (!domain) {
+            alert('Domain not found');
+            return;
+        }
+
+        let challengesHtml = '';
+        try {
+            const challenges = await api.getDomainChallenges(projectName, domainName);
+            if (challenges.length > 0) {
+                challengesHtml = `
+                    <h5>ACME Challenges</h5>
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Type</th>
+                                <th>Record Name</th>
+                                <th>Record Value</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${challenges.map(c => `
+                                <tr>
+                                    <td>${escapeHtml(c.challenge_type)}</td>
+                                    <td><code>${escapeHtml(c.record_name)}</code></td>
+                                    <td><code>${escapeHtml(c.record_value)}</code></td>
+                                    <td><span class="status-badge status-${c.status.toLowerCase()}">${c.status}</span></td>
+                                </tr>
+                            `).join('')}
+                        </tbody>
+                    </table>
+                `;
+            }
+        } catch (e) {
+            // Challenges not available
+        }
+
+        listEl.innerHTML = `
+            <button onclick="loadCustomDomains('${projectName}')" class="secondary" style="margin-bottom: 1rem;">← Back to Domains</button>
+            <article>
+                <header><h4>Domain: ${escapeHtml(domain.domain_name)}</h4></header>
+                <dl>
+                    <dt>CNAME Target</dt>
+                    <dd><code>${escapeHtml(domain.cname_target)}</code></dd>
+                    <dt>Verification Status</dt>
+                    <dd>${domain.verification_status}${domain.verified_at ? ` (verified at ${formatDate(domain.verified_at)})` : ''}</dd>
+                    <dt>Certificate Status</dt>
+                    <dd>${domain.certificate_status}${domain.certificate_issued_at ? ` (issued at ${formatDate(domain.certificate_issued_at)})` : ''}</dd>
+                    ${domain.certificate_expires_at ? `
+                        <dt>Certificate Expires</dt>
+                        <dd>${formatDate(domain.certificate_expires_at)}</dd>
+                    ` : ''}
+                    <dt>Created</dt>
+                    <dd>${formatDate(domain.created)}</dd>
+                </dl>
+                ${challengesHtml}
+            </article>
+        `;
+    } catch (error) {
+        alert(`Failed to load domain details: ${error.message}`);
+    }
+}
+
+// Delete a custom domain
+async function deleteDomain(projectName, domainName) {
+    if (!confirm(`Are you sure you want to delete the domain "${domainName}"?`)) {
+        return;
+    }
+
+    try {
+        await api.deleteProjectDomain(projectName, domainName);
+        alert('Domain deleted successfully');
+        await loadCustomDomains(projectName);
+    } catch (error) {
+        alert(`Failed to delete domain: ${error.message}`);
     }
 }
 
