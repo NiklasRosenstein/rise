@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod deployment;
+pub mod domain;
 #[cfg(feature = "aws")]
 pub mod ecr;
 pub mod encryption;
@@ -116,6 +117,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(deployment::routes::deployment_routes())
         .merge(workload_identity::routes::routes())
         .merge(env_vars::routes::routes())
+        .merge(domain::routes::domain_routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,

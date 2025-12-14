@@ -670,7 +670,7 @@ async fn expand_project_with_owner(
 }
 
 /// Resolve project by ID or name with fuzzy matching support
-async fn resolve_project(
+pub async fn resolve_project(
     state: &AppState,
     id_or_name: &str,
     by_id: bool,

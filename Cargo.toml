@@ -38,6 +38,7 @@ server = [
     "dep:rust-embed",
     "dep:mime_guess",
     "dep:tera",
+    "dep:trust-dns-resolver",
 ]
 aws = [
     "server",  # AWS features require server
@@ -127,3 +128,6 @@ futures-util = { version = "0.3", optional = true }
 kube = { version = "0.95", features = ["client", "runtime", "derive"], optional = true }
 k8s-openapi = { version = "0.23", features = ["v1_30"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
+
+# DNS resolution for domain verification
+trust-dns-resolver = { version = "0.23", optional = true }
