@@ -173,16 +173,7 @@ sqlx migrate run
 
 ### Connection Pooling
 
-Rise uses SQLx with connection pooling. Configure pool size based on load:
-
-```toml
-# config/production.toml
-[database]
-max_connections = 20
-min_connections = 5
-connect_timeout = 30
-idle_timeout = 600
-```
+Rise uses SQLx with connection pooling. Configure pool size based on load in `config/production.toml` if needed.
 
 ## High Availability
 
@@ -383,6 +374,6 @@ ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
 
 ## Next Steps
 
-- **Deploy with AWS ECR**: See [AWS ECR](./aws-ecr.md)
-- **Configure authentication**: See [Authentication](../core-concepts/authentication.md)
-- **Set up CI/CD**: See [Service Accounts](../features/service-accounts.md)
+- **Configure authentication**: See [Authentication](authentication.md)
+- **Set up CI/CD**: See [Authentication](authentication.md#service-accounts-workload-identity)
+- **Container registries**: See [Container Registries](registries.md)

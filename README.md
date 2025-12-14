@@ -115,7 +115,7 @@ Rise uses a multi-process architecture:
 | **PostgreSQL** | Database for projects, teams, deployments |
 | **Dex** | OAuth2/OIDC provider for authentication |
 
-See [Architecture](docs/introduction/architecture.md) for details.
+
 
 ## Project Status
 

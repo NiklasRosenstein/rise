@@ -4,12 +4,7 @@ Rise uses PostgreSQL for data storage with SQLX for compile-time verified SQL qu
 
 ## Overview
 
-Rise's database schema includes:
-- **Projects**: Application metadata, ownership, visibility
-- **Teams**: Collaborative ownership groups
-- **Deployments**: Deployment instances with status and configuration
-- **Service Accounts**: Workload identity for CI/CD
-- **Users**: User accounts linked to OAuth2 subject IDs
+Schema: Projects, Teams, Deployments, Service Accounts, Users
 
 ## Schema Management
 
@@ -17,131 +12,43 @@ Rise uses SQLX migrations for database schema versioning.
 
 ### Migrations Directory
 
-Migrations are stored in `rise-backend/migrations/`:
-
-```
-rise-backend/migrations/
-├── 20240101000000_initial.sql
-├── 20240102000000_add_teams.sql
-├── 20240103000000_add_deployments.sql
-└── ...
-```
-
-Each migration has a timestamp-based name ensuring ordered execution.
+Migrations in `migrations/` with timestamp-based names.
 
 ### Creating Migrations
 
-Create a new migration:
-
 ```bash
-cd rise-backend
 sqlx migrate add <description>
 ```
 
-Example:
-
-```bash
-sqlx migrate add add_deployment_expiration
-```
-
-This creates a file like `migrations/20241205123456_add_deployment_expiration.sql`.
-
-Edit the file and add your SQL:
-
-```sql
--- Add expiration timestamp to deployments
-ALTER TABLE deployments ADD COLUMN expires_at TIMESTAMPTZ;
-
--- Create index for cleanup queries
-CREATE INDEX idx_deployments_expires_at ON deployments(expires_at) WHERE expires_at IS NOT NULL;
-```
+Creates `migrations/<timestamp>_<description>.sql`. Edit and add SQL.
 
 ### Running Migrations
 
-Migrations run automatically in development (`mise backend:run`) but must be run manually in production.
+**Development**: `mise db:migrate` (auto-run by `mise backend:run`)
 
-**Development**:
-```bash
-mise db:migrate
-```
-
-**Production**:
-```bash
-export DATABASE_URL="postgres://user:password@host:5432/rise"
-cd rise-backend
-sqlx migrate run
-```
-
-**Check migration status**:
-```bash
-# Show applied migrations
-sqlx migrate info
-```
+**Production**: `sqlx migrate run`
 
 ### Migration Best Practices
 
-1. **Always test migrations** on a copy of production data first
-2. **Make migrations reversible** when possible (create a separate "down" migration if needed)
-3. **Add indexes concurrently** in PostgreSQL:
-   ```sql
-   CREATE INDEX CONCURRENTLY idx_name ON table(column);
-   ```
-4. **Avoid blocking operations** on large tables (use `ALTER TABLE ... ADD COLUMN ... DEFAULT NULL` instead of with a default)
-5. **Test rollback procedures** before deploying
+1. Test on production copy first
+2. Use `CREATE INDEX CONCURRENTLY` in PostgreSQL
+3. Avoid blocking operations on large tables
+4. Test rollback procedures
 
 ## SQLX Compile-Time Verification
 
-SQLX verifies SQL queries against the database schema at compile time.
-
-### The SQLX Cache
-
-The `.sqlx/` directory contains query metadata for offline builds:
+`.sqlx/` directory contains query metadata for offline builds.
 
 ```bash
-# Generate query metadata
-cargo sqlx prepare
-
-# Check cache is up to date
-cargo sqlx prepare --check
+cargo sqlx prepare              # Generate metadata
+cargo sqlx prepare --check      # Verify cache
 ```
 
-**When to regenerate**:
-- After creating/running new migrations
-- After adding/modifying SQL queries in code
-- Before committing code changes
-
-**In CI/CD**:
-```yaml
-- name: Check SQLX cache
-  run: cargo sqlx prepare --check
-  env:
-    DATABASE_URL: ${{ secrets.DATABASE_URL }}
-```
+Regenerate after migrations or SQL query changes.
 
 ### Writing Queries
 
-Use the `sqlx::query!` macro for compile-time verification:
-
-```rust
-let projects = sqlx::query!(
-    r#"
-    SELECT id, name, owner_type, owner_id, visibility
-    FROM projects
-    WHERE owner_type = $1 AND owner_id = $2
-    ORDER BY created_at DESC
-    "#,
-    "user",
-    user_id
-)
-.fetch_all(&pool)
-.await?;
-```
-
-The macro:
-- Verifies the query syntax
-- Checks column names and types
-- Validates parameter types
-- Generates type-safe result structs
+Use `sqlx::query!` macro for compile-time verification (syntax, types, columns).
 
 ## Database Access
 
@@ -313,17 +220,7 @@ CREATE INDEX idx_deployments_expires_at ON deployments(expires_at) WHERE expires
 
 ### Connection Pooling
 
-Configure connection pool size in `rise-backend/config/`:
-
-```toml
-[database]
-max_connections = 20
-min_connections = 5
-acquire_timeout = 30
-idle_timeout = 600
-```
-
-Adjust based on load and database limits.
+Configure connection pool size in `config/production.toml` based on load and database limits.
 
 ### Query Optimization
 
@@ -383,6 +280,5 @@ docker-compose restart postgres
 
 ## Next Steps
 
-- **Learn about local development**: See [Local Development](../getting-started/local-development.md)
-- **Production database setup**: See [Production Setup](../deployment/production.md)
-- **Contributing code**: See [Contributing](./contributing.md)
+- **Learn about local development**: See [Local Development](development.md)
+- **Production database setup**: See [Production Setup](production.md)

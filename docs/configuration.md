@@ -4,7 +4,7 @@ Rise backend uses YAML configuration files with environment variable substitutio
 
 ## Configuration Files
 
-Configuration files are located in `rise-backend/config/` and loaded in this order:
+Configuration files are located in `config/` and loaded in this order:
 
 1. `default.{toml,yaml,yml}` - Base configuration with sensible defaults
 2. `{RISE_CONFIG_RUN_MODE}.{toml,yaml,yml}` - Environment-specific config (optional)

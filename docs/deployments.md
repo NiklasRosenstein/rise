@@ -200,6 +200,5 @@ rise d c my-app --follow --timeout 5m || exit 1
 
 ## Next Steps
 
-- **Deploy your first app**: See [Getting Started](../getting-started/README.md)
-- **Use service accounts in CI/CD**: See [Service Accounts](../features/service-accounts.md)
-- **Learn CLI commands**: See [CLI Basics](../getting-started/cli-basics.md)
+- **Use service accounts in CI/CD**: See [Authentication](authentication.md#service-accounts-workload-identity)
+- **Learn CLI commands**: See [CLI Guide](cli.md)
