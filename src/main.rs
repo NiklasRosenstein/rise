@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
 use tracing::info;
@@ -57,6 +57,9 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "d")]
     Deployment(DeploymentCommands),
+    /// Custom domain management commands
+    #[command(subcommand)]
+    Domain(DomainCommands),
     /// Service account (workload identity) management commands
     #[command(subcommand)]
     #[command(visible_alias = "sa")]
@@ -271,6 +274,42 @@ enum DeploymentCommands {
         /// Deployment group to stop
         #[arg(long, short)]
         group: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DomainCommands {
+    /// Add a custom domain to a project
+    #[command(visible_alias = "a")]
+    Add {
+        /// Project name
+        project: String,
+        /// Domain name (e.g., example.com, www.example.com)
+        domain: String,
+    },
+    /// List custom domains for a project
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
+    List {
+        /// Project name
+        project: String,
+    },
+    /// Delete a custom domain
+    #[command(visible_alias = "del")]
+    #[command(visible_alias = "rm")]
+    Delete {
+        /// Project name
+        project: String,
+        /// Domain name
+        domain: String,
+    },
+    /// Verify a custom domain's CNAME configuration
+    #[command(visible_alias = "v")]
+    Verify {
+        /// Project name
+        project: String,
+        /// Domain name
+        domain: String,
     },
 }
 
@@ -764,6 +803,40 @@ async fn main() -> Result<()> {
                 .await?;
             }
         },
+        Commands::Domain(domain_cmd) => {
+            let config = config::Config::load()
+                .context("Not logged in. Run 'rise login' first.")?;
+            match domain_cmd {
+                DomainCommands::Add { project, domain } => {
+                    domain::handle_domain_command(
+                        &config,
+                        project,
+                        domain::DomainSubcommand::Add { domain: domain.clone() },
+                    )
+                    .await?;
+                }
+                DomainCommands::List { project } => {
+                    domain::handle_domain_command(&config, project, domain::DomainSubcommand::List)
+                        .await?;
+                }
+                DomainCommands::Delete { project, domain } => {
+                    domain::handle_domain_command(
+                        &config,
+                        project,
+                        domain::DomainSubcommand::Delete { domain: domain.clone() },
+                    )
+                    .await?;
+                }
+                DomainCommands::Verify { project, domain } => {
+                    domain::handle_domain_command(
+                        &config,
+                        project,
+                        domain::DomainSubcommand::Verify { domain: domain.clone() },
+                    )
+                    .await?;
+                }
+            }
+        }
         Commands::Env(env_cmd) => {
             let token = config.get_token().ok_or_else(|| {
                 anyhow::anyhow!("Not authenticated. Please run 'rise login' first")
