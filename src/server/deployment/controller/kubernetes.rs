@@ -972,13 +972,84 @@ impl KubernetesController {
             ("/".to_string(), "Prefix")
         };
 
-        // Build TLS configuration if secret name is provided
-        let tls = self.ingress_tls_secret_name.as_ref().map(|secret_name| {
-            vec![k8s_openapi::api::networking::v1::IngressTLS {
-                hosts: Some(vec![url_components.host.clone()]),
-                secret_name: Some(secret_name.clone()),
-            }]
-        });
+        // Get verified custom domains for this project
+        let custom_domains = if let Ok(domains) = self.get_verified_custom_domains(project.id) {
+            domains
+        } else {
+            vec![]
+        };
+
+        // Build list of all hosts (default + custom domains)
+        let mut all_hosts = vec![url_components.host.clone()];
+        for domain in &custom_domains {
+            if domain.verification_status == crate::db::models::DomainVerificationStatus::Verified {
+                all_hosts.push(domain.domain_name.clone());
+            }
+        }
+
+        // Build TLS configuration
+        let tls = if !custom_domains.is_empty() {
+            // Create TLS entries for each domain with issued certificates
+            let mut tls_entries = Vec::new();
+            
+            // Default domain TLS (if configured)
+            if let Some(default_secret) = &self.ingress_tls_secret_name {
+                tls_entries.push(k8s_openapi::api::networking::v1::IngressTLS {
+                    hosts: Some(vec![url_components.host.clone()]),
+                    secret_name: Some(default_secret.clone()),
+                });
+            }
+            
+            // Custom domain TLS (from certificates stored in database)
+            for domain in &custom_domains {
+                if domain.certificate_status == crate::db::models::CertificateStatus::Issued {
+                    // Create K8s secret name from domain name
+                    let secret_name = format!("tls-{}", domain.domain_name.replace('.', "-"));
+                    tls_entries.push(k8s_openapi::api::networking::v1::IngressTLS {
+                        hosts: Some(vec![domain.domain_name.clone()]),
+                        secret_name: Some(secret_name),
+                    });
+                }
+            }
+            
+            if !tls_entries.is_empty() {
+                Some(tls_entries)
+            } else {
+                None
+            }
+        } else {
+            // No custom domains, use default TLS if configured
+            self.ingress_tls_secret_name.as_ref().map(|secret_name| {
+                vec![k8s_openapi::api::networking::v1::IngressTLS {
+                    hosts: Some(vec![url_components.host.clone()]),
+                    secret_name: Some(secret_name.clone()),
+                }]
+            })
+        };
+
+        // Create ingress rules for all hosts
+        let rules: Vec<IngressRule> = all_hosts
+            .into_iter()
+            .map(|host| IngressRule {
+                host: Some(host),
+                http: Some(HTTPIngressRuleValue {
+                    paths: vec![HTTPIngressPath {
+                        path: Some(ingress_path.clone()),
+                        path_type: path_type.to_string(),
+                        backend: IngressBackend {
+                            service: Some(IngressServiceBackend {
+                                name: Self::service_name(project, deployment),
+                                port: Some(ServiceBackendPort {
+                                    name: Some("http".to_string()),
+                                    ..Default::default()
+                                }),
+                            }),
+                            ..Default::default()
+                        },
+                    }],
+                }),
+            })
+            .collect();
 
         Ingress {
             metadata: ObjectMeta {
@@ -995,29 +1066,22 @@ impl KubernetesController {
             spec: Some(IngressSpec {
                 ingress_class_name: Some(self.ingress_class.clone()),
                 tls,
-                rules: Some(vec![IngressRule {
-                    host: Some(url_components.host.clone()),
-                    http: Some(HTTPIngressRuleValue {
-                        paths: vec![HTTPIngressPath {
-                            path: Some(ingress_path),
-                            path_type: path_type.to_string(),
-                            backend: IngressBackend {
-                                service: Some(IngressServiceBackend {
-                                    name: Self::service_name(project, deployment),
-                                    port: Some(ServiceBackendPort {
-                                        name: Some("http".to_string()),
-                                        ..Default::default()
-                                    }),
-                                }),
-                                ..Default::default()
-                            },
-                        }],
-                    }),
-                }]),
+                rules: Some(rules),
                 ..Default::default()
             }),
             ..Default::default()
         }
+    }
+    
+    /// Get verified custom domains for a project
+    /// Returns an empty vector on error to allow graceful degradation
+    fn get_verified_custom_domains(&self, project_id: uuid::Uuid) -> Result<Vec<crate::db::models::CustomDomain>> {
+        // This is a synchronous call in an async context
+        // In a real implementation, we would need to make this async or cache the domains
+        // For now, we'll return an empty vector and log an error
+        // TODO: Make this async by passing domains through the reconcile context
+        warn!("Custom domain lookup not yet implemented in Kubernetes controller");
+        Ok(vec![])
     }
 }
 
