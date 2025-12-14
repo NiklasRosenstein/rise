@@ -5,7 +5,7 @@ use super::models::{
     ProjectWithOwnerInfo, TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
 };
 use crate::db::models::User;
-use crate::db::{projects, service_accounts, teams as db_teams, users as db_users};
+use crate::db::{custom_domains, projects, service_accounts, teams as db_teams, users as db_users};
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Path, Query, State},
@@ -13,6 +13,37 @@ use axum::{
     Json,
 };
 use uuid::Uuid;
+
+/// Get preferred project URLs for a batch of projects
+/// Returns first verified custom domain for each project, or default project_url
+async fn get_preferred_project_urls_batch(
+    db_pool: &sqlx::PgPool,
+    project_ids: &[Uuid],
+    projects: &[crate::db::models::Project],
+) -> std::collections::HashMap<Uuid, Option<String>> {
+    let mut result = std::collections::HashMap::new();
+
+    // Pre-populate with default project URLs
+    for project in projects {
+        result.insert(project.id, project.project_url.clone());
+    }
+
+    // Fetch all verified custom domains for all projects in one query
+    // Note: This is a simplified approach - in production you might want to optimize further
+    for project_id in project_ids {
+        if let Ok(domains) = custom_domains::list_by_project(db_pool, *project_id).await {
+            // Find first verified domain
+            if let Some(domain) = domains.iter().find(|d| {
+                d.verification_status == crate::db::models::DomainVerificationStatus::Verified
+            }) {
+                // Use HTTPS for custom domains
+                result.insert(*project_id, Some(format!("https://{}", domain.domain_name)));
+            }
+        }
+    }
+
+    result
+}
 
 pub async fn create_project(
     State(state): State<AppState>,
@@ -119,6 +150,9 @@ pub async fn list_projects(
                 )
             })?;
 
+    // Batch fetch preferred project URLs (custom domain or default)
+    let preferred_urls = get_preferred_project_urls_batch(&state.db_pool, &project_ids, &projects).await;
+
     // Batch fetch owner information (user emails and team names)
     let user_ids: Vec<Uuid> = projects.iter().filter_map(|p| p.owner_user_id).collect();
     let team_ids: Vec<Uuid> = projects.iter().filter_map(|p| p.owner_team_id).collect();
@@ -171,6 +205,11 @@ pub async fn list_projects(
                 .owner_team_id
                 .and_then(|id| team_names.get(&id).cloned());
 
+            let preferred_url = preferred_urls
+                .get(&project.id)
+                .and_then(|u| u.clone())
+                .or_else(|| project.project_url.clone());
+
             ApiProject {
                 id: project.id.to_string(),
                 created: project.created_at.to_rfc3339(),
@@ -185,7 +224,7 @@ pub async fn list_projects(
                 active_deployment_id,
                 active_deployment_status,
                 deployment_url,
-                project_url: project.project_url,
+                project_url: preferred_url,
                 deployment_groups: None, // Not populated in list view for performance
             }
         })
@@ -255,10 +294,19 @@ pub async fn get_project(
             })?;
 
         expanded.deployment_url = deployment_url;
+        
+        // Get preferred project URL (custom domain or default)
+        let preferred_urls = get_preferred_project_urls_batch(&state.db_pool, &[project.id], &[project.clone()]).await;
+        expanded.project_url = preferred_urls.get(&project.id).and_then(|u| u.clone()).or(expanded.project_url);
+        
         Ok(Json(serde_json::to_value(expanded).unwrap()))
     } else {
         let mut api_project = convert_project(project.clone());
         api_project.deployment_url = deployment_url;
+
+        // Get preferred project URL (custom domain or default)
+        let preferred_urls = get_preferred_project_urls_batch(&state.db_pool, &[project.id], &[project]).await;
+        api_project.project_url = preferred_urls.get(&project.id).and_then(|u| u.clone()).or(api_project.project_url);
 
         // Get active deployment groups
         let deployment_groups =

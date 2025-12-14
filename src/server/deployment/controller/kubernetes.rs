@@ -973,13 +973,23 @@ impl KubernetesController {
         };
 
         // Get verified custom domains for this project (placeholder)
-        let custom_domains = self.get_verified_custom_domains(project.id);
+        // Custom domains only apply to the default deployment group
+        let custom_domains = if deployment.deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            self.get_verified_custom_domains(project.id)
+        } else {
+            vec![]
+        };
 
-        // Build list of all hosts (default + custom domains)
+        // Build list of all hosts
+        // Default host is always included
         let mut all_hosts = vec![url_components.host.clone()];
-        for domain in &custom_domains {
-            if domain.verification_status == crate::db::models::DomainVerificationStatus::Verified {
-                all_hosts.push(domain.domain_name.clone());
+        
+        // Custom domains are only added for default group and never have path prefix
+        if deployment.deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            for domain in &custom_domains {
+                if domain.verification_status == crate::db::models::DomainVerificationStatus::Verified {
+                    all_hosts.push(domain.domain_name.clone());
+                }
             }
         }
 
@@ -1026,24 +1036,36 @@ impl KubernetesController {
         // Create ingress rules for all hosts
         let rules: Vec<IngressRule> = all_hosts
             .into_iter()
-            .map(|host| IngressRule {
-                host: Some(host),
-                http: Some(HTTPIngressRuleValue {
-                    paths: vec![HTTPIngressPath {
-                        path: Some(ingress_path.clone()),
-                        path_type: path_type.to_string(),
-                        backend: IngressBackend {
-                            service: Some(IngressServiceBackend {
-                                name: Self::service_name(project, deployment),
-                                port: Some(ServiceBackendPort {
-                                    name: Some("http".to_string()),
-                                    ..Default::default()
+            .map(|host| {
+                // Custom domains always use root path (no prefix), only default host uses path
+                let is_custom_domain = custom_domains.iter().any(|d| d.domain_name == host);
+                let (path, path_type_str) = if is_custom_domain {
+                    // Custom domains always use root path
+                    ("/".to_string(), "Prefix")
+                } else {
+                    // Default host uses configured path
+                    (ingress_path.clone(), path_type)
+                };
+
+                IngressRule {
+                    host: Some(host),
+                    http: Some(HTTPIngressRuleValue {
+                        paths: vec![HTTPIngressPath {
+                            path: Some(path),
+                            path_type: path_type_str.to_string(),
+                            backend: IngressBackend {
+                                service: Some(IngressServiceBackend {
+                                    name: Self::service_name(project, deployment),
+                                    port: Some(ServiceBackendPort {
+                                        name: Some("http".to_string()),
+                                        ..Default::default()
+                                    }),
                                 }),
-                            }),
-                            ..Default::default()
-                        },
-                    }],
-                }),
+                                ..Default::default()
+                            },
+                        }],
+                    }),
+                }
             })
             .collect();
 
