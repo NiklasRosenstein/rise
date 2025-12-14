@@ -9,6 +9,7 @@
 - [CLI Guide](cli.md)
 - [Authentication](authentication.md)
 - [Deployments](deployments.md)
+- [Custom Domains](custom-domains.md)
 - [Building Images](builds.md)
 - [Configuration](configuration.md)
 - [Container Registries](registries.md)
