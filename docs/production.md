@@ -170,6 +170,14 @@ sqlx migrate run
 
 Deployments with `--expire` auto-delete. Manual: `rise deployment stop my-app:20241105-1234`
 
+### Monitoring Database Size
+
+```sql
+SELECT pg_size_pretty(pg_database_size('rise'));
+SELECT tablename, pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename))
+FROM pg_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC;
+```
+
 ## Cost Optimization
 
 - **Database**: Right-size instances (start `db.t3.medium`), auto-scale storage, use Reserved Instances

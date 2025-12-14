@@ -12,7 +12,7 @@ Rise uses SQLX migrations for database schema versioning.
 
 ### Migrations Directory
 
-Migrations in `migrations/` with timestamp-based names.
+Migrations in `./migrations/` (project root) with timestamp-based names.
 
 ### Creating Migrations
 
