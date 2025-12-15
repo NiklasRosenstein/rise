@@ -315,8 +315,21 @@ function DeploymentsList({ projectName }) {
     const [page, setPage] = useState(0);
     const [hasMore, setHasMore] = useState(true);
     const [groupFilter, setGroupFilter] = useState('');
-    const [filterInput, setFilterInput] = useState('');
+    const [deploymentGroups, setDeploymentGroups] = useState([]);
     const pageSize = 10;
+
+    // Load deployment groups
+    useEffect(() => {
+        async function loadGroups() {
+            try {
+                const groups = await api.getDeploymentGroups(projectName);
+                setDeploymentGroups(groups);
+            } catch (err) {
+                console.error('Failed to load deployment groups:', err);
+            }
+        }
+        loadGroups();
+    }, [projectName]);
 
     const loadDeployments = useCallback(async () => {
         try {
@@ -342,14 +355,8 @@ function DeploymentsList({ projectName }) {
         return () => clearInterval(interval);
     }, [loadDeployments]);
 
-    const applyFilter = () => {
-        setGroupFilter(filterInput.trim());
-        setPage(0);
-    };
-
-    const clearFilter = () => {
-        setFilterInput('');
-        setGroupFilter('');
+    const handleGroupChange = (e) => {
+        setGroupFilter(e.target.value);
         setPage(0);
     };
 
@@ -361,21 +368,18 @@ function DeploymentsList({ projectName }) {
             <div className="mb-4 flex items-center gap-2">
                 <label htmlFor="deployment-group-filter" className="flex items-center gap-2">
                     <span className="text-sm text-gray-400 whitespace-nowrap">Filter by group:</span>
-                    <input
-                        type="text"
+                    <select
                         id="deployment-group-filter"
-                        placeholder="Leave empty for all groups"
-                        value={filterInput}
-                        onChange={(e) => setFilterInput(e.target.value)}
-                        className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 w-64"
-                    />
+                        value={groupFilter}
+                        onChange={handleGroupChange}
+                        className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                    >
+                        <option value="">All groups</option>
+                        {deploymentGroups.map(group => (
+                            <option key={group} value={group}>{group}</option>
+                        ))}
+                    </select>
                 </label>
-                <button onClick={applyFilter} className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded text-sm transition-colors">
-                    Apply
-                </button>
-                <button onClick={clearFilter} className="bg-gray-700 hover:bg-gray-600 text-white px-4 py-2 rounded text-sm transition-colors">
-                    Clear
-                </button>
             </div>
 
             {deployments.length === 0 ? (

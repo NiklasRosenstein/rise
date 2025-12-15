@@ -878,6 +878,43 @@ pub async fn get_active_deployment_groups(pool: &PgPool, project_id: Uuid) -> Re
     Ok(groups)
 }
 
+/// Get all deployment groups for a project, sorted by activity
+/// Returns deployment groups in the following order:
+/// 1. "default" (if it exists)
+/// 2. Other groups with active (Healthy) deployments (alphabetically)
+/// 3. Other groups without active deployments (alphabetically)
+pub async fn get_all_deployment_groups(pool: &PgPool, project_id: Uuid) -> Result<Vec<String>> {
+    let groups = sqlx::query_scalar!(
+        r#"
+        WITH group_priority AS (
+            SELECT
+                deployment_group,
+                CASE
+                    WHEN deployment_group = 'default' THEN 0
+                    WHEN EXISTS (
+                        SELECT 1 FROM deployments d2
+                        WHERE d2.project_id = $1
+                        AND d2.deployment_group = deployments.deployment_group
+                        AND d2.status = 'Healthy'
+                    ) THEN 1
+                    ELSE 2
+                END as priority
+            FROM deployments
+            WHERE project_id = $1
+            GROUP BY deployment_group
+        )
+        SELECT deployment_group
+        FROM group_priority
+        ORDER BY priority, deployment_group
+        "#,
+        project_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(groups)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

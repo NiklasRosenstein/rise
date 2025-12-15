@@ -936,6 +936,54 @@ pub async fn get_deployment_by_project(
     Ok(Json(convert_deployment(deployment, created_by_email)))
 }
 
+/// GET /projects/{project_name}/deployment-groups - List all deployment groups for a project
+pub async fn list_deployment_groups(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(project_name): Path<String>,
+) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+    debug!("Listing deployment groups for project: {}", project_name);
+
+    // Find the project by name
+    let project = projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
+
+    // Check if user has permission to view deployment groups
+    // Return 404 instead of 403 to avoid revealing project existence
+    check_deploy_permission(&state, &project, &user)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
+
+    // Get deployment groups from database
+    let groups = db_deployments::get_all_deployment_groups(&state.db_pool, project.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to list deployment groups: {}", e),
+            )
+        })?;
+
+    Ok(Json(groups))
+}
+
 /// POST /projects/{project_name}/deployments/{deployment_id}/rollback - Rollback to a previous deployment
 pub async fn rollback_deployment(
     State(state): State<AppState>,
