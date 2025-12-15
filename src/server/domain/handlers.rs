@@ -89,21 +89,11 @@ pub async fn add_domain(
             }
         })?;
 
-    // Compute CNAME target dynamically from server settings
-    let default_domain = state
-        .settings
-        .server
-        .public_url
-        .trim_start_matches("http://")
-        .trim_start_matches("https://")
-        .split('/')
-        .next()
-        .unwrap_or("rise.dev");
-
+    // Compute CNAME target dynamically from server hostname
     let cname_target = super::models::compute_cname_target(
         project.project_url.as_deref(),
         &project.name,
-        default_domain,
+        &state.hostname,
     );
 
     let api_domain = ApiCustomDomain::from_db(domain, cname_target.clone());
@@ -159,11 +149,11 @@ pub async fn list_domains(
             )
         })?;
 
-    // Compute CNAME target dynamically for each domain
+    // Compute CNAME target from server hostname
     let cname_target = super::models::compute_cname_target(
         project.project_url.as_deref(),
         &project.name,
-        "rise.dev", // TODO: Make this configurable
+        &state.hostname,
     );
 
     let api_domains: Vec<ApiCustomDomain> = domains
@@ -293,11 +283,11 @@ pub async fn verify_domain(
         ));
     }
 
-    // Compute CNAME target dynamically for verification
+    // Compute CNAME target from server hostname for verification
     let cname_target = super::models::compute_cname_target(
         project.project_url.as_deref(),
         &project.name,
-        "rise.dev", // TODO: Make this configurable
+        &state.hostname,
     );
 
     // Perform DNS lookup to verify CNAME

@@ -26,6 +26,8 @@ use std::time::Duration;
 pub struct ControllerState {
     pub db_pool: PgPool,
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
+    /// Hostname extracted from public_url, without port (for CNAME records)
+    pub hostname: String,
 }
 
 /// Full state for HTTP server
@@ -43,6 +45,8 @@ pub struct AppState {
     pub token_store: Arc<dyn TokenStore>,
     pub cookie_settings: CookieSettings,
     pub public_url: String,
+    /// Hostname extracted from public_url, without port (for CNAME records)
+    pub hostname: String,
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
     pub settings: Arc<Settings>,
 }
@@ -140,6 +144,7 @@ impl ControllerState {
         database_url: &str,
         max_connections: u32,
         encryption_settings: Option<&EncryptionSettings>,
+        public_url: &str,
     ) -> Result<Self> {
         tracing::info!(
             "Connecting to PostgreSQL with {} max connections...",
@@ -156,9 +161,20 @@ impl ControllerState {
 
         let encryption_provider = init_encryption_provider(encryption_settings).await?;
 
+        // Extract hostname from public_url, stripping protocol and port
+        let hostname = public_url
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .split(':') // Remove port if present
+            .next()
+            .and_then(|h| h.split('/').next()) // Remove path if present
+            .unwrap_or("localhost")
+            .to_string();
+
         Ok(Self {
             db_pool,
             encryption_provider,
+            hostname,
         })
     }
 }
@@ -334,6 +350,17 @@ impl AppState {
         let public_url = settings.server.public_url.clone();
         tracing::info!("Public URL: {}", public_url);
 
+        // Extract hostname from public_url, stripping protocol and port for CNAME records
+        let hostname = public_url
+            .trim_start_matches("http://")
+            .trim_start_matches("https://")
+            .split(':') // Remove port if present (e.g., localhost:3000 -> localhost)
+            .next()
+            .and_then(|h| h.split('/').next()) // Remove path if present
+            .unwrap_or("localhost")
+            .to_string();
+        tracing::info!("Hostname (for CNAME records): {}", hostname);
+
         // Initialize encryption provider
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
 
@@ -350,6 +377,7 @@ impl AppState {
             token_store,
             cookie_settings,
             public_url,
+            hostname,
             encryption_provider,
             settings: Arc::new(settings.clone()),
         })
@@ -485,6 +513,7 @@ impl AppState {
             secure: true,
         };
         let public_url = "http://localhost:3000".to_string(); // Dummy value, not used by controller
+        let hostname = "localhost".to_string(); // Dummy value, not used by controller
 
         // Initialize encryption provider
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
@@ -502,6 +531,7 @@ impl AppState {
             token_store,
             cookie_settings,
             public_url,
+            hostname,
             encryption_provider,
             settings: Arc::new(settings.clone()),
         })

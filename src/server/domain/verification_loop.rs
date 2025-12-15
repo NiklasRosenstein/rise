@@ -91,11 +91,11 @@ impl DomainVerificationLoop {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Project not found for domain"))?;
 
-        // Compute CNAME target dynamically
+        // Compute CNAME target from server hostname
         let cname_target = crate::server::domain::models::compute_cname_target(
             project.project_url.as_deref(),
             &project.name,
-            "rise.dev", // TODO: Make this configurable from settings
+            &self.state.hostname,
         );
 
         // Perform DNS lookup
