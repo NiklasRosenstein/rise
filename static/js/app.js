@@ -1891,24 +1891,9 @@ function TeamDetail({ teamName, currentUser }) {
             <div className="mb-6">
                 <div className="flex justify-between items-center mb-4">
                     <h4 className="text-lg font-bold">Owners</h4>
-                    {canEdit && (
-                        <div className="flex gap-2">
-                            <input
-                                type="email"
-                                placeholder="owner@example.com"
-                                value={newOwnerEmail}
-                                onChange={(e) => setNewOwnerEmail(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleAddOwner()}
-                                className="w-64 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
-                            />
-                            <Button variant="primary" size="sm" onClick={handleAddOwner}>
-                                Add
-                            </Button>
-                        </div>
-                    )}
                 </div>
                 {team.owners && team.owners.length > 0 ? (
-                    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+                    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800 mb-4">
                         <table className="w-full">
                             <thead className="bg-gray-800">
                                 <tr>
@@ -1939,31 +1924,33 @@ function TeamDetail({ teamName, currentUser }) {
                         </table>
                     </div>
                 ) : (
-                    <p className="text-gray-400">No owners</p>
+                    <p className="text-gray-400 mb-4">No owners</p>
+                )}
+                {canEdit && (
+                    <div className="flex justify-end">
+                        <div className="flex gap-2">
+                            <input
+                                type="email"
+                                placeholder="owner@example.com"
+                                value={newOwnerEmail}
+                                onChange={(e) => setNewOwnerEmail(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleAddOwner()}
+                                className="w-64 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                            />
+                            <Button variant="primary" size="sm" onClick={handleAddOwner}>
+                                Add
+                            </Button>
+                        </div>
+                    </div>
                 )}
             </div>
 
             <div>
                 <div className="flex justify-between items-center mb-4">
                     <h4 className="text-lg font-bold">Members</h4>
-                    {canEdit && (
-                        <div className="flex gap-2">
-                            <input
-                                type="email"
-                                placeholder="member@example.com"
-                                value={newMemberEmail}
-                                onChange={(e) => setNewMemberEmail(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleAddMember()}
-                                className="w-64 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
-                            />
-                            <Button variant="primary" size="sm" onClick={handleAddMember}>
-                                Add
-                            </Button>
-                        </div>
-                    )}
                 </div>
                 {team.members && team.members.length > 0 ? (
-                    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+                    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800 mb-4">
                         <table className="w-full">
                             <thead className="bg-gray-800">
                                 <tr>
@@ -1994,7 +1981,24 @@ function TeamDetail({ teamName, currentUser }) {
                         </table>
                     </div>
                 ) : (
-                    <p className="text-gray-400">No members</p>
+                    <p className="text-gray-400 mb-4">No members</p>
+                )}
+                {canEdit && (
+                    <div className="flex justify-end">
+                        <div className="flex gap-2">
+                            <input
+                                type="email"
+                                placeholder="member@example.com"
+                                value={newMemberEmail}
+                                onChange={(e) => setNewMemberEmail(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleAddMember()}
+                                className="w-64 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                            />
+                            <Button variant="primary" size="sm" onClick={handleAddMember}>
+                                Add
+                            </Button>
+                        </div>
+                    </div>
                 )}
             </div>
 
