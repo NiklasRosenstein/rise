@@ -85,7 +85,7 @@ controller: {}
 registry:
   type: "oci-client-auth"
   registry_url: "rise-registry:5000"      # Internal URL for deployment controllers
-  namespace: "rise-apps/"
+  namespace: "rise-apps"
   client_registry_url: "localhost:5000"   # Client-facing URL for CLI push operations
 
 # Encryption configuration (optional)

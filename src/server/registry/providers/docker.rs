@@ -33,19 +33,29 @@ impl OciClientAuthProvider {
             .unwrap_or(&config.registry_url)
             .to_string();
 
-        let registry_url = format!(
-            "{}/{}",
-            config.registry_url.trim_end_matches('/'),
-            config.namespace
-        );
+        // Trim trailing slashes from namespace to prevent double slashes in image tags
+        let namespace = config.namespace.trim_end_matches('/');
+
+        let registry_url = if namespace.is_empty() {
+            config.registry_url.trim_end_matches('/').to_string()
+        } else {
+            format!(
+                "{}/{}",
+                config.registry_url.trim_end_matches('/'),
+                namespace
+            )
+        };
 
         // Calculate client-facing registry URL (use client_registry_url if provided, otherwise use registry_url)
         let client_base = config
             .client_registry_url
             .as_ref()
             .unwrap_or(&config.registry_url);
-        let client_registry_url =
-            format!("{}/{}", client_base.trim_end_matches('/'), config.namespace);
+        let client_registry_url = if namespace.is_empty() {
+            client_base.trim_end_matches('/').to_string()
+        } else {
+            format!("{}/{}", client_base.trim_end_matches('/'), namespace)
+        };
 
         Ok(Self {
             config,
