@@ -1906,14 +1906,16 @@ function TeamDetail({ teamName, currentUser }) {
                                     <tr key={owner.id} className="hover:bg-gray-800/50 transition-colors">
                                         <td className="px-6 py-4 text-sm text-gray-200">{owner.email}</td>
                                         {canEdit && (
-                                            <td className="px-6 py-4 text-right">
-                                                <Button
-                                                    variant="danger"
-                                                    size="sm"
-                                                    onClick={() => handleRemoveOwner(owner.id, owner.email)}
-                                                >
-                                                    Remove
-                                                </Button>
+                                            <td className="px-6 py-4">
+                                                <div className="flex justify-end">
+                                                    <Button
+                                                        variant="danger"
+                                                        size="sm"
+                                                        onClick={() => handleRemoveOwner(owner.id, owner.email)}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </div>
                                             </td>
                                         )}
                                     </tr>
@@ -1959,14 +1961,16 @@ function TeamDetail({ teamName, currentUser }) {
                                     <tr key={member.id} className="hover:bg-gray-800/50 transition-colors">
                                         <td className="px-6 py-4 text-sm text-gray-200">{member.email}</td>
                                         {canEdit && (
-                                            <td className="px-6 py-4 text-right">
-                                                <Button
-                                                    variant="danger"
-                                                    size="sm"
-                                                    onClick={() => handleRemoveMember(member.id, member.email)}
-                                                >
-                                                    Remove
-                                                </Button>
+                                            <td className="px-6 py-4">
+                                                <div className="flex justify-end">
+                                                    <Button
+                                                        variant="danger"
+                                                        size="sm"
+                                                        onClick={() => handleRemoveMember(member.id, member.email)}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </div>
                                             </td>
                                         )}
                                     </tr>
