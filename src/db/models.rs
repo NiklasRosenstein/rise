@@ -260,6 +260,7 @@ pub struct CustomDomain {
     pub certificate_issued_at: Option<DateTime<Utc>>,
     pub certificate_expires_at: Option<DateTime<Utc>>,
     pub certificate_pem: Option<String>,
+    /// Encrypted private key for the certificate (encrypted via encryption provider)
     pub certificate_key_pem: Option<String>,
     pub acme_order_url: Option<String>,
     pub created_at: DateTime<Utc>,

@@ -1007,12 +1007,11 @@ impl KubernetesController {
             }
         }
 
-        // Build TLS configuration
-        let tls = if !custom_domains.is_empty() {
-            // Create TLS entries for each domain with issued certificates
+        // Build TLS configuration - always include default host TLS since we always include default host
+        let tls = {
             let mut tls_entries = Vec::new();
 
-            // Default domain TLS (if configured)
+            // Always add default host TLS if configured (since we always include default host in Ingress)
             if let Some(default_secret) = &self.ingress_tls_secret_name {
                 tls_entries.push(k8s_openapi::api::networking::v1::IngressTLS {
                     hosts: Some(vec![url_components.host.clone()]),
@@ -1020,7 +1019,7 @@ impl KubernetesController {
                 });
             }
 
-            // Custom domain TLS (from certificates stored in database)
+            // Add custom domain TLS (from certificates stored in database)
             for domain in &custom_domains {
                 if domain.certificate_status == crate::db::models::CertificateStatus::Issued {
                     // Create K8s secret name from domain name
@@ -1037,14 +1036,6 @@ impl KubernetesController {
             } else {
                 None
             }
-        } else {
-            // No custom domains, use default TLS if configured
-            self.ingress_tls_secret_name.as_ref().map(|secret_name| {
-                vec![k8s_openapi::api::networking::v1::IngressTLS {
-                    hosts: Some(vec![url_components.host.clone()]),
-                    secret_name: Some(secret_name.clone()),
-                }]
-            })
         };
 
         // Create ingress rules for all hosts
