@@ -1,6 +1,6 @@
 use super::models::{EnvVarResponse, EnvVarsResponse, SetEnvVarRequest};
 use crate::db::models::User;
-use crate::db::{env_vars as db_env_vars, projects};
+use crate::db::{deployments as db_deployments, env_vars as db_env_vars, projects};
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Path, State},
@@ -121,6 +121,28 @@ pub async fn set_project_env_var(
         project.name,
         payload.is_secret
     );
+
+    // Trigger reconciliation of all active deployments for this project
+    // Env vars affect all deployment groups, so we update all active deployments
+    match db_deployments::mark_all_active_needs_reconcile(&state.db_pool, project.id).await {
+        Ok(count) => {
+            if count > 0 {
+                tracing::info!(
+                    "Triggered reconciliation for {} active deployment(s) after updating env var '{}'",
+                    count,
+                    key
+                );
+            }
+        }
+        Err(e) => {
+            // Log the error but don't fail the request - the env var was set successfully
+            tracing::warn!(
+                "Failed to trigger reconciliation after updating env var '{}': {}",
+                key,
+                e
+            );
+        }
+    }
 
     // Return masked response
     Ok(Json(EnvVarResponse::from_db_model(
@@ -261,6 +283,28 @@ pub async fn delete_project_env_var(
         key,
         project.name
     );
+
+    // Trigger reconciliation of all active deployments for this project
+    // Env vars affect all deployment groups, so we update all active deployments
+    match db_deployments::mark_all_active_needs_reconcile(&state.db_pool, project.id).await {
+        Ok(count) => {
+            if count > 0 {
+                tracing::info!(
+                    "Triggered reconciliation for {} active deployment(s) after deleting env var '{}'",
+                    count,
+                    key
+                );
+            }
+        }
+        Err(e) => {
+            // Log the error but don't fail the request - the env var was deleted successfully
+            tracing::warn!(
+                "Failed to trigger reconciliation after deleting env var '{}': {}",
+                key,
+                e
+            );
+        }
+    }
 
     Ok(StatusCode::NO_CONTENT)
 }

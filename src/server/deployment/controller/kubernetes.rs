@@ -2191,6 +2191,28 @@ impl KubernetesController {
             return true;
         }
 
+        // 4. Environment variables
+        let actual_env = actual
+            .spec
+            .as_ref()
+            .and_then(|s| s.template.as_ref())
+            .and_then(|t| t.spec.as_ref())
+            .and_then(|ps| ps.containers.first())
+            .and_then(|c| c.env.as_ref());
+
+        let desired_env = desired
+            .spec
+            .as_ref()
+            .and_then(|s| s.template.as_ref())
+            .and_then(|t| t.spec.as_ref())
+            .and_then(|ps| ps.containers.first())
+            .and_then(|c| c.env.as_ref());
+
+        if actual_env != desired_env {
+            warn!("ReplicaSet drift: environment variables have changed");
+            return true;
+        }
+
         false
     }
 

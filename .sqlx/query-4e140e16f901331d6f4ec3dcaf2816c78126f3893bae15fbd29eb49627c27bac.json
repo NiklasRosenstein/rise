@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET\n            status = 'Stopped',\n            termination_reason = 'UserStopped',\n            deployment_url = NULL,\n            controller_metadata = '{}',\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port,\n            created_at, updated_at\n        ",
+  "query": "\n        UPDATE deployments\n        SET\n            status = 'Terminating',\n            termination_reason = $2,\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port, needs_reconcile,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -98,18 +98,37 @@
       },
       {
         "ordinal": 16,
+        "name": "needs_reconcile",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        {
+          "Custom": {
+            "name": "termination_reason",
+            "kind": {
+              "Enum": [
+                "UserStopped",
+                "Superseded",
+                "Cancelled",
+                "Failed",
+                "Expired"
+              ]
+            }
+          }
+        }
       ]
     },
     "nullable": [
@@ -130,8 +149,9 @@
       true,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "7e6b321dcddc0df15473174dd015ae42fbd87daddc76f053c817c530bac20bf3"
+  "hash": "4e140e16f901331d6f4ec3dcaf2816c78126f3893bae15fbd29eb49627c27bac"
 }

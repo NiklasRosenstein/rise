@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, deployment_group, expires_at, http_port)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n                        deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port,\n            created_at, updated_at\n        ",
+  "query": "\n            SELECT\n                id, deployment_id, project_id, created_by_id,\n                status as \"status: DeploymentStatus\",\n                deployment_group, expires_at,\n                termination_reason as \"termination_reason: _\",\n                completed_at, error_message, build_logs,\n                controller_metadata as \"controller_metadata: serde_json::Value\",\n                deployment_url,\n                image, image_digest,\n                http_port, needs_reconcile,\n                created_at, updated_at\n            FROM deployments\n            WHERE project_id = $1\n            ORDER BY created_at DESC\n            LIMIT $2 OFFSET $3\n            ",
   "describe": {
     "columns": [
       {
@@ -98,26 +98,25 @@
       },
       {
         "ordinal": 16,
+        "name": "needs_reconcile",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
         "Uuid",
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Text",
-        "Timestamptz",
-        "Int4"
+        "Int8",
+        "Int8"
       ]
     },
     "nullable": [
@@ -138,8 +137,9 @@
       true,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "784c508c47d2b6406b7f2587c2258f5503b3678b2202da8184ea15a749f456a5"
+  "hash": "5be7a7d5830321eac978fb6f8a410782ee55808b8d868e145d77e509ac8c7e0b"
 }

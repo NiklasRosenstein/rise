@@ -145,6 +145,7 @@ pub struct Deployment {
     pub image: Option<String>,
     pub image_digest: Option<String>,
     pub http_port: i32,
+    pub needs_reconcile: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

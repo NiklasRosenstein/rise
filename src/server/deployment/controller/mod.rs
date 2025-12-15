@@ -191,13 +191,29 @@ impl DeploymentController {
         }
     }
 
-    /// Process all deployments in Pushed or Deploying states
+    /// Process all deployments in Pushed or Deploying states, and Healthy/Unhealthy deployments needing reconciliation
     async fn reconcile_deployments(&self) -> anyhow::Result<()> {
         // Find deployments that need reconciliation (Pushed or Deploying)
         let deployments = db_deployments::find_non_terminal(&self.state.db_pool, 10).await?;
 
         for deployment in deployments {
             let deployment_id = deployment.deployment_id.clone();
+            if let Err(e) = self.reconcile_single_deployment(deployment).await {
+                error!("Failed to reconcile deployment {}: {}", deployment_id, e);
+            }
+        }
+
+        // Also find Healthy/Unhealthy deployments that need reconciliation
+        // (due to config changes like custom domains or env vars)
+        let flagged_deployments =
+            db_deployments::find_needing_reconcile(&self.state.db_pool, 10).await?;
+
+        for deployment in flagged_deployments {
+            let deployment_id = deployment.deployment_id.clone();
+            debug!(
+                "Reconciling deployment {} due to needs_reconcile flag",
+                deployment_id
+            );
             if let Err(e) = self.reconcile_single_deployment(deployment).await {
                 error!("Failed to reconcile deployment {}: {}", deployment_id, e);
             }
@@ -363,6 +379,15 @@ impl DeploymentController {
 
         // Update project status
         projects::update_calculated_status(&self.state.db_pool, project.id).await?;
+
+        // Clear needs_reconcile flag if it was set
+        if deployment.needs_reconcile {
+            db_deployments::clear_needs_reconcile(&self.state.db_pool, deployment.id).await?;
+            debug!(
+                "Cleared needs_reconcile flag for deployment {}",
+                deployment.deployment_id
+            );
+        }
 
         Ok(())
     }
@@ -707,7 +732,8 @@ impl DeploymentController {
                    status as "status: DeploymentStatus",
                    deployment_group, expires_at, error_message, completed_at,
                    build_logs, controller_metadata, deployment_url,
-                   image, image_digest, http_port, created_at, updated_at,
+                   image, image_digest, http_port, needs_reconcile,
+                   created_at, updated_at,
                    termination_reason as "termination_reason: _"
             FROM deployments
             WHERE status IN ('Pending', 'Building', 'Pushing')

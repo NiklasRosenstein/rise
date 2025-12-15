@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n                        deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port,\n            created_at, updated_at\n        FROM deployments\n        WHERE expires_at IS NOT NULL\n          AND expires_at <= NOW()\n          AND NOT is_terminal(status)\n        ORDER BY expires_at ASC\n        LIMIT $1\n        ",
+  "query": "\n        UPDATE deployments\n        SET controller_metadata = $2\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port, needs_reconcile,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -40,6 +40,51 @@
       },
       {
         "ordinal": 7,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "build_logs",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "controller_metadata: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "deployment_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "image",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "image_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "http_port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "needs_reconcile",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -57,59 +102,20 @@
         }
       },
       {
-        "ordinal": 8,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 9,
-        "name": "error_message",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 10,
-        "name": "build_logs",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 11,
-        "name": "controller_metadata: serde_json::Value",
-        "type_info": "Jsonb"
-      },
-      {
-        "ordinal": 12,
-        "name": "deployment_url",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 13,
-        "name": "image",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 14,
-        "name": "image_digest",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 15,
-        "name": "http_port",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid",
+        "Jsonb"
       ]
     },
     "nullable": [
@@ -127,11 +133,12 @@
       true,
       true,
       true,
-      true,
       false,
+      false,
+      true,
       false,
       false
     ]
   },
-  "hash": "c8175fe598607971216c394f60e93071f9d87aa1bb44967c970366e8d2b27690"
+  "hash": "72f92a07b59d2b8b6ee6d0ff90017704aa0b0363a0aa439679e9ea0bf17d15ed"
 }

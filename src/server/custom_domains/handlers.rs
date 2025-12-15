@@ -1,12 +1,14 @@
 use super::models::{AddCustomDomainRequest, CustomDomainResponse, CustomDomainsResponse};
 use crate::db::models::User;
-use crate::db::{custom_domains as db_custom_domains, projects};
+use crate::db::{custom_domains as db_custom_domains, deployments as db_deployments, projects};
+use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Path, State},
     http::StatusCode,
     Json,
 };
+use tracing::info;
 
 /// Add a custom domain to a project
 pub async fn add_custom_domain(
@@ -79,6 +81,31 @@ pub async fn add_custom_domain(
                 )
             }
         })?;
+
+    // Trigger reconciliation of the active deployment in the default group
+    // Custom domains are only applied to the default deployment group
+    if let Ok(Some(active_deployment)) = db_deployments::find_active_for_project_and_group(
+        &state.db_pool,
+        project.id,
+        DEFAULT_DEPLOYMENT_GROUP,
+    )
+    .await
+    {
+        if let Err(e) =
+            db_deployments::mark_needs_reconcile(&state.db_pool, active_deployment.id).await
+        {
+            // Log the error but don't fail the request - the domain was added successfully
+            info!(
+                "Failed to trigger reconciliation for deployment {} after adding domain: {}",
+                active_deployment.deployment_id, e
+            );
+        } else {
+            info!(
+                "Triggered reconciliation for deployment {} after adding custom domain '{}'",
+                active_deployment.deployment_id, payload.domain
+            );
+        }
+    }
 
     Ok((
         StatusCode::CREATED,
@@ -259,6 +286,31 @@ pub async fn delete_custom_domain(
 
     if !deleted {
         return Err((StatusCode::NOT_FOUND, "Custom domain not found".to_string()));
+    }
+
+    // Trigger reconciliation of the active deployment in the default group
+    // Custom domains are only applied to the default deployment group
+    if let Ok(Some(active_deployment)) = db_deployments::find_active_for_project_and_group(
+        &state.db_pool,
+        project.id,
+        DEFAULT_DEPLOYMENT_GROUP,
+    )
+    .await
+    {
+        if let Err(e) =
+            db_deployments::mark_needs_reconcile(&state.db_pool, active_deployment.id).await
+        {
+            // Log the error but don't fail the request - the domain was deleted successfully
+            info!(
+                "Failed to trigger reconciliation for deployment {} after deleting domain: {}",
+                active_deployment.deployment_id, e
+            );
+        } else {
+            info!(
+                "Triggered reconciliation for deployment {} after deleting custom domain '{}'",
+                active_deployment.deployment_id, domain
+            );
+        }
     }
 
     Ok(StatusCode::NO_CONTENT)

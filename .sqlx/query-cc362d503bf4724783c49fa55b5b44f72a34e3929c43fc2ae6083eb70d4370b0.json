@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET\n            status = 'Unhealthy',\n            error_message = $2,\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            deployment_url,\n            image, image_digest,\n            http_port,\n            created_at, updated_at\n        ",
+  "query": "\n            SELECT id, deployment_id, project_id, created_by_id,\n                   status as \"status: DeploymentStatus\",\n                   deployment_group, expires_at, error_message, completed_at,\n                   build_logs, controller_metadata, deployment_url,\n                   image, image_digest, http_port, needs_reconcile,\n                   created_at, updated_at,\n                   termination_reason as \"termination_reason: _\"\n            FROM deployments\n            WHERE status IN ('Pending', 'Building', 'Pushing')\n              AND created_at < $1\n              AND NOT is_protected(status)\n            LIMIT 50\n            ",
   "describe": {
     "columns": [
       {
@@ -40,6 +40,61 @@
       },
       {
         "ordinal": 7,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "build_logs",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "controller_metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "deployment_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "image",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "image_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "http_port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "needs_reconcile",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 17,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -55,62 +110,11 @@
             }
           }
         }
-      },
-      {
-        "ordinal": 8,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 9,
-        "name": "error_message",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 10,
-        "name": "build_logs",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 11,
-        "name": "controller_metadata: serde_json::Value",
-        "type_info": "Jsonb"
-      },
-      {
-        "ordinal": 12,
-        "name": "deployment_url",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 13,
-        "name": "image",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 14,
-        "name": "image_digest",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 15,
-        "name": "http_port",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 16,
-        "name": "created_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 17,
-        "name": "updated_at",
-        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -128,11 +132,12 @@
       true,
       true,
       true,
-      true,
       false,
       false,
-      false
+      false,
+      false,
+      true
     ]
   },
-  "hash": "3fd39326df5f36d74a1f1782836f9e7a5cf95a4580c2da5ba74134d427aac323"
+  "hash": "cc362d503bf4724783c49fa55b5b44f72a34e3929c43fc2ae6083eb70d4370b0"
 }
