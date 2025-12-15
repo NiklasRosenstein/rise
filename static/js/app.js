@@ -50,22 +50,36 @@ function useHashLocation() {
 }
 
 // Header Component
-function Header({ user, onLogout }) {
+function Header({ user, onLogout, currentView }) {
+    // Determine which section is active (projects or teams)
+    const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail';
+    const isTeamsActive = currentView === 'teams' || currentView === 'team-detail';
+
     return (
         <header className="bg-gray-900 border-b border-gray-800">
             <nav className="container mx-auto px-4 py-4">
                 <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                    <a href="#projects" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
                         <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
                             <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                             <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                             <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
                         </svg>
                         <strong className="text-lg font-bold">Rise Dashboard</strong>
-                    </div>
+                    </a>
                     <div className="flex items-center gap-6">
-                        <a href="#projects" className="text-gray-300 hover:text-white transition-colors">Projects</a>
-                        <a href="#teams" className="text-gray-300 hover:text-white transition-colors">Teams</a>
+                        <a
+                            href="#projects"
+                            className={`transition-colors ${isProjectsActive ? 'text-indigo-400 font-semibold' : 'text-gray-300 hover:text-white'}`}
+                        >
+                            Projects
+                        </a>
+                        <a
+                            href="#teams"
+                            className={`transition-colors ${isTeamsActive ? 'text-indigo-400 font-semibold' : 'text-gray-300 hover:text-white'}`}
+                        >
+                            Teams
+                        </a>
                         <span className="text-gray-400">{user?.email}</span>
                         <a href="#" onClick={(e) => { e.preventDefault(); onLogout(); }} className="text-red-400 hover:text-red-300 transition-colors">
                             Logout
@@ -2188,7 +2202,7 @@ function App() {
 
     return (
         <>
-            <Header user={user} onLogout={handleLogout} />
+            <Header user={user} onLogout={handleLogout} currentView={view} />
             <main className="container mx-auto px-4 py-8">
                 {view === 'projects' && <ProjectsList />}
                 {view === 'teams' && <TeamsList />}
