@@ -688,29 +688,111 @@ function EnvVarsList({ projectName, deploymentId }) {
     const [envVars, setEnvVars] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingEnvVar, setEditingEnvVar] = useState(null);
+    const [formData, setFormData] = useState({ key: '', value: '', is_secret: false });
+    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+    const [envVarToDelete, setEnvVarToDelete] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const { showToast } = useToast();
+
+    const loadEnvVars = useCallback(async () => {
+        try {
+            const response = deploymentId
+                ? await api.getDeploymentEnvVars(projectName, deploymentId)
+                : await api.getProjectEnvVars(projectName);
+            setEnvVars(response.env_vars || []);
+            setLoading(false);
+        } catch (err) {
+            setError(err.message);
+            setLoading(false);
+        }
+    }, [projectName, deploymentId]);
 
     useEffect(() => {
-        async function loadEnvVars() {
-            try {
-                const response = deploymentId
-                    ? await api.getDeploymentEnvVars(projectName, deploymentId)
-                    : await api.getProjectEnvVars(projectName);
-                setEnvVars(response.env_vars || []);
-            } catch (err) {
-                setError(err.message);
-            } finally {
-                setLoading(false);
-            }
-        }
         loadEnvVars();
-    }, [projectName, deploymentId]);
+    }, [loadEnvVars]);
+
+    const handleAddClick = () => {
+        setEditingEnvVar(null);
+        setFormData({ key: '', value: '', is_secret: false });
+        setIsModalOpen(true);
+    };
+
+    const handleEditClick = (envVar) => {
+        setEditingEnvVar(envVar);
+        setFormData({ key: envVar.key, value: envVar.value, is_secret: envVar.is_secret });
+        setIsModalOpen(true);
+    };
+
+    const handleDeleteClick = (envVar) => {
+        setEnvVarToDelete(envVar);
+        setConfirmDialogOpen(true);
+    };
+
+    const handleSave = async () => {
+        if (!formData.key || !formData.value) {
+            showToast('Key and value are required', 'error');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            await api.setEnvVar(projectName, formData.key, formData.value, formData.is_secret);
+            showToast(`Environment variable ${formData.key} ${editingEnvVar ? 'updated' : 'created'} successfully`, 'success');
+            setIsModalOpen(false);
+            loadEnvVars();
+        } catch (err) {
+            showToast(`Failed to save environment variable: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDeleteConfirm = async () => {
+        if (!envVarToDelete) return;
+
+        setDeleting(true);
+        try {
+            await api.deleteEnvVar(projectName, envVarToDelete.key);
+            showToast(`Environment variable ${envVarToDelete.key} deleted successfully`, 'success');
+            setConfirmDialogOpen(false);
+            setEnvVarToDelete(null);
+            loadEnvVars();
+        } catch (err) {
+            showToast(`Failed to delete environment variable: ${err.message}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading environment variables: {error}</p>;
-    if (envVars.length === 0) return <p className="text-gray-400">No environment variables configured.</p>;
+
+    if (envVars.length === 0) {
+        if (deploymentId) {
+            return <p className="text-gray-400">No environment variables configured.</p>;
+        }
+        return (
+            <div className="text-center py-8">
+                <p className="text-gray-400 mb-4">No environment variables configured.</p>
+                <Button variant="primary" size="sm" onClick={handleAddClick}>
+                    Add Variable
+                </Button>
+            </div>
+        );
+    }
 
     return (
         <div>
+            {!deploymentId && (
+                <div className="mb-4 flex justify-end">
+                    <Button variant="primary" size="sm" onClick={handleAddClick}>
+                        Add Variable
+                    </Button>
+                </div>
+            )}
             <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
                 <table className="w-full">
                     <thead className="bg-gray-800">
@@ -718,6 +800,9 @@ function EnvVarsList({ projectName, deploymentId }) {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Key</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Value</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
+                            {!deploymentId && (
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                            )}
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
@@ -732,6 +817,26 @@ function EnvVarsList({ projectName, deploymentId }) {
                                         <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">plain</span>
                                     )}
                                 </td>
+                                {!deploymentId && (
+                                    <td className="px-6 py-4 text-sm">
+                                        <div className="flex gap-2">
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                onClick={() => handleEditClick(env)}
+                                            >
+                                                Edit
+                                            </Button>
+                                            <Button
+                                                variant="danger"
+                                                size="sm"
+                                                onClick={() => handleDeleteClick(env)}
+                                            >
+                                                Delete
+                                            </Button>
+                                        </div>
+                                    </td>
+                                )}
                             </tr>
                         ))}
                     </tbody>
@@ -743,6 +848,73 @@ function EnvVarsList({ projectName, deploymentId }) {
                     Secret values are always masked for security.
                 </p>
             )}
+
+            <Modal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                title={editingEnvVar ? 'Edit Environment Variable' : 'Add Environment Variable'}
+            >
+                <div className="space-y-4">
+                    <FormField
+                        label="Key"
+                        id="env-key"
+                        value={formData.key}
+                        onChange={(e) => setFormData({ ...formData, key: e.target.value })}
+                        placeholder="DATABASE_URL"
+                        disabled={editingEnvVar !== null}
+                        required
+                    />
+                    <FormField
+                        label="Value"
+                        id="env-value"
+                        type="textarea"
+                        value={formData.value}
+                        onChange={(e) => setFormData({ ...formData, value: e.target.value })}
+                        placeholder="postgres://..."
+                        required
+                        rows={3}
+                    />
+                    <FormField
+                        label=""
+                        id="env-is-secret"
+                        type="checkbox"
+                        value={formData.is_secret}
+                        onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked })}
+                        placeholder="Mark as secret (value will be encrypted)"
+                    />
+
+                    <div className="flex justify-end gap-3 pt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setIsModalOpen(false)}
+                            disabled={saving}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleSave}
+                            loading={saving}
+                        >
+                            {editingEnvVar ? 'Update' : 'Add'}
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            <ConfirmDialog
+                isOpen={confirmDialogOpen}
+                onClose={() => {
+                    setConfirmDialogOpen(false);
+                    setEnvVarToDelete(null);
+                }}
+                onConfirm={handleDeleteConfirm}
+                title="Delete Environment Variable"
+                message={`Are you sure you want to delete the environment variable "${envVarToDelete?.key}"? This action cannot be undone.`}
+                confirmText="Delete Variable"
+                variant="danger"
+                loading={deleting}
+            />
         </div>
     );
 }
