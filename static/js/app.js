@@ -1,5 +1,6 @@
 // React-based Rise Dashboard Application with Tailwind CSS
 const { useState, useEffect, useCallback } = React;
+const CONFIG = window.RISE_CONFIG || { backendUrl: window.location.origin };
 
 // Utility functions
 function formatDate(dateString) {
@@ -198,6 +199,69 @@ function ProjectsList() {
                         Create Project
                     </Button>
                 </div>
+
+                <Modal
+                    isOpen={isModalOpen}
+                    onClose={() => setIsModalOpen(false)}
+                    title="Create Project"
+                >
+                    <div className="space-y-4">
+                        <FormField
+                            label="Project Name"
+                            id="project-name"
+                            value={formData.name}
+                            onChange={(e) => setFormData({ ...formData, name: e.target.value.toLowerCase() })}
+                            placeholder="my-awesome-app"
+                            required
+                        />
+                        <p className="text-sm text-gray-500 -mt-2">
+                            Only lowercase letters, numbers, and hyphens allowed
+                        </p>
+
+                        <FormField
+                            label="Visibility"
+                            id="project-visibility"
+                            type="select"
+                            value={formData.visibility}
+                            onChange={(e) => setFormData({ ...formData, visibility: e.target.value })}
+                            required
+                        >
+                            <option value="Public">Public</option>
+                            <option value="Private">Private</option>
+                        </FormField>
+
+                        <FormField
+                            label="Owner"
+                            id="project-owner"
+                            type="select"
+                            value={formData.owner}
+                            onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
+                            required
+                        >
+                            <option value="self">Self</option>
+                            {teams.map(team => (
+                                <option key={team.id} value={team.id}>team:{team.name}</option>
+                            ))}
+                        </FormField>
+
+                        <div className="flex justify-end gap-3 pt-4">
+                            <Button
+                                variant="secondary"
+                                onClick={() => setIsModalOpen(false)}
+                                disabled={saving}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="primary"
+                                onClick={handleCreate}
+                                loading={saving}
+                            >
+                                Create
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
             </section>
         );
     }
@@ -802,14 +866,12 @@ function ServiceAccountsList({ projectName }) {
     }, [loadServiceAccounts]);
 
     const handleAddClick = () => {
-        console.log('ServiceAccountsList handleAddClick called');
         setEditingSA(null);
-        // Default aud to project URL
-        const defaultAud = `https://${projectName}.rise.dev`;
+        // Default aud to Rise backend URL (where the API is hosted)
+        const defaultAud = CONFIG.backendUrl;
         setFormData({ issuer_url: '', aud: defaultAud, claims: {} });
         setClaimsText('');
         setIsModalOpen(true);
-        console.log('Modal should open now, isModalOpen set to true');
     };
 
     const handleEditClick = (sa) => {
@@ -894,12 +956,68 @@ function ServiceAccountsList({ projectName }) {
 
     if (serviceAccounts.length === 0) {
         return (
-            <div className="text-center py-8">
-                <p className="text-gray-400 mb-4">No service accounts found.</p>
-                <Button variant="primary" size="sm" onClick={handleAddClick}>
-                    Create Service Account
-                </Button>
-            </div>
+            <>
+                <div className="text-center py-8">
+                    <p className="text-gray-400 mb-4">No service accounts found.</p>
+                    <Button variant="primary" size="sm" onClick={handleAddClick}>
+                        Create Service Account
+                    </Button>
+                </div>
+
+                <Modal
+                    isOpen={isModalOpen}
+                    onClose={() => setIsModalOpen(false)}
+                    title={editingSA ? 'Edit Service Account' : 'Create Service Account'}
+                >
+                    <div className="space-y-4">
+                        <FormField
+                            label="Issuer URL"
+                            id="sa-issuer-url"
+                            value={formData.issuer_url}
+                            onChange={(e) => setFormData({ ...formData, issuer_url: e.target.value })}
+                            placeholder="https://token.actions.githubusercontent.com"
+                            required
+                        />
+                        <FormField
+                            label="Audience (aud)"
+                            id="sa-aud"
+                            value={formData.aud}
+                            onChange={(e) => setFormData({ ...formData, aud: e.target.value })}
+                            placeholder={CONFIG.backendUrl}
+                            required
+                        />
+                        <FormField
+                            label="Additional Claims (JSON)"
+                            id="sa-claims"
+                            type="textarea"
+                            value={claimsText}
+                            onChange={(e) => setClaimsText(e.target.value)}
+                            placeholder={`{\n  "sub": "repo:myorg/myrepo:*"\n}`}
+                            rows={5}
+                        />
+                        <p className="text-sm text-gray-500">
+                            <strong>Note:</strong> Additional claims should be provided as a JSON object. The <code className="bg-gray-800 px-1 rounded">aud</code> claim is configured separately above.
+                        </p>
+
+                        <div className="flex justify-end gap-3 pt-4">
+                            <Button
+                                variant="secondary"
+                                onClick={() => setIsModalOpen(false)}
+                                disabled={saving}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="primary"
+                                onClick={handleSave}
+                                loading={saving}
+                            >
+                                {editingSA ? 'Update' : 'Create'}
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+            </>
         );
     }
 
@@ -975,7 +1093,7 @@ function ServiceAccountsList({ projectName }) {
                         id="sa-aud"
                         value={formData.aud}
                         onChange={(e) => setFormData({ ...formData, aud: e.target.value })}
-                        placeholder="https://my-project.rise.dev"
+                        placeholder={CONFIG.backendUrl}
                         required
                     />
                     <FormField
@@ -1059,11 +1177,9 @@ function EnvVarsList({ projectName, deploymentId }) {
     }, [loadEnvVars]);
 
     const handleAddClick = () => {
-        console.log('EnvVarsList handleAddClick called');
         setEditingEnvVar(null);
         setFormData({ key: '', value: '', is_secret: false });
         setIsModalOpen(true);
-        console.log('EnvVar modal should open now, isModalOpen set to true');
     };
 
     const handleEditClick = (envVar) => {
@@ -1121,12 +1237,81 @@ function EnvVarsList({ projectName, deploymentId }) {
             return <p className="text-gray-400">No environment variables configured.</p>;
         }
         return (
-            <div className="text-center py-8">
-                <p className="text-gray-400 mb-4">No environment variables configured.</p>
-                <Button variant="primary" size="sm" onClick={handleAddClick}>
-                    Add Variable
-                </Button>
-            </div>
+            <>
+                <div className="text-center py-8">
+                    <p className="text-gray-400 mb-4">No environment variables configured.</p>
+                    <Button variant="primary" size="sm" onClick={handleAddClick}>
+                        Add Variable
+                    </Button>
+                </div>
+
+                <Modal
+                    isOpen={isModalOpen}
+                    onClose={() => setIsModalOpen(false)}
+                    title={editingEnvVar ? 'Edit Environment Variable' : 'Add Environment Variable'}
+                >
+                    <div className="space-y-4">
+                        <FormField
+                            label="Key"
+                            id="env-key"
+                            value={formData.key}
+                            onChange={(e) => setFormData({ ...formData, key: e.target.value })}
+                            placeholder="DATABASE_URL"
+                            disabled={editingEnvVar !== null}
+                            required
+                        />
+                        <FormField
+                            label="Value"
+                            id="env-value"
+                            type="textarea"
+                            value={formData.value}
+                            onChange={(e) => setFormData({ ...formData, value: e.target.value })}
+                            placeholder="postgres://..."
+                            required
+                            rows={3}
+                        />
+                        <FormField
+                            label=""
+                            id="env-is-secret"
+                            type="checkbox"
+                            value={formData.is_secret}
+                            onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked })}
+                            placeholder="Mark as secret (value will be encrypted)"
+                        />
+
+                        <div className="flex justify-end gap-3 pt-4">
+                            <Button
+                                variant="secondary"
+                                onClick={() => setIsModalOpen(false)}
+                                disabled={saving}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="primary"
+                                onClick={handleSave}
+                                loading={saving}
+                            >
+                                {editingEnvVar ? 'Update' : 'Add'}
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+
+                <ConfirmDialog
+                    isOpen={confirmDialogOpen}
+                    onClose={() => {
+                        setConfirmDialogOpen(false);
+                        setEnvVarToDelete(null);
+                    }}
+                    onConfirm={handleDeleteConfirm}
+                    title="Delete Environment Variable"
+                    message={`Are you sure you want to delete the environment variable "${envVarToDelete?.key}"? This action cannot be undone.`}
+                    confirmText="Delete Variable"
+                    variant="danger"
+                    loading={deleting}
+                />
+            </>
         );
     }
 
@@ -1809,8 +1994,6 @@ function useToast() {
 
 // Modal Component
 function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
-    console.log('Modal render:', { isOpen, title });
-
     useEffect(() => {
         const handleEscape = (e) => {
             if (e.key === 'Escape' && isOpen) {
@@ -1824,7 +2007,6 @@ function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
 
     useEffect(() => {
         if (isOpen) {
-            console.log('Modal is open, setting overflow hidden');
             document.body.style.overflow = 'hidden';
         } else {
             document.body.style.overflow = 'unset';
@@ -1834,12 +2016,7 @@ function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
         };
     }, [isOpen]);
 
-    if (!isOpen) {
-        console.log('Modal returning null because isOpen is false');
-        return null;
-    }
-
-    console.log('Modal rendering content');
+    if (!isOpen) return null;
 
     return (
         <div className="modal-backdrop" onClick={onClose}>
@@ -1888,10 +2065,7 @@ function Button({
     return (
         <button
             type={type}
-            onClick={(e) => {
-                console.log('Button clicked', { disabled, loading, onClick: !!onClick });
-                if (onClick) onClick(e);
-            }}
+            onClick={onClick}
             disabled={disabled || loading}
             className={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
         >
