@@ -1485,6 +1485,11 @@ function DeploymentDetail({ projectName, deploymentId }) {
     const [deployment, setDeployment] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [isRollbackModalOpen, setIsRollbackModalOpen] = useState(false);
+    const [targetGroup, setTargetGroup] = useState('');
+    const [deploymentGroups, setDeploymentGroups] = useState([]);
+    const [rolling, setRolling] = useState(false);
+    const { showToast } = useToast();
 
     const loadDeployment = useCallback(async () => {
         try {
@@ -1496,6 +1501,44 @@ function DeploymentDetail({ projectName, deploymentId }) {
             setLoading(false);
         }
     }, [projectName, deploymentId]);
+
+    useEffect(() => {
+        async function loadGroups() {
+            try {
+                const groups = await api.getDeploymentGroups(projectName);
+                setDeploymentGroups(groups);
+            } catch (err) {
+                console.error('Failed to load deployment groups:', err);
+            }
+        }
+        loadGroups();
+    }, [projectName]);
+
+    const handleRollbackClick = () => {
+        // Default to the source deployment group
+        setTargetGroup(deployment?.deployment_group || 'default');
+        setIsRollbackModalOpen(true);
+    };
+
+    const handleRollback = async () => {
+        if (!targetGroup) {
+            showToast('Please select a target deployment group', 'error');
+            return;
+        }
+
+        setRolling(true);
+        try {
+            await api.rollbackDeployment(projectName, deploymentId, targetGroup);
+            showToast(`Rollback to deployment ${deploymentId} in group ${targetGroup} initiated successfully`, 'success');
+            setIsRollbackModalOpen(false);
+            // Redirect to project page to see the new deployment
+            window.location.hash = `project/${projectName}`;
+        } catch (err) {
+            showToast(`Failed to rollback deployment: ${err.message}`, 'error');
+        } finally {
+            setRolling(false);
+        }
+    };
 
     useEffect(() => {
         loadDeployment();
@@ -1521,7 +1564,18 @@ function DeploymentDetail({ projectName, deploymentId }) {
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-2xl font-bold">Deployment {deployment.deployment_id}</h3>
-                    <StatusBadge status={deployment.status} />
+                    <div className="flex items-center gap-3">
+                        <StatusBadge status={deployment.status} />
+                        {deployment.status === 'Running' && (
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={handleRollbackClick}
+                            >
+                                Rollback
+                            </Button>
+                        )}
+                    </div>
                 </div>
                 <dl className="grid grid-cols-2 gap-4 text-sm">
                     <div>
@@ -1588,6 +1642,55 @@ function DeploymentDetail({ projectName, deploymentId }) {
 
             <h3 className="text-xl font-bold mb-4">Environment Variables</h3>
             <EnvVarsList projectName={projectName} deploymentId={deploymentId} />
+
+            <Modal
+                isOpen={isRollbackModalOpen}
+                onClose={() => setIsRollbackModalOpen(false)}
+                title="Rollback Deployment"
+            >
+                <div className="space-y-4">
+                    <p className="text-gray-300">
+                        Rollback to deployment <strong className="text-white">{deploymentId}</strong>
+                    </p>
+                    <p className="text-sm text-gray-400">
+                        This will create a new deployment using the image from this deployment.
+                    </p>
+
+                    <FormField
+                        label="Target Deployment Group"
+                        id="rollback-target-group"
+                        type="select"
+                        value={targetGroup}
+                        onChange={(e) => setTargetGroup(e.target.value)}
+                        required
+                    >
+                        {deploymentGroups.map(group => (
+                            <option key={group} value={group}>{group}</option>
+                        ))}
+                    </FormField>
+
+                    <p className="text-sm text-gray-500">
+                        <strong>Note:</strong> The deployment will be created in the selected group. By default, it will use the same group as this deployment ({deployment.deployment_group}).
+                    </p>
+
+                    <div className="flex justify-end gap-3 pt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setIsRollbackModalOpen(false)}
+                            disabled={rolling}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleRollback}
+                            loading={rolling}
+                        >
+                            Rollback
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </section>
     );
 }
