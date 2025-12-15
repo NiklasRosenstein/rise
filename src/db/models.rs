@@ -254,7 +254,6 @@ pub struct CustomDomain {
     pub id: Uuid,
     pub project_id: Uuid,
     pub domain_name: String,
-    // Note: cname_target removed - computed dynamically from project config
     pub verification_status: DomainVerificationStatus,
     pub verified_at: Option<DateTime<Utc>>,
     pub certificate_status: CertificateStatus,

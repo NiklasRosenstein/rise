@@ -122,7 +122,6 @@ pub struct AddDomainResponse {
 #[derive(Debug, Serialize)]
 pub struct DomainSetupInstructions {
     pub cname_record: CnameRecord,
-    pub message: String,
 }
 
 /// CNAME record to configure

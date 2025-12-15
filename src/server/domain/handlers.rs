@@ -89,11 +89,21 @@ pub async fn add_domain(
             }
         })?;
 
-    // Compute CNAME target dynamically
+    // Compute CNAME target dynamically from server settings
+    let default_domain = state
+        .settings
+        .server
+        .public_url
+        .trim_start_matches("http://")
+        .trim_start_matches("https://")
+        .split('/')
+        .next()
+        .unwrap_or("rise.dev");
+
     let cname_target = super::models::compute_cname_target(
         project.project_url.as_deref(),
         &project.name,
-        "rise.dev", // TODO: Make this configurable
+        default_domain,
     );
 
     let api_domain = ApiCustomDomain::from_db(domain, cname_target.clone());
@@ -103,11 +113,6 @@ pub async fn add_domain(
             name: domain_name.clone(),
             value: cname_target,
         },
-        message: format!(
-            "Please configure a CNAME record for '{}' pointing to the target. \
-             Once configured, use the verify endpoint to validate the domain.",
-            domain_name
-        ),
     };
 
     Ok(Json(AddDomainResponse {

@@ -26,6 +26,7 @@ CREATE INDEX idx_custom_domains_verification_status ON custom_domains(verificati
 CREATE INDEX idx_custom_domains_certificate_status ON custom_domains(certificate_status);
 
 -- Create trigger to automatically update updated_at timestamp
+-- Note: update_updated_at_column() is defined in 20251203000001_create_users.sql
 CREATE TRIGGER update_custom_domains_updated_at
     BEFORE UPDATE ON custom_domains
     FOR EACH ROW

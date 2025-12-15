@@ -28,8 +28,6 @@ struct AddDomainResponse {
 #[derive(Debug, Deserialize)]
 struct DomainSetupInstructions {
     cname_record: CnameRecord,
-    #[allow(dead_code)]
-    message: String,
 }
 
 #[derive(Debug, Deserialize)]

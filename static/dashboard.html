@@ -49,32 +49,14 @@
             
             <!-- Tabs for different sections -->
             <div class="project-tabs" style="margin-top: 2rem; border-bottom: 2px solid var(--card-border-color);">
-                <button class="tab-button active" onclick="switchProjectTab('domains')">Custom Domains</button>
+                <button class="tab-button active" onclick="switchProjectTab('deployments')">Deployments</button>
                 <button class="tab-button" onclick="switchProjectTab('service-accounts')">Service Accounts</button>
                 <button class="tab-button" onclick="switchProjectTab('env-vars')">Environment Variables</button>
-                <button class="tab-button" onclick="switchProjectTab('deployments')">Deployments</button>
-            </div>
-            
-            <!-- Custom Domains Tab -->
-            <div id="tab-domains" class="tab-content" style="display: block;">
-                <h3>Custom Domains</h3>
-                <div id="custom-domains-list"></div>
-            </div>
-            
-            <!-- Service Accounts Tab -->
-            <div id="tab-service-accounts" class="tab-content" style="display: none;">
-                <h3>Service Accounts</h3>
-                <div id="service-account-list"></div>
-            </div>
-            
-            <!-- Environment Variables Tab -->
-            <div id="tab-env-vars" class="tab-content" style="display: none;">
-                <h3>Environment Variables</h3>
-                <div id="project-env-vars-list"></div>
+                <button class="tab-button" onclick="switchProjectTab('domains')">Custom Domains</button>
             </div>
             
             <!-- Deployments Tab -->
-            <div id="tab-deployments" class="tab-content" style="display: none;">
+            <div id="tab-deployments" class="tab-content" style="display: block;">
                 <h3>Deployments</h3>
             <div id="deployment-filters" style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
                 <label for="deployment-group-filter" style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
@@ -90,6 +72,24 @@
                 <span id="page-info" style="font-size: 0.9rem;"></span>
                 <button id="next-page" onclick="nextPage()" style="padding: 0.5rem 1rem;">Next</button>
             </div>
+            </div>
+            
+            <!-- Service Accounts Tab -->
+            <div id="tab-service-accounts" class="tab-content" style="display: none;">
+                <h3>Service Accounts</h3>
+                <div id="service-account-list"></div>
+            </div>
+            
+            <!-- Environment Variables Tab -->
+            <div id="tab-env-vars" class="tab-content" style="display: none;">
+                <h3>Environment Variables</h3>
+                <div id="project-env-vars-list"></div>
+            </div>
+            
+            <!-- Custom Domains Tab -->
+            <div id="tab-domains" class="tab-content" style="display: none;">
+                <h3>Custom Domains</h3>
+                <div id="custom-domains-list"></div>
             </div>
         </section>
 
