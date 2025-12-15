@@ -660,26 +660,6 @@ pub async fn mark_needs_reconcile(pool: &PgPool, id: Uuid) -> Result<()> {
     Ok(())
 }
 
-/// Mark all active deployments for a project as needing reconciliation
-///
-/// Used when configuration changes affect all deployment groups (e.g., env vars)
-pub async fn mark_all_active_needs_reconcile(pool: &PgPool, project_id: Uuid) -> Result<usize> {
-    let result = sqlx::query!(
-        r#"
-        UPDATE deployments
-        SET needs_reconcile = TRUE, updated_at = NOW()
-        WHERE project_id = $1
-          AND status IN ('Healthy', 'Unhealthy')
-        "#,
-        project_id
-    )
-    .execute(pool)
-    .await
-    .context("Failed to mark active deployments as needing reconciliation")?;
-
-    Ok(result.rows_affected() as usize)
-}
-
 /// Clear the needs_reconcile flag for a deployment
 ///
 /// Called after successfully reconciling a deployment

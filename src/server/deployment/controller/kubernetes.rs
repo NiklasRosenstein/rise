@@ -1820,6 +1820,15 @@ impl DeploymentBackend for KubernetesController {
                         Api::namespaced(self.kube_client.clone(), namespace);
 
                     // Fetch custom domains (only for DEFAULT group)
+                    info!(
+                        project = project.name,
+                        deployment_id = %deployment.id,
+                        deployment_group = %deployment.deployment_group,
+                        default_group = DEFAULT_DEPLOYMENT_GROUP,
+                        is_default_group = (deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP),
+                        "Checking deployment group for custom domain fetch"
+                    );
+
                     let custom_domains = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP
                     {
                         let domains = crate::db::custom_domains::list_project_custom_domains(
@@ -1839,6 +1848,12 @@ impl DeploymentBackend for KubernetesController {
 
                         domains
                     } else {
+                        info!(
+                            project = project.name,
+                            deployment_id = %deployment.id,
+                            deployment_group = %deployment.deployment_group,
+                            "Skipping custom domain fetch - not in default deployment group"
+                        );
                         Vec::new()
                     };
 
@@ -2250,25 +2265,9 @@ impl KubernetesController {
             return true;
         }
 
-        // 4. Environment variables
-        let actual_env = actual
-            .spec
-            .as_ref()
-            .and_then(|s| s.template.spec.as_ref())
-            .and_then(|ps| ps.containers.first())
-            .and_then(|c| c.env.as_ref());
-
-        let desired_env = desired
-            .spec
-            .as_ref()
-            .and_then(|s| s.template.spec.as_ref())
-            .and_then(|ps| ps.containers.first())
-            .and_then(|c| c.env.as_ref());
-
-        if actual_env != desired_env {
-            warn!("Deployment drift: environment variables have changed");
-            return true;
-        }
+        // Note: We do NOT check environment variables for drift.
+        // Environment variables are snapshots at deployment time and should not
+        // trigger reconciliation when project-level env vars change.
 
         false
     }

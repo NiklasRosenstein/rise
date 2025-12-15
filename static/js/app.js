@@ -1665,9 +1665,15 @@ function EnvVarsList({ projectName, deploymentId }) {
                     </tbody>
                 </table>
             </div>
-            {deploymentId && (
+            {deploymentId ? (
                 <p className="mt-4 text-sm text-gray-500">
                     <strong>Note:</strong> Environment variables are read-only snapshots taken at deployment time.
+                    Secret values are always masked for security.
+                </p>
+            ) : (
+                <p className="mt-4 text-sm text-gray-500">
+                    <strong>Note:</strong> Environment variables are snapshots at deployment time.
+                    Changes to project variables will only apply to new deployments, not existing ones.
                     Secret values are always masked for security.
                 </p>
             )}
