@@ -89,14 +89,24 @@ pub async fn list_projects(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<ApiProject>>, (StatusCode, String)> {
-    let projects = projects::list_accessible_by_user(&state.db_pool, user.id)
-        .await
-        .map_err(|e| {
+    // Admins can see all projects, others only see projects they have access to
+    let projects = if is_admin(&state, &user.email) {
+        projects::list(&state.db_pool, None).await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to list projects: {}", e),
             )
-        })?;
+        })?
+    } else {
+        projects::list_accessible_by_user(&state.db_pool, user.id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to list projects: {}", e),
+                )
+            })?
+    };
 
     // Batch fetch deployment URLs and active deployment info for efficiency
     let project_ids: Vec<uuid::Uuid> = projects.iter().map(|p| p.id).collect();
