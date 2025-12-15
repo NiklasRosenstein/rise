@@ -912,6 +912,15 @@ function DeploymentDetail({ projectName, deploymentId }) {
                             <dd className="mt-1 text-gray-200">{formatDate(deployment.completed_at)}</dd>
                         </div>
                     )}
+                    {deployment.expires_at && (
+                        <div>
+                            <dt className="text-gray-400">Expires</dt>
+                            <dd className="mt-1 text-gray-200">
+                                {formatTimeRemaining(deployment.expires_at)}
+                                <span className="text-gray-500 text-xs ml-2">({formatDate(deployment.expires_at)})</span>
+                            </dd>
+                        </div>
+                    )}
                     {deployment.error_message && (
                         <div className="col-span-2">
                             <dt className="text-gray-400">Error</dt>
