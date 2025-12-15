@@ -59,6 +59,9 @@ pub fn is_valid_transition(from: &DeploymentStatus, to: &DeploymentStatus) -> bo
     use DeploymentStatus::*;
 
     match (from, to) {
+        // Same status is always valid (allows updated_at refresh)
+        (from, to) if from == to => true,
+
         // Can't transition from terminal states
         (from, _) if is_terminal(from) => false,
 
@@ -231,5 +234,16 @@ mod tests {
         // Cannot go back in deployment path
         assert!(!is_valid_transition(&Deploying, &Building));
         assert!(!is_valid_transition(&Healthy, &Pending));
+    }
+
+    #[test]
+    fn test_same_status_transitions() {
+        // Same status transitions should be valid (allows updated_at refresh)
+        assert!(is_valid_transition(&Pending, &Pending));
+        assert!(is_valid_transition(&Building, &Building));
+        assert!(is_valid_transition(&Healthy, &Healthy));
+        assert!(is_valid_transition(&Unhealthy, &Unhealthy));
+        assert!(is_valid_transition(&Failed, &Failed));
+        assert!(is_valid_transition(&Stopped, &Stopped));
     }
 }
