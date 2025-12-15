@@ -123,7 +123,6 @@ Rise uses a multi-process architecture:
 - ✅ Project & team management
 - ✅ Service accounts (workload identity for CI/CD)
 - ✅ AWS ECR integration with Terraform module
-- ✅ Docker controller with health monitoring
 - ✅ Kubernetes controller with Ingress authentication
 - ✅ Build integrations (Docker, Buildpacks, Railpack)
 - ✅ Embedded web frontend

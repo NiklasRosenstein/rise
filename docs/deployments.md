@@ -4,7 +4,7 @@ Deployments in Rise represent immutable instances of your application running in
 
 ## What is a Deployment?
 
-A **deployment** is a specific version of your project that has been built, pushed to a container registry, and deployed to the runtime (currently Docker, future: Kubernetes).
+A **deployment** is a specific version of your project that has been built, pushed to a container registry, and deployed to the Kubernetes runtime.
 
 Key characteristics:
 - **Immutable**: Once created, a deployment's configuration cannot be changed
@@ -92,7 +92,7 @@ Custom groups allow:
 - **Isolated testing** without affecting production
 - **Preview environments** for code review
 
-**Note**: Currently, custom groups don't have dedicated URLs. This will be added when the Kubernetes controller is implemented.
+Each custom group deployment gets its own URL in the format: `https://{project}-{group}.rise.dev`
 
 ## Pre-built Images
 

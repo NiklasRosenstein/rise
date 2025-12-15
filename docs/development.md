@@ -28,7 +28,7 @@ Single process running HTTP API server + controllers (deployment, project, ECR) 
 - `mise db:migrate` - Run migrations
 - `mise backend:deps` - Start docker-compose services
 - `mise backend:run` (alias: `mise br`) - Start backend with overmind
-- `mise minikube:launch` - Start minikube with local registry
+- `mise minikube:launch` - Start Minikube with local registry
 
 ## Quick Start
 
@@ -108,6 +108,18 @@ docker-compose logs -f dex
 overmind connect server
 # Ctrl+B then D to detach
 ```
+
+## Local Kubernetes Development
+
+For testing the Kubernetes controller locally, use Minikube:
+
+```bash
+mise minikube:launch
+```
+
+This starts a local Kubernetes cluster with an embedded container registry. The backend will automatically deploy applications to Minikube when configured for Kubernetes.
+
+For installation and advanced usage, see the [Minikube documentation](https://minikube.sigs.k8s.io/docs/start/).
 
 ### Accessing Database
 

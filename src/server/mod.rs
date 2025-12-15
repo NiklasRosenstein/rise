@@ -17,7 +17,7 @@ use anyhow::Result;
 use axum::{middleware, Router};
 use state::{AppState, ControllerState};
 use std::sync::Arc;
-#[cfg(any(feature = "docker", feature = "k8s", feature = "aws"))]
+#[cfg(any(feature = "k8s", feature = "aws"))]
 use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
@@ -30,51 +30,23 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     // Spawn enabled controllers as background tasks
     let mut controller_handles = vec![];
 
-    // Start deployment controller (always enabled)
-    let is_kubernetes = settings.kubernetes.is_some();
-    info!(
-        "Starting deployment controller (backend: {})",
-        if is_kubernetes {
-            "kubernetes"
-        } else {
-            "docker"
-        }
-    );
+    // Start Kubernetes deployment controller
+    info!("Starting Kubernetes deployment controller");
 
     let settings_clone = settings.clone();
     let handle = tokio::spawn(async move {
-        async fn run_controller(_settings: settings::Settings, is_k8s: bool) -> Result<()> {
-            #[cfg(any(feature = "docker", feature = "k8s", feature = "aws"))]
-            let settings = _settings;
-            if is_k8s {
-                #[cfg(feature = "k8s")]
-                {
-                    run_kubernetes_controller_loop(settings).await
-                }
-                #[cfg(not(feature = "k8s"))]
-                {
-                    anyhow::bail!(
-                        "Kubernetes deployment backend is configured but the 'k8s' feature is not enabled. \
-                         Please rebuild with --features k8s or use a pre-built binary with Kubernetes support."
-                    )
-                }
-            } else {
-                #[cfg(feature = "docker")]
-                {
-                    run_deployment_controller_loop(settings).await
-                }
-                #[cfg(not(feature = "docker"))]
-                {
-                    anyhow::bail!(
-                        "Docker deployment backend is required but the 'docker' feature is not enabled. \
-                         Please rebuild with --features docker or use a pre-built binary with Docker support."
-                    )
-                }
+        #[cfg(feature = "k8s")]
+        {
+            if let Err(e) = run_kubernetes_controller_loop(settings_clone).await {
+                tracing::error!("Deployment controller error: {}", e);
             }
         }
-
-        if let Err(e) = run_controller(settings_clone, is_kubernetes).await {
-            tracing::error!("Deployment controller error: {}", e);
+        #[cfg(not(feature = "k8s"))]
+        {
+            tracing::error!(
+                "Kubernetes deployment controller is required but the 'k8s' feature is not enabled. \
+                 Please rebuild with --features server,k8s"
+            );
         }
     });
     controller_handles.push(handle);
@@ -143,53 +115,6 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         let _ = handle.await;
     }
 
-    Ok(())
-}
-
-/// Run the deployment controller loop (for embedding in server process)
-#[cfg(feature = "docker")]
-async fn run_deployment_controller_loop(settings: settings::Settings) -> Result<()> {
-    let app_state = state::AppState::new_for_controller(&settings).await?;
-
-    // Create minimal controller state for the base controller
-    let controller_state = ControllerState {
-        db_pool: app_state.db_pool.clone(),
-        encryption_provider: app_state.encryption_provider.clone(),
-    };
-
-    // Wrap registry provider in credentials adapter
-    let credentials_provider = app_state.registry_provider.as_ref().map(|p| {
-        std::sync::Arc::new(registry::RegistryCredentialsAdapter::new(p.clone()))
-            as std::sync::Arc<dyn registry::CredentialsProvider>
-    });
-
-    // Extract registry URL for image tag construction
-    let registry_url = app_state
-        .registry_provider
-        .as_ref()
-        .map(|p| p.registry_url().to_string());
-
-    let backend = Arc::new(deployment::controller::DockerController::new(
-        controller_state.clone(),
-        credentials_provider,
-        registry_url,
-    )?);
-
-    let controller = Arc::new(deployment::controller::DeploymentController::new(
-        Arc::new(controller_state),
-        backend,
-        Duration::from_secs(settings.controller.reconcile_interval_secs),
-        Duration::from_secs(settings.controller.health_check_interval_secs),
-        Duration::from_secs(settings.controller.termination_interval_secs),
-        Duration::from_secs(settings.controller.cancellation_interval_secs),
-        Duration::from_secs(settings.controller.expiration_interval_secs),
-    )?);
-    controller.start();
-    info!("Deployment controller started");
-
-    // Wait for shutdown signal
-    shutdown_signal().await;
-    info!("Deployment controller shutdown complete");
     Ok(())
 }
 
@@ -264,10 +189,49 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
         .install_default()
         .ok();
 
-    let k8s_settings = settings
-        .kubernetes
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("Kubernetes settings required"))?;
+    // Extract Kubernetes controller settings
+    let (
+        kubeconfig,
+        ingress_class,
+        production_ingress_url_template,
+        staging_ingress_url_template,
+        auth_backend_url,
+        auth_signin_url,
+        _namespace_format,
+        namespace_annotations,
+        ingress_annotations,
+        ingress_tls_secret_name,
+        node_selector,
+    ) = match settings.deployment_controller.clone() {
+        Some(settings::DeploymentControllerSettings::Kubernetes {
+            kubeconfig,
+            ingress_class,
+            production_ingress_url_template,
+            staging_ingress_url_template,
+            auth_backend_url,
+            auth_signin_url,
+            namespace_format,
+            namespace_annotations,
+            ingress_annotations,
+            ingress_tls_secret_name,
+            node_selector,
+        }) => (
+            kubeconfig,
+            ingress_class,
+            production_ingress_url_template,
+            staging_ingress_url_template,
+            auth_backend_url,
+            auth_signin_url,
+            namespace_format,
+            namespace_annotations,
+            ingress_annotations,
+            ingress_tls_secret_name,
+            node_selector,
+        ),
+        None => {
+            anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
+        }
+    };
 
     let app_state = state::AppState::new_for_controller(&settings).await?;
     let controller_state = ControllerState {
@@ -276,7 +240,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
     };
 
     // Create kube client
-    let kube_config = if k8s_settings.kubeconfig.is_some() {
+    let kube_config = if kubeconfig.is_some() {
         // Use explicit kubeconfig if provided
         kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
             context: None,
@@ -300,17 +264,17 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
         controller_state.clone(),
         kube_client,
         deployment::controller::KubernetesControllerConfig {
-            ingress_class: k8s_settings.ingress_class,
-            production_ingress_url_template: k8s_settings.production_ingress_url_template,
-            staging_ingress_url_template: k8s_settings.staging_ingress_url_template,
+            ingress_class,
+            production_ingress_url_template,
+            staging_ingress_url_template,
             registry_provider,
             registry_url,
-            auth_backend_url: k8s_settings.auth_backend_url,
-            auth_signin_url: k8s_settings.auth_signin_url,
-            namespace_annotations: k8s_settings.namespace_annotations,
-            ingress_annotations: k8s_settings.ingress_annotations,
-            ingress_tls_secret_name: k8s_settings.ingress_tls_secret_name,
-            node_selector: k8s_settings.node_selector,
+            auth_backend_url,
+            auth_signin_url,
+            namespace_annotations,
+            ingress_annotations,
+            ingress_tls_secret_name,
+            node_selector,
         },
     )?);
 

@@ -46,11 +46,6 @@ aws = [
     "dep:aws-sdk-kms",
     "dep:aws-sdk-sts",
 ]
-docker = [
-    "server",  # Docker controller requires server
-    "dep:bollard",
-    "dep:futures-util",
-]
 k8s = [
     "server",  # Kubernetes controller requires server
     "dep:kube",
@@ -118,10 +113,6 @@ aws-config = { version = "1.5", features = ["behavior-version-latest"], optional
 aws-sdk-ecr = { version = "1.80", optional = true }
 aws-sdk-kms = { version = "1.80", optional = true }
 aws-sdk-sts = { version = "1.80", optional = true }
-
-# Docker feature dependencies
-bollard = { version = "0.17", optional = true }
-futures-util = { version = "0.3", optional = true }
 
 # Kubernetes feature dependencies
 kube = { version = "0.95", features = ["client", "runtime", "derive"], optional = true }

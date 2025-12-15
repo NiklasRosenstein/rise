@@ -1,11 +1,5 @@
-#[cfg(feature = "docker")]
-mod docker;
-
 #[cfg(feature = "k8s")]
 mod kubernetes;
-
-#[cfg(feature = "docker")]
-pub use docker::DockerController;
 
 #[cfg(feature = "k8s")]
 pub use kubernetes::{KubernetesController, KubernetesControllerConfig};
@@ -115,7 +109,7 @@ impl DeploymentController {
     ///
     /// # Arguments
     /// * `state` - Minimal controller state with database access
-    /// * `backend` - The deployment backend implementation (e.g., DockerController)
+    /// * `backend` - The deployment backend implementation (e.g., KubernetesController)
     /// * `reconcile_interval` - How often to check for deployments to reconcile
     /// * `health_check_interval` - How often to perform health checks
     /// * `termination_interval` - How often to process terminating deployments

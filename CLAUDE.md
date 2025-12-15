@@ -64,8 +64,8 @@ The codebase is organized into functional modules:
    - **Authentication Module** (`auth/`): OAuth2/OIDC with Dex, JWT validation
    - **Project Management** (`project/`): Project CRUD and lifecycle management
    - **Team Management** (`team/`): Team and membership management
-   - **Container Registry** (`registry/`): Temporary credentials for Docker/ECR registries
-   - **Deployment Module** (`deployment/`): Controllers for Docker and Kubernetes runtimes
+   - **Container Registry** (`registry/`): Temporary credentials for ECR registries
+   - **Deployment Module** (`deployment/`): Kubernetes controller for deployments
    - **ECR Integration** (`ecr/`): AWS ECR repository management (feature: `aws`)
    - **Encryption** (`encryption/`): Local AES-GCM and AWS KMS providers
    - **OCI Client** (`oci/`): OCI registry interaction
@@ -86,13 +86,12 @@ The crate uses granular Cargo features for modular compilation:
 - **`cli`** (default): CLI commands and client-side functionality
 - **`server`**: HTTP server, controllers, and backend logic
 - **`aws`**: AWS ECR registry and KMS encryption (requires `server`)
-- **`docker`**: Docker deployment controller (requires `server`)
 - **`k8s`**: Kubernetes deployment controller (requires `server`)
 
 Examples:
 ```bash
 cargo build                           # CLI-only build (smallest binary)
-cargo build --features server,docker  # Server with Docker backend
+cargo build --features server,k8s     # Server with Kubernetes backend
 cargo build --all-features            # Full build with all capabilities
 ```
 
@@ -103,7 +102,7 @@ cargo build --all-features            # Full build with all capabilities
 ### Completed Implementation
 
 1. **Core Infrastructure** ✅
-   - [x] Single consolidated crate with feature flags (`cli`, `server`, `aws`, `docker`, `k8s`)
+   - [x] Single consolidated crate with feature flags (`cli`, `server`, `aws`, `k8s`)
    - [x] PostgreSQL database with SQLX (compile-time verified queries and migrations)
    - [x] Dex OAuth2/OIDC integration for authentication
    - [x] Docker Compose setup for local development (PostgreSQL, Dex, Registry)
@@ -113,11 +112,9 @@ cargo build --all-features            # Full build with all capabilities
    - [x] Authentication: OAuth2/OIDC with Dex, JWT validation, PKCE flow
    - [x] Project management: CRUD operations, ownership, visibility
    - [x] Team management: Team creation, membership, role-based access
-   - [x] Deployment controllers:
-     - [x] Docker controller (`--features docker`) - local container deployments
+   - [x] Deployment controller:
      - [x] Kubernetes controller (`--features k8s`) - K8s deployments with Ingress
    - [x] Container registry integration:
-     - [x] Docker registry provider
      - [x] AWS ECR provider (`--features aws`) with repository lifecycle management
    - [x] Encryption providers: Local AES-GCM and AWS KMS (`--features aws`)
    - [x] OCI client for image digest resolution
@@ -192,22 +189,20 @@ For user-facing documentation, see the [`/docs`](./docs) directory. Key topics i
 
 ### Ingress Authentication (Kubernetes Controller)
 
-The project `visibility` field (Public/Private) is currently stored but not enforced at the API level. This field is intended for future ingress-level authentication when deploying to Kubernetes:
+The project `visibility` field (Public/Private) is currently stored but not enforced at the ingress level. This field is intended for ingress-level authentication:
 
 - **Public projects**: The ingress will serve the application without requiring authentication
 - **Private projects**: The ingress will require user authentication AND verify project access authorization before serving the application
 
 **Current State**: The visibility field is stored in the database and returned via the API, but does NOT affect:
 - API authorization (all projects require ownership/team membership to access via API)
-- Docker controller deployments (no ingress authentication layer)
+- Ingress routing (authentication not yet configured in ingress annotations)
 
 **Implementation Plan**:
-- When the Kubernetes controller is implemented, it will configure ingress resources based on the visibility field
+- The Kubernetes controller will configure ingress resources based on the visibility field
 - Public projects will have standard ingress rules
 - Private projects will have OAuth2 proxy or similar authentication middleware configured in the ingress
 - The authentication layer will validate both user identity AND project access permissions before proxying requests to the application
-
-This feature is specifically for the Kubernetes controller and will not be implemented for the Docker controller.
 - When removing a feature, do a comprehensive check on the codebase to ensure any remaining references to that feature are removed or updated. This includes documentation files/READMEs, config files, code comments, etc.
 - Run `mise sqlx:check` and `mise sqlx:prepare` (if needed) as part of the finalizing steps
 - The CLI should first and foremost always accept the names of things (e.g. project names, or project names + deployment timestamp). The UUIDs in our tables are only for internal book-keeping.

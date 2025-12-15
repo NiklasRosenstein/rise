@@ -301,7 +301,7 @@ pub async fn user_can_access(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> 
 }
 
 /// Set the active deployment for a project
-#[cfg(any(feature = "docker", feature = "k8s", feature = "aws"))]
+#[cfg(any(feature = "k8s", feature = "aws"))]
 pub async fn set_active_deployment(
     pool: &PgPool,
     project_id: Uuid,
@@ -641,7 +641,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
 }
 
 /// Update project URL
-#[cfg(any(feature = "docker", feature = "k8s", feature = "aws"))]
+#[cfg(any(feature = "k8s", feature = "aws"))]
 pub async fn update_project_url(pool: &PgPool, project_id: Uuid, url: &str) -> Result<Project> {
     let project = sqlx::query_as!(
         Project,

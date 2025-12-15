@@ -17,7 +17,7 @@ struct ProjectInfo {
     project_url: Option<String>,
 }
 
-// Docker controller metadata structures
+// Legacy Docker controller metadata structures (for backward compatibility with old deployments)
 #[derive(Deserialize, Debug, Clone, PartialEq)]
 struct DockerMetadata {
     #[serde(default)]
@@ -259,14 +259,14 @@ fn is_terminal_state(status: &DeploymentStatus) -> bool {
     )
 }
 
-/// Parse controller metadata to extract Docker-specific info
+/// Parse controller metadata to extract deployment phase info (handles legacy Docker deployments)
 fn parse_controller_metadata(metadata: &serde_json::Value) -> Option<DockerMetadata> {
     if metadata.is_null() || metadata == &serde_json::json!({}) {
         return None;
     }
 
-    // Try to parse as Docker metadata - if it fails, it's likely a different controller
-    // (e.g., Kubernetes) which is fine, we just won't show Docker-specific details
+    // Try to parse as Docker metadata (for legacy deployments)
+    // For Kubernetes deployments, this will return None, which is fine
     serde_json::from_value::<DockerMetadata>(metadata.clone()).ok()
 }
 

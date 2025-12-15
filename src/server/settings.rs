@@ -12,7 +12,7 @@ pub struct Settings {
     #[serde(default)]
     pub registry: Option<RegistrySettings>,
     #[serde(default)]
-    pub kubernetes: Option<KubernetesSettings>,
+    pub deployment_controller: Option<DeploymentControllerSettings>,
     #[serde(default)]
     pub encryption: Option<EncryptionSettings>,
 }
@@ -167,120 +167,78 @@ fn default_node_selector() -> std::collections::HashMap<String, String> {
     selector
 }
 
-/// Kubernetes deployment controller configuration
-///
-/// # Ingress Authentication Architecture
-///
-/// For cookie-based authentication to work with private projects, the backend API
-/// must be accessible on the same parent domain as the deployed applications:
-///
-/// **Required Setup:**
-/// 1. Deploy backend with Ingress at a subdomain (e.g., `rise.dev`)
-/// 2. Configure apps to use sibling subdomains (e.g., `{project}.apps.rise.dev`)
-/// 3. Set `cookie_domain` to parent domain (e.g., `.rise.dev`)
-/// 4. Set `public_url` to API ingress URL (e.g., `https://rise.dev`)
-///
-/// **Example Production Configuration:**
-/// ```toml
-/// [server]
-/// public_url = "https://rise.dev"
-/// cookie_domain = ".rise.dev"  # Shared across rise.dev and *.apps.rise.dev
-/// cookie_secure = true
-///
-/// [kubernetes]
-/// hostname_format = "{project_name}.apps.rise.dev"
-/// namespace_format = "rise-{project_name}"
-/// auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL
-/// auth_signin_url = "https://rise.dev"  # Public API URL for browser redirects
-/// ```
-///
-/// **How it works:**
-/// 1. User visits `myapp.apps.rise.dev` (deployed application)
-/// 2. Nginx ingress checks authentication via `auth_backend_url` (cluster-internal)
-/// 3. If unauthenticated, redirects browser to `auth_signin_url` (public API URL)
-/// 4. Backend sets session cookie with `domain=.rise.dev`
-/// 5. Browser redirects back to `myapp.apps.rise.dev` with cookie
-/// 6. Cookie is sent by browser (same parent domain) and Nginx auth succeeds
-///
-/// **Development Setup (Minikube):**
-/// - Create Ingress for backend at `rise.dev`
-/// - Add `/etc/hosts` entries pointing to Minikube IP
-/// - Use `auth_backend_url = "http://172.17.0.1:3000"` (Docker bridge IP)
-/// - Use `auth_signin_url = "http://rise.dev"` (through ingress)
+/// Deployment controller configuration
 #[derive(Debug, Clone, Deserialize)]
-pub struct KubernetesSettings {
-    /// Optional kubeconfig path (defaults to in-cluster or ~/.kube/config)
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub kubeconfig: Option<String>,
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum DeploymentControllerSettings {
+    /// Kubernetes deployment controller
+    #[cfg(feature = "k8s")]
+    Kubernetes {
+        /// Optional kubeconfig path (defaults to in-cluster or ~/.kube/config)
+        #[serde(default)]
+        kubeconfig: Option<String>,
 
-    /// Ingress class to use (e.g., "nginx")
-    #[serde(default = "default_ingress_class")]
-    #[allow(dead_code)]
-    pub ingress_class: String,
+        /// Ingress class to use (e.g., "nginx")
+        #[serde(default = "default_ingress_class")]
+        ingress_class: String,
 
-    /// Ingress URL template for production (default) deployment group
-    /// Supports both subdomain and sub-path routing:
-    ///   Subdomain: "{project_name}.apps.rise.dev"
-    ///   Sub-path: "rise.dev/{project_name}"
-    /// Must contain {project_name} placeholder
-    pub production_ingress_url_template: String,
+        /// Ingress URL template for production (default) deployment group
+        /// Supports both subdomain and sub-path routing:
+        ///   Subdomain: "{project_name}.apps.rise.dev"
+        ///   Sub-path: "rise.dev/{project_name}"
+        /// Must contain {project_name} placeholder
+        production_ingress_url_template: String,
 
-    /// Ingress URL template for staging (non-default) deployment groups
-    /// Supports both subdomain and sub-path routing:
-    ///   Subdomain: "{project_name}-{deployment_group}.preview.rise.dev"
-    ///   Sub-path: "rise.dev/{project_name}/{deployment_group}"
-    /// Must contain both {project_name} and {deployment_group} placeholders
-    /// If not set, falls back to inserting "-{deployment_group}" before first dot
-    #[serde(default)]
-    pub staging_ingress_url_template: Option<String>,
+        /// Ingress URL template for staging (non-default) deployment groups
+        /// Supports both subdomain and sub-path routing:
+        ///   Subdomain: "{project_name}-{deployment_group}.preview.rise.dev"
+        ///   Sub-path: "rise.dev/{project_name}/{deployment_group}"
+        /// Must contain both {project_name} and {deployment_group} placeholders
+        /// If not set, falls back to inserting "-{deployment_group}" before first dot
+        #[serde(default)]
+        staging_ingress_url_template: Option<String>,
 
-    /// Backend URL for Nginx auth subrequests (internal cluster URL)
-    /// Example: "http://rise-backend.default.svc.cluster.local:3000"
-    /// This is the URL Nginx will use internally within the cluster to validate authentication.
-    /// For Minikube development, use "http://172.17.0.1:3000" (Docker bridge IP) to reach host.
-    #[allow(dead_code)]
-    pub auth_backend_url: String,
+        /// Backend URL for Nginx auth subrequests (internal cluster URL)
+        /// Example: "http://rise-backend.default.svc.cluster.local:3000"
+        /// This is the URL Nginx will use internally within the cluster to validate authentication.
+        /// For Minikube development, use "http://172.17.0.1:3000" (Docker bridge IP) to reach host.
+        auth_backend_url: String,
 
-    /// Public backend URL for browser redirects during authentication
-    /// Example: "https://rise.dev"
-    /// This must be the public URL where the backend is accessible via Ingress.
-    /// The domain should share a parent with app domains for cookie sharing (see struct docs).
-    #[allow(dead_code)]
-    pub auth_signin_url: String,
+        /// Public backend URL for browser redirects during authentication
+        /// Example: "https://rise.dev"
+        /// This must be the public URL where the backend is accessible via Ingress.
+        /// The domain should share a parent with app domains for cookie sharing (see struct docs).
+        auth_signin_url: String,
 
-    /// Namespace format template for deployed applications
-    /// Template variables: {project_name}
-    /// Example: "rise-{project_name}" → namespace "rise-myapp" for project "myapp"
-    /// Defaults to "rise-{project_name}"
-    #[serde(default = "default_namespace_format")]
-    pub namespace_format: String,
+        /// Namespace format template for deployed applications
+        /// Template variables: {project_name}
+        /// Example: "rise-{project_name}" → namespace "rise-myapp" for project "myapp"
+        /// Defaults to "rise-{project_name}"
+        #[serde(default = "default_namespace_format")]
+        namespace_format: String,
 
-    /// Annotations to apply to all managed namespaces
-    /// Example: {"company.com/team": "platform", "cost-center": "engineering"}
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub namespace_annotations: std::collections::HashMap<String, String>,
+        /// Annotations to apply to all managed namespaces
+        /// Example: {"company.com/team": "platform", "cost-center": "engineering"}
+        #[serde(default)]
+        namespace_annotations: std::collections::HashMap<String, String>,
 
-    /// Ingress annotations to apply to all deployed application ingresses
-    /// Example: {"cert-manager.io/cluster-issuer": "letsencrypt-prod"}
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub ingress_annotations: std::collections::HashMap<String, String>,
+        /// Ingress annotations to apply to all deployed application ingresses
+        /// Example: {"cert-manager.io/cluster-issuer": "letsencrypt-prod"}
+        #[serde(default)]
+        ingress_annotations: std::collections::HashMap<String, String>,
 
-    /// TLS secret name for ingress certificates
-    /// If set, enables TLS on all ingresses with this secret
-    /// Example: "rise-apps-tls" (secret must exist in each namespace)
-    #[serde(default)]
-    #[allow(dead_code)]
-    pub ingress_tls_secret_name: Option<String>,
+        /// TLS secret name for ingress certificates
+        /// If set, enables TLS on all ingresses with this secret
+        /// Example: "rise-apps-tls" (secret must exist in each namespace)
+        #[serde(default)]
+        ingress_tls_secret_name: Option<String>,
 
-    /// Node selector for pod placement (controls which nodes pods can run on)
-    /// Default: {"kubernetes.io/arch": "amd64"}
-    /// Example: {"kubernetes.io/arch": "amd64", "node-type": "compute"}
-    #[serde(default = "default_node_selector")]
-    #[allow(dead_code)]
-    pub node_selector: std::collections::HashMap<String, String>,
+        /// Node selector for pod placement (controls which nodes pods can run on)
+        /// Default: {"kubernetes.io/arch": "amd64"}
+        /// Example: {"kubernetes.io/arch": "amd64", "node-type": "compute"}
+        #[serde(default = "default_node_selector")]
+        node_selector: std::collections::HashMap<String, String>,
+    },
 }
 
 /// Registry provider configuration
@@ -503,20 +461,22 @@ impl Settings {
             ));
         }
 
-        // Validate Kubernetes settings if configured
-        if let Some(ref k8s) = settings.kubernetes {
+        // Validate deployment controller settings if configured
+        if let Some(DeploymentControllerSettings::Kubernetes {
+            ref namespace_format,
+            ref production_ingress_url_template,
+            ref staging_ingress_url_template,
+            ..
+        }) = settings.deployment_controller
+        {
+            Self::validate_format_string(namespace_format, "namespace_format", "{project_name}")?;
             Self::validate_format_string(
-                &k8s.namespace_format,
-                "namespace_format",
-                "{project_name}",
-            )?;
-            Self::validate_format_string(
-                &k8s.production_ingress_url_template,
+                production_ingress_url_template,
                 "production_ingress_url_template",
                 "{project_name}",
             )?;
 
-            if let Some(ref staging_template) = k8s.staging_ingress_url_template {
+            if let Some(ref staging_template) = staging_ingress_url_template {
                 Self::validate_format_string(
                     staging_template,
                     "staging_ingress_url_template",

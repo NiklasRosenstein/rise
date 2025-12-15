@@ -8,16 +8,11 @@ This guide covers security, configuration, database setup, monitoring, and opera
 
 ## Deployment Backend
 
-Rise supports multiple deployment backends for running applications:
+Rise deploys applications to Kubernetes clusters. For local development, use Minikube:
 
-| Backend | Description | Use Case |
-|---------|-------------|----------|
-| **Docker** | Deploys to local Docker daemon | Development, single-server deployments |
-| **Kubernetes** | Deploys to Kubernetes clusters | Production, multi-server, cloud deployments |
-
-**Choosing a backend**:
-- Use **Docker** for simple, single-server deployments or development
-- Use **Kubernetes** for production environments requiring scalability, high availability, and cloud integration
+```bash
+mise minikube:launch
+```
 
 See [Kubernetes Backend](./kubernetes.md) for Kubernetes-specific configuration and operation.
 
