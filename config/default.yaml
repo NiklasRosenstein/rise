@@ -95,7 +95,7 @@ registry:
 # Local encryption with AES-256-GCM (good for development and single-server deployments)
 # encryption:
 #   type: "aes-gcm-256"
-#   key: "${RISE_ENCRYPTION_KEY}"  # Generate with: openssl rand -base64 32
+#   key: "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=" # TODO: Generate with: openssl rand -base64 32
 
 # AWS KMS encryption (recommended for production)
 # encryption:
