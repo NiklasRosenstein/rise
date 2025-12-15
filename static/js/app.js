@@ -628,26 +628,45 @@ function ActiveDeploymentsSummary({ projectName }) {
     const [stopping, setStopping] = useState(false);
     const { showToast } = useToast();
 
+    const isTerminal = (status) => {
+        return ['Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired'].includes(status);
+    };
+
     const loadSummary = useCallback(async () => {
         try {
             const deployments = await api.getProjectDeployments(projectName, { limit: 100 });
-            const activeStatuses = ['Pending', 'Building', 'Pushing', 'Pushed', 'Deploying', 'Running', 'Healthy'];
-            const active = deployments.filter(d => activeStatuses.includes(d.status));
 
-            // Group by deployment group
-            const grouped = active.reduce((acc, d) => {
+            // Group ALL deployments by deployment group
+            const allGrouped = deployments.reduce((acc, d) => {
                 const group = d.deployment_group || 'default';
                 if (!acc[group]) acc[group] = [];
                 acc[group].push(d);
                 return acc;
             }, {});
 
-            // Sort each group by created date
-            Object.keys(grouped).forEach(group => {
-                grouped[group].sort((a, b) => new Date(b.created) - new Date(a.created));
+            // Sort each group by created date (newest first)
+            Object.keys(allGrouped).forEach(group => {
+                allGrouped[group].sort((a, b) => new Date(b.created) - new Date(a.created));
             });
 
-            setActiveDeployments(grouped);
+            // Filter groups based on visibility rules:
+            // - "default" group: always include if it exists (show latest deployment regardless of status)
+            // - Other groups: only include if they have at least one non-terminal deployment
+            const filtered = {};
+            Object.keys(allGrouped).forEach(group => {
+                if (group === 'default') {
+                    // Always include default group - show latest deployment regardless of status
+                    filtered[group] = allGrouped[group];
+                } else {
+                    // Only include non-default groups if they have non-terminal deployments
+                    const nonTerminal = allGrouped[group].filter(d => !isTerminal(d.status));
+                    if (nonTerminal.length > 0) {
+                        filtered[group] = nonTerminal;
+                    }
+                }
+            });
+
+            setActiveDeployments(filtered);
             setLoading(false);
         } catch (err) {
             setError(err.message);
@@ -699,10 +718,6 @@ function ActiveDeploymentsSummary({ projectName }) {
         const latestB = activeDeployments[b][0];
         return new Date(latestB.created) - new Date(latestA.created);
     });
-
-    const isTerminal = (status) => {
-        return ['Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired'].includes(status);
-    };
 
     return (
         <>
