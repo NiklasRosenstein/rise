@@ -109,28 +109,95 @@ function ProjectsList() {
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [formData, setFormData] = useState({ name: '', visibility: 'Public', owner: 'self' });
+    const [teams, setTeams] = useState([]);
+    const [saving, setSaving] = useState(false);
+    const { showToast } = useToast();
+
+    const loadProjects = useCallback(async () => {
+        try {
+            const data = await api.getProjects();
+            setProjects(data);
+            setLoading(false);
+        } catch (err) {
+            setError(err.message);
+            setLoading(false);
+        }
+    }, []);
 
     useEffect(() => {
-        async function loadProjects() {
+        loadProjects();
+    }, [loadProjects]);
+
+    useEffect(() => {
+        async function loadTeams() {
             try {
-                const data = await api.getProjects();
-                setProjects(data);
+                const data = await api.getTeams();
+                setTeams(data);
             } catch (err) {
-                setError(err.message);
-            } finally {
-                setLoading(false);
+                console.error('Failed to load teams:', err);
             }
         }
-        loadProjects();
+        loadTeams();
     }, []);
+
+    const handleCreateClick = () => {
+        setFormData({ name: '', visibility: 'Public', owner: 'self' });
+        setIsModalOpen(true);
+    };
+
+    const handleCreate = async () => {
+        if (!formData.name) {
+            showToast('Project name is required', 'error');
+            return;
+        }
+
+        // Validate project name (lowercase alphanumeric and hyphens)
+        if (!/^[a-z0-9-]+$/.test(formData.name)) {
+            showToast('Project name must contain only lowercase letters, numbers, and hyphens', 'error');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            const owner = formData.owner === 'self' ? null : formData.owner;
+            await api.createProject(formData.name, formData.visibility, owner);
+            showToast(`Project ${formData.name} created successfully`, 'success');
+            setIsModalOpen(false);
+            loadProjects();
+        } catch (err) {
+            showToast(`Failed to create project: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading projects: {error}</p>;
-    if (projects.length === 0) return <p className="text-gray-400">No projects found.</p>;
+
+    if (projects.length === 0) {
+        return (
+            <section>
+                <h2 className="text-2xl font-bold mb-6">Projects</h2>
+                <div className="text-center py-8">
+                    <p className="text-gray-400 mb-4">No projects found.</p>
+                    <Button variant="primary" size="sm" onClick={handleCreateClick}>
+                        Create Project
+                    </Button>
+                </div>
+            </section>
+        );
+    }
 
     return (
         <section>
-            <h2 className="text-2xl font-bold mb-6">Projects</h2>
+            <div className="flex justify-between items-center mb-6">
+                <h2 className="text-2xl font-bold">Projects</h2>
+                <Button variant="primary" size="sm" onClick={handleCreateClick}>
+                    Create Project
+                </Button>
+            </div>
             <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
                 <table className="w-full">
                     <thead className="bg-gray-800">
@@ -175,6 +242,69 @@ function ProjectsList() {
                     </tbody>
                 </table>
             </div>
+
+            <Modal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                title="Create Project"
+            >
+                <div className="space-y-4">
+                    <FormField
+                        label="Project Name"
+                        id="project-name"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value.toLowerCase() })}
+                        placeholder="my-awesome-app"
+                        required
+                    />
+                    <p className="text-sm text-gray-500 -mt-2">
+                        Only lowercase letters, numbers, and hyphens allowed
+                    </p>
+
+                    <FormField
+                        label="Visibility"
+                        id="project-visibility"
+                        type="select"
+                        value={formData.visibility}
+                        onChange={(e) => setFormData({ ...formData, visibility: e.target.value })}
+                        required
+                    >
+                        <option value="Public">Public</option>
+                        <option value="Private">Private</option>
+                    </FormField>
+
+                    <FormField
+                        label="Owner"
+                        id="project-owner"
+                        type="select"
+                        value={formData.owner}
+                        onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
+                        required
+                    >
+                        <option value="self">Self</option>
+                        {teams.map(team => (
+                            <option key={team.id} value={`team:${team.name}`}>team:{team.name}</option>
+                        ))}
+                    </FormField>
+
+                    <div className="flex justify-end gap-3 pt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setIsModalOpen(false)}
+                            disabled={saving}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleCreate}
+                            loading={saving}
+                        >
+                            Create
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </section>
     );
 }
