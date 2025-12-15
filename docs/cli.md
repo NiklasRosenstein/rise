@@ -40,7 +40,8 @@ rise login --device
 ```
 
 **Environment variables:**
-- `RISE_BACKEND_URL`: Set default backend URL
+- `RISE_URL`: Set default backend URL
+- `RISE_TOKEN`: Set authentication token
 
 ### Project Management
 
