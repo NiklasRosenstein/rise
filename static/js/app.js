@@ -1336,6 +1336,182 @@ function ServiceAccountsList({ projectName }) {
     );
 }
 
+// Custom Domains Component
+function DomainsList({ projectName }) {
+    const [domains, setDomains] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [formData, setFormData] = useState({ domain: '' });
+    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+    const [domainToDelete, setDomainToDelete] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const { showToast } = useToast();
+
+    const loadDomains = useCallback(async () => {
+        try {
+            const response = await api.getProjectDomains(projectName);
+            setDomains(response.domains || []);
+            setLoading(false);
+        } catch (err) {
+            setError(err.message);
+            setLoading(false);
+        }
+    }, [projectName]);
+
+    useEffect(() => {
+        loadDomains();
+    }, [loadDomains]);
+
+    const handleAddClick = () => {
+        setFormData({ domain: '' });
+        setIsModalOpen(true);
+    };
+
+    const handleDeleteClick = (domain) => {
+        setDomainToDelete(domain);
+        setConfirmDialogOpen(true);
+    };
+
+    const handleSave = async () => {
+        if (!formData.domain) {
+            showToast('Domain is required', 'error');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            await api.addCustomDomain(projectName, formData.domain);
+            showToast(`Custom domain ${formData.domain} added successfully`, 'success');
+            setIsModalOpen(false);
+            loadDomains();
+        } catch (err) {
+            showToast(`Failed to add custom domain: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDeleteConfirm = async () => {
+        if (!domainToDelete) return;
+
+        setDeleting(true);
+        try {
+            await api.deleteCustomDomain(projectName, domainToDelete.domain);
+            showToast(`Custom domain ${domainToDelete.domain} deleted successfully`, 'success');
+            setConfirmDialogOpen(false);
+            setDomainToDelete(null);
+            loadDomains();
+        } catch (err) {
+            showToast(`Failed to delete custom domain: ${err.message}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
+    if (error) return <p className="text-red-400">Error loading custom domains: {error}</p>;
+
+    return (
+        <div>
+            <div className="mb-4 flex justify-end">
+                <Button variant="primary" size="sm" onClick={handleAddClick}>
+                    Add Domain
+                </Button>
+            </div>
+            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+                <table className="w-full">
+                    <thead className="bg-gray-800">
+                        <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Domain</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                        {domains.length === 0 ? (
+                            <tr>
+                                <td colSpan="3" className="px-6 py-8 text-center text-gray-400">
+                                    No custom domains configured.
+                                </td>
+                            </tr>
+                        ) : (
+                            domains.map(domain => (
+                            <tr key={domain.id} className="hover:bg-gray-800/50 transition-colors">
+                                <td className="px-6 py-4 text-sm font-mono text-gray-200">{domain.domain}</td>
+                                <td className="px-6 py-4 text-sm text-gray-300">{formatDate(domain.created_at)}</td>
+                                <td className="px-6 py-4 text-sm">
+                                    <Button
+                                        variant="danger"
+                                        size="sm"
+                                        onClick={() => handleDeleteClick(domain)}
+                                    >
+                                        Delete
+                                    </Button>
+                                </td>
+                            </tr>
+                        ))
+                        )}
+                    </tbody>
+                </table>
+            </div>
+
+            <Modal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                title="Add Custom Domain"
+            >
+                <div className="space-y-4">
+                    <FormField
+                        label="Domain"
+                        id="domain-name"
+                        value={formData.domain}
+                        onChange={(e) => setFormData({ ...formData, domain: e.target.value })}
+                        placeholder="example.com"
+                        required
+                    />
+                    <p className="text-sm text-gray-500">
+                        <strong>Note:</strong> Make sure to configure your DNS to point this domain to your Rise deployment before adding it.
+                        The domain will be added to the ingress for the default deployment group only.
+                    </p>
+
+                    <div className="flex justify-end gap-3 pt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setIsModalOpen(false)}
+                            disabled={saving}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleSave}
+                            loading={saving}
+                        >
+                            Add Domain
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            <ConfirmDialog
+                isOpen={confirmDialogOpen}
+                onClose={() => {
+                    setConfirmDialogOpen(false);
+                    setDomainToDelete(null);
+                }}
+                onConfirm={handleDeleteConfirm}
+                title="Delete Custom Domain"
+                message={`Are you sure you want to delete the custom domain "${domainToDelete?.domain}"? This action cannot be undone.`}
+                confirmText="Delete Domain"
+                variant="danger"
+                loading={deleting}
+            />
+        </div>
+    );
+}
+
 // Environment Variables Component
 function EnvVarsList({ projectName, deploymentId }) {
     const [envVars, setEnvVars] = useState([]);
@@ -1693,6 +1869,12 @@ function ProjectDetail({ projectName, initialTab }) {
                     >
                         Environment Variables
                     </button>
+                    <button
+                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'domains' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                        onClick={() => changeTab('domains')}
+                    >
+                        Domains
+                    </button>
                 </div>
             </div>
 
@@ -1716,6 +1898,11 @@ function ProjectDetail({ projectName, initialTab }) {
                 {activeTab === 'env-vars' && (
                     <div>
                         <EnvVarsList projectName={projectName} />
+                    </div>
+                )}
+                {activeTab === 'domains' && (
+                    <div>
+                        <DomainsList projectName={projectName} />
                     </div>
                 )}
             </div>
@@ -2707,3 +2894,4 @@ root.render(
         <App />
     </ToastProvider>
 );
+ 

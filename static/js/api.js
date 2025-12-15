@@ -181,6 +181,24 @@ class RiseAPI {
             method: 'DELETE'
         });
     }
+
+    // Custom domain endpoints
+    async getProjectDomains(projectName) {
+        return this.request(`/projects/${projectName}/domains`);
+    }
+
+    async addCustomDomain(projectName, domain) {
+        return this.request(`/projects/${projectName}/domains`, {
+            method: 'POST',
+            body: JSON.stringify({ domain })
+        });
+    }
+
+    async deleteCustomDomain(projectName, domain) {
+        return this.request(`/projects/${projectName}/domains/${encodeURIComponent(domain)}`, {
+            method: 'DELETE'
+        });
+    }
 }
 
 const api = new RiseAPI();
