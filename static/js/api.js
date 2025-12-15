@@ -47,6 +47,13 @@ class RiseAPI {
         return this.request('/me');
     }
 
+    async lookupUsers(emails) {
+        return this.request('/users/lookup', {
+            method: 'POST',
+            body: JSON.stringify({ emails })
+        });
+    }
+
     // Team endpoints
     async getTeams() {
         return this.request('/teams');
@@ -55,6 +62,26 @@ class RiseAPI {
     async getTeam(idOrName, params = {}) {
         const queryString = new URLSearchParams(params).toString();
         return this.request(`/teams/${idOrName}${queryString ? '?' + queryString : ''}`);
+    }
+
+    async createTeam(name, members, owners) {
+        return this.request('/teams', {
+            method: 'POST',
+            body: JSON.stringify({ name, members, owners })
+        });
+    }
+
+    async updateTeam(idOrName, updates) {
+        return this.request(`/teams/${idOrName}`, {
+            method: 'PUT',
+            body: JSON.stringify(updates)
+        });
+    }
+
+    async deleteTeam(idOrName) {
+        return this.request(`/teams/${idOrName}`, {
+            method: 'DELETE'
+        });
     }
 
     // Project endpoints
