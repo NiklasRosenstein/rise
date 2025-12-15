@@ -418,7 +418,7 @@ function ProjectsList() {
 }
 
 // Teams List Component
-function TeamsList() {
+function TeamsList({ currentUser }) {
     const [teams, setTeams] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -443,7 +443,7 @@ function TeamsList() {
     }, [loadTeams]);
 
     const handleCreateClick = () => {
-        setFormData({ name: '', members: '', owners: '' });
+        setFormData({ name: '', members: '', owners: currentUser?.email || '' });
         setIsModalOpen(true);
     };
 
@@ -1909,7 +1909,7 @@ function TeamDetail({ teamName, currentUser }) {
                                             <td className="px-6 py-4 text-right">
                                                 <Button
                                                     variant="danger"
-                                                    size="xs"
+                                                    size="sm"
                                                     onClick={() => handleRemoveOwner(owner.id, owner.email)}
                                                 >
                                                     Remove
@@ -1962,7 +1962,7 @@ function TeamDetail({ teamName, currentUser }) {
                                             <td className="px-6 py-4 text-right">
                                                 <Button
                                                     variant="danger"
-                                                    size="xs"
+                                                    size="sm"
                                                     onClick={() => handleRemoveMember(member.id, member.email)}
                                                 >
                                                     Remove
@@ -2653,7 +2653,7 @@ function App() {
             <Header user={user} onLogout={handleLogout} currentView={view} />
             <main className="container mx-auto px-4 py-8">
                 {view === 'projects' && <ProjectsList />}
-                {view === 'teams' && <TeamsList />}
+                {view === 'teams' && <TeamsList currentUser={user} />}
                 {view === 'project-detail' && <ProjectDetail projectName={params.projectName} />}
                 {view === 'team-detail' && <TeamDetail teamName={params.teamName} currentUser={user} />}
                 {view === 'deployment-detail' && <DeploymentDetail projectName={params.projectName} deploymentId={params.deploymentId} />}
