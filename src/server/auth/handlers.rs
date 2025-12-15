@@ -368,19 +368,22 @@ pub async fn device_exchange(
 pub struct MeResponse {
     pub id: String,
     pub email: String,
+    pub is_admin: bool,
 }
 
 /// Get current user info from auth middleware
-#[instrument(skip(_state))]
+#[instrument(skip(state))]
 pub async fn me(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> Result<Json<MeResponse>, (StatusCode, String)> {
     // User is injected by auth middleware
     tracing::debug!("GET /me: user_id={}, email={}", user.id, user.email);
+    let is_admin = state.admin_users.contains(&user.email);
     Ok(Json(MeResponse {
         id: user.id.to_string(),
         email: user.email,
+        is_admin,
     }))
 }
 
