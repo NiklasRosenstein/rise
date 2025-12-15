@@ -165,11 +165,5 @@ pub async fn load_deployment_env_vars_decrypted(
         env_vars.push((var.key, value));
     }
 
-    tracing::info!(
-        "Loaded {} environment variables for deployment {}",
-        env_vars.len(),
-        deployment_id
-    );
-
     Ok(env_vars)
 }

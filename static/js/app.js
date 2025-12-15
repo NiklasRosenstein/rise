@@ -241,6 +241,10 @@ function ActiveDeploymentsSummary({ projectName }) {
     const [activeDeployments, setActiveDeployments] = useState({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+    const [deploymentToStop, setDeploymentToStop] = useState(null);
+    const [stopping, setStopping] = useState(false);
+    const { showToast } = useToast();
 
     const loadSummary = useCallback(async () => {
         try {
@@ -278,6 +282,28 @@ function ActiveDeploymentsSummary({ projectName }) {
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading active deployments: {error}</p>;
 
+    const handleStopClick = (deployment) => {
+        setDeploymentToStop(deployment);
+        setConfirmDialogOpen(true);
+    };
+
+    const handleStopConfirm = async () => {
+        if (!deploymentToStop) return;
+
+        setStopping(true);
+        try {
+            await api.stopDeployment(projectName, deploymentToStop.deployment_id);
+            showToast(`Deployment ${deploymentToStop.deployment_id} stopped successfully`, 'success');
+            setConfirmDialogOpen(false);
+            setDeploymentToStop(null);
+            loadSummary(); // Refresh the list
+        } catch (err) {
+            showToast(`Failed to stop deployment: ${err.message}`, 'error');
+        } finally {
+            setStopping(false);
+        }
+    };
+
     const groups = Object.keys(activeDeployments);
     if (groups.length === 0) return <p className="text-gray-400">No active deployments.</p>;
 
@@ -292,17 +318,34 @@ function ActiveDeploymentsSummary({ projectName }) {
         return new Date(latestB.created) - new Date(latestA.created);
     });
 
+    const isTerminal = (status) => {
+        return ['Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired'].includes(status);
+    };
+
     return (
-        <div className="space-y-4">
-            {sortedGroups.map(group => {
-                const deps = activeDeployments[group];
-                const latest = deps[0];
-                return (
-                    <div key={group} className="bg-gray-900 border border-gray-800 rounded-lg p-6">
-                        <div className="flex justify-between items-center mb-4">
-                            <h5 className="text-lg font-semibold">Group: {group}</h5>
-                            <StatusBadge status={latest.status} />
-                        </div>
+        <>
+            <div className="space-y-4">
+                {sortedGroups.map(group => {
+                    const deps = activeDeployments[group];
+                    const latest = deps[0];
+                    const canStop = !isTerminal(latest.status);
+                    return (
+                        <div key={group} className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+                            <div className="flex justify-between items-center mb-4">
+                                <h5 className="text-lg font-semibold">Group: {group}</h5>
+                                <div className="flex items-center gap-3">
+                                    <StatusBadge status={latest.status} />
+                                    {canStop && (
+                                        <Button
+                                            variant="danger"
+                                            size="sm"
+                                            onClick={() => handleStopClick(latest)}
+                                        >
+                                            Stop
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
                         <dl className="grid grid-cols-2 gap-4 text-sm">
                             <div>
                                 <dt className="text-gray-400">Deployment ID</dt>
@@ -343,7 +386,22 @@ function ActiveDeploymentsSummary({ projectName }) {
                     </div>
                 );
             })}
-        </div>
+            </div>
+
+            <ConfirmDialog
+                isOpen={confirmDialogOpen}
+                onClose={() => {
+                    setConfirmDialogOpen(false);
+                    setDeploymentToStop(null);
+                }}
+                onConfirm={handleStopConfirm}
+                title="Stop Deployment"
+                message={`Are you sure you want to stop deployment ${deploymentToStop?.deployment_id}? This action will terminate the deployment.`}
+                confirmText="Stop Deployment"
+                variant="danger"
+                loading={stopping}
+            />
+        </>
     );
 }
 
@@ -356,6 +414,10 @@ function DeploymentsList({ projectName }) {
     const [hasMore, setHasMore] = useState(true);
     const [groupFilter, setGroupFilter] = useState('');
     const [deploymentGroups, setDeploymentGroups] = useState([]);
+    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+    const [deploymentToStop, setDeploymentToStop] = useState(null);
+    const [stopping, setStopping] = useState(false);
+    const { showToast } = useToast();
     const pageSize = 10;
 
     // Load deployment groups
@@ -400,6 +462,32 @@ function DeploymentsList({ projectName }) {
         setPage(0);
     };
 
+    const isTerminal = (status) => {
+        return ['Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired'].includes(status);
+    };
+
+    const handleStopClick = (deployment) => {
+        setDeploymentToStop(deployment);
+        setConfirmDialogOpen(true);
+    };
+
+    const handleStopConfirm = async () => {
+        if (!deploymentToStop) return;
+
+        setStopping(true);
+        try {
+            await api.stopDeployment(projectName, deploymentToStop.deployment_id);
+            showToast(`Deployment ${deploymentToStop.deployment_id} stopped successfully`, 'success');
+            setConfirmDialogOpen(false);
+            setDeploymentToStop(null);
+            loadDeployments();
+        } catch (err) {
+            showToast(`Failed to stop deployment: ${err.message}`, 'error');
+        } finally {
+            setStopping(false);
+        }
+    };
+
     if (loading && deployments.length === 0) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading deployments: {error}</p>;
 
@@ -441,6 +529,7 @@ function DeploymentsList({ projectName }) {
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">URL</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expires</th>
                                     <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-800">
@@ -480,6 +569,20 @@ function DeploymentsList({ projectName }) {
                                             ) : '-'}
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDate(d.created)}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                            {!isTerminal(d.status) && (
+                                                <Button
+                                                    variant="danger"
+                                                    size="sm"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        handleStopClick(d);
+                                                    }}
+                                                >
+                                                    Stop
+                                                </Button>
+                                            )}
+                                        </td>
                                     </tr>
                                     );
                                 })}
@@ -508,6 +611,20 @@ function DeploymentsList({ projectName }) {
                     </div>
                 </>
             )}
+
+            <ConfirmDialog
+                isOpen={confirmDialogOpen}
+                onClose={() => {
+                    setConfirmDialogOpen(false);
+                    setDeploymentToStop(null);
+                }}
+                onConfirm={handleStopConfirm}
+                title="Stop Deployment"
+                message={`Are you sure you want to stop deployment ${deploymentToStop?.deployment_id}? This action will terminate the deployment.`}
+                confirmText="Stop Deployment"
+                variant="danger"
+                loading={stopping}
+            />
         </div>
     );
 }
