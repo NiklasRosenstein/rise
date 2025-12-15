@@ -256,10 +256,6 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
     // Get registry provider
     let registry_provider = app_state.registry_provider.clone();
 
-    let registry_url = registry_provider
-        .as_ref()
-        .map(|p| p.registry_url().to_string());
-
     let backend = Arc::new(deployment::controller::KubernetesController::new(
         controller_state.clone(),
         kube_client,
@@ -268,7 +264,6 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             production_ingress_url_template,
             staging_ingress_url_template,
             registry_provider,
-            registry_url,
             auth_backend_url,
             auth_signin_url,
             namespace_annotations,

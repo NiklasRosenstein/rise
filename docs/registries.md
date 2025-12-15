@@ -37,7 +37,7 @@ Works with any Docker-compatible registry (Docker Hub, Harbor, Quay, local regis
 **Configuration:**
 ```toml
 [registry]
-type = "docker"
+type = "oci-client-auth"
 registry_url = "localhost:5000"
 namespace = "rise-apps"
 ```

@@ -267,7 +267,7 @@ pub enum RegistrySettings {
         #[allow(dead_code)]
         secret_access_key: Option<String>,
     },
-    #[serde(rename = "oci-client-auth", alias = "docker")]
+    #[serde(rename = "oci-client-auth")]
     OciClientAuth {
         registry_url: String,
         #[serde(default)]

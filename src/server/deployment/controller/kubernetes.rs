@@ -95,7 +95,6 @@ pub struct KubernetesControllerConfig {
     pub production_ingress_url_template: String,
     pub staging_ingress_url_template: Option<String>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
-    pub registry_url: Option<String>,
     pub auth_backend_url: String,
     pub auth_signin_url: String,
     pub namespace_annotations: std::collections::HashMap<String, String>,
@@ -112,7 +111,6 @@ pub struct KubernetesController {
     production_ingress_url_template: String,
     staging_ingress_url_template: Option<String>,
     registry_provider: Option<Arc<dyn RegistryProvider>>,
-    registry_url: Option<String>,
     auth_backend_url: String,
     auth_signin_url: String,
     namespace_annotations: std::collections::HashMap<String, String>,
@@ -135,7 +133,6 @@ impl KubernetesController {
             production_ingress_url_template: config.production_ingress_url_template,
             staging_ingress_url_template: config.staging_ingress_url_template,
             registry_provider: config.registry_provider,
-            registry_url: config.registry_url,
             auth_backend_url: config.auth_backend_url,
             auth_signin_url: config.auth_signin_url,
             namespace_annotations: config.namespace_annotations,
@@ -859,13 +856,6 @@ impl KubernetesController {
                 &project.name,
                 &deployment.deployment_id,
                 crate::server::registry::ImageTagType::Internal,
-            )
-        } else if let Some(ref registry_url) = self.registry_url {
-            // Fallback for backward compatibility
-            // registry_url should include trailing slash if needed (e.g., "host/prefix/")
-            format!(
-                "{}{}:{}",
-                registry_url, project.name, deployment.deployment_id
             )
         } else {
             deployment
@@ -2309,7 +2299,6 @@ mod tests {
             production_ingress_url_template: "{project_name}.test.local".to_string(),
             staging_ingress_url_template: None,
             registry_provider: None,
-            registry_url: None,
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
             namespace_annotations: std::collections::HashMap::new(),
