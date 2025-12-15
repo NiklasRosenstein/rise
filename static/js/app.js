@@ -51,9 +51,39 @@ function useHashLocation() {
 
 // Header Component
 function Header({ user, onLogout, currentView }) {
+    const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const profileRef = React.useRef(null);
+    const { showToast } = useToast();
+
     // Determine which section is active (projects or teams)
     const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail';
     const isTeamsActive = currentView === 'teams' || currentView === 'team-detail';
+
+    // Close dropdown when clicking outside
+    useEffect(() => {
+        function handleClickOutside(event) {
+            if (profileRef.current && !profileRef.current.contains(event.target)) {
+                setIsProfileOpen(false);
+            }
+        }
+
+        if (isProfileOpen) {
+            document.addEventListener('mousedown', handleClickOutside);
+            return () => document.removeEventListener('mousedown', handleClickOutside);
+        }
+    }, [isProfileOpen]);
+
+    const handleCopyJWT = () => {
+        const token = localStorage.getItem('rise_token');
+        if (token) {
+            navigator.clipboard.writeText(token).then(() => {
+                showToast('JWT token copied to clipboard', 'success');
+                setIsProfileOpen(false);
+            }).catch(() => {
+                showToast('Failed to copy JWT token', 'error');
+            });
+        }
+    };
 
     return (
         <header className="bg-gray-900 border-b border-gray-800">
@@ -80,10 +110,53 @@ function Header({ user, onLogout, currentView }) {
                         >
                             Teams
                         </a>
-                        <span className="text-gray-400">{user?.email}</span>
-                        <a href="#" onClick={(e) => { e.preventDefault(); onLogout(); }} className="text-red-400 hover:text-red-300 transition-colors">
-                            Logout
-                        </a>
+
+                        {/* User Profile Dropdown */}
+                        <div className="relative" ref={profileRef}>
+                            <button
+                                onClick={() => setIsProfileOpen(!isProfileOpen)}
+                                className="flex items-center gap-2 hover:opacity-80 transition-opacity"
+                            >
+                                <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center border-2 border-indigo-500">
+                                    <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                        <circle cx="12" cy="7" r="4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                    </svg>
+                                </div>
+                            </button>
+
+                            {isProfileOpen && (
+                                <div className="absolute right-0 mt-2 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50">
+                                    <div className="p-4 border-b border-gray-700">
+                                        <p className="text-sm text-gray-400 mb-1">Signed in as</p>
+                                        <p className="text-white font-medium break-all">{user?.email}</p>
+                                    </div>
+                                    <div className="p-2">
+                                        <button
+                                            onClick={handleCopyJWT}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-gray-300 hover:bg-gray-700 rounded transition-colors"
+                                        >
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                            </svg>
+                                            Copy JWT Token
+                                        </button>
+                                        <button
+                                            onClick={() => { setIsProfileOpen(false); onLogout(); }}
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-red-400 hover:bg-gray-700 rounded transition-colors"
+                                        >
+                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                                <polyline points="16 17 21 12 16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                                <line x1="21" y1="12" x2="9" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                            </svg>
+                                            Logout
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             </nav>
