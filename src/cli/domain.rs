@@ -41,8 +41,7 @@ pub async fn add_domain(
         .header("Authorization", format!("Bearer {}", token))
         .json(&payload)
         .send()
-        .await
-        .context("Failed to add custom domain")?;
+        .await?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -78,8 +77,7 @@ pub async fn list_domains(
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
         .send()
-        .await
-        .context("Failed to list custom domains")?;
+        .await?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -137,8 +135,7 @@ pub async fn remove_domain(
         .delete(&url)
         .header("Authorization", format!("Bearer {}", token))
         .send()
-        .await
-        .context("Failed to remove custom domain")?;
+        .await?;
 
     if !response.status().is_success() {
         let status = response.status();
