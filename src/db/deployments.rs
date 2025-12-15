@@ -860,14 +860,22 @@ pub async fn list_for_project_and_group(
 }
 
 /// Get all active deployment groups for a project
-/// Returns a list of unique deployment group names that have at least one healthy deployment
+/// Returns deployment groups based on the following rules:
+/// - "default" group: always included if it has any deployments (regardless of status)
+/// - Other groups: only included if they have at least one non-terminal deployment
 pub async fn get_active_deployment_groups(pool: &PgPool, project_id: Uuid) -> Result<Vec<String>> {
     let groups = sqlx::query_scalar!(
         r#"
         SELECT DISTINCT deployment_group
         FROM deployments
         WHERE project_id = $1
-          AND status = 'Healthy'
+          AND (
+            -- Always include default group if it has any deployments
+            deployment_group = 'default'
+            OR
+            -- Include other groups only if they have non-terminal deployments
+            (deployment_group != 'default' AND NOT is_terminal(status))
+          )
         ORDER BY deployment_group
         "#,
         project_id
