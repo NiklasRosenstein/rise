@@ -45,25 +45,52 @@
         <!-- Project Detail View -->
         <section id="project-detail-view" style="display: none;">
             <a href="#" class="back-button" onclick="showView('projects'); return false;">Back to Projects</a>
-            <div id="project-detail"></div>
-            <h3>Service Accounts</h3>
-            <div id="service-account-list"></div>
-            <h3>Environment Variables</h3>
-            <div id="project-env-vars-list"></div>
-            <h3>Deployments</h3>
-            <div id="deployment-filters" style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
-                <label for="deployment-group-filter" style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
-                    <span style="white-space: nowrap;">Filter by group:</span>
-                    <input type="text" id="deployment-group-filter" placeholder="Leave empty for all groups" style="width: 250px; margin: 0;">
-                </label>
-                <button onclick="applyDeploymentFilter()" style="margin: 0; padding: 0.5rem 1rem;">Apply</button>
-                <button onclick="clearDeploymentFilter()" style="margin: 0; padding: 0.5rem 1rem;" class="secondary">Clear</button>
+            <div id="project-detail-header"></div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab-button active" data-tab="overview" onclick="switchTab('overview')">Overview</button>
+                <button class="tab-button" data-tab="deployments" onclick="switchTab('deployments')">Deployments</button>
+                <button class="tab-button" data-tab="service-accounts" onclick="switchTab('service-accounts')">Service Accounts</button>
+                <button class="tab-button" data-tab="env-vars" onclick="switchTab('env-vars')">Environment Variables</button>
             </div>
-            <div id="deployment-list"></div>
-            <div id="deployment-pagination" style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
-                <button id="prev-page" onclick="prevPage()" disabled style="padding: 0.5rem 1rem;">Previous</button>
-                <span id="page-info" style="font-size: 0.9rem;"></span>
-                <button id="next-page" onclick="nextPage()" style="padding: 0.5rem 1rem;">Next</button>
+
+            <!-- Tab Content -->
+            <div class="tab-content">
+                <!-- Overview Tab -->
+                <div id="tab-overview" class="tab-panel active">
+                    <div id="project-detail"></div>
+                    <h3>Active Deployments</h3>
+                    <div id="active-deployments-summary"></div>
+                </div>
+
+                <!-- Deployments Tab -->
+                <div id="tab-deployments" class="tab-panel">
+                    <div id="deployment-filters" style="margin-bottom: 1rem; display: flex; align-items: center; gap: 0.5rem;">
+                        <label for="deployment-group-filter" style="margin: 0; display: flex; align-items: center; gap: 0.5rem;">
+                            <span style="white-space: nowrap;">Filter by group:</span>
+                            <input type="text" id="deployment-group-filter" placeholder="Leave empty for all groups" style="width: 250px; margin: 0;">
+                        </label>
+                        <button onclick="applyDeploymentFilter()" style="margin: 0; padding: 0.5rem 1rem;">Apply</button>
+                        <button onclick="clearDeploymentFilter()" style="margin: 0; padding: 0.5rem 1rem;" class="secondary">Clear</button>
+                    </div>
+                    <div id="deployment-list"></div>
+                    <div id="deployment-pagination" style="margin-top: 1rem; display: flex; justify-content: space-between; align-items: center;">
+                        <button id="prev-page" onclick="prevPage()" disabled style="padding: 0.5rem 1rem;">Previous</button>
+                        <span id="page-info" style="font-size: 0.9rem;"></span>
+                        <button id="next-page" onclick="nextPage()" style="padding: 0.5rem 1rem;">Next</button>
+                    </div>
+                </div>
+
+                <!-- Service Accounts Tab -->
+                <div id="tab-service-accounts" class="tab-panel">
+                    <div id="service-account-list"></div>
+                </div>
+
+                <!-- Environment Variables Tab -->
+                <div id="tab-env-vars" class="tab-panel">
+                    <div id="project-env-vars-list"></div>
+                </div>
             </div>
         </section>
 

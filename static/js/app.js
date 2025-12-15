@@ -3,6 +3,7 @@
 let currentView = 'projects';
 let currentProject = null;
 let refreshInterval = null;
+let currentTab = 'overview';
 
 // Pagination state
 let currentPage = 0;
@@ -230,6 +231,17 @@ async function showProject(projectName) {
     const viewEl = document.getElementById('project-detail-view');
     viewEl.style.display = 'block';
 
+    // Reset to overview tab
+    currentTab = 'overview';
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelector('.tab-button[data-tab="overview"]').classList.add('active');
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    document.getElementById('tab-overview').classList.add('active');
+
     const detailEl = document.getElementById('project-detail');
     const serviceAccountListEl = document.getElementById('service-account-list');
     const deploymentListEl = document.getElementById('deployment-list');
@@ -265,19 +277,87 @@ async function showProject(projectName) {
             </article>
         `;
 
-        // Load service accounts
+        // Load service accounts (for when user switches to that tab)
         await loadServiceAccounts(projectName);
 
-        // Load environment variables
+        // Load environment variables (for when user switches to that tab)
         await loadProjectEnvVars(projectName);
 
-        // Load deployments
+        // Load all deployments (for when user switches to deployments tab)
         await loadDeployments(projectName, 0);
 
-        // Start auto-refresh for deployment status (maintain current page)
-        startAutoRefresh(() => loadDeployments(projectName, currentPage), 5000);
+        // Load active deployments summary for overview tab
+        await loadActiveDeploymentsSummary(projectName);
+
+        // Start auto-refresh for active deployments summary (overview tab)
+        startAutoRefresh(() => loadActiveDeploymentsSummary(projectName), 5000);
     } catch (error) {
         detailEl.innerHTML = `<p>Error loading project: ${escapeHtml(error.message)}</p>`;
+    }
+}
+
+// Load active deployments summary for a project
+async function loadActiveDeploymentsSummary(projectName) {
+    const listEl = document.getElementById('active-deployments-summary');
+    listEl.innerHTML = '<p aria-busy="true">Loading active deployments...</p>';
+
+    try {
+        // Fetch all deployments (we'll filter client-side)
+        const deployments = await api.getProjectDeployments(projectName, { limit: 100 });
+
+        // Filter for active (non-terminal) deployments
+        const activeStatuses = ['Pending', 'Building', 'Pushing', 'Pushed', 'Deploying', 'Running'];
+        const activeDeployments = deployments.filter(d => activeStatuses.includes(d.status));
+
+        if (activeDeployments.length === 0) {
+            listEl.innerHTML = '<p>No active deployments.</p>';
+            return;
+        }
+
+        // Group by deployment group
+        const groupedDeployments = activeDeployments.reduce((acc, d) => {
+            const group = d.deployment_group || 'default';
+            if (!acc[group]) {
+                acc[group] = [];
+            }
+            acc[group].push(d);
+            return acc;
+        }, {});
+
+        let html = '';
+        for (const [group, deps] of Object.entries(groupedDeployments)) {
+            // Sort by created date, newest first
+            deps.sort((a, b) => new Date(b.created) - new Date(a.created));
+            const latestDeployment = deps[0];
+
+            html += `
+                <article style="margin-bottom: 1rem;">
+                    <header style="display: flex; justify-content: space-between; align-items: center;">
+                        <h5 style="margin: 0;">Group: ${escapeHtml(group)}</h5>
+                        <span class="status-badge status-${latestDeployment.status.toLowerCase()}">${latestDeployment.status}</span>
+                    </header>
+                    <dl style="margin-top: 0.5rem;">
+                        <dt>Deployment ID</dt>
+                        <dd><code>${escapeHtml(latestDeployment.deployment_id)}</code></dd>
+                        <dt>Image</dt>
+                        <dd><small>${latestDeployment.image ? escapeHtml(latestDeployment.image.split('/').pop()) : '-'}</small></dd>
+                        <dt>URL</dt>
+                        <dd>${latestDeployment.deployment_url ? `<a href="${latestDeployment.deployment_url}" target="_blank">${latestDeployment.deployment_url}</a>` : '-'}</dd>
+                        <dt>Created</dt>
+                        <dd>${formatDate(latestDeployment.created)}</dd>
+                        ${latestDeployment.expires_at ? `<dt>Expires</dt><dd>${formatDate(latestDeployment.expires_at)}</dd>` : ''}
+                    </dl>
+                    <footer>
+                        <a href="#" onclick="showDeployment('${escapeHtml(projectName)}', '${escapeHtml(latestDeployment.deployment_id)}'); return false;">View Details</a>
+                        ${deps.length > 1 ? `<span style="margin-left: 1rem; color: var(--pico-muted-color); font-size: 0.9rem;">(+${deps.length - 1} more active)</span>` : ''}
+                    </footer>
+                </article>
+            `;
+        }
+
+        listEl.innerHTML = html;
+    } catch (error) {
+        listEl.innerHTML = `<p>Error loading active deployments: ${escapeHtml(error.message)}</p>`;
     }
 }
 
@@ -576,6 +656,42 @@ function goBack() {
         showProject(currentProject);
     } else {
         showView('projects');
+    }
+}
+
+// Tab switching
+function switchTab(tabName) {
+    // Update tab buttons
+    document.querySelectorAll('.tab-button').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    document.querySelector(`.tab-button[data-tab="${tabName}"]`).classList.add('active');
+
+    // Update tab panels
+    document.querySelectorAll('.tab-panel').forEach(panel => {
+        panel.classList.remove('active');
+    });
+    document.getElementById(`tab-${tabName}`).classList.add('active');
+
+    currentTab = tabName;
+
+    // Stop auto-refresh when switching tabs
+    stopAutoRefresh();
+
+    // Load tab-specific data if needed
+    if (currentProject) {
+        switch (tabName) {
+            case 'overview':
+                loadActiveDeploymentsSummary(currentProject);
+                // Auto-refresh active deployments summary
+                startAutoRefresh(() => loadActiveDeploymentsSummary(currentProject), 5000);
+                break;
+            case 'deployments':
+                loadDeployments(currentProject, currentPage);
+                // Auto-refresh deployments list
+                startAutoRefresh(() => loadDeployments(currentProject, currentPage), 5000);
+                break;
+        }
     }
 }
 

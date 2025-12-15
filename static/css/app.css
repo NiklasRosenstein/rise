@@ -130,3 +130,49 @@ details summary {
 details[open] summary {
     margin-bottom: 1rem;
 }
+
+/* Tabs */
+.tabs {
+    display: flex;
+    gap: 0;
+    border-bottom: 2px solid var(--pico-muted-border-color);
+    margin-bottom: 2rem;
+    margin-top: 2rem;
+}
+
+.tab-button {
+    background: transparent;
+    border: none;
+    border-bottom: 3px solid transparent;
+    padding: 0.75rem 1.5rem;
+    cursor: pointer;
+    font-size: 1rem;
+    font-weight: 500;
+    color: var(--pico-muted-color);
+    transition: all 0.2s;
+    margin: 0;
+    position: relative;
+    bottom: -2px;
+}
+
+.tab-button:hover {
+    color: var(--pico-color);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.tab-button.active {
+    color: var(--rise-primary);
+    border-bottom-color: var(--rise-primary);
+}
+
+.tab-content {
+    margin-top: 1.5rem;
+}
+
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.active {
+    display: block;
+}
