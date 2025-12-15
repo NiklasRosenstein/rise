@@ -256,17 +256,22 @@ pub async fn update_team(
         // Remove members that are no longer in the list
         for current_member_id in &current_member_ids {
             if !member_ids.contains(current_member_id) {
-                db_teams::remove_member(&state.db_pool, team.id, *current_member_id)
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(TeamErrorResponse {
-                                error: format!("Failed to remove member: {}", e),
-                                suggestions: None,
-                            }),
-                        )
-                    })?;
+                db_teams::remove_member(
+                    &state.db_pool,
+                    team.id,
+                    *current_member_id,
+                    TeamRole::Member,
+                )
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(TeamErrorResponse {
+                            error: format!("Failed to remove member: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
             }
         }
 
@@ -347,17 +352,22 @@ pub async fn update_team(
         // Remove owners that are no longer in the list
         for current_owner_id in &current_owner_ids {
             if !owner_ids.contains(current_owner_id) {
-                db_teams::remove_member(&state.db_pool, team.id, *current_owner_id)
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(TeamErrorResponse {
-                                error: format!("Failed to remove owner: {}", e),
-                                suggestions: None,
-                            }),
-                        )
-                    })?;
+                db_teams::remove_member(
+                    &state.db_pool,
+                    team.id,
+                    *current_owner_id,
+                    TeamRole::Owner,
+                )
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(TeamErrorResponse {
+                            error: format!("Failed to remove owner: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
             }
         }
 
@@ -517,14 +527,24 @@ pub async fn list_teams(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<ApiTeam>>, (StatusCode, String)> {
-    let teams = db_teams::list_for_user(&state.db_pool, user.id)
-        .await
-        .map_err(|e| {
+    // Admins can see all teams, others only see teams they have access to
+    let teams = if state.admin_users.contains(&user.email) {
+        db_teams::list(&state.db_pool).await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to list teams: {}", e),
             )
-        })?;
+        })?
+    } else {
+        db_teams::list_for_user(&state.db_pool, user.id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to list teams: {}", e),
+                )
+            })?
+    };
 
     let mut api_teams = Vec::new();
 

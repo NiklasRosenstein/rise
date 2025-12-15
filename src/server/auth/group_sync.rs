@@ -123,7 +123,7 @@ pub async fn sync_user_groups(pool: &PgPool, user_id: Uuid, idp_groups: &[String
                     "Removing user from IdP-managed team '{}' (not in groups claim)",
                     team.name
                 );
-                teams::remove_member(&mut *tx, team.id, user_id)
+                teams::remove_all_user_roles(&mut *tx, team.id, user_id)
                     .await
                     .context("Failed to remove user from team")?;
             }

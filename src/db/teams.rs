@@ -111,7 +111,7 @@ pub async fn delete(pool: &PgPool, id: Uuid) -> Result<()> {
     Ok(())
 }
 
-/// Get team members
+/// Get team members (users with member role only, not owners)
 pub async fn get_members(pool: &PgPool, team_id: Uuid) -> Result<Vec<User>> {
     let members = sqlx::query_as!(
         User,
@@ -119,7 +119,7 @@ pub async fn get_members(pool: &PgPool, team_id: Uuid) -> Result<Vec<User>> {
         SELECT u.id, u.email, u.created_at, u.updated_at
         FROM users u
         INNER JOIN team_members tm ON u.id = tm.user_id
-        WHERE tm.team_id = $1
+        WHERE tm.team_id = $1 AND tm.role = 'member'
         ORDER BY u.email
         "#,
         team_id
@@ -181,8 +181,33 @@ where
     Ok(member)
 }
 
-/// Remove member from team
-pub async fn remove_member<'a, E>(executor: E, team_id: Uuid, user_id: Uuid) -> Result<()>
+/// Remove member from team (specific role only)
+pub async fn remove_member<'a, E>(
+    executor: E,
+    team_id: Uuid,
+    user_id: Uuid,
+    role: TeamRole,
+) -> Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let role_str = role.to_string();
+
+    sqlx::query!(
+        "DELETE FROM team_members WHERE team_id = $1 AND user_id = $2 AND role = $3",
+        team_id,
+        user_id,
+        role_str
+    )
+    .execute(executor)
+    .await
+    .context("Failed to remove team member")?;
+
+    Ok(())
+}
+
+/// Remove user from team (all roles)
+pub async fn remove_all_user_roles<'a, E>(executor: E, team_id: Uuid, user_id: Uuid) -> Result<()>
 where
     E: sqlx::Executor<'a, Database = sqlx::Postgres>,
 {
@@ -193,7 +218,7 @@ where
     )
     .execute(executor)
     .await
-    .context("Failed to remove team member")?;
+    .context("Failed to remove user from team")?;
 
     Ok(())
 }
