@@ -1552,11 +1552,11 @@ function EnvVarsList({ projectName, deploymentId }) {
 }
 
 // Project Detail Component (with tabs)
-function ProjectDetail({ projectName }) {
+function ProjectDetail({ projectName, initialTab }) {
     const [project, setProject] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [activeTab, setActiveTab] = useState('overview');
+    const [activeTab, setActiveTab] = useState(initialTab || 'overview');
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
     const { showToast } = useToast();
@@ -1574,6 +1574,19 @@ function ProjectDetail({ projectName }) {
         }
         loadProject();
     }, [projectName]);
+
+    // Update activeTab when initialTab changes (e.g., browser back/forward)
+    useEffect(() => {
+        if (initialTab) {
+            setActiveTab(initialTab);
+        }
+    }, [initialTab]);
+
+    // Helper function to change tab and update URL
+    const changeTab = (tab) => {
+        setActiveTab(tab);
+        window.location.hash = `project/${projectName}/${tab}`;
+    };
 
     const handleDeleteClick = () => {
         setConfirmDialogOpen(true);
@@ -1643,25 +1656,25 @@ function ProjectDetail({ projectName }) {
                 <div className="flex gap-8">
                     <button
                         className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'overview' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
-                        onClick={() => setActiveTab('overview')}
+                        onClick={() => changeTab('overview')}
                     >
                         Overview
                     </button>
                     <button
                         className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'deployments' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
-                        onClick={() => setActiveTab('deployments')}
+                        onClick={() => changeTab('deployments')}
                     >
                         Deployments
                     </button>
                     <button
                         className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'service-accounts' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
-                        onClick={() => setActiveTab('service-accounts')}
+                        onClick={() => changeTab('service-accounts')}
                     >
                         Service Accounts
                     </button>
                     <button
                         className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'env-vars' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
-                        onClick={() => setActiveTab('env-vars')}
+                        onClick={() => changeTab('env-vars')}
                     >
                         Environment Variables
                     </button>
@@ -2641,7 +2654,9 @@ function App() {
 
     if (hash.startsWith('project/')) {
         view = 'project-detail';
-        params.projectName = hash.split('/')[1];
+        const parts = hash.split('/');
+        params.projectName = parts[1];
+        params.tab = parts[2] || 'overview'; // Default to overview if no tab specified
     } else if (hash.startsWith('team/')) {
         view = 'team-detail';
         params.teamName = hash.split('/')[1];
@@ -2662,7 +2677,7 @@ function App() {
             <main className="container mx-auto px-4 py-8">
                 {view === 'projects' && <ProjectsList />}
                 {view === 'teams' && <TeamsList currentUser={user} />}
-                {view === 'project-detail' && <ProjectDetail projectName={params.projectName} />}
+                {view === 'project-detail' && <ProjectDetail projectName={params.projectName} initialTab={params.tab} />}
                 {view === 'team-detail' && <TeamDetail teamName={params.teamName} currentUser={user} />}
                 {view === 'deployment-detail' && <DeploymentDetail projectName={params.projectName} deploymentId={params.deploymentId} />}
             </main>
