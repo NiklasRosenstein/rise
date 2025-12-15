@@ -1809,6 +1809,8 @@ function useToast() {
 
 // Modal Component
 function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
+    console.log('Modal render:', { isOpen, title });
+
     useEffect(() => {
         const handleEscape = (e) => {
             if (e.key === 'Escape' && isOpen) {
@@ -1822,6 +1824,7 @@ function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
 
     useEffect(() => {
         if (isOpen) {
+            console.log('Modal is open, setting overflow hidden');
             document.body.style.overflow = 'hidden';
         } else {
             document.body.style.overflow = 'unset';
@@ -1831,7 +1834,12 @@ function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
         };
     }, [isOpen]);
 
-    if (!isOpen) return null;
+    if (!isOpen) {
+        console.log('Modal returning null because isOpen is false');
+        return null;
+    }
+
+    console.log('Modal rendering content');
 
     return (
         <div className="modal-backdrop" onClick={onClose}>
