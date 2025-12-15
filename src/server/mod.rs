@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod custom_domains;
 pub mod deployment;
 #[cfg(feature = "aws")]
 pub mod ecr;
@@ -82,6 +83,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     // Protected routes (require authentication)
     let protected_routes = Router::new()
         .merge(auth::routes::protected_routes())
+        .merge(custom_domains::routes())
         .merge(project::routes::routes())
         .merge(team::routes::team_routes())
         .merge(registry::routes::routes())
@@ -201,6 +203,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
         namespace_annotations,
         ingress_annotations,
         ingress_tls_secret_name,
+        custom_domain_tls_mode,
         node_selector,
     ) = match settings.deployment_controller.clone() {
         Some(settings::DeploymentControllerSettings::Kubernetes {
@@ -214,6 +217,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             namespace_annotations,
             ingress_annotations,
             ingress_tls_secret_name,
+            custom_domain_tls_mode,
             node_selector,
         }) => (
             kubeconfig,
@@ -226,6 +230,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             namespace_annotations,
             ingress_annotations,
             ingress_tls_secret_name,
+            custom_domain_tls_mode,
             node_selector,
         ),
         None => {
@@ -269,6 +274,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             namespace_annotations,
             ingress_annotations,
             ingress_tls_secret_name,
+            custom_domain_tls_mode,
             node_selector,
         },
     )?);

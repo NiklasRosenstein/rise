@@ -1,0 +1,18 @@
+use super::handlers;
+use crate::server::state::AppState;
+use axum::{
+    routing::{get, post},
+    Router,
+};
+
+pub fn routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/projects/{project_id_or_name}/domains",
+            post(handlers::add_custom_domain).get(handlers::list_custom_domains),
+        )
+        .route(
+            "/projects/{project_id_or_name}/domains/{domain}",
+            get(handlers::get_custom_domain).delete(handlers::delete_custom_domain),
+        )
+}

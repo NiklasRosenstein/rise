@@ -2,6 +2,7 @@ pub mod backend;
 pub mod config;
 pub mod deployment;
 pub mod dev_oidc_issuer;
+pub mod domain;
 pub mod env;
 pub mod login;
 pub mod project;

@@ -24,6 +24,7 @@ use super::{DeploymentBackend, HealthStatus, ReconcileResult};
 use crate::db::deployments as db_deployments;
 use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectVisibility};
 use crate::db::projects as db_projects;
+use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
 use crate::server::registry::RegistryProvider;
 use crate::server::state::ControllerState;
 
@@ -100,6 +101,7 @@ pub struct KubernetesControllerConfig {
     pub namespace_annotations: std::collections::HashMap<String, String>,
     pub ingress_annotations: std::collections::HashMap<String, String>,
     pub ingress_tls_secret_name: Option<String>,
+    pub custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
     pub node_selector: std::collections::HashMap<String, String>,
 }
 
@@ -116,6 +118,7 @@ pub struct KubernetesController {
     namespace_annotations: std::collections::HashMap<String, String>,
     ingress_annotations: std::collections::HashMap<String, String>,
     ingress_tls_secret_name: Option<String>,
+    custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
     node_selector: std::collections::HashMap<String, String>,
 }
 
@@ -138,6 +141,7 @@ impl KubernetesController {
             namespace_annotations: config.namespace_annotations,
             ingress_annotations: config.ingress_annotations,
             ingress_tls_secret_name: config.ingress_tls_secret_name,
+            custom_domain_tls_mode: config.custom_domain_tls_mode,
             node_selector: config.node_selector,
         })
     }
@@ -921,6 +925,7 @@ impl KubernetesController {
         project: &Project,
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
+        custom_domains: &[crate::db::models::CustomDomain],
     ) -> Ingress {
         let url_components = self.ingress_url_components(project, deployment);
 
@@ -981,13 +986,53 @@ impl KubernetesController {
             ("/".to_string(), "Prefix")
         };
 
-        // Build TLS configuration if secret name is provided
-        let tls = self.ingress_tls_secret_name.as_ref().map(|secret_name| {
-            vec![k8s_openapi::api::networking::v1::IngressTLS {
-                hosts: Some(vec![url_components.host.clone()]),
-                secret_name: Some(secret_name.clone()),
-            }]
-        });
+        // Build rules - primary host + custom domains
+        let service_name = Self::service_name(project, deployment);
+        let mut rules = vec![IngressRule {
+            host: Some(url_components.host.clone()),
+            http: Some(HTTPIngressRuleValue {
+                paths: vec![HTTPIngressPath {
+                    path: Some(ingress_path),
+                    path_type: path_type.to_string(),
+                    backend: IngressBackend {
+                        service: Some(IngressServiceBackend {
+                            name: service_name.clone(),
+                            port: Some(ServiceBackendPort {
+                                name: Some("http".to_string()),
+                                ..Default::default()
+                            }),
+                        }),
+                        ..Default::default()
+                    },
+                }],
+            }),
+        }];
+
+        // Add custom domain rules (always from root, no path prefix)
+        for domain in custom_domains {
+            rules.push(IngressRule {
+                host: Some(domain.domain.clone()),
+                http: Some(HTTPIngressRuleValue {
+                    paths: vec![HTTPIngressPath {
+                        path: Some("/".to_string()),
+                        path_type: "Prefix".to_string(),
+                        backend: IngressBackend {
+                            service: Some(IngressServiceBackend {
+                                name: service_name.clone(),
+                                port: Some(ServiceBackendPort {
+                                    name: Some("http".to_string()),
+                                    ..Default::default()
+                                }),
+                            }),
+                            ..Default::default()
+                        },
+                    }],
+                }),
+            });
+        }
+
+        // Build TLS configuration
+        let tls = self.build_tls_config(&url_components.host, custom_domains);
 
         Ingress {
             metadata: ObjectMeta {
@@ -1004,29 +1049,52 @@ impl KubernetesController {
             spec: Some(IngressSpec {
                 ingress_class_name: Some(self.ingress_class.clone()),
                 tls,
-                rules: Some(vec![IngressRule {
-                    host: Some(url_components.host.clone()),
-                    http: Some(HTTPIngressRuleValue {
-                        paths: vec![HTTPIngressPath {
-                            path: Some(ingress_path),
-                            path_type: path_type.to_string(),
-                            backend: IngressBackend {
-                                service: Some(IngressServiceBackend {
-                                    name: Self::service_name(project, deployment),
-                                    port: Some(ServiceBackendPort {
-                                        name: Some("http".to_string()),
-                                        ..Default::default()
-                                    }),
-                                }),
-                                ..Default::default()
-                            },
-                        }],
-                    }),
-                }]),
+                rules: Some(rules),
                 ..Default::default()
             }),
             ..Default::default()
         }
+    }
+
+    /// Build TLS configuration for Ingress based on custom_domain_tls_mode
+    fn build_tls_config(
+        &self,
+        primary_host: &str,
+        custom_domains: &[crate::db::models::CustomDomain],
+    ) -> Option<Vec<k8s_openapi::api::networking::v1::IngressTLS>> {
+        let shared_secret = self.ingress_tls_secret_name.as_ref()?;
+
+        let mut tls_configs = Vec::new();
+
+        match self.custom_domain_tls_mode {
+            crate::server::settings::CustomDomainTlsMode::Shared => {
+                // All hosts (primary + custom) share the same TLS secret
+                let mut all_hosts = vec![primary_host.to_string()];
+                all_hosts.extend(custom_domains.iter().map(|d| d.domain.clone()));
+
+                tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
+                    hosts: Some(all_hosts),
+                    secret_name: Some(shared_secret.clone()),
+                });
+            }
+            crate::server::settings::CustomDomainTlsMode::PerDomain => {
+                // Primary host uses shared secret
+                tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
+                    hosts: Some(vec![primary_host.to_string()]),
+                    secret_name: Some(shared_secret.clone()),
+                });
+
+                // Each custom domain gets its own tls-{domain} secret
+                for domain in custom_domains {
+                    tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
+                        hosts: Some(vec![domain.domain.clone()]),
+                        secret_name: Some(format!("tls-{}", domain.domain)),
+                    });
+                }
+            }
+        }
+
+        Some(tls_configs)
     }
 }
 
@@ -1566,12 +1634,26 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    // Fetch custom domains (only for DEFAULT group)
+                    let custom_domains = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP
+                    {
+                        crate::db::custom_domains::list_project_custom_domains(
+                            &self.state.db_pool,
+                            project.id,
+                        )
+                        .await
+                        .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+
                     // Create Ingress for all deployment groups (each group gets its own hostname)
                     let ingress_name = Self::ingress_name(project, deployment);
                     let ingress_api: Api<Ingress> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
-                    let ingress = self.create_ingress(project, deployment, &metadata);
+                    let ingress =
+                        self.create_ingress(project, deployment, &metadata, &custom_domains);
 
                     // Use server-side apply with force for idempotent ingress updates
                     let patch_params = PatchParams::apply("rise").force();
@@ -1719,7 +1801,22 @@ impl DeploymentBackend for KubernetesController {
                     let ingress_name = Self::ingress_name(project, deployment);
                     let ingress_api: Api<Ingress> =
                         Api::namespaced(self.kube_client.clone(), namespace);
-                    let ingress = self.create_ingress(project, deployment, &metadata);
+
+                    // Fetch custom domains (only for DEFAULT group)
+                    let custom_domains = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP
+                    {
+                        crate::db::custom_domains::list_project_custom_domains(
+                            &self.state.db_pool,
+                            project.id,
+                        )
+                        .await
+                        .unwrap_or_default()
+                    } else {
+                        Vec::new()
+                    };
+
+                    let ingress =
+                        self.create_ingress(project, deployment, &metadata, &custom_domains);
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&ingress);
                     match ingress_api
@@ -2278,6 +2375,7 @@ mod tests {
             namespace_annotations: std::collections::HashMap::new(),
             ingress_annotations: std::collections::HashMap::new(),
             ingress_tls_secret_name: None,
+            custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
             node_selector: std::collections::HashMap::new(),
         }
     }

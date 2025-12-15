@@ -247,3 +247,13 @@ pub struct DeploymentEnvVar {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// Custom domain for projects
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct CustomDomain {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub domain: String,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}

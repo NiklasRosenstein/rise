@@ -65,6 +65,10 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "e")]
     Env(EnvCommands),
+    /// Custom domain management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "dom")]
+    Domain(DomainCommands),
     /// Build a container image locally without deploying
     Build {
         /// Tag for the built image (e.g., myapp:latest, registry.io/org/app:v1.0)
@@ -364,6 +368,34 @@ enum EnvCommands {
         project: String,
         /// Deployment ID
         deployment_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum DomainCommands {
+    /// Add a custom domain to a project
+    #[command(visible_alias = "a")]
+    Add {
+        /// Project name
+        project: String,
+        /// Domain name (e.g., example.com)
+        domain: String,
+    },
+    /// List custom domains for a project
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
+    List {
+        /// Project name
+        project: String,
+    },
+    /// Remove a custom domain from a project
+    #[command(visible_alias = "rm")]
+    #[command(visible_alias = "del")]
+    Remove {
+        /// Project name
+        project: String,
+        /// Domain name
+        domain: String,
     },
 }
 
@@ -807,6 +839,23 @@ async fn main() -> Result<()> {
                         deployment_id,
                     )
                     .await?;
+                }
+            }
+        }
+        Commands::Domain(domain_cmd) => {
+            let token = config.get_token().ok_or_else(|| {
+                anyhow::anyhow!("Not authenticated. Please run 'rise login' first")
+            })?;
+            match domain_cmd {
+                DomainCommands::Add { project, domain } => {
+                    domain::add_domain(&http_client, &backend_url, &token, project, domain).await?;
+                }
+                DomainCommands::List { project } => {
+                    domain::list_domains(&http_client, &backend_url, &token, project).await?;
+                }
+                DomainCommands::Remove { project, domain } => {
+                    domain::remove_domain(&http_client, &backend_url, &token, project, domain)
+                        .await?;
                 }
             }
         }

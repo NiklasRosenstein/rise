@@ -167,6 +167,20 @@ fn default_node_selector() -> std::collections::HashMap<String, String> {
     selector
 }
 
+/// TLS mode for custom domains
+#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum CustomDomainTlsMode {
+    /// All hosts (primary + custom domains) share the same TLS secret
+    Shared,
+    /// Each custom domain gets its own tls-{domain} secret (cert-manager integration)
+    PerDomain,
+}
+
+fn default_custom_domain_tls_mode() -> CustomDomainTlsMode {
+    CustomDomainTlsMode::PerDomain
+}
+
 /// Deployment controller configuration
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -232,6 +246,14 @@ pub enum DeploymentControllerSettings {
         /// Example: "rise-apps-tls" (secret must exist in each namespace)
         #[serde(default)]
         ingress_tls_secret_name: Option<String>,
+
+        /// TLS mode for custom domains
+        /// - "shared": All hosts use ingress_tls_secret_name
+        /// - "per-domain": Each custom domain uses tls-{domain} secret (for cert-manager)
+        ///
+        /// Defaults to "per-domain"
+        #[serde(default = "default_custom_domain_tls_mode")]
+        custom_domain_tls_mode: CustomDomainTlsMode,
 
         /// Node selector for pod placement (controls which nodes pods can run on)
         /// Default: {"kubernetes.io/arch": "amd64"}

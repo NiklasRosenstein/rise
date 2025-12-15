@@ -145,6 +145,11 @@ deployment_controller:
 #   # Optional: TLS secret name for ingress certificates
 #   ingress_tls_secret_name: "rise-apps-tls"
 #
+#   # Optional: TLS mode for custom domains (default: "per-domain")
+#   # - "shared": All hosts (primary + custom domains) use ingress_tls_secret_name
+#   # - "per-domain": Each custom domain uses tls-{domain} secret (for cert-manager)
+#   custom_domain_tls_mode: "per-domain"
+#
 #   # Optional: Node selector for pod placement
 #   node_selector:
 #     kubernetes.io/arch: "amd64"
