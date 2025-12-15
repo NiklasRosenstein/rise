@@ -753,6 +753,9 @@ function ProjectDetail({ projectName }) {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [activeTab, setActiveTab] = useState('overview');
+    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const { showToast } = useToast();
 
     useEffect(() => {
         async function loadProject() {
@@ -768,6 +771,27 @@ function ProjectDetail({ projectName }) {
         loadProject();
     }, [projectName]);
 
+    const handleDeleteClick = () => {
+        setConfirmDialogOpen(true);
+    };
+
+    const handleDeleteConfirm = async () => {
+        if (!project) return;
+
+        setDeleting(true);
+        try {
+            await api.deleteProject(project.name);
+            showToast(`Project ${project.name} deleted successfully`, 'success');
+            setConfirmDialogOpen(false);
+            // Redirect to projects list
+            window.location.hash = 'projects';
+        } catch (err) {
+            showToast(`Failed to delete project: ${err.message}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading project: {error}</p>;
     if (!project) return <p className="text-gray-400">Project not found.</p>;
@@ -779,7 +803,16 @@ function ProjectDetail({ projectName }) {
             </a>
 
             <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
-                <h3 className="text-2xl font-bold mb-4">Project {project.name}</h3>
+                <div className="flex justify-between items-start mb-4">
+                    <h3 className="text-2xl font-bold">Project {project.name}</h3>
+                    <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={handleDeleteClick}
+                    >
+                        Delete Project
+                    </Button>
+                </div>
                 <dl className="grid grid-cols-2 gap-4 text-sm">
                     <div>
                         <dt className="text-gray-400">Status</dt>
@@ -854,6 +887,19 @@ function ProjectDetail({ projectName }) {
                     </div>
                 )}
             </div>
+
+            <ConfirmDialog
+                isOpen={confirmDialogOpen}
+                onClose={() => setConfirmDialogOpen(false)}
+                onConfirm={handleDeleteConfirm}
+                title="Delete Project"
+                message={`Are you sure you want to delete project "${project.name}"? This action cannot be undone and will delete all associated deployments, service accounts, and environment variables.`}
+                confirmText="Delete Project"
+                variant="danger"
+                requireConfirmation={true}
+                confirmationText={project.name}
+                loading={deleting}
+            />
         </section>
     );
 }
