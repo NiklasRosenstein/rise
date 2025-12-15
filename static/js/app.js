@@ -2047,14 +2047,91 @@ function ConfirmDialog({
     );
 }
 
+// Login Page Component
+function LoginPage() {
+    const [status, setStatus] = useState('');
+    const [loading, setLoading] = useState(false);
+
+    // Handle OAuth callback on component mount
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('code')) {
+            setStatus('Processing authentication...');
+            setLoading(true);
+            handleOAuthCallback()
+                .catch((error) => {
+                    setStatus(`Error: ${error.message}`);
+                    setLoading(false);
+                });
+        }
+    }, []);
+
+    const handleLogin = async () => {
+        setStatus('Initializing authentication...');
+        setLoading(true);
+        try {
+            await login();
+        } catch (error) {
+            setStatus(`Error: ${error.message}`);
+            setLoading(false);
+        }
+    };
+
+    return (
+        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-black">
+            <div className="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl">
+                <div className="text-center mb-8">
+                    <div className="flex justify-center mb-4">
+                        <svg className="w-16 h-16 text-indigo-500" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                    </div>
+                    <h1 className="text-3xl font-bold text-white mb-2">Rise</h1>
+                    <p className="text-gray-400">Container Deployment Platform</p>
+                </div>
+
+                {loading ? (
+                    <div className="flex flex-col items-center gap-4 py-8">
+                        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-gray-300">{status}</p>
+                    </div>
+                ) : (
+                    <>
+                        <button
+                            onClick={handleLogin}
+                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors mb-4"
+                        >
+                            Login with OAuth
+                        </button>
+                        {status && (
+                            <p className="text-center text-sm text-red-400">{status}</p>
+                        )}
+                    </>
+                )}
+            </div>
+        </div>
+    );
+}
+
 // Main App Component
 function App() {
     const [user, setUser] = useState(null);
+    const [authChecked, setAuthChecked] = useState(false);
     const hash = useHashLocation();
 
     useEffect(() => {
+        // Check if we're handling OAuth callback
+        const params = new URLSearchParams(window.location.search);
+        if (params.has('code')) {
+            // Let LoginPage handle the callback
+            setAuthChecked(true);
+            return;
+        }
+
         if (!isAuthenticated()) {
-            window.location.href = '/';
+            setAuthChecked(true);
             return;
         }
 
@@ -2065,6 +2142,8 @@ function App() {
             } catch (err) {
                 console.error('Failed to load user:', err);
                 logout();
+            } finally {
+                setAuthChecked(true);
             }
         }
         loadUser();
@@ -2074,12 +2153,16 @@ function App() {
         logout();
     };
 
-    if (!user) {
+    if (!authChecked) {
         return (
             <div className="flex items-center justify-center min-h-screen">
                 <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
             </div>
         );
+    }
+
+    if (!isAuthenticated() || !user) {
+        return <LoginPage />;
     }
 
     // Parse hash for routing

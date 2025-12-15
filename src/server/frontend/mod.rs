@@ -18,12 +18,24 @@ mod tests {
             "index.html.tera should be embedded"
         );
         assert!(
-            StaticAssets::get("dashboard.html").is_some(),
-            "dashboard.html should be embedded"
+            StaticAssets::get("auth-signin.html.tera").is_some(),
+            "auth-signin.html.tera should be embedded"
+        );
+        assert!(
+            StaticAssets::get("auth-success.html.tera").is_some(),
+            "auth-success.html.tera should be embedded"
         );
         assert!(
             StaticAssets::get("js/auth.js").is_some(),
             "js/auth.js should be embedded"
+        );
+        assert!(
+            StaticAssets::get("js/api.js").is_some(),
+            "js/api.js should be embedded"
+        );
+        assert!(
+            StaticAssets::get("js/app.js").is_some(),
+            "js/app.js should be embedded"
         );
     }
 }

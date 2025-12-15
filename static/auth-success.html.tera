@@ -1,111 +1,84 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="dark">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% if success %}Authentication Successful{% else %}Authentication Failed{% endif %} - Rise</title>
-    <link rel="stylesheet" href="/css/pico.min.css">
-    <link rel="stylesheet" href="/css/app.css">
-    <style>
-        #status-card {
-            max-width: 500px;
-            margin: 2rem auto;
-            text-align: center;
-        }
-        .status-icon {
-            font-size: 4rem;
-            margin: 1rem 0;
-        }
-        .success-icon {
-            color: var(--ins-color);
-        }
-        .error-icon {
-            color: var(--del-color);
-        }
-        .project-name {
-            font-family: monospace;
-            background: var(--code-background-color);
-            padding: 0.125rem 0.375rem;
-            border-radius: 0.25rem;
-        }
-        .countdown {
-            font-weight: bold;
-            color: var(--primary);
-        }
-        .redirect-url {
-            font-size: 0.875rem;
-            color: var(--muted-color);
-            word-break: break-all;
-            margin-top: 1rem;
-        }
-    </style>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
 </head>
-<body>
-    <main class="container">
-        <article id="status-card">
+<body class="bg-gray-950 text-gray-100">
+    <div class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-black">
+        <div class="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl text-center">
             {% if success %}
-            <header>
-                <div class="status-icon success-icon">✓</div>
-                <h2>Authentication Successful</h2>
-            </header>
-            <section>
-                <p>
+            <div>
+                <div class="text-6xl text-green-500 mb-4">✓</div>
+                <h2 class="text-2xl font-bold text-white mb-4">Authentication Successful</h2>
+
+                <p class="text-gray-300 mb-4">
                     You have been successfully authenticated for project
-                    <strong class="project-name">{{ project_name }}</strong>.
+                    <strong class="font-mono text-white bg-gray-800 px-2 py-1 rounded">{{ project_name }}</strong>.
                 </p>
-                <p>
-                    Redirecting in <span class="countdown" id="countdown">3</span> seconds...
+
+                <p class="text-gray-400 mb-2">
+                    Redirecting in <span class="font-bold text-indigo-400" id="countdown">3</span> seconds...
                 </p>
+
+                <div class="w-full bg-gray-800 rounded-full h-2 mb-4">
+                    <div class="bg-indigo-600 h-2 rounded-full transition-all duration-1000" id="progress-bar" style="width: 0%"></div>
+                </div>
+
                 {% if redirect_url %}
-                <p class="redirect-url">
-                    <small>Redirecting to: <code>{{ redirect_url }}</code></small>
+                <p class="text-xs text-gray-500 mb-4">
+                    <small>Redirecting to: <code class="bg-gray-800 px-1 rounded">{{ redirect_url }}</code></small>
                 </p>
                 {% endif %}
-                <progress id="redirect-progress" value="0" max="3"></progress>
-                <p>
-                    <a href="{{ redirect_url }}">Click here if not redirected automatically</a>
-                </p>
-            </section>
+
+                <a href="{{ redirect_url }}" class="text-sm text-indigo-400 hover:text-indigo-300">Click here if not redirected automatically</a>
+            </div>
+
+            <script>
+                let secondsLeft = 3;
+                const countdownElement = document.getElementById('countdown');
+                const progressBar = document.getElementById('progress-bar');
+                const redirectUrl = "{{ redirect_url }}";
+
+                const intervalId = setInterval(() => {
+                    secondsLeft--;
+                    countdownElement.textContent = secondsLeft;
+                    progressBar.style.width = ((3 - secondsLeft) / 3 * 100) + '%';
+
+                    if (secondsLeft <= 0) {
+                        clearInterval(intervalId);
+                        window.location.href = redirectUrl;
+                    }
+                }, 1000);
+
+                // Start progress bar animation
+                setTimeout(() => progressBar.style.width = '33.33%', 100);
+            </script>
             {% else %}
-            <header>
-                <div class="status-icon error-icon">✗</div>
-                <h2>Authentication Failed</h2>
-            </header>
-            <section>
-                <p>
+            <div>
+                <div class="text-6xl text-red-500 mb-4">✗</div>
+                <h2 class="text-2xl font-bold text-white mb-4">Authentication Failed</h2>
+
+                <p class="text-gray-300 mb-4">
                     Failed to authenticate for project
-                    <strong class="project-name">{{ project_name }}</strong>.
+                    <strong class="font-mono text-white bg-gray-800 px-2 py-1 rounded">{{ project_name }}</strong>.
                 </p>
+
                 {% if error_message %}
-                <p>
-                    <mark>{{ error_message }}</mark>
+                <p class="bg-red-900/50 border border-red-500 text-red-200 px-4 py-2 rounded mb-4">
+                    {{ error_message }}
                 </p>
                 {% endif %}
-                <a href="/auth/signin?project={{ project_name }}{% if redirect_url %}&redirect={{ redirect_url | urlencode }}{% endif %}" role="button">Try Again</a>
-            </section>
+
+                <a href="/auth/signin?project={{ project_name }}{% if redirect_url %}&redirect={{ redirect_url | urlencode }}{% endif %}"
+                   class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors">
+                    Try Again
+                </a>
+            </div>
             {% endif %}
-        </article>
-    </main>
-
-    {% if success %}
-    <script>
-        // Auto-redirect countdown
-        let secondsLeft = 3;
-        const countdownElement = document.getElementById('countdown');
-        const progressElement = document.getElementById('redirect-progress');
-        const redirectUrl = "{{ redirect_url }}";
-
-        const intervalId = setInterval(() => {
-            secondsLeft--;
-            countdownElement.textContent = secondsLeft;
-            progressElement.value = 3 - secondsLeft;
-
-            if (secondsLeft <= 0) {
-                clearInterval(intervalId);
-                window.location.href = redirectUrl;
-            }
-        }, 1000);
-    </script>
-    {% endif %}
+        </div>
+    </div>
 </body>
 </html>

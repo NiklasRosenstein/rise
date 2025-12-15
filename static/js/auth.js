@@ -2,12 +2,14 @@
 
 // Configuration is injected by the backend via index.html.tera template
 // Fallback to defaults for local development if not injected
-const CONFIG = window.RISE_CONFIG || {
-    backendUrl: window.location.origin,
-    issuerUrl: 'http://localhost:5556/dex',
-    clientId: 'rise-backend',
-    redirectUri: window.location.origin + '/',
-};
+if (!window.CONFIG) {
+    window.CONFIG = {
+        backendUrl: window.location.origin,
+        issuerUrl: 'http://localhost:5556/dex',
+        clientId: 'rise-backend',
+        redirectUri: window.location.origin + '/',
+    };
+}
 
 // Generate random string for PKCE
 function generateRandomString(length) {
@@ -41,9 +43,6 @@ async function generatePKCE() {
 
 // Initiate OAuth2 authorization code flow
 async function login() {
-    const statusEl = document.getElementById('status-message');
-    statusEl.textContent = 'Initializing authentication...';
-
     try {
         const { codeVerifier, codeChallenge } = await generatePKCE();
 
@@ -62,34 +61,29 @@ async function login() {
         // Redirect to OIDC provider
         window.location.href = authUrl.toString();
     } catch (error) {
-        statusEl.textContent = 'Error: ' + error.message;
         console.error('Login error:', error);
+        throw error;
     }
 }
 
 // Handle OAuth callback
 async function handleOAuthCallback() {
-    const statusEl = document.getElementById('status-message');
-    statusEl.textContent = 'Processing authentication...';
-
     const params = new URLSearchParams(window.location.search);
     const code = params.get('code');
     const error = params.get('error');
 
     if (error) {
-        statusEl.textContent = 'Authentication failed: ' + (params.get('error_description') || error);
-        return;
+        console.error('OAuth error:', params.get('error_description') || error);
+        throw new Error('Authentication failed: ' + (params.get('error_description') || error));
     }
 
     if (!code) {
-        statusEl.textContent = 'No authorization code received';
-        return;
+        throw new Error('No authorization code received');
     }
 
     const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
     if (!codeVerifier) {
-        statusEl.textContent = 'Error: No code verifier found';
-        return;
+        throw new Error('No code verifier found');
     }
 
     try {
@@ -115,11 +109,12 @@ async function handleOAuthCallback() {
         localStorage.setItem('rise_token', data.token);
         sessionStorage.removeItem('pkce_code_verifier');
 
-        // Redirect to dashboard
-        window.location.href = '/dashboard.html';
+        // Clear OAuth params and reload to show dashboard
+        window.history.replaceState({}, document.title, '/');
+        window.location.reload();
     } catch (error) {
-        statusEl.textContent = 'Error exchanging code: ' + error.message;
         console.error('Code exchange error:', error);
+        throw error;
     }
 }
 
