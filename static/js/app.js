@@ -113,6 +113,7 @@ function ProjectsList() {
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [formData, setFormData] = useState({ name: '', visibility: 'Public', owner: 'self' });
     const [teams, setTeams] = useState([]);
+    const [currentUser, setCurrentUser] = useState(null);
     const [saving, setSaving] = useState(false);
     const { showToast } = useToast();
 
@@ -143,6 +144,18 @@ function ProjectsList() {
         loadTeams();
     }, []);
 
+    useEffect(() => {
+        async function loadCurrentUser() {
+            try {
+                const user = await api.getMe();
+                setCurrentUser(user);
+            } catch (err) {
+                console.error('Failed to load current user:', err);
+            }
+        }
+        loadCurrentUser();
+    }, []);
+
     const handleCreateClick = () => {
         setFormData({ name: '', visibility: 'Public', owner: 'self' });
         setIsModalOpen(true);
@@ -160,16 +173,17 @@ function ProjectsList() {
             return;
         }
 
+        if (!currentUser) {
+            showToast('Unable to determine current user', 'error');
+            return;
+        }
+
         setSaving(true);
         try {
             // Format owner correctly for the API
             let owner;
             if (formData.owner === 'self') {
-                // For self, we need to get the current user's ID from the teams list or make an API call
-                // For now, we'll send the user's ID from the first team's user info
-                // Actually, let me check the API - it seems like we should send { user: "user-id" }
-                // But we don't have the user ID readily available. Let's use null for self.
-                owner = null;
+                owner = { user: currentUser.id };
             } else {
                 // formData.owner is the team ID
                 owner = { team: formData.owner };
@@ -188,83 +202,6 @@ function ProjectsList() {
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading projects: {error}</p>;
-
-    if (projects.length === 0) {
-        return (
-            <section>
-                <h2 className="text-2xl font-bold mb-6">Projects</h2>
-                <div className="text-center py-8">
-                    <p className="text-gray-400 mb-4">No projects found.</p>
-                    <Button variant="primary" size="sm" onClick={handleCreateClick}>
-                        Create Project
-                    </Button>
-                </div>
-
-                <Modal
-                    isOpen={isModalOpen}
-                    onClose={() => setIsModalOpen(false)}
-                    title="Create Project"
-                >
-                    <div className="space-y-4">
-                        <FormField
-                            label="Project Name"
-                            id="project-name"
-                            value={formData.name}
-                            onChange={(e) => setFormData({ ...formData, name: e.target.value.toLowerCase() })}
-                            placeholder="my-awesome-app"
-                            required
-                        />
-                        <p className="text-sm text-gray-500 -mt-2">
-                            Only lowercase letters, numbers, and hyphens allowed
-                        </p>
-
-                        <FormField
-                            label="Visibility"
-                            id="project-visibility"
-                            type="select"
-                            value={formData.visibility}
-                            onChange={(e) => setFormData({ ...formData, visibility: e.target.value })}
-                            required
-                        >
-                            <option value="Public">Public</option>
-                            <option value="Private">Private</option>
-                        </FormField>
-
-                        <FormField
-                            label="Owner"
-                            id="project-owner"
-                            type="select"
-                            value={formData.owner}
-                            onChange={(e) => setFormData({ ...formData, owner: e.target.value })}
-                            required
-                        >
-                            <option value="self">Self</option>
-                            {teams.map(team => (
-                                <option key={team.id} value={team.id}>team:{team.name}</option>
-                            ))}
-                        </FormField>
-
-                        <div className="flex justify-end gap-3 pt-4">
-                            <Button
-                                variant="secondary"
-                                onClick={() => setIsModalOpen(false)}
-                                disabled={saving}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                variant="primary"
-                                onClick={handleCreate}
-                                loading={saving}
-                            >
-                                Create
-                            </Button>
-                        </div>
-                    </div>
-                </Modal>
-            </section>
-        );
-    }
 
     return (
         <section>
@@ -286,7 +223,14 @@ function ProjectsList() {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
-                        {projects.map(p => {
+                        {projects.length === 0 ? (
+                            <tr>
+                                <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
+                                    No projects found.
+                                </td>
+                            </tr>
+                        ) : (
+                            projects.map(p => {
                             const owner = p.owner_user_email ? `user:${p.owner_user_email}` :
                                          p.owner_team_name ? `team:${p.owner_team_name}` : '-';
                             return (
@@ -314,7 +258,8 @@ function ProjectsList() {
                                     </td>
                                 </tr>
                             );
-                        })}
+                        })
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -623,6 +568,9 @@ function DeploymentsList({ projectName }) {
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [deploymentToStop, setDeploymentToStop] = useState(null);
     const [stopping, setStopping] = useState(false);
+    const [rollbackDialogOpen, setRollbackDialogOpen] = useState(false);
+    const [deploymentToRollback, setDeploymentToRollback] = useState(null);
+    const [rollingBack, setRollingBack] = useState(false);
     const { showToast } = useToast();
     const pageSize = 10;
 
@@ -672,6 +620,10 @@ function DeploymentsList({ projectName }) {
         return ['Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired'].includes(status);
     };
 
+    const isRollbackable = (status) => {
+        return ['Healthy', 'Superseded'].includes(status);
+    };
+
     const handleStopClick = (deployment) => {
         setDeploymentToStop(deployment);
         setConfirmDialogOpen(true);
@@ -691,6 +643,28 @@ function DeploymentsList({ projectName }) {
             showToast(`Failed to stop deployment: ${err.message}`, 'error');
         } finally {
             setStopping(false);
+        }
+    };
+
+    const handleRollbackClick = (deployment) => {
+        setDeploymentToRollback(deployment);
+        setRollbackDialogOpen(true);
+    };
+
+    const handleRollbackConfirm = async () => {
+        if (!deploymentToRollback) return;
+
+        setRollingBack(true);
+        try {
+            const response = await api.rollbackDeployment(projectName, deploymentToRollback.deployment_id);
+            showToast(`Rollback successful! New deployment: ${response.new_deployment_id}`, 'success');
+            setRollbackDialogOpen(false);
+            setDeploymentToRollback(null);
+            loadDeployments();
+        } catch (err) {
+            showToast(`Failed to rollback deployment: ${err.message}`, 'error');
+        } finally {
+            setRollingBack(false);
         }
     };
 
@@ -776,18 +750,32 @@ function DeploymentsList({ projectName }) {
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDate(d.created)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                            {!isTerminal(d.status) && (
-                                                <Button
-                                                    variant="danger"
-                                                    size="sm"
-                                                    onClick={(e) => {
-                                                        e.stopPropagation();
-                                                        handleStopClick(d);
-                                                    }}
-                                                >
-                                                    Stop
-                                                </Button>
-                                            )}
+                                            <div className="flex gap-2">
+                                                {isRollbackable(d.status) && (
+                                                    <Button
+                                                        variant="primary"
+                                                        size="sm"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleRollbackClick(d);
+                                                        }}
+                                                    >
+                                                        Rollback
+                                                    </Button>
+                                                )}
+                                                {!isTerminal(d.status) && (
+                                                    <Button
+                                                        variant="danger"
+                                                        size="sm"
+                                                        onClick={(e) => {
+                                                            e.stopPropagation();
+                                                            handleStopClick(d);
+                                                        }}
+                                                    >
+                                                        Stop
+                                                    </Button>
+                                                )}
+                                            </div>
                                         </td>
                                     </tr>
                                     );
@@ -830,6 +818,20 @@ function DeploymentsList({ projectName }) {
                 confirmText="Stop Deployment"
                 variant="danger"
                 loading={stopping}
+            />
+
+            <ConfirmDialog
+                isOpen={rollbackDialogOpen}
+                onClose={() => {
+                    setRollbackDialogOpen(false);
+                    setDeploymentToRollback(null);
+                }}
+                onConfirm={handleRollbackConfirm}
+                title="Rollback to Deployment"
+                message={`Are you sure you want to rollback to deployment ${deploymentToRollback?.deployment_id}? This will create a new deployment with the same image and configuration.`}
+                confirmText="Rollback"
+                variant="primary"
+                loading={rollingBack}
             />
         </div>
     );
@@ -954,73 +956,6 @@ function ServiceAccountsList({ projectName }) {
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading service accounts: {error}</p>;
 
-    if (serviceAccounts.length === 0) {
-        return (
-            <>
-                <div className="text-center py-8">
-                    <p className="text-gray-400 mb-4">No service accounts found.</p>
-                    <Button variant="primary" size="sm" onClick={handleAddClick}>
-                        Create Service Account
-                    </Button>
-                </div>
-
-                <Modal
-                    isOpen={isModalOpen}
-                    onClose={() => setIsModalOpen(false)}
-                    title={editingSA ? 'Edit Service Account' : 'Create Service Account'}
-                >
-                    <div className="space-y-4">
-                        <FormField
-                            label="Issuer URL"
-                            id="sa-issuer-url"
-                            value={formData.issuer_url}
-                            onChange={(e) => setFormData({ ...formData, issuer_url: e.target.value })}
-                            placeholder="https://token.actions.githubusercontent.com"
-                            required
-                        />
-                        <FormField
-                            label="Audience (aud)"
-                            id="sa-aud"
-                            value={formData.aud}
-                            onChange={(e) => setFormData({ ...formData, aud: e.target.value })}
-                            placeholder={CONFIG.backendUrl}
-                            required
-                        />
-                        <FormField
-                            label="Additional Claims (JSON)"
-                            id="sa-claims"
-                            type="textarea"
-                            value={claimsText}
-                            onChange={(e) => setClaimsText(e.target.value)}
-                            placeholder={`{\n  "sub": "repo:myorg/myrepo:*"\n}`}
-                            rows={5}
-                        />
-                        <p className="text-sm text-gray-500">
-                            <strong>Note:</strong> Additional claims should be provided as a JSON object. The <code className="bg-gray-800 px-1 rounded">aud</code> claim is configured separately above.
-                        </p>
-
-                        <div className="flex justify-end gap-3 pt-4">
-                            <Button
-                                variant="secondary"
-                                onClick={() => setIsModalOpen(false)}
-                                disabled={saving}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                variant="primary"
-                                onClick={handleSave}
-                                loading={saving}
-                            >
-                                {editingSA ? 'Update' : 'Create'}
-                            </Button>
-                        </div>
-                    </div>
-                </Modal>
-            </>
-        );
-    }
-
     return (
         <div>
             <div className="mb-4 flex justify-end">
@@ -1040,7 +975,14 @@ function ServiceAccountsList({ projectName }) {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
-                        {serviceAccounts.map(sa => (
+                        {serviceAccounts.length === 0 ? (
+                            <tr>
+                                <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
+                                    No service accounts found.
+                                </td>
+                            </tr>
+                        ) : (
+                            serviceAccounts.map(sa => (
                             <tr key={sa.id} className="hover:bg-gray-800/50 transition-colors">
                                 <td className="px-6 py-4 text-sm text-gray-200">{sa.email}</td>
                                 <td className="px-6 py-4 text-sm text-gray-300 break-all max-w-xs">{sa.issuer_url}</td>
@@ -1069,7 +1011,8 @@ function ServiceAccountsList({ projectName }) {
                                     </div>
                                 </td>
                             </tr>
-                        ))}
+                        ))
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -1232,89 +1175,6 @@ function EnvVarsList({ projectName, deploymentId }) {
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading environment variables: {error}</p>;
 
-    if (envVars.length === 0) {
-        if (deploymentId) {
-            return <p className="text-gray-400">No environment variables configured.</p>;
-        }
-        return (
-            <>
-                <div className="text-center py-8">
-                    <p className="text-gray-400 mb-4">No environment variables configured.</p>
-                    <Button variant="primary" size="sm" onClick={handleAddClick}>
-                        Add Variable
-                    </Button>
-                </div>
-
-                <Modal
-                    isOpen={isModalOpen}
-                    onClose={() => setIsModalOpen(false)}
-                    title={editingEnvVar ? 'Edit Environment Variable' : 'Add Environment Variable'}
-                >
-                    <div className="space-y-4">
-                        <FormField
-                            label="Key"
-                            id="env-key"
-                            value={formData.key}
-                            onChange={(e) => setFormData({ ...formData, key: e.target.value })}
-                            placeholder="DATABASE_URL"
-                            disabled={editingEnvVar !== null}
-                            required
-                        />
-                        <FormField
-                            label="Value"
-                            id="env-value"
-                            type="textarea"
-                            value={formData.value}
-                            onChange={(e) => setFormData({ ...formData, value: e.target.value })}
-                            placeholder="postgres://..."
-                            required
-                            rows={3}
-                        />
-                        <FormField
-                            label=""
-                            id="env-is-secret"
-                            type="checkbox"
-                            value={formData.is_secret}
-                            onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked })}
-                            placeholder="Mark as secret (value will be encrypted)"
-                        />
-
-                        <div className="flex justify-end gap-3 pt-4">
-                            <Button
-                                variant="secondary"
-                                onClick={() => setIsModalOpen(false)}
-                                disabled={saving}
-                            >
-                                Cancel
-                            </Button>
-                            <Button
-                                variant="primary"
-                                onClick={handleSave}
-                                loading={saving}
-                            >
-                                {editingEnvVar ? 'Update' : 'Add'}
-                            </Button>
-                        </div>
-                    </div>
-                </Modal>
-
-                <ConfirmDialog
-                    isOpen={confirmDialogOpen}
-                    onClose={() => {
-                        setConfirmDialogOpen(false);
-                        setEnvVarToDelete(null);
-                    }}
-                    onConfirm={handleDeleteConfirm}
-                    title="Delete Environment Variable"
-                    message={`Are you sure you want to delete the environment variable "${envVarToDelete?.key}"? This action cannot be undone.`}
-                    confirmText="Delete Variable"
-                    variant="danger"
-                    loading={deleting}
-                />
-            </>
-        );
-    }
-
     return (
         <div>
             {!deploymentId && (
@@ -1337,7 +1197,14 @@ function EnvVarsList({ projectName, deploymentId }) {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
-                        {envVars.map(env => (
+                        {envVars.length === 0 ? (
+                            <tr>
+                                <td colSpan={deploymentId ? "3" : "4"} className="px-6 py-8 text-center text-gray-400">
+                                    No environment variables configured.
+                                </td>
+                            </tr>
+                        ) : (
+                            envVars.map(env => (
                             <tr key={env.key} className="hover:bg-gray-800/50 transition-colors">
                                 <td className="px-6 py-4 text-sm font-mono text-gray-200">{env.key}</td>
                                 <td className="px-6 py-4 text-sm font-mono text-gray-200">{env.value}</td>
@@ -1369,7 +1236,8 @@ function EnvVarsList({ projectName, deploymentId }) {
                                     </td>
                                 )}
                             </tr>
-                        ))}
+                        ))
+                        )}
                     </tbody>
                 </table>
             </div>
@@ -1703,9 +1571,7 @@ function DeploymentDetail({ projectName, deploymentId }) {
     const [deployment, setDeployment] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [isRollbackModalOpen, setIsRollbackModalOpen] = useState(false);
-    const [targetGroup, setTargetGroup] = useState('');
-    const [deploymentGroups, setDeploymentGroups] = useState([]);
+    const [rollbackDialogOpen, setRollbackDialogOpen] = useState(false);
     const [rolling, setRolling] = useState(false);
     const { showToast } = useToast();
 
@@ -1720,35 +1586,16 @@ function DeploymentDetail({ projectName, deploymentId }) {
         }
     }, [projectName, deploymentId]);
 
-    useEffect(() => {
-        async function loadGroups() {
-            try {
-                const groups = await api.getDeploymentGroups(projectName);
-                setDeploymentGroups(groups);
-            } catch (err) {
-                console.error('Failed to load deployment groups:', err);
-            }
-        }
-        loadGroups();
-    }, [projectName]);
-
     const handleRollbackClick = () => {
-        // Default to the source deployment group
-        setTargetGroup(deployment?.deployment_group || 'default');
-        setIsRollbackModalOpen(true);
+        setRollbackDialogOpen(true);
     };
 
     const handleRollback = async () => {
-        if (!targetGroup) {
-            showToast('Please select a target deployment group', 'error');
-            return;
-        }
-
         setRolling(true);
         try {
-            await api.rollbackDeployment(projectName, deploymentId, targetGroup);
-            showToast(`Rollback to deployment ${deploymentId} in group ${targetGroup} initiated successfully`, 'success');
-            setIsRollbackModalOpen(false);
+            const response = await api.rollbackDeployment(projectName, deploymentId);
+            showToast(`Rollback successful! New deployment: ${response.new_deployment_id}`, 'success');
+            setRollbackDialogOpen(false);
             // Redirect to project page to see the new deployment
             window.location.hash = `project/${projectName}`;
         } catch (err) {
@@ -1784,7 +1631,7 @@ function DeploymentDetail({ projectName, deploymentId }) {
                     <h3 className="text-2xl font-bold">Deployment {deployment.deployment_id}</h3>
                     <div className="flex items-center gap-3">
                         <StatusBadge status={deployment.status} />
-                        {deployment.status === 'Running' && (
+                        {(deployment.status === 'Healthy' || deployment.status === 'Superseded') && (
                             <Button
                                 variant="secondary"
                                 size="sm"
@@ -1861,54 +1708,16 @@ function DeploymentDetail({ projectName, deploymentId }) {
             <h3 className="text-xl font-bold mb-4">Environment Variables</h3>
             <EnvVarsList projectName={projectName} deploymentId={deploymentId} />
 
-            <Modal
-                isOpen={isRollbackModalOpen}
-                onClose={() => setIsRollbackModalOpen(false)}
-                title="Rollback Deployment"
-            >
-                <div className="space-y-4">
-                    <p className="text-gray-300">
-                        Rollback to deployment <strong className="text-white">{deploymentId}</strong>
-                    </p>
-                    <p className="text-sm text-gray-400">
-                        This will create a new deployment using the image from this deployment.
-                    </p>
-
-                    <FormField
-                        label="Target Deployment Group"
-                        id="rollback-target-group"
-                        type="select"
-                        value={targetGroup}
-                        onChange={(e) => setTargetGroup(e.target.value)}
-                        required
-                    >
-                        {deploymentGroups.map(group => (
-                            <option key={group} value={group}>{group}</option>
-                        ))}
-                    </FormField>
-
-                    <p className="text-sm text-gray-500">
-                        <strong>Note:</strong> The deployment will be created in the selected group. By default, it will use the same group as this deployment ({deployment.deployment_group}).
-                    </p>
-
-                    <div className="flex justify-end gap-3 pt-4">
-                        <Button
-                            variant="secondary"
-                            onClick={() => setIsRollbackModalOpen(false)}
-                            disabled={rolling}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="primary"
-                            onClick={handleRollback}
-                            loading={rolling}
-                        >
-                            Rollback
-                        </Button>
-                    </div>
-                </div>
-            </Modal>
+            <ConfirmDialog
+                isOpen={rollbackDialogOpen}
+                onClose={() => setRollbackDialogOpen(false)}
+                onConfirm={handleRollback}
+                title="Rollback to Deployment"
+                message={`Are you sure you want to rollback to deployment ${deploymentId}? This will create a new deployment with the same image and configuration.`}
+                confirmText="Rollback"
+                variant="primary"
+                loading={rolling}
+            />
         </section>
     );
 }

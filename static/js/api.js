@@ -34,6 +34,11 @@ class RiseAPI {
             throw new Error(`API error: ${response.status} ${errorText}`);
         }
 
+        // Handle 204 No Content responses (no body to parse)
+        if (response.status === 204) {
+            return null;
+        }
+
         return response.json();
     }
 
@@ -93,6 +98,12 @@ class RiseAPI {
 
     async stopDeployment(projectName, deploymentId) {
         return this.request(`/projects/${projectName}/deployments/${deploymentId}/stop`, {
+            method: 'POST'
+        });
+    }
+
+    async rollbackDeployment(projectName, deploymentId) {
+        return this.request(`/projects/${projectName}/deployments/${deploymentId}/rollback`, {
             method: 'POST'
         });
     }
