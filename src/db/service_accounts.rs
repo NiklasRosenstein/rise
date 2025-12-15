@@ -48,19 +48,38 @@ pub async fn create(
     // Generate service account email
     let email = format!("{}+{}@sa.rise.local", project.name, sequence);
 
-    // Create user for service account
-    let user = sqlx::query_as!(
+    // Check if user already exists with this email (from previously deleted SA)
+    let existing_user = sqlx::query_as!(
         User,
         r#"
-        INSERT INTO users (email)
-        VALUES ($1)
-        RETURNING id, email, created_at, updated_at
+        SELECT id, email, created_at, updated_at
+        FROM users
+        WHERE email = $1
         "#,
         email
     )
-    .fetch_one(&mut *tx)
+    .fetch_optional(&mut *tx)
     .await
-    .context("Failed to create user for service account")?;
+    .context("Failed to check for existing user")?;
+
+    // Create or reuse user
+    let user = if let Some(user) = existing_user {
+        tracing::debug!("Reusing existing user for service account: {}", email);
+        user
+    } else {
+        sqlx::query_as!(
+            User,
+            r#"
+            INSERT INTO users (email)
+            VALUES ($1)
+            RETURNING id, email, created_at, updated_at
+            "#,
+            email
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .context("Failed to create user for service account")?
+    };
 
     // Convert claims HashMap to JSONB
     let claims_json = serde_json::to_value(claims).context("Failed to serialize claims")?;

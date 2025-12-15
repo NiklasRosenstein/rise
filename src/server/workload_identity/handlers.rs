@@ -15,6 +15,72 @@ use crate::server::workload_identity::models::{
 
 type Result<T> = std::result::Result<T, (StatusCode, String)>;
 
+/// Verify that an OIDC issuer is reachable and has valid configuration
+async fn verify_oidc_issuer(issuer_url: &str) -> Result<()> {
+    // Construct the OIDC discovery URL
+    let discovery_url = if issuer_url.ends_with('/') {
+        format!("{}well-known/openid-configuration", issuer_url)
+    } else {
+        format!("{}/.well-known/openid-configuration", issuer_url)
+    };
+
+    tracing::debug!("Verifying OIDC issuer at: {}", discovery_url);
+
+    // Attempt to fetch the OIDC configuration
+    let response = reqwest::get(&discovery_url)
+        .await
+        .map_err(|e| {
+            tracing::warn!("Failed to reach OIDC issuer {}: {}", issuer_url, e);
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Failed to reach OIDC issuer: {}. Please verify the issuer URL is correct and accessible.", e),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        tracing::warn!(
+            "OIDC issuer {} returned non-success status: {}",
+            issuer_url,
+            response.status()
+        );
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "OIDC issuer returned status {}: {}. Please verify the issuer URL points to a valid OIDC provider.",
+                response.status(),
+                response.status().canonical_reason().unwrap_or("Unknown")
+            ),
+        ));
+    }
+
+    // Try to parse the response as JSON to verify it's valid OIDC configuration
+    let config: serde_json::Value = response.json().await.map_err(|e| {
+        tracing::warn!("Failed to parse OIDC configuration from {}: {}", issuer_url, e);
+        (
+            StatusCode::BAD_REQUEST,
+            format!("Invalid OIDC configuration: {}. The issuer URL does not return valid OIDC discovery metadata.", e),
+        )
+    })?;
+
+    // Verify required OIDC fields are present
+    if !config.get("issuer").is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "OIDC configuration missing required 'issuer' field".to_string(),
+        ));
+    }
+
+    if !config.get("jwks_uri").is_some() {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "OIDC configuration missing required 'jwks_uri' field".to_string(),
+        ));
+    }
+
+    tracing::info!("Successfully verified OIDC issuer: {}", issuer_url);
+    Ok(())
+}
+
 /// Create a new service account for a project
 pub async fn create_workload_identity(
     State(state): State<AppState>,
@@ -80,10 +146,16 @@ pub async fn create_workload_identity(
         ));
     }
 
+    // Verify OIDC issuer is reachable and has valid configuration
+    verify_oidc_issuer(&req.issuer_url).await?;
+
     // Create service account
     let sa = service_accounts::create(&state.db_pool, project.id, &req.issuer_url, &req.claims)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| {
+            tracing::error!("Failed to create service account: {:?}", e);
+            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create service account: {}", e))
+        })?;
 
     // Get user for response
     let sa_user = users::find_by_id(&state.db_pool, sa.user_id)

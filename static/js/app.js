@@ -1,6 +1,6 @@
 // React-based Rise Dashboard Application with Tailwind CSS
 const { useState, useEffect, useCallback } = React;
-const CONFIG = window.RISE_CONFIG || { backendUrl: window.location.origin };
+// CONFIG is already defined in auth.js which loads before this script
 
 // Utility functions
 function formatDate(dateString) {
