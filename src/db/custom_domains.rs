@@ -174,6 +174,30 @@ pub async fn update_certificate_status(
     Ok(())
 }
 
+/// Get all pending domains (for verification loop)
+pub async fn get_pending_domains(pool: &PgPool) -> Result<Vec<CustomDomain>> {
+    let domains = sqlx::query_as!(
+        CustomDomain,
+        r#"
+        SELECT
+            id, project_id, domain_name,
+            verification_status as "verification_status: DomainVerificationStatus",
+            verified_at,
+            certificate_status as "certificate_status: CertificateStatus",
+            certificate_issued_at, certificate_expires_at,
+            certificate_pem, certificate_key_pem, acme_order_url,
+            created_at, updated_at
+        FROM custom_domains
+        WHERE verification_status = 'Pending'
+        ORDER BY created_at ASC
+        "#,
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(domains)
+}
+
 /// Update ACME order URL
 #[allow(dead_code)]
 pub async fn update_acme_order_url(

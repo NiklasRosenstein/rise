@@ -452,6 +452,14 @@ pub async fn request_certificate(
         ));
     }
 
+    // Check if certificate issuance is already in progress
+    if domain.certificate_status == crate::db::models::CertificateStatus::Pending {
+        return Err((
+            StatusCode::CONFLICT,
+            "Certificate issuance is already in progress for this domain".to_string(),
+        ));
+    }
+
     // Check if ACME service is configured
     let acme_settings = state.settings.acme.as_ref().ok_or_else(|| {
         (

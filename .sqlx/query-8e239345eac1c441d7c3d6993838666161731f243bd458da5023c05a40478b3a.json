@@ -1,0 +1,92 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT\n            id, project_id, domain_name,\n            verification_status as \"verification_status: DomainVerificationStatus\",\n            verified_at,\n            certificate_status as \"certificate_status: CertificateStatus\",\n            certificate_issued_at, certificate_expires_at,\n            certificate_pem, certificate_key_pem, acme_order_url,\n            created_at, updated_at\n        FROM custom_domains\n        WHERE verification_status = 'Pending'\n        ORDER BY created_at ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "domain_name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "verification_status: DomainVerificationStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "verified_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "certificate_status: CertificateStatus",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 6,
+        "name": "certificate_issued_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 7,
+        "name": "certificate_expires_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "certificate_pem",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "certificate_key_pem",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "acme_order_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 12,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "8e239345eac1c441d7c3d6993838666161731f243bd458da5023c05a40478b3a"
+}

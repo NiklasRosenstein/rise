@@ -49,25 +49,9 @@ impl DomainVerificationLoop {
 
     /// Verify all pending domains
     async fn verify_pending_domains(&self) -> Result<()> {
-        // Query all domains with Pending status
-        let pending_domains = sqlx::query_as!(
-            crate::db::models::CustomDomain,
-            r#"
-            SELECT
-                id, project_id, domain_name,
-                verification_status as "verification_status: DomainVerificationStatus",
-                verified_at,
-                certificate_status as "certificate_status: crate::db::models::CertificateStatus",
-                certificate_issued_at, certificate_expires_at,
-                certificate_pem, certificate_key_pem, acme_order_url,
-                created_at, updated_at
-            FROM custom_domains
-            WHERE verification_status = 'Pending'
-            ORDER BY created_at ASC
-            "#,
-        )
-        .fetch_all(&self.state.db_pool)
-        .await?;
+        // Get all domains with Pending status using database function
+        let pending_domains =
+            crate::db::custom_domains::get_pending_domains(&self.state.db_pool).await?;
 
         if pending_domains.is_empty() {
             debug!("No pending domains to verify");

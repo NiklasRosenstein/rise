@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
-use instant_acme::{
-    Account, ChallengeType, Identifier, LetsEncrypt, NewAccount, NewOrder, OrderStatus,
-};
+use instant_acme::{Account, ChallengeType, Identifier, NewAccount, NewOrder, OrderStatus};
 use rcgen::{CertificateParams, DistinguishedName, KeyPair};
 use std::sync::Arc;
 use std::time::Duration;
@@ -45,11 +43,8 @@ impl AcmeService {
 
         // For production use, we should persist account credentials to database
         // For now, create a new account each time (Let's Encrypt allows this)
-        let directory_url = if self.settings.directory_url.contains("staging") {
-            LetsEncrypt::Staging.url()
-        } else {
-            LetsEncrypt::Production.url()
-        };
+        // Use the directory_url directly from configuration
+        let directory_url = &self.settings.directory_url;
 
         let (account, _credentials) = Account::create(
             &NewAccount {
