@@ -633,8 +633,8 @@ function DeploymentsList({ projectName }) {
     if (loading && deployments.length === 0) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading deployments: {error}</p>;
 
-    // Find the most recent deployment in the default group
-    const mostRecentDefault = deployments.find(d => d.deployment_group === 'default');
+    // Find the most recent deployment in the default group (only non-terminal)
+    const mostRecentDefault = deployments.find(d => d.deployment_group === 'default' && !isTerminal(d.status));
 
     return (
         <div>
