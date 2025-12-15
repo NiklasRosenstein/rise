@@ -84,25 +84,44 @@ pub async fn add_custom_domain(
 
     // Trigger reconciliation of the active deployment in the default group
     // Custom domains are only applied to the default deployment group
-    if let Ok(Some(active_deployment)) = db_deployments::find_active_for_project_and_group(
+    match db_deployments::find_active_for_project_and_group(
         &state.db_pool,
         project.id,
         DEFAULT_DEPLOYMENT_GROUP,
     )
     .await
     {
-        if let Err(e) =
-            db_deployments::mark_needs_reconcile(&state.db_pool, active_deployment.id).await
-        {
-            // Log the error but don't fail the request - the domain was added successfully
+        Ok(Some(active_deployment)) => {
             info!(
-                "Failed to trigger reconciliation for deployment {} after adding domain: {}",
-                active_deployment.deployment_id, e
+                "Found active deployment {} in default group for project '{}', marking for reconciliation",
+                active_deployment.deployment_id, project.name
             );
-        } else {
+
+            if let Err(e) =
+                db_deployments::mark_needs_reconcile(&state.db_pool, active_deployment.id).await
+            {
+                // Log the error but don't fail the request - the domain was added successfully
+                info!(
+                    "Failed to trigger reconciliation for deployment {} after adding domain: {}",
+                    active_deployment.deployment_id, e
+                );
+            } else {
+                info!(
+                    "Successfully marked deployment {} for reconciliation after adding custom domain '{}'",
+                    active_deployment.deployment_id, payload.domain
+                );
+            }
+        }
+        Ok(None) => {
             info!(
-                "Triggered reconciliation for deployment {} after adding custom domain '{}'",
-                active_deployment.deployment_id, payload.domain
+                "No active deployment found in default group for project '{}', custom domain added but no reconciliation needed",
+                project.name
+            );
+        }
+        Err(e) => {
+            info!(
+                "Failed to find active deployment for project '{}': {}",
+                project.name, e
             );
         }
     }
@@ -290,25 +309,44 @@ pub async fn delete_custom_domain(
 
     // Trigger reconciliation of the active deployment in the default group
     // Custom domains are only applied to the default deployment group
-    if let Ok(Some(active_deployment)) = db_deployments::find_active_for_project_and_group(
+    match db_deployments::find_active_for_project_and_group(
         &state.db_pool,
         project.id,
         DEFAULT_DEPLOYMENT_GROUP,
     )
     .await
     {
-        if let Err(e) =
-            db_deployments::mark_needs_reconcile(&state.db_pool, active_deployment.id).await
-        {
-            // Log the error but don't fail the request - the domain was deleted successfully
+        Ok(Some(active_deployment)) => {
             info!(
-                "Failed to trigger reconciliation for deployment {} after deleting domain: {}",
-                active_deployment.deployment_id, e
+                "Found active deployment {} in default group for project '{}', marking for reconciliation",
+                active_deployment.deployment_id, project.name
             );
-        } else {
+
+            if let Err(e) =
+                db_deployments::mark_needs_reconcile(&state.db_pool, active_deployment.id).await
+            {
+                // Log the error but don't fail the request - the domain was deleted successfully
+                info!(
+                    "Failed to trigger reconciliation for deployment {} after deleting domain: {}",
+                    active_deployment.deployment_id, e
+                );
+            } else {
+                info!(
+                    "Successfully marked deployment {} for reconciliation after deleting custom domain '{}'",
+                    active_deployment.deployment_id, domain
+                );
+            }
+        }
+        Ok(None) => {
             info!(
-                "Triggered reconciliation for deployment {} after deleting custom domain '{}'",
-                active_deployment.deployment_id, domain
+                "No active deployment found in default group for project '{}', custom domain deleted but no reconciliation needed",
+                project.name
+            );
+        }
+        Err(e) => {
+            info!(
+                "Failed to find active deployment for project '{}': {}",
+                project.name, e
             );
         }
     }

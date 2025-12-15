@@ -208,14 +208,26 @@ impl DeploymentController {
         let flagged_deployments =
             db_deployments::find_needing_reconcile(&self.state.db_pool, 10).await?;
 
+        if !flagged_deployments.is_empty() {
+            info!(
+                "Found {} deployment(s) with needs_reconcile flag set",
+                flagged_deployments.len()
+            );
+        }
+
         for deployment in flagged_deployments {
             let deployment_id = deployment.deployment_id.clone();
-            debug!(
-                "Reconciling deployment {} due to needs_reconcile flag",
-                deployment_id
+            info!(
+                "Reconciling deployment {} (status: {:?}) due to needs_reconcile flag",
+                deployment_id, deployment.status
             );
             if let Err(e) = self.reconcile_single_deployment(deployment).await {
                 error!("Failed to reconcile deployment {}: {}", deployment_id, e);
+            } else {
+                info!(
+                    "Successfully reconciled deployment {} for config changes",
+                    deployment_id
+                );
             }
         }
 

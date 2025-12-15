@@ -1822,30 +1822,61 @@ impl DeploymentBackend for KubernetesController {
                     // Fetch custom domains (only for DEFAULT group)
                     let custom_domains = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP
                     {
-                        crate::db::custom_domains::list_project_custom_domains(
+                        let domains = crate::db::custom_domains::list_project_custom_domains(
                             &self.state.db_pool,
                             project.id,
                         )
                         .await
-                        .unwrap_or_default()
+                        .unwrap_or_default();
+
+                        info!(
+                            project = project.name,
+                            deployment_id = %deployment.id,
+                            custom_domain_count = domains.len(),
+                            domains = ?domains.iter().map(|d| &d.domain).collect::<Vec<_>>(),
+                            "Fetched custom domains for Ingress reconciliation"
+                        );
+
+                        domains
                     } else {
                         Vec::new()
                     };
 
                     let ingress =
                         self.create_ingress(project, deployment, &metadata, &custom_domains);
+
+                    // Log the Ingress rules that will be applied
+                    if let Some(ref spec) = ingress.spec {
+                        if let Some(ref rules) = spec.rules {
+                            info!(
+                                project = project.name,
+                                deployment_id = %deployment.id,
+                                rule_count = rules.len(),
+                                hosts = ?rules.iter().filter_map(|r| r.host.as_ref()).collect::<Vec<_>>(),
+                                "Applying Ingress with rules"
+                            );
+                        }
+                    }
+
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&ingress);
                     match ingress_api
                         .patch(&ingress_name, &patch_params, &patch)
                         .await
                     {
-                        Ok(_) => {
-                            debug!(
+                        Ok(patched_ingress) => {
+                            info!(
                                 project = project.name,
                                 deployment_id = %deployment.id,
-                                "Ingress drift check completed"
+                                "Ingress drift check completed and patched successfully"
                             );
+
+                            // Log the result to confirm it was applied
+                            if let Some(ref spec) = patched_ingress.spec {
+                                if let Some(ref rules) = spec.rules {
+                                    debug!("Patched Ingress now has {} rules", rules.len());
+                                }
+                            }
                         }
                         Err(e) if is_namespace_not_found_error(&e) => {
                             warn!("Namespace missing during Completed phase (Ingress), resetting to CreatingNamespace");
