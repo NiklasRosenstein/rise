@@ -7,6 +7,32 @@ function formatDate(dateString) {
     return date.toLocaleString();
 }
 
+function formatTimeRemaining(expiresAt) {
+    if (!expiresAt) return null;
+
+    const now = new Date();
+    const expiryDate = new Date(expiresAt);
+    const diffMs = expiryDate - now;
+    const diffSec = Math.floor(Math.abs(diffMs) / 1000);
+    const diffMin = Math.floor(diffSec / 60);
+    const diffHour = Math.floor(diffMin / 60);
+    const diffDay = Math.floor(diffHour / 24);
+
+    const isExpired = diffMs < 0;
+    const prefix = isExpired ? 'expired ' : 'in ';
+    const suffix = isExpired ? ' ago' : '';
+
+    if (diffDay > 0) {
+        return `${prefix}${diffDay} day${diffDay > 1 ? 's' : ''}${suffix}`;
+    } else if (diffHour > 0) {
+        return `${prefix}${diffHour} hour${diffHour > 1 ? 's' : ''}${suffix}`;
+    } else if (diffMin > 0) {
+        return `${prefix}${diffMin} minute${diffMin > 1 ? 's' : ''}${suffix}`;
+    } else {
+        return `${prefix}${diffSec} second${diffSec !== 1 ? 's' : ''}${suffix}`;
+    }
+}
+
 // Navigation helpers
 function useHashLocation() {
     const [hash, setHash] = useState(window.location.hash.slice(1) || 'projects');
@@ -297,7 +323,10 @@ function ActiveDeploymentsSummary({ projectName }) {
                             {latest.expires_at && (
                                 <div>
                                     <dt className="text-gray-400">Expires</dt>
-                                    <dd className="text-gray-200">{formatDate(latest.expires_at)}</dd>
+                                    <dd className="text-gray-200">
+                                        {formatTimeRemaining(latest.expires_at)}
+                                        <span className="text-gray-500 text-xs ml-2">({formatDate(latest.expires_at)})</span>
+                                    </dd>
                                 </div>
                             )}
                         </dl>
@@ -441,7 +470,15 @@ function DeploymentsList({ projectName }) {
                                                 </a>
                                             ) : '-'}
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{d.expires_at ? formatDate(d.expires_at) : '-'}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                            {d.expires_at ? (
+                                                <span>
+                                                    {formatTimeRemaining(d.expires_at)}
+                                                    <br />
+                                                    <span className="text-gray-500 text-xs">({formatDate(d.expires_at)})</span>
+                                                </span>
+                                            ) : '-'}
+                                        </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDate(d.created)}</td>
                                     </tr>
                                     );
