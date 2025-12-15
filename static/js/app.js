@@ -634,51 +634,234 @@ function ServiceAccountsList({ projectName }) {
     const [serviceAccounts, setServiceAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingSA, setEditingSA] = useState(null);
+    const [formData, setFormData] = useState({ issuer_url: '', claims: {} });
+    const [claimsText, setClaimsText] = useState('');
+    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+    const [saToDelete, setSAToDelete] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const { showToast } = useToast();
+
+    const loadServiceAccounts = useCallback(async () => {
+        try {
+            const response = await api.getProjectServiceAccounts(projectName);
+            setServiceAccounts(response.workload_identities || []);
+            setLoading(false);
+        } catch (err) {
+            setError(err.message);
+            setLoading(false);
+        }
+    }, [projectName]);
 
     useEffect(() => {
-        async function loadServiceAccounts() {
-            try {
-                const response = await api.getProjectServiceAccounts(projectName);
-                setServiceAccounts(response.workload_identities || []);
-            } catch (err) {
-                setError(err.message);
-            } finally {
-                setLoading(false);
-            }
-        }
         loadServiceAccounts();
-    }, [projectName]);
+    }, [loadServiceAccounts]);
+
+    const handleAddClick = () => {
+        setEditingSA(null);
+        setFormData({ issuer_url: '', claims: {} });
+        setClaimsText('');
+        setIsModalOpen(true);
+    };
+
+    const handleEditClick = (sa) => {
+        setEditingSA(sa);
+        setFormData({ issuer_url: sa.issuer_url, claims: sa.claims || {} });
+        // Convert claims object to JSON string for editing
+        const claimsObj = { ...sa.claims };
+        delete claimsObj.aud; // Remove aud as it's handled separately
+        setClaimsText(JSON.stringify(claimsObj, null, 2));
+        setIsModalOpen(true);
+    };
+
+    const handleDeleteClick = (sa) => {
+        setSAToDelete(sa);
+        setConfirmDialogOpen(true);
+    };
+
+    const handleSave = async () => {
+        if (!formData.issuer_url) {
+            showToast('Issuer URL is required', 'error');
+            return;
+        }
+
+        // Parse claims from text
+        let claims = {};
+        try {
+            if (claimsText.trim()) {
+                claims = JSON.parse(claimsText);
+            }
+        } catch (err) {
+            showToast('Invalid JSON in claims', 'error');
+            return;
+        }
+
+        // Add required aud claim (project URL)
+        claims.aud = `https://${projectName}.rise.dev`;
+
+        setSaving(true);
+        try {
+            if (editingSA) {
+                await api.updateServiceAccount(projectName, editingSA.id, formData.issuer_url, claims);
+                showToast('Service account updated successfully', 'success');
+            } else {
+                await api.createServiceAccount(projectName, formData.issuer_url, claims);
+                showToast('Service account created successfully', 'success');
+            }
+            setIsModalOpen(false);
+            loadServiceAccounts();
+        } catch (err) {
+            showToast(`Failed to ${editingSA ? 'update' : 'create'} service account: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDeleteConfirm = async () => {
+        if (!saToDelete) return;
+
+        setDeleting(true);
+        try {
+            await api.deleteServiceAccount(projectName, saToDelete.id);
+            showToast(`Service account ${saToDelete.email} deleted successfully`, 'success');
+            setConfirmDialogOpen(false);
+            setSAToDelete(null);
+            loadServiceAccounts();
+        } catch (err) {
+            showToast(`Failed to delete service account: ${err.message}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading service accounts: {error}</p>;
-    if (serviceAccounts.length === 0) return <p className="text-gray-400">No service accounts found.</p>;
+
+    if (serviceAccounts.length === 0) {
+        return (
+            <div className="text-center py-8">
+                <p className="text-gray-400 mb-4">No service accounts found.</p>
+                <Button variant="primary" size="sm" onClick={handleAddClick}>
+                    Create Service Account
+                </Button>
+            </div>
+        );
+    }
 
     return (
-        <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
-            <table className="w-full">
-                <thead className="bg-gray-800">
-                    <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Issuer URL</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Claims</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-800">
-                    {serviceAccounts.map(sa => (
-                        <tr key={sa.id} className="hover:bg-gray-800/50 transition-colors">
-                            <td className="px-6 py-4 text-sm text-gray-200">{sa.email}</td>
-                            <td className="px-6 py-4 text-sm text-gray-300 break-all max-w-xs">{sa.issuer_url}</td>
-                            <td className="px-6 py-4 text-xs font-mono text-gray-300">
-                                {Object.entries(sa.claims || {})
-                                    .map(([key, value]) => `${key}=${value}`)
-                                    .join(', ')}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDate(sa.created_at)}</td>
+        <div>
+            <div className="mb-4 flex justify-end">
+                <Button variant="primary" size="sm" onClick={handleAddClick}>
+                    Create Service Account
+                </Button>
+            </div>
+            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+                <table className="w-full">
+                    <thead className="bg-gray-800">
+                        <tr>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Issuer URL</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Claims</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
                         </tr>
-                    ))}
-                </tbody>
-            </table>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                        {serviceAccounts.map(sa => (
+                            <tr key={sa.id} className="hover:bg-gray-800/50 transition-colors">
+                                <td className="px-6 py-4 text-sm text-gray-200">{sa.email}</td>
+                                <td className="px-6 py-4 text-sm text-gray-300 break-all max-w-xs">{sa.issuer_url}</td>
+                                <td className="px-6 py-4 text-xs font-mono text-gray-300">
+                                    {Object.entries(sa.claims || {})
+                                        .map(([key, value]) => `${key}=${value}`)
+                                        .join(', ')}
+                                </td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDate(sa.created_at)}</td>
+                                <td className="px-6 py-4 text-sm">
+                                    <div className="flex gap-2">
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={() => handleEditClick(sa)}
+                                        >
+                                            Edit
+                                        </Button>
+                                        <Button
+                                            variant="danger"
+                                            size="sm"
+                                            onClick={() => handleDeleteClick(sa)}
+                                        >
+                                            Delete
+                                        </Button>
+                                    </div>
+                                </td>
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+
+            <Modal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                title={editingSA ? 'Edit Service Account' : 'Create Service Account'}
+            >
+                <div className="space-y-4">
+                    <FormField
+                        label="Issuer URL"
+                        id="sa-issuer-url"
+                        value={formData.issuer_url}
+                        onChange={(e) => setFormData({ ...formData, issuer_url: e.target.value })}
+                        placeholder="https://token.actions.githubusercontent.com"
+                        required
+                    />
+                    <FormField
+                        label="Additional Claims (JSON)"
+                        id="sa-claims"
+                        type="textarea"
+                        value={claimsText}
+                        onChange={(e) => setClaimsText(e.target.value)}
+                        placeholder={`{\n  "sub": "repo:myorg/myrepo:*"\n}`}
+                        rows={5}
+                    />
+                    <p className="text-sm text-gray-500">
+                        <strong>Note:</strong> The <code className="bg-gray-800 px-1 rounded">aud</code> claim will be automatically set to <code className="bg-gray-800 px-1 rounded">https://{projectName}.rise.dev</code>
+                    </p>
+
+                    <div className="flex justify-end gap-3 pt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => setIsModalOpen(false)}
+                            disabled={saving}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleSave}
+                            loading={saving}
+                        >
+                            {editingSA ? 'Update' : 'Create'}
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
+
+            <ConfirmDialog
+                isOpen={confirmDialogOpen}
+                onClose={() => {
+                    setConfirmDialogOpen(false);
+                    setSAToDelete(null);
+                }}
+                onConfirm={handleDeleteConfirm}
+                title="Delete Service Account"
+                message={`Are you sure you want to delete the service account "${saToDelete?.email}"? This action cannot be undone.`}
+                confirmText="Delete Service Account"
+                variant="danger"
+                loading={deleting}
+            />
         </div>
     );
 }
