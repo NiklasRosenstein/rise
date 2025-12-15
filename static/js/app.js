@@ -255,9 +255,20 @@ function ActiveDeploymentsSummary({ projectName }) {
     const groups = Object.keys(activeDeployments);
     if (groups.length === 0) return <p className="text-gray-400">No active deployments.</p>;
 
+    // Sort groups: "default" first, then by latest deployment's created timestamp
+    const sortedGroups = groups.sort((a, b) => {
+        if (a === 'default') return -1;
+        if (b === 'default') return 1;
+
+        // Both non-default: sort by latest deployment's created timestamp (descending)
+        const latestA = activeDeployments[a][0];
+        const latestB = activeDeployments[b][0];
+        return new Date(latestB.created) - new Date(latestA.created);
+    });
+
     return (
         <div className="space-y-4">
-            {groups.map(group => {
+            {sortedGroups.map(group => {
                 const deps = activeDeployments[group];
                 const latest = deps[0];
                 return (
