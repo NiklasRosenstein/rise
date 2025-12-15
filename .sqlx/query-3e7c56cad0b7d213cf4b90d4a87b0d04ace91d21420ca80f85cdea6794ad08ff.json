@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT u.id, u.email, u.created_at, u.updated_at\n        FROM users u\n        INNER JOIN team_members tm ON u.id = tm.user_id\n        WHERE tm.team_id = $1\n        ORDER BY u.email\n        ",
+  "query": "\n        SELECT u.id, u.email, u.created_at, u.updated_at\n        FROM users u\n        INNER JOIN team_members tm ON u.id = tm.user_id\n        WHERE tm.team_id = $1 AND tm.role = 'member'\n        ORDER BY u.email\n        ",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       false
     ]
   },
-  "hash": "ac2649d7e3ef3d33a3340b30f27bda0cfe9e25cbf0527c09a80291e6cf639cc5"
+  "hash": "3e7c56cad0b7d213cf4b90d4a87b0d04ace91d21420ca80f85cdea6794ad08ff"
 }
