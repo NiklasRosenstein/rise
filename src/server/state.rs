@@ -265,10 +265,12 @@ impl AppState {
                 RegistrySettings::OciClientAuth {
                     registry_url,
                     namespace,
+                    client_registry_url,
                 } => {
                     let oci_config = OciClientAuthConfig {
                         registry_url: registry_url.clone(),
                         namespace: namespace.clone(),
+                        client_registry_url: client_registry_url.clone(),
                     };
                     match OciClientAuthProvider::new(oci_config) {
                         Ok(provider) => {
@@ -417,10 +419,12 @@ impl AppState {
                 RegistrySettings::OciClientAuth {
                     registry_url,
                     namespace,
+                    client_registry_url,
                 } => {
                     let oci_config = OciClientAuthConfig {
                         registry_url: registry_url.clone(),
                         namespace: namespace.clone(),
+                        client_registry_url: client_registry_url.clone(),
                     };
                     match OciClientAuthProvider::new(oci_config) {
                         Ok(provider) => {

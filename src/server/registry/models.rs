@@ -69,6 +69,10 @@ pub struct OciClientAuthConfig {
     /// Namespace/path within registry (e.g., "rise-apps", "myorg")
     #[serde(default = "default_namespace")]
     pub namespace: String,
+    /// Optional client-facing registry URL for CLI push operations
+    /// If not specified, defaults to registry_url
+    #[serde(default)]
+    pub client_registry_url: Option<String>,
 }
 
 fn default_namespace() -> String {

@@ -17,6 +17,7 @@ pub struct OciClientAuthProvider {
     config: OciClientAuthConfig,
     registry_url: String,
     registry_host: String,
+    client_registry_url: String,
 }
 
 impl OciClientAuthProvider {
@@ -37,10 +38,20 @@ impl OciClientAuthProvider {
             config.registry_url.trim_end_matches('/'),
             config.namespace
         );
+
+        // Calculate client-facing registry URL (use client_registry_url if provided, otherwise use registry_url)
+        let client_base = config
+            .client_registry_url
+            .as_ref()
+            .unwrap_or(&config.registry_url);
+        let client_registry_url =
+            format!("{}/{}", client_base.trim_end_matches('/'), config.namespace);
+
         Ok(Self {
             config,
             registry_url,
             registry_host,
+            client_registry_url,
         })
     }
 }
@@ -50,9 +61,10 @@ impl RegistryProvider for OciClientAuthProvider {
     async fn get_credentials(&self, repository: &str) -> Result<RegistryCredentials> {
         tracing::info!("Returning OCI registry info for repository: {}", repository);
 
-        // Return registry URL - credentials assumed to be configured via docker login
+        // Return client-facing registry URL - credentials assumed to be configured via docker login
+        // The client_registry_url is used for push operations, while registry_url is used by deployment controllers
         Ok(RegistryCredentials {
-            registry_url: self.registry_url.clone(),
+            registry_url: self.client_registry_url.clone(),
             username: String::new(), // Empty - docker CLI uses stored credentials
             password: String::new(), // Empty - docker CLI uses stored credentials
             expires_in: None,

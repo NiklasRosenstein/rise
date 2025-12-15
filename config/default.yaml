@@ -84,8 +84,9 @@ controller: {}
 # OCI registry for local development (client-side auth via docker login)
 registry:
   type: "oci-client-auth"
-  registry_url: "localhost:5000"
-  namespace: "rise-apps"
+  registry_url: "rise-registry:5000"      # Internal URL for deployment controllers
+  namespace: "rise-apps/"
+  client_registry_url: "localhost:5000"   # Client-facing URL for CLI push operations
 
 # Encryption configuration (optional)
 # Required if you want to encrypt secret environment variables
@@ -139,7 +140,7 @@ registry:
 #   namespace_format: "rise-{project_name}"  # Template for Kubernetes namespaces (must contain {project_name}, default: "rise-{project_name}")
 #   auth_backend_url: "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster service URL for auth checks
 #   auth_signin_url: "https://rise.dev"  # Public API URL for browser redirects during authentication
-#   kubeconfig: "/path/to/kubeconfig"  # Optional: explicit kubeconfig path
+#   # kubeconfig: "/path/to/kubeconfig"  # Optional: explicit kubeconfig path
 #
 #   # Optional: Annotations to apply to all managed namespaces
 #   namespace_annotations:

@@ -314,6 +314,10 @@ pub enum RegistrySettings {
         registry_url: String,
         #[serde(default)]
         namespace: String,
+        /// Optional client-facing registry URL for CLI push operations
+        /// If not specified, defaults to registry_url
+        #[serde(default)]
+        client_registry_url: Option<String>,
     },
 }
 

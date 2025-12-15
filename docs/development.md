@@ -39,6 +39,24 @@ mise backend:run  # Starts services + backend
 
 Services: http://localhost:3000 (API, Web UI), localhost:5432 (PostgreSQL), http://localhost:5000 (Registry)
 
+### Registry Configuration for Local Development
+
+When using Docker Compose with Minikube, you may need different registry URLs for:
+- **Deployment controllers** (running in Minikube): `rise-registry:5000` (Docker internal network)
+- **CLI** (running on host): `localhost:5000` (host network)
+
+Configure this in `config/default.yaml`:
+
+```yaml
+registry:
+  type: "oci-client-auth"
+  registry_url: "rise-registry:5000"      # Internal URL for deployment controllers
+  namespace: "rise-apps/"
+  client_registry_url: "localhost:5000"   # Client-facing URL for CLI push operations
+```
+
+The `client_registry_url` is optional and defaults to `registry_url` if not specified. The API returns `client_registry_url` to CLI clients for push operations, while deployment controllers use `registry_url` for image references.
+
 ### Build CLI
 
 ```bash
