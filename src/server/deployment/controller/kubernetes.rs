@@ -1809,32 +1809,6 @@ impl DeploymentBackend for KubernetesController {
                                     }
                                     Err(e) => return Err(e.into()),
                                 }
-
-                                info!(
-                                    project = project.name,
-                                    deployment_id = %deployment.id,
-                                    "ReplicaSet recreated after drift detected in Completed phase"
-                                );
-
-                                // Move back to WaitingForReplicaSet to ensure it becomes ready
-                                metadata.reconcile_phase = ReconcilePhase::WaitingForReplicaSet;
-                                let metadata_json = serde_json::to_value(&metadata)?;
-                                db_deployments::update_controller_metadata(
-                                    &self.state.db_pool,
-                                    deployment.id,
-                                    &metadata_json,
-                                )
-                                .await?;
-
-                                return Ok(ReconcileResult {
-                                    status: DeploymentStatus::Deploying,
-                                    deployment_url: Some(format!(
-                                        "https://{}",
-                                        self.hostname(project, deployment)
-                                    )),
-                                    controller_metadata: serde_json::to_value(&metadata)?,
-                                    error_message: None,
-                                });
                             } else {
                                 debug!(
                                     project = project.name,
