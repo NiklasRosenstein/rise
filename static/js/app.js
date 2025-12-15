@@ -374,6 +374,9 @@ function DeploymentsList({ projectName }) {
     if (loading && deployments.length === 0) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading deployments: {error}</p>;
 
+    // Find the most recent deployment in the default group
+    const mostRecentDefault = deployments.find(d => d.deployment_group === 'default');
+
     return (
         <div>
             <div className="mb-4 flex items-center gap-2">
@@ -412,11 +415,13 @@ function DeploymentsList({ projectName }) {
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-gray-800">
-                                {deployments.map(d => (
+                                {deployments.map(d => {
+                                    const isHighlighted = mostRecentDefault && d.id === mostRecentDefault.id;
+                                    return (
                                     <tr
                                         key={d.id}
                                         onClick={() => window.location.hash = `deployment/${projectName}/${d.deployment_id}`}
-                                        className="hover:bg-gray-800/50 transition-colors cursor-pointer"
+                                        className={`transition-colors cursor-pointer ${isHighlighted ? 'bg-indigo-900/20 border-l-4 border-l-indigo-500 hover:bg-indigo-900/30' : 'hover:bg-gray-800/50'}`}
                                     >
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-200">{d.deployment_id}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge status={d.status} /></td>
@@ -439,7 +444,8 @@ function DeploymentsList({ projectName }) {
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{d.expires_at ? formatDate(d.expires_at) : '-'}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDate(d.created)}</td>
                                     </tr>
-                                ))}
+                                    );
+                                })}
                             </tbody>
                         </table>
                     </div>
