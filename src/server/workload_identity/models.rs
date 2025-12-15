@@ -8,6 +8,13 @@ pub struct CreateWorkloadIdentityRequest {
     pub claims: HashMap<String, String>,
 }
 
+/// Request to update an existing service account
+#[derive(Debug, Deserialize)]
+pub struct UpdateWorkloadIdentityRequest {
+    pub issuer_url: Option<String>,
+    pub claims: Option<HashMap<String, String>>,
+}
+
 /// Response for a single workload identity
 #[derive(Debug, Serialize)]
 pub struct WorkloadIdentityResponse {

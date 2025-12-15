@@ -31,4 +31,8 @@ pub fn deployment_routes() -> Router<AppState> {
             "/projects/{project_name}/deployments/{deployment_id}/rollback",
             post(super::handlers::rollback_deployment),
         )
+        .route(
+            "/projects/{project_name}/deployments/{deployment_id}/stop",
+            post(super::handlers::stop_deployment),
+        )
 }

@@ -217,6 +217,43 @@ pub async fn is_service_account(pool: &PgPool, user_id: Uuid) -> Result<bool> {
     Ok(exists)
 }
 
+/// Update a service account's issuer_url and/or claims
+pub async fn update(
+    pool: &PgPool,
+    id: Uuid,
+    issuer_url: Option<&str>,
+    claims: Option<&HashMap<String, String>>,
+) -> Result<ServiceAccount> {
+    // Convert claims HashMap to JSONB if provided
+    let claims_json = if let Some(c) = claims {
+        Some(serde_json::to_value(c).context("Failed to serialize claims")?)
+    } else {
+        None
+    };
+
+    let sa = sqlx::query_as!(
+        ServiceAccount,
+        r#"
+        UPDATE service_accounts
+        SET
+            issuer_url = COALESCE($2, issuer_url),
+            claims = COALESCE($3, claims),
+            updated_at = NOW()
+        WHERE id = $1 AND deleted_at IS NULL
+        RETURNING id, project_id, user_id, issuer_url, claims, sequence,
+                  deleted_at, created_at, updated_at
+        "#,
+        id,
+        issuer_url,
+        claims_json
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to update service account")?;
+
+    Ok(sa)
+}
+
 /// Soft delete a service account
 pub async fn soft_delete(pool: &PgPool, id: Uuid) -> Result<()> {
     sqlx::query!(

@@ -14,6 +14,8 @@ pub fn routes() -> Router<AppState> {
         )
         .route(
             "/projects/{project_name}/workload-identities/{sa_id}",
-            get(handlers::get_workload_identity).delete(handlers::delete_workload_identity),
+            get(handlers::get_workload_identity)
+                .put(handlers::update_workload_identity)
+                .delete(handlers::delete_workload_identity),
         )
 }

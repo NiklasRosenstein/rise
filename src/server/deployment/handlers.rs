@@ -871,6 +871,107 @@ pub async fn stop_deployments_by_group(
     }))
 }
 
+/// POST /projects/{project_name}/deployments/{deployment_id}/stop - Stop a specific deployment
+pub async fn stop_deployment(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((project_name, deployment_id)): Path<(String, String)>,
+) -> Result<Json<Deployment>, (StatusCode, String)> {
+    info!(
+        "Stopping deployment '{}' for project '{}'",
+        deployment_id, project_name
+    );
+
+    // Find the project by name
+    let project = projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
+
+    // Check if user has permission to stop deployments
+    // Return 404 instead of 403 to avoid revealing project existence
+    check_deploy_permission(&state, &project, &user)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
+
+    // Find the specific deployment
+    let deployment =
+        db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to find deployment: {}", e),
+                )
+            })?
+            .ok_or_else(|| {
+                (
+                    StatusCode::NOT_FOUND,
+                    format!("Deployment '{}' not found", deployment_id),
+                )
+            })?;
+
+    // Check if deployment is already in a terminal state
+    if state_machine::is_terminal(&deployment.status) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Deployment '{}' is already in terminal state: {}",
+                deployment_id, deployment.status
+            ),
+        ));
+    }
+
+    // Mark deployment as Terminating with UserStopped reason
+    let updated_deployment = db_deployments::mark_terminating(
+        &state.db_pool,
+        deployment.id,
+        crate::db::models::TerminationReason::UserStopped,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to stop deployment: {}", e),
+        )
+    })?;
+
+    info!("Marked deployment {} as Terminating", deployment_id);
+
+    // Update project status
+    projects::update_calculated_status(&state.db_pool, project.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to update project status: {}", e),
+            )
+        })?;
+
+    // Get creator email and convert to API model
+    let created_by_email =
+        get_creator_email(&state.db_pool, updated_deployment.created_by_id).await;
+    Ok(Json(convert_deployment(
+        updated_deployment,
+        created_by_email,
+    )))
+}
+
 /// GET /projects/{project_name}/deployments/{deployment_id} - Get a specific deployment
 pub async fn get_deployment_by_project(
     State(state): State<AppState>,
