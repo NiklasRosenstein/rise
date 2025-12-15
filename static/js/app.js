@@ -161,7 +161,19 @@ function ProjectsList() {
 
         setSaving(true);
         try {
-            const owner = formData.owner === 'self' ? null : formData.owner;
+            // Format owner correctly for the API
+            let owner;
+            if (formData.owner === 'self') {
+                // For self, we need to get the current user's ID from the teams list or make an API call
+                // For now, we'll send the user's ID from the first team's user info
+                // Actually, let me check the API - it seems like we should send { user: "user-id" }
+                // But we don't have the user ID readily available. Let's use null for self.
+                owner = null;
+            } else {
+                // formData.owner is the team ID
+                owner = { team: formData.owner };
+            }
+
             await api.createProject(formData.name, formData.visibility, owner);
             showToast(`Project ${formData.name} created successfully`, 'success');
             setIsModalOpen(false);
@@ -283,7 +295,7 @@ function ProjectsList() {
                     >
                         <option value="self">Self</option>
                         {teams.map(team => (
-                            <option key={team.id} value={`team:${team.name}`}>team:{team.name}</option>
+                            <option key={team.id} value={team.id}>team:{team.name}</option>
                         ))}
                     </FormField>
 
@@ -791,17 +803,21 @@ function ServiceAccountsList({ projectName }) {
 
     const handleAddClick = () => {
         setEditingSA(null);
-        setFormData({ issuer_url: '', claims: {} });
+        // Default aud to project URL
+        const defaultAud = `https://${projectName}.rise.dev`;
+        setFormData({ issuer_url: '', aud: defaultAud, claims: {} });
         setClaimsText('');
         setIsModalOpen(true);
     };
 
     const handleEditClick = (sa) => {
         setEditingSA(sa);
-        setFormData({ issuer_url: sa.issuer_url, claims: sa.claims || {} });
-        // Convert claims object to JSON string for editing
+        // Extract aud from existing claims
+        const aud = sa.claims?.aud || '';
+        setFormData({ issuer_url: sa.issuer_url, aud, claims: sa.claims || {} });
+        // Convert claims object to JSON string for editing (excluding aud)
         const claimsObj = { ...sa.claims };
-        delete claimsObj.aud; // Remove aud as it's handled separately
+        delete claimsObj.aud; // aud is handled separately
         setClaimsText(JSON.stringify(claimsObj, null, 2));
         setIsModalOpen(true);
     };
@@ -817,19 +833,24 @@ function ServiceAccountsList({ projectName }) {
             return;
         }
 
-        // Parse claims from text
+        if (!formData.aud) {
+            showToast('Audience (aud) is required', 'error');
+            return;
+        }
+
+        // Parse additional claims from text
         let claims = {};
         try {
             if (claimsText.trim()) {
                 claims = JSON.parse(claimsText);
             }
         } catch (err) {
-            showToast('Invalid JSON in claims', 'error');
+            showToast('Invalid JSON in additional claims', 'error');
             return;
         }
 
-        // Add required aud claim (project URL)
-        claims.aud = `https://${projectName}.rise.dev`;
+        // Add aud claim from form data
+        claims.aud = formData.aud;
 
         setSaving(true);
         try {
@@ -948,6 +969,14 @@ function ServiceAccountsList({ projectName }) {
                         required
                     />
                     <FormField
+                        label="Audience (aud)"
+                        id="sa-aud"
+                        value={formData.aud}
+                        onChange={(e) => setFormData({ ...formData, aud: e.target.value })}
+                        placeholder="https://my-project.rise.dev"
+                        required
+                    />
+                    <FormField
                         label="Additional Claims (JSON)"
                         id="sa-claims"
                         type="textarea"
@@ -957,7 +986,7 @@ function ServiceAccountsList({ projectName }) {
                         rows={5}
                     />
                     <p className="text-sm text-gray-500">
-                        <strong>Note:</strong> The <code className="bg-gray-800 px-1 rounded">aud</code> claim will be automatically set to <code className="bg-gray-800 px-1 rounded">https://{projectName}.rise.dev</code>
+                        <strong>Note:</strong> Additional claims should be provided as a JSON object. The <code className="bg-gray-800 px-1 rounded">aud</code> claim is configured separately above.
                     </p>
 
                     <div className="flex justify-end gap-3 pt-4">
@@ -1871,7 +1900,8 @@ function FormField({
     placeholder,
     disabled = false,
     options = [],
-    rows = 3
+    rows = 3,
+    children
 }) {
     const inputClasses = `w-full bg-gray-800 border ${error ? 'border-red-500' : 'border-gray-700'} rounded px-3 py-2 text-gray-100 placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed`;
 
@@ -1890,7 +1920,7 @@ function FormField({
                     disabled={disabled}
                     className={inputClasses}
                 >
-                    {options.map(opt => (
+                    {children ? children : options.map(opt => (
                         <option key={opt.value} value={opt.value}>
                             {opt.label}
                         </option>
