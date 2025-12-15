@@ -63,14 +63,14 @@ async fn verify_oidc_issuer(issuer_url: &str) -> Result<()> {
     })?;
 
     // Verify required OIDC fields are present
-    if !config.get("issuer").is_some() {
+    if config.get("issuer").is_none() {
         return Err((
             StatusCode::BAD_REQUEST,
             "OIDC configuration missing required 'issuer' field".to_string(),
         ));
     }
 
-    if !config.get("jwks_uri").is_some() {
+    if config.get("jwks_uri").is_none() {
         return Err((
             StatusCode::BAD_REQUEST,
             "OIDC configuration missing required 'jwks_uri' field".to_string(),
@@ -154,7 +154,10 @@ pub async fn create_workload_identity(
         .await
         .map_err(|e| {
             tracing::error!("Failed to create service account: {:?}", e);
-            (StatusCode::INTERNAL_SERVER_ERROR, format!("Failed to create service account: {}", e))
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create service account: {}", e),
+            )
         })?;
 
     // Get user for response
