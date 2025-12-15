@@ -68,6 +68,15 @@ enum ReconcilePhase {
     Completed,
 }
 
+/// Check if an error indicates the namespace is missing
+/// Handles both direct kube::Error and anyhow::Error with kube::Error source
+fn is_namespace_not_found_error(error: &(impl std::fmt::Display + std::fmt::Debug + ?Sized)) -> bool {
+    let error_string = error.to_string();
+    // Check if error message indicates namespace is missing
+    // Kubernetes returns messages like: "namespaces \"rise-test\" not found"
+    error_string.contains("namespaces") && error_string.contains("not found")
+}
+
 /// Parsed ingress URL components
 #[derive(Debug, Clone)]
 struct IngressUrl {
@@ -1245,23 +1254,58 @@ impl DeploymentBackend for KubernetesController {
                         match secret_api.get("rise-registry-creds").await {
                             Ok(_) => {
                                 // Secret exists, replace it
-                                secret_api
+                                match secret_api
                                     .replace("rise-registry-creds", &PostParams::default(), &secret)
-                                    .await?;
-                                info!(
-                                    project = project.name,
-                                    namespace = namespace,
-                                    "ImagePullSecret replaced (any drift corrected)"
-                                );
+                                    .await
+                                {
+                                    Ok(_) => {
+                                        info!(
+                                            project = project.name,
+                                            namespace = namespace,
+                                            "ImagePullSecret replaced (any drift corrected)"
+                                        );
+                                    }
+                                    Err(e) if is_namespace_not_found_error(&e) => {
+                                        warn!(
+                                            "Namespace missing during ImagePullSecret replace, resetting to CreatingNamespace"
+                                        );
+                                        metadata.reconcile_phase =
+                                            ReconcilePhase::CreatingNamespace;
+                                        metadata.namespace = None;
+                                        continue;
+                                    }
+                                    Err(e) => return Err(e.into()),
+                                }
                             }
                             Err(kube::Error::Api(ae)) if ae.code == 404 => {
                                 // Secret doesn't exist, create it
-                                secret_api.create(&PostParams::default(), &secret).await?;
-                                info!(
-                                    project = project.name,
-                                    namespace = namespace,
-                                    "ImagePullSecret created"
+                                match secret_api.create(&PostParams::default(), &secret).await {
+                                    Ok(_) => {
+                                        info!(
+                                            project = project.name,
+                                            namespace = namespace,
+                                            "ImagePullSecret created"
+                                        );
+                                    }
+                                    Err(e) if is_namespace_not_found_error(&e) => {
+                                        warn!(
+                                            "Namespace missing during ImagePullSecret create, resetting to CreatingNamespace"
+                                        );
+                                        metadata.reconcile_phase =
+                                            ReconcilePhase::CreatingNamespace;
+                                        metadata.namespace = None;
+                                        continue;
+                                    }
+                                    Err(e) => return Err(e.into()),
+                                }
+                            }
+                            Err(e) if is_namespace_not_found_error(&e) => {
+                                warn!(
+                                    "Namespace missing during ImagePullSecret get, resetting to CreatingNamespace"
                                 );
+                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                metadata.namespace = None;
+                                continue;
                             }
                             Err(e) => return Err(e.into()),
                         }
@@ -1289,7 +1333,18 @@ impl DeploymentBackend for KubernetesController {
                     let svc = self.create_service(project, deployment, &metadata);
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&svc);
-                    let result = svc_api.patch(&service_name, &patch_params, &patch).await?;
+                    let result = match svc_api.patch(&service_name, &patch_params, &patch).await {
+                        Ok(r) => r,
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!(
+                                "Namespace missing during Service creation, resetting to CreatingNamespace"
+                            );
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e.into()),
+                    };
 
                     info!(
                         project = project.name,
@@ -1335,16 +1390,42 @@ impl DeploymentBackend for KubernetesController {
                                 );
 
                                 // Delete and wait for deletion to complete
-                                self.delete_and_wait_replicaset(&rs_api, &rs_name).await?;
+                                if let Err(e) =
+                                    self.delete_and_wait_replicaset(&rs_api, &rs_name).await
+                                {
+                                    if is_namespace_not_found_error(&e) {
+                                        warn!(
+                                            "Namespace missing during ReplicaSet deletion, resetting to CreatingNamespace"
+                                        );
+                                        metadata.reconcile_phase =
+                                            ReconcilePhase::CreatingNamespace;
+                                        metadata.namespace = None;
+                                        continue;
+                                    } else {
+                                        return Err(e);
+                                    }
+                                }
 
                                 // Create new ReplicaSet
-                                rs_api.create(&PostParams::default(), &desired_rs).await?;
-
-                                info!(
-                                    project = project.name,
-                                    deployment_id = %deployment.id,
-                                    "ReplicaSet recreated after drift detected"
-                                );
+                                match rs_api.create(&PostParams::default(), &desired_rs).await {
+                                    Ok(_) => {
+                                        info!(
+                                            project = project.name,
+                                            deployment_id = %deployment.id,
+                                            "ReplicaSet recreated after drift detected"
+                                        );
+                                    }
+                                    Err(e) if is_namespace_not_found_error(&e) => {
+                                        warn!(
+                                            "Namespace missing during ReplicaSet creation, resetting to CreatingNamespace"
+                                        );
+                                        metadata.reconcile_phase =
+                                            ReconcilePhase::CreatingNamespace;
+                                        metadata.namespace = None;
+                                        continue;
+                                    }
+                                    Err(e) => return Err(e.into()),
+                                }
                             } else {
                                 debug!(
                                     project = project.name,
@@ -1357,12 +1438,32 @@ impl DeploymentBackend for KubernetesController {
                             // ReplicaSet doesn't exist - create it
                             let rs =
                                 self.create_replicaset(project, deployment, &metadata, env_vars);
-                            rs_api.create(&PostParams::default(), &rs).await?;
-                            info!(
-                                project = project.name,
-                                deployment_id = %deployment.id,
-                                "ReplicaSet created"
+                            match rs_api.create(&PostParams::default(), &rs).await {
+                                Ok(_) => {
+                                    info!(
+                                        project = project.name,
+                                        deployment_id = %deployment.id,
+                                        "ReplicaSet created"
+                                    );
+                                }
+                                Err(e) if is_namespace_not_found_error(&e) => {
+                                    warn!(
+                                        "Namespace missing during ReplicaSet creation, resetting to CreatingNamespace"
+                                    );
+                                    metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                    metadata.namespace = None;
+                                    continue;
+                                }
+                                Err(e) => return Err(e.into()),
+                            }
+                        }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!(
+                                "Namespace missing during ReplicaSet get, resetting to CreatingNamespace"
                             );
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
                         }
                         Err(e) => return Err(e.into()),
                     }
@@ -1390,7 +1491,19 @@ impl DeploymentBackend for KubernetesController {
                         .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name in metadata"))?;
 
                     // Check for irrecoverable pod errors first
-                    let (has_errors, error_msg) = self.check_pod_errors(namespace, rs_name).await?;
+                    let (has_errors, error_msg) = match self
+                        .check_pod_errors(namespace, rs_name)
+                        .await
+                    {
+                        Ok((errors, msg)) => (errors, msg),
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!("Namespace missing during pod error check, resetting to CreatingNamespace");
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    };
                     if has_errors {
                         error!(
                             "Deployment {} has irrecoverable pod errors: {}",
@@ -1409,7 +1522,16 @@ impl DeploymentBackend for KubernetesController {
 
                     let rs_api: Api<ReplicaSet> =
                         Api::namespaced(self.kube_client.clone(), namespace);
-                    let rs = rs_api.get(rs_name).await?;
+                    let rs = match rs_api.get(rs_name).await {
+                        Ok(r) => r,
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!("Namespace missing during ReplicaSet get in WaitingForReplicaSet, resetting to CreatingNamespace");
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e.into()),
+                    };
 
                     let spec_replicas = rs.spec.and_then(|s| s.replicas).unwrap_or(1);
                     let ready_replicas = rs.status.and_then(|s| s.ready_replicas).unwrap_or(0);
@@ -1454,9 +1576,21 @@ impl DeploymentBackend for KubernetesController {
                     // Use server-side apply with force for idempotent ingress updates
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&ingress);
-                    let result = ingress_api
+                    let result = match ingress_api
                         .patch(&ingress_name, &patch_params, &patch)
-                        .await?;
+                        .await
+                    {
+                        Ok(r) => r,
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!(
+                                "Namespace missing during Ingress creation, resetting to CreatingNamespace"
+                            );
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e.into()),
+                    };
 
                     info!(
                         project = project.name,
@@ -1517,11 +1651,23 @@ impl DeploymentBackend for KubernetesController {
                     // Use server-side apply with force to update the service selector
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&svc);
-                    svc_api.patch(&service_name, &patch_params, &patch).await?;
-                    info!(
-                        "Switched traffic: Service {} selector now points to deployment {}",
-                        service_name, deployment.deployment_id
-                    );
+                    match svc_api.patch(&service_name, &patch_params, &patch).await {
+                        Ok(_) => {
+                            info!(
+                                "Switched traffic: Service {} selector now points to deployment {}",
+                                service_name, deployment.deployment_id
+                            );
+                        }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!(
+                                "Namespace missing during traffic switch, resetting to CreatingNamespace"
+                            );
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
 
                     metadata.reconcile_phase = ReconcilePhase::Completed;
                     let deployment_url =
@@ -1552,13 +1698,22 @@ impl DeploymentBackend for KubernetesController {
                     let svc = self.create_service(project, deployment, &metadata);
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&svc);
-                    svc_api.patch(&service_name, &patch_params, &patch).await?;
-
-                    debug!(
-                        project = project.name,
-                        deployment_id = %deployment.id,
-                        "Service drift check completed"
-                    );
+                    match svc_api.patch(&service_name, &patch_params, &patch).await {
+                        Ok(_) => {
+                            debug!(
+                                project = project.name,
+                                deployment_id = %deployment.id,
+                                "Service drift check completed"
+                            );
+                        }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!("Namespace missing during Completed phase (Service), resetting to CreatingNamespace");
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
 
                     // 2. Re-apply Ingress to correct any drift
                     let ingress_name = Self::ingress_name(project, deployment);
@@ -1567,15 +1722,25 @@ impl DeploymentBackend for KubernetesController {
                     let ingress = self.create_ingress(project, deployment, &metadata);
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&ingress);
-                    ingress_api
+                    match ingress_api
                         .patch(&ingress_name, &patch_params, &patch)
-                        .await?;
-
-                    debug!(
-                        project = project.name,
-                        deployment_id = %deployment.id,
-                        "Ingress drift check completed"
-                    );
+                        .await
+                    {
+                        Ok(_) => {
+                            debug!(
+                                project = project.name,
+                                deployment_id = %deployment.id,
+                                "Ingress drift check completed"
+                            );
+                        }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!("Namespace missing during Completed phase (Ingress), resetting to CreatingNamespace");
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e.into()),
+                    }
 
                     // 3. Check ReplicaSet for drift
                     let rs_name = metadata
@@ -1602,10 +1767,48 @@ impl DeploymentBackend for KubernetesController {
                                 );
 
                                 // Delete and wait for deletion to complete
-                                self.delete_and_wait_replicaset(&rs_api, rs_name).await?;
+                                if let Err(e) =
+                                    self.delete_and_wait_replicaset(&rs_api, rs_name).await
+                                {
+                                    if is_namespace_not_found_error(&e) {
+                                        warn!("Namespace missing during ReplicaSet deletion in Completed phase, resetting to CreatingNamespace");
+                                        metadata.reconcile_phase =
+                                            ReconcilePhase::CreatingNamespace;
+                                        metadata.namespace = None;
+                                        continue;
+                                    } else {
+                                        return Err(e);
+                                    }
+                                }
 
                                 // Create new ReplicaSet
-                                rs_api.create(&PostParams::default(), &desired_rs).await?;
+                                match rs_api.create(&PostParams::default(), &desired_rs).await {
+                                    Ok(_) => {
+                                        info!(
+                                            project = project.name,
+                                            deployment_id = %deployment.id,
+                                            "ReplicaSet recreated after drift detected in Completed phase"
+                                        );
+
+                                        // Move back to WaitingForReplicaSet to ensure it becomes ready
+                                        metadata.reconcile_phase =
+                                            ReconcilePhase::WaitingForReplicaSet;
+                                        return Ok(ReconcileResult {
+                                            status,
+                                            deployment_url: None,
+                                            controller_metadata: serde_json::to_value(&metadata)?,
+                                            error_message: None,
+                                        });
+                                    }
+                                    Err(e) if is_namespace_not_found_error(&e) => {
+                                        warn!("Namespace missing during ReplicaSet creation in Completed phase, resetting to CreatingNamespace");
+                                        metadata.reconcile_phase =
+                                            ReconcilePhase::CreatingNamespace;
+                                        metadata.namespace = None;
+                                        continue;
+                                    }
+                                    Err(e) => return Err(e.into()),
+                                }
 
                                 info!(
                                     project = project.name,
@@ -1667,6 +1870,14 @@ impl DeploymentBackend for KubernetesController {
                                 error_message: None,
                             });
                         }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!(
+                                "Namespace missing during ReplicaSet get in Completed phase, resetting to CreatingNamespace"
+                            );
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
                         Err(e) => return Err(e.into()),
                     }
 
@@ -1698,7 +1909,19 @@ impl DeploymentBackend for KubernetesController {
         // 1. Check for pod-level errors FIRST
         // This prevents race conditions where ReplicaSet reports ready_replicas
         // but pods are actually in CrashLoopBackOff or other error states
-        let (has_errors, error_msg) = self.check_pod_errors(&namespace, &rs_name).await?;
+        let (has_errors, error_msg) = match self.check_pod_errors(&namespace, &rs_name).await {
+            Ok((errors, msg)) => (errors, msg),
+            Err(e) if is_namespace_not_found_error(&e) => {
+                // Namespace missing - return unhealthy status
+                warn!("Namespace missing during health check, marking deployment as unhealthy");
+                return Ok(HealthStatus {
+                    healthy: false,
+                    message: Some("Namespace missing - recovery in progress".to_string()),
+                    last_check: Utc::now(),
+                });
+            }
+            Err(e) => return Err(e),
+        };
         if has_errors {
             return Ok(HealthStatus {
                 healthy: false,
@@ -1741,6 +1964,15 @@ impl DeploymentBackend for KubernetesController {
                 Ok(HealthStatus {
                     healthy: false,
                     message: Some(format!("ReplicaSet {} not found", rs_name)),
+                    last_check: Utc::now(),
+                })
+            }
+            Err(e) if is_namespace_not_found_error(&e) => {
+                // Namespace missing - mark as unhealthy
+                warn!("Namespace missing during ReplicaSet health check");
+                Ok(HealthStatus {
+                    healthy: false,
+                    message: Some("Namespace missing - recovery in progress".to_string()),
                     last_check: Utc::now(),
                 })
             }
