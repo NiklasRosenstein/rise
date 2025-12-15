@@ -15,6 +15,7 @@ use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
 use crate::db::{
     deployments as db_deployments, projects, service_accounts, teams as db_teams, users,
 };
+use crate::server::registry::ImageTagType;
 use crate::server::state::AppState;
 
 /// Check if a user is an admin (based on email in config)
@@ -472,13 +473,11 @@ pub async fn create_deployment(
                 )
             })?;
 
-        // Construct image tag
-        // Note: credentials.registry_url already includes the full repository path
-        // (e.g., "459109751375.dkr.ecr.eu-west-1.amazonaws.com/rise-niklas-dev/devtest")
-        let image_tag = format!(
-            "{}:{}",
-            credentials.registry_url.trim_end_matches('/'),
-            deployment_id
+        // Get full image tag from provider for CLI client (uses client_registry_url if configured)
+        let image_tag = registry_provider.get_image_tag(
+            &payload.project,
+            &deployment_id,
+            ImageTagType::ClientFacing,
         );
 
         debug!("Image tag: {}", image_tag);

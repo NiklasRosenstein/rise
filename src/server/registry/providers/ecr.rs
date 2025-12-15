@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use crate::server::registry::{
     models::{EcrConfig, RegistryCredentials},
-    RegistryProvider,
+    ImageTagType, RegistryProvider,
 };
 
 /// AWS ECR registry provider with scoped credentials via STS AssumeRole
@@ -288,5 +288,11 @@ impl RegistryProvider for EcrProvider {
 
     fn registry_url(&self) -> &str {
         &self.registry_url
+    }
+
+    fn get_image_tag(&self, repository: &str, tag: &str, _tag_type: ImageTagType) -> String {
+        // ECR doesn't differentiate between client and internal - always use same path
+        let repo_name = format!("{}{}", self.config.repo_prefix, repository);
+        format!("{}/{}:{}", self.registry_host, repo_name, tag)
     }
 }

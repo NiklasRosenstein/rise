@@ -70,7 +70,9 @@ enum ReconcilePhase {
 
 /// Check if an error indicates the namespace is missing
 /// Handles both direct kube::Error and anyhow::Error with kube::Error source
-fn is_namespace_not_found_error(error: &(impl std::fmt::Display + std::fmt::Debug + ?Sized)) -> bool {
+fn is_namespace_not_found_error(
+    error: &(impl std::fmt::Display + std::fmt::Debug + ?Sized),
+) -> bool {
     let error_string = error.to_string();
     // Check if error message indicates namespace is missing
     // Kubernetes returns messages like: "namespaces \"rise-test\" not found"
@@ -846,12 +848,20 @@ impl KubernetesController {
         metadata: &KubernetesMetadata,
         env_vars: Vec<k8s_openapi::api::core::v1::EnvVar>,
     ) -> ReplicaSet {
-        // Build image reference from deployment.image_digest or registry_url
+        // Build image reference from deployment.image_digest or registry_provider
         let image = if let Some(ref image_digest) = deployment.image_digest {
             // image_digest already contains the full reference with digest
             // (e.g., "docker.io/library/nginx@sha256:...")
             image_digest.clone()
+        } else if let Some(ref registry_provider) = self.registry_provider {
+            // Use Internal variant to ignore client_registry_url configuration (Kubernetes always uses internal registry)
+            registry_provider.get_image_tag(
+                &project.name,
+                &deployment.deployment_id,
+                crate::server::registry::ImageTagType::Internal,
+            )
         } else if let Some(ref registry_url) = self.registry_url {
+            // Fallback for backward compatibility
             // registry_url should include trailing slash if needed (e.g., "host/prefix/")
             format!(
                 "{}{}:{}",

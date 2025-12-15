@@ -3,7 +3,7 @@ use async_trait::async_trait;
 
 use crate::server::registry::{
     models::{OciClientAuthConfig, RegistryCredentials},
-    RegistryProvider,
+    ImageTagType, RegistryProvider,
 };
 
 /// OCI registry provider that relies on client-side authentication
@@ -83,5 +83,13 @@ impl RegistryProvider for OciClientAuthProvider {
 
     fn registry_url(&self) -> &str {
         &self.registry_url
+    }
+
+    fn get_image_tag(&self, repository: &str, tag: &str, tag_type: ImageTagType) -> String {
+        let registry_url = match tag_type {
+            ImageTagType::ClientFacing => &self.client_registry_url,
+            ImageTagType::Internal => &self.registry_url,
+        };
+        format!("{}/{}:{}", registry_url, repository, tag)
     }
 }
