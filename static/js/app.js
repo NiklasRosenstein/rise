@@ -778,7 +778,7 @@ function ServiceAccountsList({ projectName }) {
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingSA, setEditingSA] = useState(null);
-    const [formData, setFormData] = useState({ issuer_url: '', claims: {} });
+    const [formData, setFormData] = useState({ issuer_url: '', aud: '', claims: {} });
     const [claimsText, setClaimsText] = useState('');
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [saToDelete, setSAToDelete] = useState(null);
