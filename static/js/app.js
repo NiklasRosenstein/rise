@@ -802,12 +802,14 @@ function ServiceAccountsList({ projectName }) {
     }, [loadServiceAccounts]);
 
     const handleAddClick = () => {
+        console.log('ServiceAccountsList handleAddClick called');
         setEditingSA(null);
         // Default aud to project URL
         const defaultAud = `https://${projectName}.rise.dev`;
         setFormData({ issuer_url: '', aud: defaultAud, claims: {} });
         setClaimsText('');
         setIsModalOpen(true);
+        console.log('Modal should open now, isModalOpen set to true');
     };
 
     const handleEditClick = (sa) => {
@@ -1057,9 +1059,11 @@ function EnvVarsList({ projectName, deploymentId }) {
     }, [loadEnvVars]);
 
     const handleAddClick = () => {
+        console.log('EnvVarsList handleAddClick called');
         setEditingEnvVar(null);
         setFormData({ key: '', value: '', is_secret: false });
         setIsModalOpen(true);
+        console.log('EnvVar modal should open now, isModalOpen set to true');
     };
 
     const handleEditClick = (envVar) => {
@@ -1876,7 +1880,10 @@ function Button({
     return (
         <button
             type={type}
-            onClick={onClick}
+            onClick={(e) => {
+                console.log('Button clicked', { disabled, loading, onClick: !!onClick });
+                if (onClick) onClick(e);
+            }}
             disabled={disabled || loading}
             className={`${baseClasses} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
         >
