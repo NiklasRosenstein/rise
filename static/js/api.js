@@ -34,8 +34,8 @@ class RiseAPI {
             throw new Error(`API error: ${response.status} ${errorText}`);
         }
 
-        // Handle 204 No Content responses (no body to parse)
-        if (response.status === 204) {
+        // Handle responses with no body (204 No Content, 202 Accepted)
+        if (response.status === 204 || response.status === 202) {
             return null;
         }
 
