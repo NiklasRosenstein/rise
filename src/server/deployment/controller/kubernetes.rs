@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
-use k8s_openapi::api::apps::v1::{ReplicaSet, ReplicaSetSpec};
+use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec};
 use k8s_openapi::api::core::v1::{
     Container, ContainerPort, LocalObjectReference, Namespace, PodSpec, PodTemplateSpec, Secret,
     Service, ServicePort, ServiceSpec,
@@ -43,14 +43,14 @@ pub const KUBERNETES_NAMESPACE_FINALIZER: &str = "kubernetes.rise.dev/namespace"
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct KubernetesMetadata {
     namespace: Option<String>,
-    replicaset_name: Option<String>,
+    deployment_name: Option<String>,
     service_name: Option<String>,
     ingress_name: Option<String>,
     image_tag: Option<String>,
     http_port: u16,
     #[serde(default)]
     reconcile_phase: ReconcilePhase,
-    previous_replicaset: Option<String>,
+    previous_deployment: Option<String>,
 }
 
 /// Reconciliation phases for Kubernetes deployments
@@ -641,7 +641,7 @@ impl KubernetesController {
     async fn check_pod_errors(
         &self,
         namespace: &str,
-        rs_name: &str,
+        deploy_name: &str,
     ) -> Result<(bool, Option<String>)> {
         use k8s_openapi::api::core::v1::Pod;
 
@@ -651,7 +651,7 @@ impl KubernetesController {
         let pods = pod_api
             .list(&kube::api::ListParams::default().labels(&format!(
                 "rise.dev/deployment-id={}",
-                rs_name.rsplit_once('-').map(|(_, id)| id).unwrap_or(rs_name)
+                deploy_name.rsplit_once('-').map(|(_, id)| id).unwrap_or(deploy_name)
             )))
             .await?;
 
@@ -841,14 +841,14 @@ impl KubernetesController {
             .collect())
     }
 
-    /// Create ReplicaSet resource
-    fn create_replicaset(
+    /// Create Deployment resource
+    fn create_deployment(
         &self,
         project: &Project,
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
         env_vars: Vec<k8s_openapi::api::core::v1::EnvVar>,
-    ) -> ReplicaSet {
+    ) -> K8sDeployment {
         // Build image reference from deployment.image_digest or registry_provider
         let image = if let Some(ref image_digest) = deployment.image_digest {
             // image_digest already contains the full reference with digest
@@ -868,21 +868,32 @@ impl KubernetesController {
                 .unwrap_or_else(|| "unknown".to_string())
         };
 
-        ReplicaSet {
+        K8sDeployment {
             metadata: ObjectMeta {
                 name: Some(format!("{}-{}", project.name, deployment.deployment_id)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::deployment_labels(project, deployment)),
                 ..Default::default()
             },
-            spec: Some(ReplicaSetSpec {
+            spec: Some(DeploymentSpec {
                 replicas: Some(1),
                 min_ready_seconds: None,
                 selector: LabelSelector {
                     match_labels: Some(Self::deployment_labels(project, deployment)),
                     ..Default::default()
                 },
-                template: Some(PodTemplateSpec {
+                strategy: Some(k8s_openapi::api::apps::v1::DeploymentStrategy {
+                    type_: Some("RollingUpdate".to_string()),
+                    rolling_update: Some(k8s_openapi::api::apps::v1::RollingUpdateDeployment {
+                        max_surge: Some(
+                            k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(1),
+                        ),
+                        max_unavailable: Some(
+                            k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(0),
+                        ),
+                    }),
+                }),
+                template: PodTemplateSpec {
                     metadata: Some(ObjectMeta {
                         labels: Some(Self::deployment_labels(project, deployment)),
                         ..Default::default()
@@ -913,7 +924,8 @@ impl KubernetesController {
                         },
                         ..Default::default()
                     }),
-                }),
+                },
+                ..Default::default()
             }),
             ..Default::default()
         }
@@ -1159,23 +1171,24 @@ impl DeploymentBackend for KubernetesController {
             )
         {
             // Check if ReplicaSet still exists
-            if let (Some(ref rs_name), Some(ref namespace)) =
-                (&metadata.replicaset_name, &metadata.namespace)
+            if let (Some(ref deploy_name), Some(ref namespace)) =
+                (&metadata.deployment_name, &metadata.namespace)
             {
-                let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), namespace);
-                match rs_api.get(rs_name).await {
+                let deploy_api: Api<K8sDeployment> =
+                    Api::namespaced(self.kube_client.clone(), namespace);
+                match deploy_api.get(deploy_name).await {
                     Ok(_) => {
                         // ReplicaSet exists, continue normal reconciliation
                         debug!(
                             "ReplicaSet {} exists, continuing normal reconciliation",
-                            rs_name
+                            deploy_name
                         );
                     }
                     Err(kube::Error::Api(ae)) if ae.code == 404 => {
                         // ReplicaSet is missing - reset to recreate it
                         warn!(
                             "Unhealthy deployment {} has missing ReplicaSet {} in phase {:?}, resetting to recreate",
-                            deployment.deployment_id, rs_name, metadata.reconcile_phase
+                            deployment.deployment_id, deploy_name, metadata.reconcile_phase
                         );
 
                         // Reset to CreatingReplicaSet to recreate the ReplicaSet
@@ -1189,7 +1202,7 @@ impl DeploymentBackend for KubernetesController {
                         // Other errors, continue normal reconciliation (will likely fail and retry)
                         warn!(
                             "Error checking ReplicaSet {} for unhealthy deployment {}: {}",
-                            rs_name, deployment.deployment_id, e
+                            deploy_name, deployment.deployment_id, e
                         );
                     }
                 }
@@ -1435,22 +1448,22 @@ impl DeploymentBackend for KubernetesController {
                     // Load and decrypt environment variables
                     let env_vars = self.load_env_vars(deployment.id).await?;
 
-                    let rs_name = format!("{}-{}", project.name, deployment.deployment_id);
-                    let rs_api: Api<ReplicaSet> =
+                    let deploy_name = format!("{}-{}", project.name, deployment.deployment_id);
+                    let deploy_api: Api<K8sDeployment> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
                     // Check if ReplicaSet exists
-                    match rs_api.get(&rs_name).await {
-                        Ok(existing_rs) => {
+                    match deploy_api.get(&deploy_name).await {
+                        Ok(existing_deploy) => {
                             // ReplicaSet exists - check for drift
-                            let desired_rs = self.create_replicaset(
+                            let desired_deploy = self.create_deployment(
                                 project,
                                 deployment,
                                 &metadata,
                                 env_vars.clone(),
                             );
 
-                            if self.replicaset_has_drifted(&existing_rs, &desired_rs) {
+                            if self.deployment_has_drifted(&existing_deploy, &desired_deploy) {
                                 info!(
                                     project = project.name,
                                     deployment_id = %deployment.id,
@@ -1458,8 +1471,9 @@ impl DeploymentBackend for KubernetesController {
                                 );
 
                                 // Delete and wait for deletion to complete
-                                if let Err(e) =
-                                    self.delete_and_wait_replicaset(&rs_api, &rs_name).await
+                                if let Err(e) = self
+                                    .delete_and_wait_replicaset(&deploy_api, &deploy_name)
+                                    .await
                                 {
                                     if is_namespace_not_found_error(&e) {
                                         warn!(
@@ -1475,7 +1489,10 @@ impl DeploymentBackend for KubernetesController {
                                 }
 
                                 // Create new ReplicaSet
-                                match rs_api.create(&PostParams::default(), &desired_rs).await {
+                                match deploy_api
+                                    .create(&PostParams::default(), &desired_deploy)
+                                    .await
+                                {
                                     Ok(_) => {
                                         info!(
                                             project = project.name,
@@ -1505,8 +1522,8 @@ impl DeploymentBackend for KubernetesController {
                         Err(kube::Error::Api(ae)) if ae.code == 404 => {
                             // ReplicaSet doesn't exist - create it
                             let rs =
-                                self.create_replicaset(project, deployment, &metadata, env_vars);
-                            match rs_api.create(&PostParams::default(), &rs).await {
+                                self.create_deployment(project, deployment, &metadata, env_vars);
+                            match deploy_api.create(&PostParams::default(), &rs).await {
                                 Ok(_) => {
                                     info!(
                                         project = project.name,
@@ -1536,7 +1553,7 @@ impl DeploymentBackend for KubernetesController {
                         Err(e) => return Err(e.into()),
                     }
 
-                    metadata.replicaset_name = Some(rs_name);
+                    metadata.deployment_name = Some(deploy_name);
                     metadata.reconcile_phase = ReconcilePhase::WaitingForReplicaSet;
 
                     // Return here - need to wait for pods to become ready
@@ -1553,14 +1570,14 @@ impl DeploymentBackend for KubernetesController {
                         .namespace
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
-                    let rs_name = metadata
-                        .replicaset_name
+                    let deploy_name = metadata
+                        .deployment_name
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name in metadata"))?;
 
                     // Check for irrecoverable pod errors first
                     let (has_errors, error_msg) = match self
-                        .check_pod_errors(namespace, rs_name)
+                        .check_pod_errors(namespace, deploy_name)
                         .await
                     {
                         Ok((errors, msg)) => (errors, msg),
@@ -1588,9 +1605,9 @@ impl DeploymentBackend for KubernetesController {
                         });
                     }
 
-                    let rs_api: Api<ReplicaSet> =
+                    let deploy_api: Api<K8sDeployment> =
                         Api::namespaced(self.kube_client.clone(), namespace);
-                    let rs = match rs_api.get(rs_name).await {
+                    let rs = match deploy_api.get(deploy_name).await {
                         Ok(r) => r,
                         Err(e) if is_namespace_not_found_error(&e) => {
                             warn!("Namespace missing during ReplicaSet get in WaitingForReplicaSet, resetting to CreatingNamespace");
@@ -1607,7 +1624,7 @@ impl DeploymentBackend for KubernetesController {
                     if ready_replicas >= spec_replicas {
                         info!(
                             "ReplicaSet {} is ready ({}/{})",
-                            rs_name, ready_replicas, spec_replicas
+                            deploy_name, ready_replicas, spec_replicas
                         );
                         metadata.reconcile_phase = ReconcilePhase::UpdatingIngress;
                         // Continue to updating ingress
@@ -1615,7 +1632,7 @@ impl DeploymentBackend for KubernetesController {
                     } else {
                         debug!(
                             "Waiting for ReplicaSet {} ({}/{})",
-                            rs_name, ready_replicas, spec_replicas
+                            deploy_name, ready_replicas, spec_replicas
                         );
 
                         // Return here - still waiting for pods
@@ -1840,23 +1857,23 @@ impl DeploymentBackend for KubernetesController {
                     }
 
                     // 3. Check ReplicaSet for drift
-                    let rs_name = metadata
-                        .replicaset_name
+                    let deploy_name = metadata
+                        .deployment_name
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name in metadata"))?;
-                    let rs_api: Api<ReplicaSet> =
+                    let deploy_api: Api<K8sDeployment> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
-                    match rs_api.get(rs_name).await {
-                        Ok(existing_rs) => {
-                            let desired_rs = self.create_replicaset(
+                    match deploy_api.get(deploy_name).await {
+                        Ok(existing_deploy) => {
+                            let desired_deploy = self.create_deployment(
                                 project,
                                 deployment,
                                 &metadata,
                                 env_vars.clone(),
                             );
 
-                            if self.replicaset_has_drifted(&existing_rs, &desired_rs) {
+                            if self.deployment_has_drifted(&existing_deploy, &desired_deploy) {
                                 info!(
                                     project = project.name,
                                     deployment_id = %deployment.id,
@@ -1864,8 +1881,9 @@ impl DeploymentBackend for KubernetesController {
                                 );
 
                                 // Delete and wait for deletion to complete
-                                if let Err(e) =
-                                    self.delete_and_wait_replicaset(&rs_api, rs_name).await
+                                if let Err(e) = self
+                                    .delete_and_wait_replicaset(&deploy_api, deploy_name)
+                                    .await
                                 {
                                     if is_namespace_not_found_error(&e) {
                                         warn!("Namespace missing during ReplicaSet deletion in Completed phase, resetting to CreatingNamespace");
@@ -1879,7 +1897,10 @@ impl DeploymentBackend for KubernetesController {
                                 }
 
                                 // Create new ReplicaSet
-                                match rs_api.create(&PostParams::default(), &desired_rs).await {
+                                match deploy_api
+                                    .create(&PostParams::default(), &desired_deploy)
+                                    .await
+                                {
                                     Ok(_) => {
                                         info!(
                                             project = project.name,
@@ -1970,8 +1991,8 @@ impl DeploymentBackend for KubernetesController {
         let metadata: KubernetesMetadata =
             serde_json::from_value(deployment.controller_metadata.clone())?;
 
-        let rs_name = metadata
-            .replicaset_name
+        let deploy_name = metadata
+            .deployment_name
             .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name"))?;
         let namespace = metadata
             .namespace
@@ -1980,7 +2001,7 @@ impl DeploymentBackend for KubernetesController {
         // 1. Check for pod-level errors FIRST
         // This prevents race conditions where ReplicaSet reports ready_replicas
         // but pods are actually in CrashLoopBackOff or other error states
-        let (has_errors, error_msg) = match self.check_pod_errors(&namespace, &rs_name).await {
+        let (has_errors, error_msg) = match self.check_pod_errors(&namespace, &deploy_name).await {
             Ok((errors, msg)) => (errors, msg),
             Err(e) if is_namespace_not_found_error(&e) => {
                 // Namespace missing - return unhealthy status
@@ -2002,10 +2023,10 @@ impl DeploymentBackend for KubernetesController {
         }
 
         // 2. Then check ReplicaSet readiness
-        let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
+        let deploy_api: Api<K8sDeployment> = Api::namespaced(self.kube_client.clone(), &namespace);
 
         // Get ReplicaSet, handling 404 errors gracefully
-        match rs_api.get(&rs_name).await {
+        match deploy_api.get(&deploy_name).await {
             Ok(rs) => {
                 // Check ReplicaSet status
                 let spec_replicas = rs.spec.and_then(|s| s.replicas).unwrap_or(1);
@@ -2030,11 +2051,11 @@ impl DeploymentBackend for KubernetesController {
                 // ReplicaSet doesn't exist - mark as unhealthy to trigger recreation
                 warn!(
                     "ReplicaSet {} not found in namespace {}, marking deployment as unhealthy",
-                    rs_name, namespace
+                    deploy_name, namespace
                 );
                 Ok(HealthStatus {
                     healthy: false,
-                    message: Some(format!("ReplicaSet {} not found", rs_name)),
+                    message: Some(format!("ReplicaSet {} not found", deploy_name)),
                     last_check: Utc::now(),
                 })
             }
@@ -2063,10 +2084,15 @@ impl DeploymentBackend for KubernetesController {
 
         if let Some(metadata) = metadata {
             // Clean up any partially created ReplicaSet
-            if let (Some(rs_name), Some(namespace)) = (metadata.replicaset_name, metadata.namespace)
+            if let (Some(deploy_name), Some(namespace)) =
+                (metadata.deployment_name, metadata.namespace)
             {
-                let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
-                if let Err(e) = rs_api.delete(&rs_name, &DeleteParams::default()).await {
+                let deploy_api: Api<K8sDeployment> =
+                    Api::namespaced(self.kube_client.clone(), &namespace);
+                if let Err(e) = deploy_api
+                    .delete(&deploy_name, &DeleteParams::default())
+                    .await
+                {
                     // Ignore 404 errors (already deleted)
                     if !e.to_string().contains("404") {
                         warn!("Error deleting ReplicaSet during cancellation: {}", e);
@@ -2096,11 +2122,15 @@ impl DeploymentBackend for KubernetesController {
 
         if let Some(metadata) = metadata {
             // Delete ONLY the ReplicaSet (cascading deletes pods)
-            if let (Some(rs_name), Some(namespace)) =
-                (metadata.replicaset_name.clone(), metadata.namespace.clone())
+            if let (Some(deploy_name), Some(namespace)) =
+                (metadata.deployment_name.clone(), metadata.namespace.clone())
             {
-                let rs_api: Api<ReplicaSet> = Api::namespaced(self.kube_client.clone(), &namespace);
-                if let Err(e) = rs_api.delete(&rs_name, &DeleteParams::default()).await {
+                let deploy_api: Api<K8sDeployment> =
+                    Api::namespaced(self.kube_client.clone(), &namespace);
+                if let Err(e) = deploy_api
+                    .delete(&deploy_name, &DeleteParams::default())
+                    .await
+                {
                     // Ignore 404 errors (already deleted)
                     if !e.to_string().contains("404") {
                         warn!("Error deleting ReplicaSet during termination: {}", e);
@@ -2137,7 +2167,7 @@ impl DeploymentBackend for KubernetesController {
 
 impl KubernetesController {
     /// Compare actual vs desired ReplicaSet state to detect drift
-    fn replicaset_has_drifted(&self, actual: &ReplicaSet, desired: &ReplicaSet) -> bool {
+    fn deployment_has_drifted(&self, actual: &K8sDeployment, desired: &K8sDeployment) -> bool {
         // Compare critical fields that should never drift
 
         // 1. Replica count
@@ -2145,7 +2175,7 @@ impl KubernetesController {
         let desired_replicas = desired.spec.as_ref().and_then(|s| s.replicas).unwrap_or(0);
         if actual_replicas != desired_replicas {
             warn!(
-                "ReplicaSet drift: replicas {} != {}",
+                "Deployment drift: replicas {} != {}",
                 actual_replicas, desired_replicas
             );
             return true;
@@ -2155,22 +2185,20 @@ impl KubernetesController {
         let actual_image = actual
             .spec
             .as_ref()
-            .and_then(|s| s.template.as_ref())
-            .and_then(|t| t.spec.as_ref())
+            .and_then(|s| s.template.spec.as_ref())
             .and_then(|ps| ps.containers.first())
             .and_then(|c| c.image.as_ref());
 
         let desired_image = desired
             .spec
             .as_ref()
-            .and_then(|s| s.template.as_ref())
-            .and_then(|t| t.spec.as_ref())
+            .and_then(|s| s.template.spec.as_ref())
             .and_then(|ps| ps.containers.first())
             .and_then(|c| c.image.as_ref());
 
         if actual_image != desired_image {
             warn!(
-                "ReplicaSet drift: image {:?} != {:?}",
+                "Deployment drift: image {:?} != {:?}",
                 actual_image, desired_image
             );
             return true;
@@ -2187,7 +2215,7 @@ impl KubernetesController {
             .and_then(|s| s.selector.match_labels.as_ref());
 
         if actual_labels != desired_labels {
-            warn!("ReplicaSet drift: labels don't match");
+            warn!("Deployment drift: labels don't match");
             return true;
         }
 
@@ -2195,21 +2223,19 @@ impl KubernetesController {
         let actual_env = actual
             .spec
             .as_ref()
-            .and_then(|s| s.template.as_ref())
-            .and_then(|t| t.spec.as_ref())
+            .and_then(|s| s.template.spec.as_ref())
             .and_then(|ps| ps.containers.first())
             .and_then(|c| c.env.as_ref());
 
         let desired_env = desired
             .spec
             .as_ref()
-            .and_then(|s| s.template.as_ref())
-            .and_then(|t| t.spec.as_ref())
+            .and_then(|s| s.template.spec.as_ref())
             .and_then(|ps| ps.containers.first())
             .and_then(|c| c.env.as_ref());
 
         if actual_env != desired_env {
-            warn!("ReplicaSet drift: environment variables have changed");
+            warn!("Deployment drift: environment variables have changed");
             return true;
         }
 
@@ -2217,10 +2243,14 @@ impl KubernetesController {
     }
 
     /// Delete ReplicaSet and wait for deletion to complete
-    async fn delete_and_wait_replicaset(&self, rs_api: &Api<ReplicaSet>, name: &str) -> Result<()> {
+    async fn delete_and_wait_replicaset(
+        &self,
+        deploy_api: &Api<K8sDeployment>,
+        name: &str,
+    ) -> Result<()> {
         // Delete the ReplicaSet
         let delete_params = DeleteParams::default();
-        match rs_api.delete(name, &delete_params).await {
+        match deploy_api.delete(name, &delete_params).await {
             Ok(_) => {}
             Err(kube::Error::Api(ae)) if ae.code == 404 => {
                 // Already deleted
@@ -2233,7 +2263,7 @@ impl KubernetesController {
         for i in 0..30 {
             tokio::time::sleep(Duration::from_secs(1)).await;
 
-            match rs_api.get(name).await {
+            match deploy_api.get(name).await {
                 Err(kube::Error::Api(ae)) if ae.code == 404 => {
                     debug!("ReplicaSet {} deleted successfully", name);
                     return Ok(());
@@ -2262,24 +2292,24 @@ mod tests {
     use k8s_openapi::api::core::v1::{Container, PodSpec, PodTemplateSpec};
     use std::collections::BTreeMap;
 
-    fn create_test_replicaset(
+    fn create_test_deployment(
         name: &str,
         replicas: i32,
         image: &str,
         labels: BTreeMap<String, String>,
-    ) -> ReplicaSet {
-        ReplicaSet {
+    ) -> K8sDeployment {
+        K8sDeployment {
             metadata: ObjectMeta {
                 name: Some(name.to_string()),
                 ..Default::default()
             },
-            spec: Some(ReplicaSetSpec {
+            spec: Some(DeploymentSpec {
                 replicas: Some(replicas),
                 selector: LabelSelector {
                     match_labels: Some(labels.clone()),
                     ..Default::default()
                 },
-                template: Some(PodTemplateSpec {
+                template: PodTemplateSpec {
                     metadata: Some(ObjectMeta {
                         labels: Some(labels),
                         ..Default::default()
@@ -2292,7 +2322,7 @@ mod tests {
                         }],
                         ..Default::default()
                     }),
-                }),
+                },
                 ..Default::default()
             }),
             ..Default::default()
@@ -2300,47 +2330,47 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_replicaset_has_drifted_no_drift() {
+    async fn test_deployment_has_drifted_no_drift() {
         // Create a mock controller (we only need the method, not actual K8s connection)
         let controller = create_mock_controller();
 
         let mut labels = BTreeMap::new();
         labels.insert("app".to_string(), "test".to_string());
 
-        let rs1 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels.clone());
-        let rs2 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels);
+        let d1 = create_test_deployment("test-deploy", 1, "nginx:1.0", labels.clone());
+        let d2 = create_test_deployment("test-deploy", 1, "nginx:1.0", labels);
 
-        assert!(!controller.replicaset_has_drifted(&rs1, &rs2));
+        assert!(!controller.deployment_has_drifted(&d1, &d2));
     }
 
     #[tokio::test]
-    async fn test_replicaset_has_drifted_replica_count() {
+    async fn test_deployment_has_drifted_replica_count() {
         let controller = create_mock_controller();
 
         let mut labels = BTreeMap::new();
         labels.insert("app".to_string(), "test".to_string());
 
-        let rs1 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels.clone());
-        let rs2 = create_test_replicaset("test-rs", 3, "nginx:1.0", labels);
+        let d1 = create_test_deployment("test-deploy", 1, "nginx:1.0", labels.clone());
+        let d2 = create_test_deployment("test-deploy", 3, "nginx:1.0", labels);
 
-        assert!(controller.replicaset_has_drifted(&rs1, &rs2));
+        assert!(controller.deployment_has_drifted(&d1, &d2));
     }
 
     #[tokio::test]
-    async fn test_replicaset_has_drifted_image() {
+    async fn test_deployment_has_drifted_image() {
         let controller = create_mock_controller();
 
         let mut labels = BTreeMap::new();
         labels.insert("app".to_string(), "test".to_string());
 
-        let rs1 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels.clone());
-        let rs2 = create_test_replicaset("test-rs", 1, "nginx:2.0", labels);
+        let d1 = create_test_deployment("test-deploy", 1, "nginx:1.0", labels.clone());
+        let d2 = create_test_deployment("test-deploy", 1, "nginx:2.0", labels);
 
-        assert!(controller.replicaset_has_drifted(&rs1, &rs2));
+        assert!(controller.deployment_has_drifted(&d1, &d2));
     }
 
     #[tokio::test]
-    async fn test_replicaset_has_drifted_labels() {
+    async fn test_deployment_has_drifted_labels() {
         let controller = create_mock_controller();
 
         let mut labels1 = BTreeMap::new();
@@ -2349,10 +2379,10 @@ mod tests {
         let mut labels2 = BTreeMap::new();
         labels2.insert("app".to_string(), "other".to_string());
 
-        let rs1 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels1);
-        let rs2 = create_test_replicaset("test-rs", 1, "nginx:1.0", labels2);
+        let d1 = create_test_deployment("test-deploy", 1, "nginx:1.0", labels1);
+        let d2 = create_test_deployment("test-deploy", 1, "nginx:1.0", labels2);
 
-        assert!(controller.replicaset_has_drifted(&rs1, &rs2));
+        assert!(controller.deployment_has_drifted(&d1, &d2));
     }
 
     // Helper function to create a mock controller for testing
