@@ -208,7 +208,7 @@ docker volume ls | grep registry
 lsof -i :3000
 ```
 
-**Solution:** Kill the process or change port in `rise-backend/config/local.toml`
+**Solution:** Kill the process or change port in `config/local.toml`
 
 ### Overmind won't start processes
 

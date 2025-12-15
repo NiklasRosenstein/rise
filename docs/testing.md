@@ -207,6 +207,5 @@ Open `coverage/index.html` to view results.
 
 ## Next Steps
 
-- **Set up development environment**: See [Local Development](../getting-started/local-development.md)
-- **Contributing guidelines**: See [Contributing](./contributing.md)
-- **Database testing**: See [Database](./database.md)
+- **Set up development environment**: See [Local Development](development.md)
+- **Database testing**: See [Database](database.md)

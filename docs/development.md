@@ -18,19 +18,14 @@
 | **registry** | 5000 | Docker registry |
 | **registry-ui** | 5001 | Registry web UI |
 
-### Rise Backend Process
+### Rise Backend
 
-Single process running HTTP API server + all controllers (deployment, project, ECR) as concurrent tokio tasks.
-
-Controllers are enabled automatically based on configuration:
-- **Deployment**: Always enabled (backend determined by presence of `kubernetes` config)
-- **Project**: Always enabled
-- **ECR**: Enabled only when `registry.type = "ecr"`
+Single process running HTTP API server + controllers (deployment, project, ECR) as concurrent tokio tasks. Controllers enabled automatically based on config.
 
 ### Mise Tasks
 
-- `mise docs:serve` - Serve docs with live reload (port 3001)
-- `mise db:migrate` - Run database migrations
+- `mise docs:serve` - Serve docs (port 3001)
+- `mise db:migrate` - Run migrations
 - `mise backend:deps` - Start docker-compose services
 - `mise backend:run` (alias: `mise br`) - Start backend with overmind
 - `mise minikube:launch` - Start minikube with local registry
@@ -38,45 +33,23 @@ Controllers are enabled automatically based on configuration:
 ## Quick Start
 
 ```bash
-# Install tools
 mise install
-
-# Start services
-mise backend:deps
-
-# Run migrations (auto-run before backend starts)
-mise db:migrate
-
-# Start backend (server + controllers)
-mise backend:run  # or: mise br
+mise backend:run  # Starts services + backend
 ```
 
-Services available:
-- Backend API: http://localhost:3000
-- Web UI: http://localhost:3000
-- Dex Auth: http://localhost:5556/dex
-- PostgreSQL: localhost:5432
-- Docker Registry: http://localhost:5000
-- Registry UI: http://localhost:5001
+Services: http://localhost:3000 (API, Web UI), localhost:5432 (PostgreSQL), http://localhost:5000 (Registry)
 
 ### Build CLI
 
 ```bash
 cargo build --bin rise
-rise login  # If using direnv, 'rise' is in PATH
 ```
 
 ## Environment Variables
 
-`.envrc` (loaded by direnv):
+`.envrc` (loaded by direnv): `DATABASE_URL`, `RISE_CONFIG_RUN_MODE`, `PATH`
 
-```bash
-DATABASE_URL="postgres://rise:rise123@localhost:5432/rise"
-RISE_CONFIG_RUN_MODE="development"
-PATH="$PATH:$PWD/target/debug"
-```
-
-Server config (host, port) in `rise-backend/config/default.toml`.
+Server config in `config/default.toml`.
 
 ## Development Workflow
 
@@ -96,7 +69,6 @@ rise <command>
 
 **Schema:**
 ```bash
-cd rise-backend
 sqlx migrate add <migration_name>
 # Edit migration in migrations/
 sqlx migrate run
@@ -131,73 +103,26 @@ psql postgres://rise:rise123@localhost:5432/rise
 
 ### Default Credentials
 
-**PostgreSQL:**
-- Host: localhost:5432
-- Database: rise
-- Username: rise
-- Password: rise123
+**PostgreSQL:** `postgres://rise:rise123@localhost:5432/rise`
 
-**Dex:**
-- Email: `admin@example.com` or `test@example.com`
-- Password: `password`
-
-⚠️ Development only. Change for production.
+**Dex:** `admin@example.com` / `password` or `test@example.com` / `password`
 
 ## Code Style
 
-**Keep it simple:**
-- Avoid over-engineering for hypothetical cases
-- Don't add abstractions until needed
-- Three similar lines > premature abstraction
-
-**Error handling:**
-- Use `anyhow::Result` for application code
-- Use typed errors only when callers handle specific cases
-- Provide context: `.context("what failed")`
-
-**Documentation:**
-- Document non-obvious behavior
-- Explain "why" not "what"
-- Update mdbook when adding features
+- Avoid over-engineering; add abstractions only when needed
+- Use `anyhow::Result` for application code, typed errors only when callers need specific handling
+- Document non-obvious behavior and rationale
+- Update docs when adding features
 
 ## Testing
 
 ```bash
-# Backend tests
-cd rise-backend && cargo test
-
-# Full integration test
-docker-compose down -v
-docker-compose up -d
-cd rise-backend && sqlx migrate run && cd ..
-rise login
-rise project create test-app
+cargo test
 ```
 
 ## Commit Messages
 
-Use conventional commits:
-
-```
-feat: add ECR registry support
-fix: validate JWT before database queries
-docs: update registry security notes
-refactor: extract fuzzy matching to module
-```
-
-Include co-authorship when using AI:
-```
-Co-Authored-By: Claude <noreply@anthropic.com>
-```
-
-## Pull Requests
-
-1. Create feature branch
-2. Make focused changes (one feature per PR)
-3. Add tests if adding features
-4. Update documentation
-5. Ensure `cargo test` passes
-6. Include migration files if schema changed
+Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`
 
 ## Troubleshooting
 

@@ -197,7 +197,7 @@ resource "aws_secretsmanager_secret_version" "rise_ecr_creds" {
 
 ## Configuration
 
-Registry configuration is in `rise-backend/config/`:
+Registry configuration is in `config/`:
 
 **Precedence** (highest to lowest):
 1. Local config (`local.toml`)
