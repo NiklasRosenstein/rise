@@ -62,6 +62,19 @@ class RiseAPI {
         return this.request(`/projects/${idOrName}${queryString ? '?' + queryString : ''}`);
     }
 
+    async createProject(name, visibility, owner) {
+        return this.request('/projects', {
+            method: 'POST',
+            body: JSON.stringify({ name, visibility, owner })
+        });
+    }
+
+    async deleteProject(nameOrId) {
+        return this.request(`/projects/${nameOrId}`, {
+            method: 'DELETE'
+        });
+    }
+
     // Deployment endpoints
     async getProjectDeployments(projectName, params = {}) {
         const queryString = new URLSearchParams(
@@ -78,9 +91,35 @@ class RiseAPI {
         return this.request(`/projects/${projectName}/deployment-groups`);
     }
 
+    async stopDeployment(projectName, deploymentId) {
+        return this.request(`/projects/${projectName}/deployments/${deploymentId}/stop`, {
+            method: 'POST'
+        });
+    }
+
     // Service account endpoints
     async getProjectServiceAccounts(projectName) {
         return this.request(`/projects/${projectName}/workload-identities`);
+    }
+
+    async createServiceAccount(projectName, issuerUrl, claims) {
+        return this.request(`/projects/${projectName}/workload-identities`, {
+            method: 'POST',
+            body: JSON.stringify({ issuer_url: issuerUrl, claims })
+        });
+    }
+
+    async updateServiceAccount(projectName, saId, issuerUrl, claims) {
+        return this.request(`/projects/${projectName}/workload-identities/${saId}`, {
+            method: 'PUT',
+            body: JSON.stringify({ issuer_url: issuerUrl, claims })
+        });
+    }
+
+    async deleteServiceAccount(projectName, saId) {
+        return this.request(`/projects/${projectName}/workload-identities/${saId}`, {
+            method: 'DELETE'
+        });
     }
 
     // Environment variable endpoints
@@ -90,6 +129,19 @@ class RiseAPI {
 
     async getDeploymentEnvVars(projectName, deploymentId) {
         return this.request(`/projects/${projectName}/deployments/${deploymentId}/env`);
+    }
+
+    async setEnvVar(projectName, key, value, isSecret) {
+        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}`, {
+            method: 'PUT',
+            body: JSON.stringify({ value, is_secret: isSecret })
+        });
+    }
+
+    async deleteEnvVar(projectName, key) {
+        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}`, {
+            method: 'DELETE'
+        });
     }
 }
 
