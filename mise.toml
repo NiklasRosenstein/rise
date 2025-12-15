@@ -47,7 +47,7 @@ run = "docker compose up -d"
 [tasks."backend:run"]
 description = "Run the backend server."
 depends = ["backend:deps", "db:migrate"]
-run = "cargo run --features server,docker,k8s,aws -- backend server"
+run = "cargo run --features server,k8s,aws -- backend server"
 alias = "br"
 
 [tasks."minikube:launch"]
