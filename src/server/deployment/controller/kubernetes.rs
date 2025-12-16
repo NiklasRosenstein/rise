@@ -61,8 +61,10 @@ enum ReconcilePhase {
     CreatingNamespace,
     CreatingImagePullSecret,
     CreatingService,
-    CreatingReplicaSet,
-    WaitingForReplicaSet,
+    #[serde(alias = "CreatingReplicaSet")]
+    CreatingDeployment,
+    #[serde(alias = "WaitingForReplicaSet")]
+    WaitingForDeployment,
     UpdatingIngress,
     WaitingForHealth,
     SwitchingTraffic,
@@ -675,7 +677,7 @@ impl KubernetesController {
 
         let pod_api: Api<Pod> = Api::namespaced(self.kube_client.clone(), namespace);
 
-        // List pods owned by this ReplicaSet
+        // List pods owned by this Deployment
         let pods = pod_api
             .list(&kube::api::ListParams::default().labels(&format!(
                 "rise.dev/deployment-id={}",
@@ -1187,18 +1189,18 @@ impl DeploymentBackend for KubernetesController {
             DeploymentStatus::Deploying
         };
 
-        // Recovery logic: If deployment is Unhealthy and ReplicaSet is missing, reset to recreate it
+        // Recovery logic: If deployment is Unhealthy and Deployment is missing, reset to recreate it
         if deployment.status == DeploymentStatus::Unhealthy
             && matches!(
                 metadata.reconcile_phase,
-                ReconcilePhase::WaitingForReplicaSet
+                ReconcilePhase::WaitingForDeployment
                     | ReconcilePhase::UpdatingIngress
                     | ReconcilePhase::WaitingForHealth
                     | ReconcilePhase::SwitchingTraffic
                     | ReconcilePhase::Completed
             )
         {
-            // Check if ReplicaSet still exists
+            // Check if Deployment still exists
             if let (Some(ref deploy_name), Some(ref namespace)) =
                 (&metadata.deployment_name, &metadata.namespace)
             {
@@ -1206,38 +1208,38 @@ impl DeploymentBackend for KubernetesController {
                     Api::namespaced(self.kube_client.clone(), namespace);
                 match deploy_api.get(deploy_name).await {
                     Ok(_) => {
-                        // ReplicaSet exists, continue normal reconciliation
+                        // Deployment exists, continue normal reconciliation
                         debug!(
-                            "ReplicaSet {} exists, continuing normal reconciliation",
+                            "Deployment {} exists, continuing normal reconciliation",
                             deploy_name
                         );
                     }
                     Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                        // ReplicaSet is missing - reset to recreate it
+                        // Deployment is missing - reset to recreate it
                         warn!(
-                            "Unhealthy deployment {} has missing ReplicaSet {} in phase {:?}, resetting to recreate",
+                            "Unhealthy deployment {} has missing Deployment {} in phase {:?}, resetting to recreate",
                             deployment.deployment_id, deploy_name, metadata.reconcile_phase
                         );
 
-                        // Reset to CreatingReplicaSet to recreate the ReplicaSet
-                        metadata.reconcile_phase = ReconcilePhase::CreatingReplicaSet;
+                        // Reset to CreatingDeployment to recreate the Deployment
+                        metadata.reconcile_phase = ReconcilePhase::CreatingDeployment;
                         info!(
-                            "Reset reconciliation phase to CreatingReplicaSet for deployment {}",
+                            "Reset reconciliation phase to CreatingDeployment for deployment {}",
                             deployment.deployment_id
                         );
                     }
                     Err(e) => {
                         // Other errors, continue normal reconciliation (will likely fail and retry)
                         warn!(
-                            "Error checking ReplicaSet {} for unhealthy deployment {}: {}",
+                            "Error checking Deployment {} for unhealthy deployment {}: {}",
                             deploy_name, deployment.deployment_id, e
                         );
                     }
                 }
             } else {
-                // No ReplicaSet name in metadata - this shouldn't happen in these phases
+                // No Deployment name in metadata - this shouldn't happen in these phases
                 warn!(
-                    "Unhealthy deployment {} in phase {:?} has no ReplicaSet name in metadata",
+                    "Unhealthy deployment {} in phase {:?} has no Deployment name in metadata",
                     deployment.deployment_id, metadata.reconcile_phase
                 );
             }
@@ -1462,12 +1464,12 @@ impl DeploymentBackend for KubernetesController {
                         "Service applied (any drift corrected)"
                     );
 
-                    metadata.reconcile_phase = ReconcilePhase::CreatingReplicaSet;
+                    metadata.reconcile_phase = ReconcilePhase::CreatingDeployment;
                     // Continue to next phase
                     continue;
                 }
 
-                ReconcilePhase::CreatingReplicaSet => {
+                ReconcilePhase::CreatingDeployment => {
                     let namespace = metadata
                         .namespace
                         .as_ref()
@@ -1480,10 +1482,10 @@ impl DeploymentBackend for KubernetesController {
                     let deploy_api: Api<K8sDeployment> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
-                    // Check if ReplicaSet exists
+                    // Check if Deployment exists
                     match deploy_api.get(&deploy_name).await {
                         Ok(existing_deploy) => {
-                            // ReplicaSet exists - check for drift
+                            // Deployment exists - check for drift
                             let desired_deploy = self.create_deployment(
                                 project,
                                 deployment,
@@ -1495,17 +1497,17 @@ impl DeploymentBackend for KubernetesController {
                                 info!(
                                     project = project.name,
                                     deployment_id = %deployment.id,
-                                    "ReplicaSet has drifted, recreating"
+                                    "Deployment has drifted, recreating"
                                 );
 
                                 // Delete and wait for deletion to complete
                                 if let Err(e) = self
-                                    .delete_and_wait_replicaset(&deploy_api, &deploy_name)
+                                    .delete_and_wait_deployment(&deploy_api, &deploy_name)
                                     .await
                                 {
                                     if is_namespace_not_found_error(&e) {
                                         warn!(
-                                            "Namespace missing during ReplicaSet deletion, resetting to CreatingNamespace"
+                                            "Namespace missing during Deployment deletion, resetting to CreatingNamespace"
                                         );
                                         metadata.reconcile_phase =
                                             ReconcilePhase::CreatingNamespace;
@@ -1516,7 +1518,7 @@ impl DeploymentBackend for KubernetesController {
                                     }
                                 }
 
-                                // Create new ReplicaSet
+                                // Create new Deployment
                                 match deploy_api
                                     .create(&PostParams::default(), &desired_deploy)
                                     .await
@@ -1525,12 +1527,12 @@ impl DeploymentBackend for KubernetesController {
                                         info!(
                                             project = project.name,
                                             deployment_id = %deployment.id,
-                                            "ReplicaSet recreated after drift detected"
+                                            "Deployment recreated after drift detected"
                                         );
                                     }
                                     Err(e) if is_namespace_not_found_error(&e) => {
                                         warn!(
-                                            "Namespace missing during ReplicaSet creation, resetting to CreatingNamespace"
+                                            "Namespace missing during Deployment creation, resetting to CreatingNamespace"
                                         );
                                         metadata.reconcile_phase =
                                             ReconcilePhase::CreatingNamespace;
@@ -1543,12 +1545,12 @@ impl DeploymentBackend for KubernetesController {
                                 debug!(
                                     project = project.name,
                                     deployment_id = %deployment.id,
-                                    "ReplicaSet exists and matches desired state"
+                                    "Deployment exists and matches desired state"
                                 );
                             }
                         }
                         Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                            // ReplicaSet doesn't exist - create it
+                            // Deployment doesn't exist - create it
                             let rs =
                                 self.create_deployment(project, deployment, &metadata, env_vars);
                             match deploy_api.create(&PostParams::default(), &rs).await {
@@ -1556,12 +1558,12 @@ impl DeploymentBackend for KubernetesController {
                                     info!(
                                         project = project.name,
                                         deployment_id = %deployment.id,
-                                        "ReplicaSet created"
+                                        "Deployment created"
                                     );
                                 }
                                 Err(e) if is_namespace_not_found_error(&e) => {
                                     warn!(
-                                        "Namespace missing during ReplicaSet creation, resetting to CreatingNamespace"
+                                        "Namespace missing during Deployment creation, resetting to CreatingNamespace"
                                     );
                                     metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
                                     metadata.namespace = None;
@@ -1572,7 +1574,7 @@ impl DeploymentBackend for KubernetesController {
                         }
                         Err(e) if is_namespace_not_found_error(&e) => {
                             warn!(
-                                "Namespace missing during ReplicaSet get, resetting to CreatingNamespace"
+                                "Namespace missing during Deployment get, resetting to CreatingNamespace"
                             );
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
                             metadata.namespace = None;
@@ -1582,7 +1584,7 @@ impl DeploymentBackend for KubernetesController {
                     }
 
                     metadata.deployment_name = Some(deploy_name);
-                    metadata.reconcile_phase = ReconcilePhase::WaitingForReplicaSet;
+                    metadata.reconcile_phase = ReconcilePhase::WaitingForDeployment;
 
                     // Return here - need to wait for pods to become ready
                     return Ok(ReconcileResult {
@@ -1593,7 +1595,7 @@ impl DeploymentBackend for KubernetesController {
                     });
                 }
 
-                ReconcilePhase::WaitingForReplicaSet => {
+                ReconcilePhase::WaitingForDeployment => {
                     let namespace = metadata
                         .namespace
                         .as_ref()
@@ -1601,7 +1603,7 @@ impl DeploymentBackend for KubernetesController {
                     let deploy_name = metadata
                         .deployment_name
                         .as_ref()
-                        .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name in metadata"))?;
+                        .ok_or_else(|| anyhow::anyhow!("No Deployment name in metadata"))?;
 
                     // Check for irrecoverable pod errors first
                     let (has_errors, error_msg) = match self
@@ -1638,7 +1640,7 @@ impl DeploymentBackend for KubernetesController {
                     let rs = match deploy_api.get(deploy_name).await {
                         Ok(r) => r,
                         Err(e) if is_namespace_not_found_error(&e) => {
-                            warn!("Namespace missing during ReplicaSet get in WaitingForReplicaSet, resetting to CreatingNamespace");
+                            warn!("Namespace missing during Deployment get in WaitingForDeployment, resetting to CreatingNamespace");
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
                             metadata.namespace = None;
                             continue;
@@ -1651,7 +1653,7 @@ impl DeploymentBackend for KubernetesController {
 
                     if ready_replicas >= spec_replicas {
                         info!(
-                            "ReplicaSet {} is ready ({}/{})",
+                            "Deployment {} is ready ({}/{})",
                             deploy_name, ready_replicas, spec_replicas
                         );
                         metadata.reconcile_phase = ReconcilePhase::UpdatingIngress;
@@ -1659,7 +1661,7 @@ impl DeploymentBackend for KubernetesController {
                         continue;
                     } else {
                         debug!(
-                            "Waiting for ReplicaSet {} ({}/{})",
+                            "Waiting for Deployment {} ({}/{})",
                             deploy_name, ready_replicas, spec_replicas
                         );
 
@@ -1863,7 +1865,7 @@ impl DeploymentBackend for KubernetesController {
                         .patch(&ingress_name, &patch_params, &patch)
                         .await
                     {
-                        Ok(patched_ingress) => {}
+                        Ok(_patched_ingress) => {}
                         Err(e) if is_namespace_not_found_error(&e) => {
                             warn!("Namespace missing during Completed phase (Ingress), resetting to CreatingNamespace");
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
@@ -1873,11 +1875,11 @@ impl DeploymentBackend for KubernetesController {
                         Err(e) => return Err(e.into()),
                     }
 
-                    // 3. Check ReplicaSet for drift
+                    // 3. Check Deployment for drift
                     let deploy_name = metadata
                         .deployment_name
                         .as_ref()
-                        .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name in metadata"))?;
+                        .ok_or_else(|| anyhow::anyhow!("No Deployment name in metadata"))?;
                     let deploy_api: Api<K8sDeployment> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
@@ -1894,16 +1896,16 @@ impl DeploymentBackend for KubernetesController {
                                 info!(
                                     project = project.name,
                                     deployment_id = %deployment.id,
-                                    "ReplicaSet has drifted in Completed phase, recreating"
+                                    "Deployment has drifted in Completed phase, recreating"
                                 );
 
                                 // Delete and wait for deletion to complete
                                 if let Err(e) = self
-                                    .delete_and_wait_replicaset(&deploy_api, deploy_name)
+                                    .delete_and_wait_deployment(&deploy_api, deploy_name)
                                     .await
                                 {
                                     if is_namespace_not_found_error(&e) {
-                                        warn!("Namespace missing during ReplicaSet deletion in Completed phase, resetting to CreatingNamespace");
+                                        warn!("Namespace missing during Deployment deletion in Completed phase, resetting to CreatingNamespace");
                                         metadata.reconcile_phase =
                                             ReconcilePhase::CreatingNamespace;
                                         metadata.namespace = None;
@@ -1913,7 +1915,7 @@ impl DeploymentBackend for KubernetesController {
                                     }
                                 }
 
-                                // Create new ReplicaSet
+                                // Create new Deployment
                                 match deploy_api
                                     .create(&PostParams::default(), &desired_deploy)
                                     .await
@@ -1922,12 +1924,12 @@ impl DeploymentBackend for KubernetesController {
                                         info!(
                                             project = project.name,
                                             deployment_id = %deployment.id,
-                                            "ReplicaSet recreated after drift detected in Completed phase"
+                                            "Deployment recreated after drift detected in Completed phase"
                                         );
 
-                                        // Move back to WaitingForReplicaSet to ensure it becomes ready
+                                        // Move back to WaitingForDeployment to ensure it becomes ready
                                         metadata.reconcile_phase =
-                                            ReconcilePhase::WaitingForReplicaSet;
+                                            ReconcilePhase::WaitingForDeployment;
                                         return Ok(ReconcileResult {
                                             status,
                                             deployment_url: None,
@@ -1936,7 +1938,7 @@ impl DeploymentBackend for KubernetesController {
                                         });
                                     }
                                     Err(e) if is_namespace_not_found_error(&e) => {
-                                        warn!("Namespace missing during ReplicaSet creation in Completed phase, resetting to CreatingNamespace");
+                                        warn!("Namespace missing during Deployment creation in Completed phase, resetting to CreatingNamespace");
                                         metadata.reconcile_phase =
                                             ReconcilePhase::CreatingNamespace;
                                         metadata.namespace = None;
@@ -1947,14 +1949,14 @@ impl DeploymentBackend for KubernetesController {
                             }
                         }
                         Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                            // ReplicaSet is missing - recreate it
+                            // Deployment is missing - recreate it
                             warn!(
                                 project = project.name,
                                 deployment_id = %deployment.id,
-                                "ReplicaSet missing in Completed phase, recreating"
+                                "Deployment missing in Completed phase, recreating"
                             );
 
-                            metadata.reconcile_phase = ReconcilePhase::CreatingReplicaSet;
+                            metadata.reconcile_phase = ReconcilePhase::CreatingDeployment;
                             let metadata_json = serde_json::to_value(&metadata)?;
                             db_deployments::update_controller_metadata(
                                 &self.state.db_pool,
@@ -1975,7 +1977,7 @@ impl DeploymentBackend for KubernetesController {
                         }
                         Err(e) if is_namespace_not_found_error(&e) => {
                             warn!(
-                                "Namespace missing during ReplicaSet get in Completed phase, resetting to CreatingNamespace"
+                                "Namespace missing during Deployment get in Completed phase, resetting to CreatingNamespace"
                             );
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
                             metadata.namespace = None;
@@ -2004,13 +2006,13 @@ impl DeploymentBackend for KubernetesController {
 
         let deploy_name = metadata
             .deployment_name
-            .ok_or_else(|| anyhow::anyhow!("No ReplicaSet name"))?;
+            .ok_or_else(|| anyhow::anyhow!("No Deployment name"))?;
         let namespace = metadata
             .namespace
             .ok_or_else(|| anyhow::anyhow!("No namespace"))?;
 
         // 1. Check for pod-level errors FIRST
-        // This prevents race conditions where ReplicaSet reports ready_replicas
+        // This prevents race conditions where Deployment reports ready_replicas
         // but pods are actually in CrashLoopBackOff or other error states
         let (has_errors, error_msg) = match self.check_pod_errors(&namespace, &deploy_name).await {
             Ok((errors, msg)) => (errors, msg),
@@ -2033,13 +2035,13 @@ impl DeploymentBackend for KubernetesController {
             });
         }
 
-        // 2. Then check ReplicaSet readiness
+        // 2. Then check Deployment readiness
         let deploy_api: Api<K8sDeployment> = Api::namespaced(self.kube_client.clone(), &namespace);
 
-        // Get ReplicaSet, handling 404 errors gracefully
+        // Get Deployment, handling 404 errors gracefully
         match deploy_api.get(&deploy_name).await {
             Ok(rs) => {
-                // Check ReplicaSet status
+                // Check Deployment status
                 let spec_replicas = rs.spec.and_then(|s| s.replicas).unwrap_or(1);
                 let ready_replicas = rs.status.and_then(|s| s.ready_replicas).unwrap_or(0);
 
@@ -2049,7 +2051,7 @@ impl DeploymentBackend for KubernetesController {
                     healthy,
                     message: if !healthy {
                         Some(format!(
-                            "ReplicaSet ready: {}/{}",
+                            "Deployment ready: {}/{}",
                             ready_replicas, spec_replicas
                         ))
                     } else {
@@ -2059,20 +2061,20 @@ impl DeploymentBackend for KubernetesController {
                 })
             }
             Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                // ReplicaSet doesn't exist - mark as unhealthy to trigger recreation
+                // Deployment doesn't exist - mark as unhealthy to trigger recreation
                 warn!(
-                    "ReplicaSet {} not found in namespace {}, marking deployment as unhealthy",
+                    "Deployment {} not found in namespace {}, marking deployment as unhealthy",
                     deploy_name, namespace
                 );
                 Ok(HealthStatus {
                     healthy: false,
-                    message: Some(format!("ReplicaSet {} not found", deploy_name)),
+                    message: Some(format!("Deployment {} not found", deploy_name)),
                     last_check: Utc::now(),
                 })
             }
             Err(e) if is_namespace_not_found_error(&e) => {
                 // Namespace missing - mark as unhealthy
-                warn!("Namespace missing during ReplicaSet health check");
+                warn!("Namespace missing during Deployment health check");
                 Ok(HealthStatus {
                     healthy: false,
                     message: Some("Namespace missing - recovery in progress".to_string()),
@@ -2094,7 +2096,7 @@ impl DeploymentBackend for KubernetesController {
             serde_json::from_value(deployment.controller_metadata.clone()).ok();
 
         if let Some(metadata) = metadata {
-            // Clean up any partially created ReplicaSet
+            // Clean up any partially created Deployment
             if let (Some(deploy_name), Some(namespace)) =
                 (metadata.deployment_name, metadata.namespace)
             {
@@ -2106,7 +2108,7 @@ impl DeploymentBackend for KubernetesController {
                 {
                     // Ignore 404 errors (already deleted)
                     if !e.to_string().contains("404") {
-                        warn!("Error deleting ReplicaSet during cancellation: {}", e);
+                        warn!("Error deleting Deployment during cancellation: {}", e);
                     }
                 }
             }
@@ -2123,7 +2125,7 @@ impl DeploymentBackend for KubernetesController {
 
     async fn terminate(&self, deployment: &Deployment) -> Result<()> {
         info!(
-            "Terminating deployment {} - deleting ReplicaSet",
+            "Terminating deployment {} - deleting Deployment",
             deployment.deployment_id
         );
 
@@ -2132,7 +2134,7 @@ impl DeploymentBackend for KubernetesController {
             serde_json::from_value(deployment.controller_metadata.clone()).ok();
 
         if let Some(metadata) = metadata {
-            // Delete ONLY the ReplicaSet (cascading deletes pods)
+            // Delete ONLY the Deployment (cascading deletes pods)
             if let (Some(deploy_name), Some(namespace)) =
                 (metadata.deployment_name.clone(), metadata.namespace.clone())
             {
@@ -2144,7 +2146,7 @@ impl DeploymentBackend for KubernetesController {
                 {
                     // Ignore 404 errors (already deleted)
                     if !e.to_string().contains("404") {
-                        warn!("Error deleting ReplicaSet during termination: {}", e);
+                        warn!("Error deleting Deployment during termination: {}", e);
                     }
                 }
             }
@@ -2177,7 +2179,7 @@ impl DeploymentBackend for KubernetesController {
 }
 
 impl KubernetesController {
-    /// Compare actual vs desired ReplicaSet state to detect drift
+    /// Compare actual vs desired Deployment state to detect drift
     fn deployment_has_drifted(&self, actual: &K8sDeployment, desired: &K8sDeployment) -> bool {
         // Compare critical fields that should never drift
 
@@ -2237,13 +2239,13 @@ impl KubernetesController {
         false
     }
 
-    /// Delete ReplicaSet and wait for deletion to complete
-    async fn delete_and_wait_replicaset(
+    /// Delete Deployment and wait for deletion to complete
+    async fn delete_and_wait_deployment(
         &self,
         deploy_api: &Api<K8sDeployment>,
         name: &str,
     ) -> Result<()> {
-        // Delete the ReplicaSet
+        // Delete the Deployment
         let delete_params = DeleteParams::default();
         match deploy_api.delete(name, &delete_params).await {
             Ok(_) => {}
@@ -2260,13 +2262,13 @@ impl KubernetesController {
 
             match deploy_api.get(name).await {
                 Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                    debug!("ReplicaSet {} deleted successfully", name);
+                    debug!("Deployment {} deleted successfully", name);
                     return Ok(());
                 }
                 Err(e) => return Err(e.into()),
                 Ok(_) => {
                     debug!(
-                        "Waiting for ReplicaSet {} deletion (attempt {})",
+                        "Waiting for Deployment {} deletion (attempt {})",
                         name,
                         i + 1
                     );
@@ -2275,7 +2277,7 @@ impl KubernetesController {
         }
 
         Err(anyhow::anyhow!(
-            "Timeout waiting for ReplicaSet {} deletion",
+            "Timeout waiting for Deployment {} deletion",
             name
         ))
     }
