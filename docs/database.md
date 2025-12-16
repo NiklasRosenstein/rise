@@ -105,9 +105,6 @@ SELECT * FROM projects LIMIT :LIMIT;
 Completely reset the development database:
 
 ```bash
-# Stop all processes
-overmind quit
-
 # Remove database volume
 docker-compose down -v
 

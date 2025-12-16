@@ -47,7 +47,6 @@ Navigate to http://localhost:3000 for the web dashboard (OAuth2 PKCE authenticat
 ## Reset Environment
 
 ```bash
-overmind quit
 docker-compose down -v
 cargo clean
 mise backend:run

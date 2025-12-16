@@ -210,23 +210,6 @@ lsof -i :3000
 
 **Solution:** Kill the process or change port in `config/local.toml`
 
-### Overmind won't start processes
-
-**Solution:**
-```bash
-# Stop overmind
-overmind quit
-
-# Ensure dependencies running
-mise backend:deps
-
-# Run migrations
-mise db:migrate
-
-# Try again
-mise backend:run
-```
-
 ### Docker Compose services won't start
 
 **Check logs:**
@@ -238,23 +221,6 @@ docker-compose logs
 ```bash
 docker-compose down -v
 mise backend:deps
-```
-
-## Reset Everything
-
-Complete reset of development environment:
-
-```bash
-# Stop all processes
-overmind quit
-docker-compose down -v
-
-# Remove build artifacts
-cargo clean
-
-# Start fresh
-mise install
-mise backend:run
 ```
 
 ## Getting Help

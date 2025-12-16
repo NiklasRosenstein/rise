@@ -27,7 +27,7 @@ Single process running HTTP API server + controllers (deployment, project, ECR) 
 - `mise docs:serve` - Serve docs (port 3001)
 - `mise db:migrate` - Run migrations
 - `mise backend:deps` - Start docker-compose services
-- `mise backend:run` (alias: `mise br`) - Start backend with overmind
+- `mise backend:run` (alias: `mise br`) - Run backend
 - `mise minikube:launch` - Start Minikube with local registry
 
 ## Quick Start
@@ -93,22 +93,6 @@ sqlx migrate run
 cargo sqlx prepare  # Update query cache
 ```
 
-### Viewing Logs
-
-**Overmind**: Terminal running `mise backend:run`
-
-**Docker Compose:**
-```bash
-docker-compose logs -f postgres
-docker-compose logs -f dex
-```
-
-**Connect to process:**
-```bash
-overmind connect server
-# Ctrl+B then D to detach
-```
-
 ## Local Kubernetes Development
 
 For testing the Kubernetes controller locally, use Minikube:
@@ -160,7 +144,6 @@ See [Troubleshooting](troubleshooting.md) for common issues.
 
 **Reset everything:**
 ```bash
-overmind quit
 docker-compose down -v
 cargo clean
 mise install
