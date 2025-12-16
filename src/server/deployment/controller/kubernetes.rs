@@ -46,6 +46,7 @@ pub const KUBERNETES_NAMESPACE_FINALIZER: &str = "kubernetes.rise.dev/namespace"
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct KubernetesMetadata {
     namespace: Option<String>,
+    #[serde(alias = "replicaset_name")]
     deployment_name: Option<String>,
     service_name: Option<String>,
     ingress_name: Option<String>,
@@ -53,6 +54,7 @@ struct KubernetesMetadata {
     http_port: u16,
     #[serde(default)]
     reconcile_phase: ReconcilePhase,
+    #[serde(alias = "previous_replicaset")]
     previous_deployment: Option<String>,
 }
 
