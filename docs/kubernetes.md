@@ -25,15 +25,15 @@ ingress_class = "nginx"
 
 # Ingress URL template for production (default) deployment group
 # Supports both subdomain and sub-path routing (must contain {project_name})
-production_ingress_url_template = "{project_name}.apps.rise.dev"
+production_ingress_url_template = "{project_name}.apps.rise.local"
 
 # Optional: Ingress URL template for staging (non-default) deployment groups
 # Must contain both {project_name} and {deployment_group} placeholders
-staging_ingress_url_template = "{project_name}-{deployment_group}.preview.rise.dev"
+staging_ingress_url_template = "{project_name}-{deployment_group}.preview.rise.local"
 
 # Or for sub-path routing:
-# production_ingress_url_template = "rise.dev/{project_name}"
-# staging_ingress_url_template = "rise.dev/{project_name}/{deployment_group}"
+# production_ingress_url_template = "rise.local/{project_name}"
+# staging_ingress_url_template = "rise.local/{project_name}/{deployment_group}"
 
 # Namespace format (must contain {project_name})
 namespace_format = "rise-{project_name}"
@@ -51,10 +51,10 @@ RISE_KUBERNETES__KUBECONFIG="/path/to/kubeconfig"
 RISE_KUBERNETES__INGRESS_CLASS="nginx"
 
 # Ingress URL template for production deployment group (required, must contain {project_name})
-RISE_KUBERNETES__PRODUCTION_INGRESS_URL_TEMPLATE="{project_name}.apps.rise.dev"
+RISE_KUBERNETES__PRODUCTION_INGRESS_URL_TEMPLATE="{project_name}.apps.rise.local"
 
 # Optional: Ingress URL template for staging groups (must contain {project_name} and {deployment_group})
-RISE_KUBERNETES__STAGING_INGRESS_URL_TEMPLATE="{project_name}-{deployment_group}.preview.rise.dev"
+RISE_KUBERNETES__STAGING_INGRESS_URL_TEMPLATE="{project_name}-{deployment_group}.preview.rise.local"
 
 # Namespace format (must contain {project_name})
 RISE_KUBERNETES__NAMESPACE_FORMAT="rise-{project_name}"
@@ -108,23 +108,23 @@ Each deployment group gets its own Service and Ingress with a unique URL:
 
 | Group | URL Pattern | Example (Subdomain) | Example (Sub-path) |
 |-------|-------------|---------------------|-------------------|
-| `default` | `production_ingress_url_template` | `my-app.apps.rise.dev` | `rise.dev/my-app` |
-| Custom groups | `staging_ingress_url_template` | `my-app-mr--26.preview.rise.dev` | `rise.dev/my-app/mr--26` |
+| `default` | `production_ingress_url_template` | `my-app.apps.rise.local` | `rise.local/my-app` |
+| Custom groups | `staging_ingress_url_template` | `my-app-mr--26.preview.rise.local` | `rise.local/my-app/mr--26` |
 
 ### Sub-path vs Subdomain Routing
 
 Rise supports two Ingress routing modes configured globally via URL templates:
 
 **Subdomain Routing** (traditional approach):
-- Production: `{project_name}.apps.rise.dev`
-- Staging: `{project_name}-{deployment_group}.preview.rise.dev`
+- Production: `{project_name}.apps.rise.local`
+- Staging: `{project_name}-{deployment_group}.preview.rise.local`
 - Each project gets a unique subdomain
 - Ingress path: `/` (Prefix type)
 - No path rewriting needed
 
 **Sub-path Routing** (shared domain):
-- Production: `rise.dev/{project_name}`
-- Staging: `rise.dev/{project_name}/{deployment_group}`
+- Production: `rise.local/{project_name}`
+- Staging: `rise.local/{project_name}/{deployment_group}`
 - All projects share the same domain with different paths
 - Ingress path: `/{project}(/|$)(.*)` (ImplementationSpecific type with regex)
 - Nginx automatically rewrites paths
@@ -133,7 +133,7 @@ Rise supports two Ingress routing modes configured globally via URL templates:
 
 For sub-path routing, Nginx automatically rewrites paths so your application receives requests at `/` while preserving the original path prefix:
 
-- **Client request**: `GET https://rise.dev/myapp/api/users`
+- **Client request**: `GET https://rise.local/myapp/api/users`
 - **Application receives**: `GET /api/users`
 - **Headers added**: `X-Forwarded-Prefix: /myapp`
 
@@ -142,10 +142,10 @@ The controller uses the built-in `nginx.ingress.kubernetes.io/x-forwarded-prefix
 **Example configuration**:
 ```toml
 [kubernetes]
-production_ingress_url_template = "rise.dev/{project_name}"
-staging_ingress_url_template = "rise.dev/{project_name}/{deployment_group}"
+production_ingress_url_template = "rise.local/{project_name}"
+staging_ingress_url_template = "rise.local/{project_name}/{deployment_group}"
 auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"
-auth_signin_url = "https://rise.dev"
+auth_signin_url = "https://rise.local"
 ```
 
 ### Private Project Authentication
@@ -175,8 +175,8 @@ jwt_signing_secret = "YOUR_BASE64_SECRET_HERE"
 jwt_claims = ["sub", "email", "name"]
 
 # Cookie settings for subdomain sharing
-cookie_domain = ".rise.dev"  # Allows cookies to work across *.rise.dev
-cookie_secure = true         # Require HTTPS (disable for local development)
+cookie_domain = ".rise.local"  # Allows cookies to work across *.rise.local
+cookie_secure = false          # Set to false for local development (HTTP)
 ```
 
 ```toml
@@ -185,7 +185,7 @@ cookie_secure = true         # Require HTTPS (disable for local development)
 auth_backend_url = "http://rise-backend.default.svc.cluster.local:3000"
 
 # Public backend URL for browser redirects during authentication
-auth_signin_url = "https://rise.dev"
+auth_signin_url = "http://rise.local"  # Use http:// for local development
 ```
 
 **Generate JWT signing secret**:
@@ -198,13 +198,13 @@ openssl rand -base64 32
 When a user visits a private project, the following flow occurs:
 
 ```
-User → myapp.apps.rise.dev (private)
+User → myapp.apps.rise.local (private)
   ↓
 Nginx calls GET /auth/ingress?project=myapp
   - 🍪 NO COOKIE or invalid JWT
   ↓ Returns 401 Unauthorized
   ↓
-Nginx redirects to /auth/signin?project=myapp&redirect=https://myapp.apps.rise.dev
+Nginx redirects to /auth/signin?project=myapp&redirect=http://myapp.apps.rise.local
   ↓
 GET /auth/signin (Pre-Auth Page):
   - Renders auth-signin.html.tera
@@ -228,12 +228,12 @@ GET /auth/callback (Token Exchange):
   - Extract claims (sub, email, name) and expiry
   - Issue Rise JWT with user claims (NOT project-scoped!)
   - 🍪 SET COOKIE: _rise_ingress = <Rise JWT>
-       (Domain: .rise.dev, HttpOnly, Secure, SameSite=Lax)
+       (Domain: .rise.local, HttpOnly, Secure=false, SameSite=Lax)
   - Renders auth-success.html.tera
   - Shows: "Authentication successful! Redirecting in 3s..."
-  - JavaScript auto-redirects to https://myapp.apps.rise.dev
+  - JavaScript auto-redirects to http://myapp.apps.rise.local
   ↓
-After 3 seconds, browser redirects to https://myapp.apps.rise.dev
+After 3 seconds, browser redirects to http://myapp.apps.rise.local
   ↓
 Nginx calls GET /auth/ingress?project=myapp
   - 🍪 READS COOKIE: _rise_ingress
@@ -258,13 +258,13 @@ Rise issues symmetric HS256 JWTs with the following claims:
   "name": "User Name",
   "iat": 1234567890,
   "exp": 1234571490,
-  "iss": "https://rise.dev",
+  "iss": "http://rise.local",
   "aud": "rise-ingress"
 }
 ```
 
 **Key features**:
-- **NOT project-scoped**: JWTs do NOT contain a project claim because the cookie is set at `rise.dev` domain and shared across all `*.apps.rise.dev` subdomains. Project access is validated separately in the ingress auth handler by checking database permissions.
+- **NOT project-scoped**: JWTs do NOT contain a project claim because the cookie is set at `rise.local` domain and shared across all `*.apps.rise.local` subdomains. Project access is validated separately in the ingress auth handler by checking database permissions.
 - **Configurable claims**: Include only necessary user information
 - **Expiry matching**: Token expiration matches IdP token (typically 1 hour)
 - **Symmetric signing**: HS256 with shared secret for fast validation
@@ -282,7 +282,7 @@ Two separate cookies are used for different purposes:
 - `HttpOnly`: Prevents JavaScript access (XSS protection)
 - `Secure`: HTTPS-only transmission
 - `SameSite=Lax`: CSRF protection while allowing navigation
-- `Domain`: Shared across subdomains (e.g., `.rise.dev`)
+- `Domain`: Shared across subdomains (e.g., `.rise.local`)
 - `Max-Age`: Matches JWT expiration
 
 #### Access Control
@@ -299,7 +299,7 @@ Access check logic:
 // - User is a member of the team that owns the project (owner_team_id)
 //
 // NOTE: JWTs are NOT project-scoped - the same JWT can be used across all projects
-// because the cookie is set at rise.dev domain level and shared across *.apps.rise.dev
+// because the cookie is set at rise.local domain level and shared across *.apps.rise.local
 ```
 
 #### Ingress Annotations
@@ -309,7 +309,7 @@ For private projects, the controller adds these Nginx annotations:
 ```yaml
 annotations:
   nginx.ingress.kubernetes.io/auth-url: "http://rise-backend.default.svc.cluster.local:3000/auth/ingress?project=myapp"
-  nginx.ingress.kubernetes.io/auth-signin: "https://rise.dev/auth/signin?project=myapp&redirect=$escaped_request_uri"
+  nginx.ingress.kubernetes.io/auth-signin: "http://rise.local/auth/signin?project=myapp&redirect=$escaped_request_uri"
   nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-Email,X-Auth-Request-User"
 ```
 
@@ -328,6 +328,12 @@ The application receives authenticated requests with these additional headers:
 - Check `cookie_domain` matches your domain structure
 - Verify cookies are being set (check browser DevTools → Application → Cookies)
 - Ensure `cookie_secure` is `false` for HTTP development environments
+
+**Browser always redirects HTTP to HTTPS**:
+- Some TLDs (e.g., `.dev`) are on the HSTS preload list and browsers will always force HTTPS
+- Use `.local` TLD for local development to avoid HSTS issues
+- The default configuration uses `rise.local` which works correctly with HTTP
+- If you must use a different TLD, check if it's on the HSTS preload list at https://hstspreload.org/
 
 **"Access denied" or 403 Forbidden error**:
 - User is authenticated but not authorized for this project
@@ -491,7 +497,7 @@ metadata:
     kubernetes.io/ingress.class: "nginx"
 spec:
   rules:
-    - host: my-app.apps.rise.dev
+    - host: my-app.apps.rise.local
       http:
         paths:
           - path: /

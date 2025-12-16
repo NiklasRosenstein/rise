@@ -85,13 +85,13 @@ controller: {}
 deployment_controller:
   type: "kubernetes"
   ingress_class: "nginx"
-  production_ingress_url_template: "{project_name}.apps.rise.dev"
-  staging_ingress_url_template: "{project_name}-{deployment_group}.preview.rise.dev"
+  production_ingress_url_template: "{project_name}.apps.rise.local"
+  staging_ingress_url_template: "{project_name}-{deployment_group}.preview.rise.local"
   namespace_format: "rise-{project_name}"
 
   # Example for Kubernetes deployment of Rise in production:
   # auth_backend_url: "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL
-  # auth_signin_url: "https://rise.dev"  # Public API URL
+  # auth_signin_url: "https://rise.example.com"  # Public API URL
 
   # Optional: Annotations to apply to all managed namespaces
   # namespace_annotations:
