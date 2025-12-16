@@ -1,7 +1,7 @@
 use anyhow::Result;
 use async_trait::async_trait;
 use chrono::Utc;
-use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec};
+use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec, ReplicaSet};
 use k8s_openapi::api::core::v1::{
     Container, ContainerPort, LocalObjectReference, Namespace, PodSpec, PodTemplateSpec, Secret,
     Service, ServicePort, ServiceSpec,
@@ -1501,10 +1501,77 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    // MIGRATION: Check if we need to clean up an old ReplicaSet from pre-Deployment era
+                    // This handles the migration from ReplicaSets to Deployments (commit 716283c)
+                    let deploy_name = format!("{}-{}", project.name, deployment.deployment_id);
+
+                    // Check if there's an old ReplicaSet with this name that needs cleanup
+                    let rs_api: Api<ReplicaSet> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+                    match rs_api.get(&deploy_name).await {
+                        Ok(_) => {
+                            // Old ReplicaSet exists - delete it before creating Deployment
+                            info!(
+                                project = project.name,
+                                deployment_id = %deployment.id,
+                                replicaset = deploy_name,
+                                "Found old ReplicaSet during migration, deleting before creating Deployment"
+                            );
+
+                            match rs_api.delete(&deploy_name, &DeleteParams::default()).await {
+                                Ok(_) => {
+                                    info!(
+                                        project = project.name,
+                                        deployment_id = %deployment.id,
+                                        "Old ReplicaSet deleted, will create Deployment"
+                                    );
+                                }
+                                Err(e) if is_namespace_not_found_error(&e) => {
+                                    warn!(
+                                        "Namespace missing during ReplicaSet migration cleanup, resetting to CreatingNamespace"
+                                    );
+                                    metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                    metadata.namespace = None;
+                                    continue;
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to delete old ReplicaSet during migration: {}. Continuing anyway.",
+                                        e
+                                    );
+                                    // Continue anyway - the Deployment creation might still work
+                                }
+                            }
+                        }
+                        Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                            // No ReplicaSet found - this is normal for new deployments or already-migrated ones
+                            debug!(
+                                project = project.name,
+                                deployment_id = %deployment.id,
+                                "No old ReplicaSet found (normal for new or already-migrated deployments)"
+                            );
+                        }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!(
+                                "Namespace missing during ReplicaSet migration check, resetting to CreatingNamespace"
+                            );
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => {
+                            warn!(
+                                "Error checking for old ReplicaSet during migration: {}. Continuing anyway.",
+                                e
+                            );
+                            // Continue anyway - might just be a transient error
+                        }
+                    }
+
                     // Load and decrypt environment variables
                     let env_vars = self.load_env_vars(deployment.id).await?;
 
-                    let deploy_name = format!("{}-{}", project.name, deployment.deployment_id);
+                    // deploy_name already calculated above for migration check
                     let deploy_api: Api<K8sDeployment> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
