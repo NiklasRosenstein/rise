@@ -1,0 +1,26 @@
+# Insecure development configuration - DO NOT USE IN PRODUCTION.
+
+server:
+  cookie_secure: false
+  jwt_signing_secret: AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+
+encryption:
+  type: "aes-gcm-256"
+  key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+
+auth:
+  issuer: "http://localhost:5556/dex"
+  client_id: "rise-backend"
+  client_secret: rise-backend-secret
+  admin_users:
+    - "admin@example.com"
+
+registry:
+  type: "oci-client-auth"
+  registry_url: "rise-registry:5000"      # Internal URL for deployment controllers
+  namespace: "rise-apps"
+  client_registry_url: "localhost:5000"   # Client-facing URL for CLI push operations
+
+deployment_controller:
+  auth_backend_url: "http://172.17.0.1:3000"  # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host)
+  auth_signin_url: "http://localhost:3000"  # Domain for user-facing OAuth redirects

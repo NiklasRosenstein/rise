@@ -23,33 +23,35 @@ server:
   port: 3000
   public_url: "http://localhost:3000"
   cookie_domain: ""  # Empty = current host only (good for localhost)
-  cookie_secure: false  # Set to true for HTTPS in production
-
-  # JWT signing secret for ingress authentication (REQUIRED)
-  # Generate with: openssl rand -base64 32
-  # Use environment variable substitution to keep secrets out of git
-  jwt_signing_secret: "${RISE_JWT_SIGNING_SECRET:-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=}"
-
-  # JWT claims to include from IdP token (optional, default shown)
+  cookie_secure: true
+  jwt_signing_secret: "${RISE_JWT_SIGNING_SECRET}" # Generate with openssl rand -base64 32
   jwt_claims: ["sub", "email", "name"]
-
-auth:
-  issuer: "http://localhost:5556/dex"
-  client_id: "rise-backend"
-  # Use environment variable substitution for secrets
-  client_secret: "${RISE_AUTH_CLIENT_SECRET:-rise-backend-secret}"
-  # List of admin user emails (have full permissions on all resources)
-  admin_users:
-    - "admin@example.com"
-  # Optional: Custom OAuth2 endpoints (if not set, will be discovered from issuer/.well-known/openid-configuration)
-  # For Entra ID/Azure AD, use:
-  # authorize_url: "https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/authorize"
-  # token_url: "https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token"
 
 database:
   # DATABASE_URL environment variable is always used if set
   # No ${} substitution needed - this is a special case for compatibility
   url: ""
+
+# encryption:
+#   type: "aws-kms"
+#   region: "us-east-1"
+#   key_id: "arn:aws:kms:us-east-1:123456789012:key/abcd-1234-5678-90ef-ghij"
+#   # Backend uses its existing IAM identity (IRSA/instance profile)
+#   # Ensure the backend role has kms:Encrypt and kms:Decrypt permissions
+#   # Optional: static credentials (development only)
+#   # access_key_id: "AKIAIOSFODNN7EXAMPLE"
+#   # secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
+
+# auth:
+#   issuer: "http://localhost:5556/dex"
+#   client_id: "rise-backend"
+#   client_secret: "${RISE_AUTH_CLIENT_SECRET}"
+#   admin_users:
+#     - "admin@example.com"
+#   # Optional: Custom OAuth2 endpoints (if not set, will be discovered from issuer/.well-known/openid-configuration)
+#   # For Entra ID/Azure AD, use:
+#   authorize_url: "https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/authorize"
+#   token_url: "https://login.microsoftonline.com/{tenant-id}/oauth2/v2.0/token"
 
 # Controller loop intervals (in seconds) - optional, all have defaults
 controller: {}
@@ -66,10 +68,6 @@ controller: {}
   # How often to refresh Kubernetes image pull secrets (default: 3600)
   # secret_refresh_interval_secs: 3600
 
-# Container registry configuration (optional)
-# Uncomment and configure ONE of the following registry providers:
-
-# AWS ECR Example:
 # registry:
 #   type: "ecr"
 #   region: "us-east-1"
@@ -81,33 +79,6 @@ controller: {}
 #   push_role_arn: "arn:aws:iam::123456789012:role/rise-backend-ecr-push"
 #   auto_remove: true
 
-# OCI registry for local development (client-side auth via docker login)
-registry:
-  type: "oci-client-auth"
-  registry_url: "rise-registry:5000"      # Internal URL for deployment controllers
-  namespace: "rise-apps"
-  client_registry_url: "localhost:5000"   # Client-facing URL for CLI push operations
-
-# Encryption configuration (optional)
-# Required if you want to encrypt secret environment variables
-# Uncomment and configure ONE of the following encryption providers:
-
-# Local encryption with AES-256-GCM (good for development and single-server deployments)
-# encryption:
-#   type: "aes-gcm-256"
-#   key: "QUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUFBQUE=" # TODO: Generate with: openssl rand -base64 32
-
-# AWS KMS encryption (recommended for production)
-# encryption:
-#   type: "aws-kms"
-#   region: "us-east-1"
-#   key_id: "arn:aws:kms:us-east-1:123456789012:key/abcd-1234-5678-90ef-ghij"
-#   # Backend uses its existing IAM identity (IRSA/instance profile)
-#   # Ensure the backend role has kms:Encrypt and kms:Decrypt permissions
-#   # Optional: static credentials (development only)
-#   # access_key_id: "AKIAIOSFODNN7EXAMPLE"
-#   # secret_access_key: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
-
 # Deployment controller configuration
 # Default configuration is set up for local Minikube development
 # For local development with Minikube, run: mise minikube:launch
@@ -117,39 +88,28 @@ deployment_controller:
   production_ingress_url_template: "{project_name}.apps.rise.dev"
   staging_ingress_url_template: "{project_name}-{deployment_group}.preview.rise.dev"
   namespace_format: "rise-{project_name}"
-  auth_backend_url: "http://172.17.0.1:3000"  # Docker bridge IP for Minikube to reach host
-  auth_signin_url: "http://localhost:3000"  # Local development URL
 
-# Production configuration example:
-# IMPORTANT: For ingress authentication to work, the backend API must be accessible
-# on the same parent domain as your apps.
-#
-# deployment_controller:
-#   type: "kubernetes"
-#   ingress_class: "nginx"
-#   production_ingress_url_template: "{project_name}.apps.rise.dev"
-#   staging_ingress_url_template: "{project_name}-{deployment_group}.preview.rise.dev"
-#   namespace_format: "rise-{project_name}"
-#   auth_backend_url: "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL
-#   auth_signin_url: "https://rise.dev"  # Public API URL
-#
-#   # Optional: Annotations to apply to all managed namespaces
-#   namespace_annotations:
-#     company.com/team: "platform"
-#     cost-center: "engineering"
-#
-#   # Optional: Ingress annotations (e.g., for cert-manager TLS certificates)
-#   ingress_annotations:
-#     cert-manager.io/cluster-issuer: "letsencrypt-prod"
-#
-#   # Optional: TLS secret name for ingress certificates
-#   ingress_tls_secret_name: "rise-apps-tls"
-#
-#   # Optional: TLS mode for custom domains (default: "per-domain")
-#   # - "shared": All hosts (primary + custom domains) use ingress_tls_secret_name
-#   # - "per-domain": Each custom domain uses tls-{domain} secret (for cert-manager)
-#   custom_domain_tls_mode: "per-domain"
-#
-#   # Optional: Node selector for pod placement
-#   node_selector:
-#     kubernetes.io/arch: "amd64"
+  # Example for Kubernetes deployment of Rise in production:
+  # auth_backend_url: "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL
+  # auth_signin_url: "https://rise.dev"  # Public API URL
+
+  # Optional: Annotations to apply to all managed namespaces
+  # namespace_annotations:
+  #   company.com/team: "platform"
+  #   cost-center: "engineering"
+
+  # Optional: Ingress annotations (e.g., for cert-manager TLS certificates)
+  # ingress_annotations:
+  #   cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+  # Optional: TLS secret name for ingress certificates
+  # ingress_tls_secret_name: "rise-apps-tls"
+
+  # Optional: TLS mode for custom domains (default: "per-domain")
+  # - "shared": All hosts (primary + custom domains) use ingress_tls_secret_name
+  # - "per-domain": Each custom domain uses tls-{domain} secret (for cert-manager)
+  # custom_domain_tls_mode: "per-domain"
+
+  # Optional: Node selector for pod placement
+  # node_selector:
+  #   kubernetes.io/arch: "amd64"
