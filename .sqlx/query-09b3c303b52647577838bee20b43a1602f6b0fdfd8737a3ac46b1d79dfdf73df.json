@@ -30,10 +30,10 @@
       ]
     },
     "nullable": [
+      null,
       true,
-      false,
-      false,
-      false
+      true,
+      true
     ]
   },
   "hash": "09b3c303b52647577838bee20b43a1602f6b0fdfd8737a3ac46b1d79dfdf73df"

@@ -157,6 +157,10 @@ fn default_ingress_class() -> String {
     "nginx".to_string()
 }
 
+fn default_ingress_schema() -> String {
+    "https".to_string()
+}
+
 fn default_namespace_format() -> String {
     "rise-{project_name}".to_string()
 }
@@ -218,6 +222,13 @@ pub enum DeploymentControllerSettings {
         /// If not set, URLs use standard ports (80 for HTTP, 443 for HTTPS)
         #[serde(default)]
         ingress_port: Option<u16>,
+
+        /// URL scheme for generated ingress URLs
+        /// Used to specify whether URLs should use "http" or "https"
+        /// Example: "http" → "http://myapp.apps.rise.local"
+        /// Defaults to "https"
+        #[serde(default = "default_ingress_schema")]
+        ingress_schema: String,
 
         /// Backend URL for Nginx auth subrequests (internal cluster URL)
         /// Example: "http://rise-backend.default.svc.cluster.local:3000"

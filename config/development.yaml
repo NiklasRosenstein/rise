@@ -27,3 +27,4 @@ deployment_controller:
   ingress_annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
   ingress_port: 8080 # `mise minikube:launch` port-forwards the ingress controller to this port
+  ingress_schema: "http" # Use http for local development (defaults to https in production)

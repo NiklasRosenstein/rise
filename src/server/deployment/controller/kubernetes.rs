@@ -101,6 +101,7 @@ pub struct KubernetesControllerConfig {
     pub production_ingress_url_template: String,
     pub staging_ingress_url_template: Option<String>,
     pub ingress_port: Option<u16>,
+    pub ingress_schema: String,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub auth_backend_url: String,
     pub auth_signin_url: String,
@@ -119,6 +120,7 @@ pub struct KubernetesController {
     production_ingress_url_template: String,
     staging_ingress_url_template: Option<String>,
     ingress_port: Option<u16>,
+    ingress_schema: String,
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     auth_backend_url: String,
     auth_signin_url: String,
@@ -143,6 +145,7 @@ impl KubernetesController {
             production_ingress_url_template: config.production_ingress_url_template,
             staging_ingress_url_template: config.staging_ingress_url_template,
             ingress_port: config.ingress_port,
+            ingress_schema: config.ingress_schema,
             registry_provider: config.registry_provider,
             auth_backend_url: config.auth_backend_url,
             auth_signin_url: config.auth_signin_url,
@@ -2158,21 +2161,23 @@ impl DeploymentBackend for KubernetesController {
         project: &Project,
     ) -> Result<DeploymentUrls> {
         // Calculate primary URL from templates
-        let primary_url = self.full_ingress_url(project, deployment);
+        let primary_url_host = self.full_ingress_url(project, deployment);
+        let primary_url = format!("{}://{}", self.ingress_schema, primary_url_host);
 
         // Fetch custom domains from database
         let custom_domains =
             crate::db::custom_domains::list_project_custom_domains(&self.state.db_pool, project.id)
                 .await?;
 
-        // Build custom domain URLs
+        // Build custom domain URLs with schema
         let mut custom_domain_urls = Vec::new();
         for domain in custom_domains {
-            let url = if let Some(port) = self.ingress_port {
+            let url_host = if let Some(port) = self.ingress_port {
                 format!("{}:{}", domain.domain, port)
             } else {
                 domain.domain
             };
+            let url = format!("{}://{}", self.ingress_schema, url_host);
             custom_domain_urls.push(url);
         }
 
@@ -2424,6 +2429,7 @@ mod tests {
             production_ingress_url_template: "{project_name}.test.local".to_string(),
             staging_ingress_url_template: None,
             ingress_port: None,
+            ingress_schema: "https".to_string(),
             registry_provider: None,
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
