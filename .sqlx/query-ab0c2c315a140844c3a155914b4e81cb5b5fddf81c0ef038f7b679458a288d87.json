@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, rolled_back_from_deployment_id, deployment_group, expires_at, http_port)\n        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n                        deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile,\n            created_at, updated_at\n        ",
+  "query": "\n            SELECT id, deployment_id, project_id, created_by_id,\n                   status as \"status: DeploymentStatus\",\n                   deployment_group, expires_at, error_message, completed_at,\n                   build_logs, controller_metadata,\n                   image, image_digest, rolled_back_from_deployment_id, http_port, needs_reconcile, is_active,\n                   created_at, updated_at,\n                   termination_reason as \"termination_reason: _\"\n            FROM deployments\n            WHERE status IN ('Pending', 'Building', 'Pushing')\n              AND created_at < $1\n              AND NOT is_protected(status)\n            LIMIT 50\n            ",
   "describe": {
     "columns": [
       {
@@ -40,6 +40,66 @@
       },
       {
         "ordinal": 7,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 8,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "build_logs",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "controller_metadata",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "image",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "image_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "rolled_back_from_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 14,
+        "name": "http_port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "needs_reconcile",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -55,75 +115,11 @@
             }
           }
         }
-      },
-      {
-        "ordinal": 8,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 9,
-        "name": "error_message",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 10,
-        "name": "build_logs",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 11,
-        "name": "controller_metadata: serde_json::Value",
-        "type_info": "Jsonb"
-      },
-      {
-        "ordinal": 12,
-        "name": "image",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 13,
-        "name": "image_digest",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 14,
-        "name": "rolled_back_from_deployment_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 15,
-        "name": "http_port",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 16,
-        "name": "needs_reconcile",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 17,
-        "name": "created_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 18,
-        "name": "updated_at",
-        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Uuid",
-        "Uuid",
-        "Text",
-        "Text",
-        "Text",
-        "Uuid",
-        "Text",
-        "Timestamptz",
-        "Int4"
+        "Timestamptz"
       ]
     },
     "nullable": [
@@ -141,12 +137,13 @@
       true,
       true,
       true,
-      true,
       false,
       false,
       false,
-      false
+      false,
+      false,
+      true
     ]
   },
-  "hash": "762dd269ac1992681325ce3e44d56c7287be39b320153f6e1fafa0dcdfc108ea"
+  "hash": "ab0c2c315a140844c3a155914b4e81cb5b5fddf81c0ef038f7b679458a288d87"
 }

@@ -292,6 +292,7 @@ async fn convert_deployment(
         custom_domain_urls,
         image,
         image_digest: deployment.image_digest,
+        is_active: deployment.is_active,
         created: deployment.created_at.to_rfc3339(),
         updated: deployment.updated_at.to_rfc3339(),
     }
@@ -429,6 +430,7 @@ pub async fn create_deployment(
                 deployment_group: &payload.group,   // deployment_group
                 expires_at,                         // expires_at
                 http_port: payload.http_port as i32, // http_port
+                is_active: false,                   // Deployments start as inactive
             },
         )
         .await
@@ -514,6 +516,7 @@ pub async fn create_deployment(
                 deployment_group: &payload.group, // deployment_group
                 expires_at,         // expires_at
                 http_port: payload.http_port as i32, // http_port
+                is_active: false,   // Deployments start as inactive
             },
         )
         .await
@@ -1293,6 +1296,7 @@ pub async fn rollback_deployment(
             deployment_group: &source_deployment.deployment_group,      // Copy group from source
             expires_at: None, // expires_at - rollbacks don't inherit expiration
             http_port: source_deployment.http_port, // Copy http_port from source
+            is_active: false, // Rollback deployments also start as inactive
         },
     )
     .await

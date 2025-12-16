@@ -1788,6 +1788,29 @@ impl DeploymentBackend for KubernetesController {
                         Err(e) => return Err(e.into()),
                     }
 
+                    // Mark this deployment as active in the database
+                    // This automatically unmarks other deployments in same (project, group)
+                    crate::db::deployments::mark_as_active(
+                        &self.state.db_pool,
+                        deployment.id,
+                        deployment.project_id,
+                        &deployment.deployment_group,
+                    )
+                    .await
+                    .map_err(|e| {
+                        tracing::error!(
+                            deployment_id = %deployment.deployment_id,
+                            error = %e,
+                            "Failed to mark deployment as active in database"
+                        );
+                        e
+                    })?;
+
+                    info!(
+                        deployment_id = %deployment.deployment_id,
+                        "Marked deployment as active in database"
+                    );
+
                     metadata.reconcile_phase = ReconcilePhase::Completed;
 
                     return Ok(ReconcileResult {

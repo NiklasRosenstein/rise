@@ -18,6 +18,7 @@ pub struct CreateDeploymentParams<'a> {
     pub deployment_group: &'a str,
     pub expires_at: Option<DateTime<Utc>>,
     pub http_port: i32,
+    pub is_active: bool,
 }
 
 /// List deployments for a project
@@ -32,7 +33,7 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Dep
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -64,7 +65,7 @@ pub async fn get_deployments_batch(
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -96,7 +97,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Deployment>> {
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -126,7 +127,7 @@ pub async fn find_by_deployment_id(
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -149,8 +150,8 @@ pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result
     let deployment = sqlx::query_as!(
         Deployment,
         r#"
-        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, rolled_back_from_deployment_id, deployment_group, expires_at, http_port)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, rolled_back_from_deployment_id, deployment_group, expires_at, http_port, is_active)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
@@ -159,7 +160,7 @@ pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         "#,
         params.deployment_id,
@@ -171,7 +172,8 @@ pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result
         params.rolled_back_from_deployment_id,
         params.deployment_group,
         params.expires_at,
-        params.http_port
+        params.http_port,
+        params.is_active
     )
     .fetch_one(pool)
     .await
@@ -200,7 +202,7 @@ pub async fn update_status(
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -232,7 +234,7 @@ pub async fn update_status(
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -272,7 +274,7 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -300,7 +302,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -332,7 +334,7 @@ pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<V
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -368,7 +370,7 @@ pub async fn update_controller_metadata(
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -413,7 +415,7 @@ pub async fn mark_cancelled(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         "#,
         id
@@ -446,7 +448,7 @@ pub async fn mark_stopped(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         "#,
         id
@@ -479,7 +481,7 @@ pub async fn mark_superseded(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         "#,
         id
@@ -512,7 +514,7 @@ pub async fn mark_expired(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         "#,
         id
@@ -544,7 +546,7 @@ pub async fn mark_healthy(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         "#,
         id
@@ -576,7 +578,7 @@ pub async fn mark_unhealthy(pool: &PgPool, id: Uuid, reason: String) -> Result<D
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         "#,
         id,
@@ -612,7 +614,7 @@ pub async fn mark_terminating(
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         "#,
         id,
@@ -644,7 +646,7 @@ pub async fn mark_cancelling(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         "#,
         id
@@ -702,7 +704,7 @@ pub async fn find_needing_reconcile(pool: &PgPool, limit: i64) -> Result<Vec<Dep
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         FROM deployments
         WHERE needs_reconcile = TRUE
@@ -738,7 +740,7 @@ pub async fn find_active_for_project_and_group(
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -774,7 +776,7 @@ pub async fn find_non_terminal_for_project_and_group(
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -810,7 +812,7 @@ pub async fn find_last_for_project_and_group(
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -842,7 +844,7 @@ pub async fn find_expired(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> 
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
-            http_port, needs_reconcile,
+            http_port, needs_reconcile, is_active,
             created_at, updated_at
         FROM deployments
         WHERE expires_at IS NOT NULL
@@ -883,7 +885,7 @@ pub async fn list_for_project_and_group(
                 completed_at, error_message, build_logs,
                 controller_metadata as "controller_metadata: serde_json::Value",
                 image, image_digest, rolled_back_from_deployment_id,
-                http_port, needs_reconcile,
+                http_port, needs_reconcile, is_active,
                 created_at, updated_at
             FROM deployments
             WHERE project_id = $1 AND deployment_group = $2
@@ -910,7 +912,7 @@ pub async fn list_for_project_and_group(
                 completed_at, error_message, build_logs,
                 controller_metadata as "controller_metadata: serde_json::Value",
                 image, image_digest, rolled_back_from_deployment_id,
-                http_port, needs_reconcile,
+                http_port, needs_reconcile, is_active,
                 created_at, updated_at
             FROM deployments
             WHERE project_id = $1
@@ -990,6 +992,92 @@ pub async fn get_all_deployment_groups(pool: &PgPool, project_id: Uuid) -> Resul
     .await?;
 
     Ok(groups)
+}
+
+/// Mark a deployment as active, automatically unmarking others in same (project, group)
+///
+/// The database constraint ensures only one deployment can be active per (project_id, deployment_group).
+/// This function uses a transaction to:
+/// 1. Unmark all other deployments in the same (project, group) as inactive
+/// 2. Mark the target deployment as active
+pub async fn mark_as_active(
+    pool: &PgPool,
+    deployment_id: Uuid,
+    project_id: Uuid,
+    deployment_group: &str,
+) -> Result<()> {
+    let mut tx = pool.begin().await?;
+
+    // First, unmark all deployments in this project/group as inactive
+    sqlx::query!(
+        "UPDATE deployments
+         SET is_active = FALSE, updated_at = NOW()
+         WHERE project_id = $1 AND deployment_group = $2 AND is_active = TRUE",
+        project_id,
+        deployment_group
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    // Then mark the target deployment as active
+    sqlx::query!(
+        "UPDATE deployments
+         SET is_active = TRUE, updated_at = NOW()
+         WHERE id = $1",
+        deployment_id
+    )
+    .execute(&mut *tx)
+    .await?;
+
+    tx.commit().await?;
+
+    Ok(())
+}
+
+/// Unmark a deployment as active
+#[allow(dead_code)]
+pub async fn mark_as_inactive(pool: &PgPool, deployment_id: Uuid) -> Result<()> {
+    sqlx::query!(
+        "UPDATE deployments
+         SET is_active = FALSE, updated_at = NOW()
+         WHERE id = $1",
+        deployment_id
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+/// Get all active deployments for a project across all deployment groups
+#[allow(dead_code)]
+pub async fn get_active_deployments_for_project(
+    pool: &PgPool,
+    project_id: Uuid,
+) -> Result<Vec<Deployment>> {
+    let deployments = sqlx::query_as!(
+        Deployment,
+        r#"
+        SELECT
+            id, deployment_id, project_id, created_by_id,
+            status as "status: DeploymentStatus",
+            deployment_group, expires_at,
+            completed_at, error_message, build_logs,
+            controller_metadata as "controller_metadata: serde_json::Value",
+            image, image_digest, rolled_back_from_deployment_id,
+            http_port, needs_reconcile, is_active,
+            termination_reason as "termination_reason: _",
+            created_at, updated_at
+        FROM deployments
+        WHERE project_id = $1 AND is_active = TRUE
+        ORDER BY deployment_group, created_at DESC
+        "#,
+        project_id
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(deployments)
 }
 
 #[cfg(test)]

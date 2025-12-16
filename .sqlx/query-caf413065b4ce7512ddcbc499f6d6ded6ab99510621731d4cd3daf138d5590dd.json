@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, deployment_id, project_id, created_by_id,\n                status as \"status: DeploymentStatus\",\n                deployment_group, expires_at,\n                termination_reason as \"termination_reason: _\",\n                completed_at, error_message, build_logs,\n                controller_metadata as \"controller_metadata: serde_json::Value\",\n                image, image_digest, rolled_back_from_deployment_id,\n                http_port, needs_reconcile,\n                created_at, updated_at\n            FROM deployments\n            WHERE project_id = $1 AND deployment_group = $2\n            ORDER BY created_at DESC\n            LIMIT $3 OFFSET $4\n            ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n                        deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n          AND deployment_group = $2\n          AND NOT is_terminal(status)\n        ORDER BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -103,11 +103,16 @@
       },
       {
         "ordinal": 17,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 18,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -115,9 +120,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
-        "Int8",
-        "Int8"
+        "Text"
       ]
     },
     "nullable": [
@@ -139,8 +142,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "3dd582ae7d5d6cb8c1cbd4098913d823afff90f39daff5473a76ba6d20b96a55"
+  "hash": "caf413065b4ce7512ddcbc499f6d6ded6ab99510621731d4cd3daf138d5590dd"
 }

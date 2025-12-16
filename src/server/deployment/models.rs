@@ -80,6 +80,8 @@ pub struct Deployment {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_digest: Option<String>,
     #[serde(default)]
+    pub is_active: bool,
+    #[serde(default)]
     pub created: String,
     #[serde(default)]
     pub updated: String,

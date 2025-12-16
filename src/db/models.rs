@@ -145,6 +145,7 @@ pub struct Deployment {
     pub rolled_back_from_deployment_id: Option<Uuid>,
     pub http_port: i32,
     pub needs_reconcile: bool,
+    pub is_active: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
