@@ -881,6 +881,7 @@ impl KubernetesController {
     async fn load_env_vars(
         &self,
         deployment_id: uuid::Uuid,
+        http_port: u16,
     ) -> Result<Vec<k8s_openapi::api::core::v1::EnvVar>> {
         use k8s_openapi::api::core::v1::EnvVar;
 
@@ -893,14 +894,26 @@ impl KubernetesController {
         .await?;
 
         // Format as Kubernetes EnvVar objects
-        Ok(env_vars
+        let mut k8s_env_vars: Vec<EnvVar> = env_vars
             .into_iter()
             .map(|(key, value)| EnvVar {
                 name: key,
                 value: Some(value),
                 ..Default::default()
             })
-            .collect())
+            .collect();
+
+        // Always inject PORT environment variable using http_port (with default 8080)
+        // Only add if not already set by user
+        if !k8s_env_vars.iter().any(|env| env.name == "PORT") {
+            k8s_env_vars.push(EnvVar {
+                name: "PORT".to_string(),
+                value: Some(http_port.to_string()),
+                ..Default::default()
+            });
+        }
+
+        Ok(k8s_env_vars)
     }
 
     /// Create Deployment resource
@@ -1000,11 +1013,7 @@ impl KubernetesController {
                                 ..Default::default()
                             }]),
                             image_pull_policy: Some("Always".to_string()),
-                            env: if env_vars.is_empty() {
-                                None
-                            } else {
-                                Some(env_vars)
-                            },
+                            env: Some(env_vars), // Always set env vars (at minimum, PORT is injected)
                             ..Default::default()
                         }],
                         node_selector: if self.node_selector.is_empty() {
@@ -1569,7 +1578,9 @@ impl DeploymentBackend for KubernetesController {
                     }
 
                     // Load and decrypt environment variables
-                    let env_vars = self.load_env_vars(deployment.id).await?;
+                    let env_vars = self
+                        .load_env_vars(deployment.id, metadata.http_port)
+                        .await?;
 
                     // deploy_name already calculated above for migration check
                     let deploy_api: Api<K8sDeployment> =
@@ -1923,7 +1934,9 @@ impl DeploymentBackend for KubernetesController {
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
                     // Load and decrypt environment variables for drift detection
-                    let env_vars = self.load_env_vars(deployment.id).await?;
+                    let env_vars = self
+                        .load_env_vars(deployment.id, metadata.http_port)
+                        .await?;
 
                     // 1. Re-apply Service to correct any drift
                     let service_name = Self::service_name(project, deployment);

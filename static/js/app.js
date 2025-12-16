@@ -146,7 +146,7 @@ function GettingStartedModal({ isOpen, onClose, publicUrl, version }) {
 
                     <div>
                         <h4 className="text-sm font-semibold text-gray-400 mb-2"># Deploy a sample project</h4>
-                        <pre className="text-sm text-indigo-300 overflow-x-auto whitespace-pre-wrap">$ git clone https://github.com/GoogleCloudPlatform/buildpack-samples{'\n'}$ rise project create my-project # Pick a unique project name{'\n'}$ rise env set my-project PORT 8080{'\n'}$ rise deployment create my-project buildpack-samples/sample-python/</pre>
+                        <pre className="text-sm text-indigo-300 overflow-x-auto whitespace-pre-wrap">$ git clone https://github.com/GoogleCloudPlatform/buildpack-samples{'\n'}$ rise project create my-project # Pick a unique project name{'\n'}$ rise deployment create my-project buildpack-samples/sample-python/</pre>
                     </div>
                 </div>
 
