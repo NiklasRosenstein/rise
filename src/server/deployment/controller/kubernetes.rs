@@ -35,6 +35,9 @@ const LABEL_DEPLOYMENT_GROUP: &str = "rise.dev/deployment-group";
 const LABEL_DEPLOYMENT_ID: &str = "rise.dev/deployment-id";
 const ANNOTATION_LAST_REFRESH: &str = "rise.dev/last-refresh";
 
+/// Image pull secret name used for private registry authentication
+const IMAGE_PULL_SECRET_NAME: &str = "rise-registry-creds";
+
 /// Finalizer name for Kubernetes namespaces
 /// Added when a namespace is created for a project, removed when namespace cleanup is complete.
 pub const KUBERNETES_NAMESPACE_FINALIZER: &str = "kubernetes.rise.dev/namespace";
@@ -344,7 +347,7 @@ impl KubernetesController {
         let secret_api: Api<Secret> = Api::namespaced(self.kube_client.clone(), namespace);
 
         // Check if secret exists and get its last refresh time
-        match secret_api.get("rise-registry-creds").await {
+        match secret_api.get(IMAGE_PULL_SECRET_NAME).await {
             Ok(existing_secret) => {
                 // Check annotation for last refresh time
                 if let Some(annotations) = &existing_secret.metadata.annotations {
@@ -389,14 +392,18 @@ impl KubernetesController {
         let (username, password) = provider.get_pull_credentials().await?;
 
         let secret = self.create_dockerconfigjson_secret(
-            "rise-registry-creds",
+            IMAGE_PULL_SECRET_NAME,
             provider.registry_host(),
             &username,
             &password,
         )?;
 
         secret_api
-            .replace("rise-registry-creds", &PostParams::default(), &secret)
+            .patch(
+                IMAGE_PULL_SECRET_NAME,
+                &PatchParams::apply("rise-controller"),
+                &Patch::Apply(&secret),
+            )
             .await?;
 
         info!(
@@ -930,7 +937,7 @@ impl KubernetesController {
                     }),
                     spec: Some(PodSpec {
                         image_pull_secrets: Some(vec![LocalObjectReference {
-                            name: "rise-registry-creds".to_string(),
+                            name: IMAGE_PULL_SECRET_NAME.to_string(),
                         }]),
                         containers: vec![Container {
                             name: "app".to_string(),
@@ -1355,64 +1362,31 @@ impl DeploymentBackend for KubernetesController {
                             Api::namespaced(self.kube_client.clone(), namespace);
 
                         let secret = self.create_dockerconfigjson_secret(
-                            "rise-registry-creds",
+                            IMAGE_PULL_SECRET_NAME,
                             provider.registry_host(),
                             &username,
                             &password,
                         )?;
 
-                        // Check if secret exists, create or replace accordingly
-                        match secret_api.get("rise-registry-creds").await {
+                        // Use server-side apply to upsert the secret (creates or updates as needed)
+                        match secret_api
+                            .patch(
+                                IMAGE_PULL_SECRET_NAME,
+                                &PatchParams::apply("rise-controller"),
+                                &Patch::Apply(&secret),
+                            )
+                            .await
+                        {
                             Ok(_) => {
-                                // Secret exists, replace it
-                                match secret_api
-                                    .replace("rise-registry-creds", &PostParams::default(), &secret)
-                                    .await
-                                {
-                                    Ok(_) => {
-                                        info!(
-                                            project = project.name,
-                                            namespace = namespace,
-                                            "ImagePullSecret replaced (any drift corrected)"
-                                        );
-                                    }
-                                    Err(e) if is_namespace_not_found_error(&e) => {
-                                        warn!(
-                                            "Namespace missing during ImagePullSecret replace, resetting to CreatingNamespace"
-                                        );
-                                        metadata.reconcile_phase =
-                                            ReconcilePhase::CreatingNamespace;
-                                        metadata.namespace = None;
-                                        continue;
-                                    }
-                                    Err(e) => return Err(e.into()),
-                                }
-                            }
-                            Err(kube::Error::Api(ae)) if ae.code == 404 => {
-                                // Secret doesn't exist, create it
-                                match secret_api.create(&PostParams::default(), &secret).await {
-                                    Ok(_) => {
-                                        info!(
-                                            project = project.name,
-                                            namespace = namespace,
-                                            "ImagePullSecret created"
-                                        );
-                                    }
-                                    Err(e) if is_namespace_not_found_error(&e) => {
-                                        warn!(
-                                            "Namespace missing during ImagePullSecret create, resetting to CreatingNamespace"
-                                        );
-                                        metadata.reconcile_phase =
-                                            ReconcilePhase::CreatingNamespace;
-                                        metadata.namespace = None;
-                                        continue;
-                                    }
-                                    Err(e) => return Err(e.into()),
-                                }
+                                info!(
+                                    project = project.name,
+                                    namespace = namespace,
+                                    "ImagePullSecret applied (created or updated)"
+                                );
                             }
                             Err(e) if is_namespace_not_found_error(&e) => {
                                 warn!(
-                                    "Namespace missing during ImagePullSecret get, resetting to CreatingNamespace"
+                                    "Namespace missing during ImagePullSecret apply, resetting to CreatingNamespace"
                                 );
                                 metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
                                 metadata.namespace = None;
