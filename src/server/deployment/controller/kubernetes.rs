@@ -1826,13 +1826,7 @@ impl DeploymentBackend for KubernetesController {
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&svc);
                     match svc_api.patch(&service_name, &patch_params, &patch).await {
-                        Ok(_) => {
-                            debug!(
-                                project = project.name,
-                                deployment_id = %deployment.id,
-                                "Service drift check completed"
-                            );
-                        }
+                        Ok(_) => {}
                         Err(e) if is_namespace_not_found_error(&e) => {
                             warn!("Namespace missing during Completed phase (Service), resetting to CreatingNamespace");
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
@@ -1869,14 +1863,7 @@ impl DeploymentBackend for KubernetesController {
                         .patch(&ingress_name, &patch_params, &patch)
                         .await
                     {
-                        Ok(patched_ingress) => {
-                            // Log the result to confirm it was applied
-                            if let Some(ref spec) = patched_ingress.spec {
-                                if let Some(ref rules) = spec.rules {
-                                    debug!("Patched Ingress now has {} rules", rules.len());
-                                }
-                            }
-                        }
+                        Ok(patched_ingress) => {}
                         Err(e) if is_namespace_not_found_error(&e) => {
                             warn!("Namespace missing during Completed phase (Ingress), resetting to CreatingNamespace");
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
@@ -1957,12 +1944,6 @@ impl DeploymentBackend for KubernetesController {
                                     }
                                     Err(e) => return Err(e.into()),
                                 }
-                            } else {
-                                debug!(
-                                    project = project.name,
-                                    deployment_id = %deployment.id,
-                                    "ReplicaSet drift check completed - no drift detected"
-                                );
                             }
                         }
                         Err(kube::Error::Api(ae)) if ae.code == 404 => {
