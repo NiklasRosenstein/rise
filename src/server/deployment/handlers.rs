@@ -685,19 +685,25 @@ pub async fn update_deployment_status(
         deployment_id, status_copy
     );
 
-    // Calculate deployment URLs dynamically
-    let (primary_url, custom_domain_urls) = match state
-        .deployment_backend
-        .get_deployment_urls(&updated_deployment, &project)
-        .await
-    {
-        Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
-        Err(e) => {
-            error!(
-                "Failed to calculate URLs for deployment {}: {}",
-                deployment_id, e
-            );
-            (None, vec![])
+    // Only calculate URLs for non-terminal deployments that could receive traffic
+    let (primary_url, custom_domain_urls) = if state_machine::is_terminal(&updated_deployment.status) {
+        // Terminal deployments (Failed, Stopped, Cancelled, Superseded, Expired) cannot receive traffic
+        (None, vec![])
+    } else {
+        // Calculate deployment URLs dynamically for active deployments
+        match state
+            .deployment_backend
+            .get_deployment_urls(&updated_deployment, &project)
+            .await
+        {
+            Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
+            Err(e) => {
+                error!(
+                    "Failed to calculate URLs for deployment {}: {}",
+                    deployment_id, e
+                );
+                (None, vec![])
+            }
         }
     };
 
@@ -785,19 +791,25 @@ pub async fn list_deployments(
     for db_deployment in db_deployments {
         let created_by_email = get_creator_email(&state.db_pool, db_deployment.created_by_id).await;
 
-        // Calculate deployment URLs dynamically
-        let (primary_url, custom_domain_urls) = match state
-            .deployment_backend
-            .get_deployment_urls(&db_deployment, &project)
-            .await
-        {
-            Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
-            Err(e) => {
-                error!(
-                    "Failed to calculate URLs for deployment {}: {}",
-                    db_deployment.deployment_id, e
-                );
-                (None, vec![])
+        // Only calculate URLs for non-terminal deployments that could receive traffic
+        let (primary_url, custom_domain_urls) = if state_machine::is_terminal(&db_deployment.status) {
+            // Terminal deployments (Failed, Stopped, Cancelled, Superseded, Expired) cannot receive traffic
+            (None, vec![])
+        } else {
+            // Calculate deployment URLs dynamically for active deployments
+            match state
+                .deployment_backend
+                .get_deployment_urls(&db_deployment, &project)
+                .await
+            {
+                Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
+                Err(e) => {
+                    error!(
+                        "Failed to calculate URLs for deployment {}: {}",
+                        db_deployment.deployment_id, e
+                    );
+                    (None, vec![])
+                }
             }
         };
 
@@ -1129,19 +1141,25 @@ pub async fn get_deployment_by_project(
         )
     })?;
 
-    // Calculate deployment URLs dynamically
-    let (primary_url, custom_domain_urls) = match state
-        .deployment_backend
-        .get_deployment_urls(&deployment, &project)
-        .await
-    {
-        Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
-        Err(e) => {
-            error!(
-                "Failed to calculate URLs for deployment {}: {}",
-                deployment_id, e
-            );
-            (None, vec![])
+    // Only calculate URLs for non-terminal deployments that could receive traffic
+    let (primary_url, custom_domain_urls) = if state_machine::is_terminal(&deployment.status) {
+        // Terminal deployments (Failed, Stopped, Cancelled, Superseded, Expired) cannot receive traffic
+        (None, vec![])
+    } else {
+        // Calculate deployment URLs dynamically for active deployments
+        match state
+            .deployment_backend
+            .get_deployment_urls(&deployment, &project)
+            .await
+        {
+            Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
+            Err(e) => {
+                error!(
+                    "Failed to calculate URLs for deployment {}: {}",
+                    deployment_id, e
+                );
+                (None, vec![])
+            }
         }
     };
 
