@@ -13,6 +13,7 @@ pub(crate) fn build_image_with_buildpacks(
     image_tag: &str,
     builder: Option<&str>,
     buildpacks: &[String],
+    pack_env: &[String],
 ) -> Result<()> {
     // Check if pack CLI is available
     let pack_check = Command::new("pack").arg("version").output();
@@ -47,6 +48,14 @@ pub(crate) fn build_image_with_buildpacks(
         info!("Using buildpacks: {:?}", buildpacks);
         for buildpack in buildpacks {
             cmd.arg("--buildpack").arg(buildpack);
+        }
+    }
+
+    // Add pack environment variables if specified
+    if !pack_env.is_empty() {
+        info!("Using pack environment variables: {:?}", pack_env);
+        for env in pack_env {
+            cmd.arg("--env").arg(env);
         }
     }
 

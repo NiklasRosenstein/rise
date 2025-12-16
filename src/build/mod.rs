@@ -108,6 +108,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 &options.image_tag,
                 options.builder.as_deref(),
                 &options.buildpacks,
+                &options.pack_env,
             )?;
 
             // Pack doesn't support push during build, so push separately if requested

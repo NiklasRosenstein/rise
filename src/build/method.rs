@@ -30,6 +30,10 @@ pub struct BuildArgs {
     #[arg(long = "buildpack", short = 'b')]
     pub buildpacks: Vec<String>,
 
+    /// Environment variables to pass to pack CLI (only for pack backend). Can be specified multiple times.
+    #[arg(long = "pack-env")]
+    pub pack_env: Vec<String>,
+
     /// Container CLI to use (docker or podman)
     #[arg(long)]
     pub container_cli: Option<String>,
@@ -51,6 +55,7 @@ pub(crate) struct BuildOptions {
     pub backend: Option<String>,
     pub builder: Option<String>,
     pub buildpacks: Vec<String>,
+    pub pack_env: Vec<String>,
     pub container_cli: Option<String>,
     pub managed_buildkit: bool,
     pub railpack_embed_ssl_cert: bool,
@@ -71,6 +76,7 @@ impl BuildOptions {
             backend: build_args.backend.clone(),
             builder: build_args.builder.clone(),
             buildpacks: build_args.buildpacks.clone(),
+            pack_env: build_args.pack_env.clone(),
             container_cli: build_args.container_cli.clone(),
             managed_buildkit: build_args.managed_buildkit,
             railpack_embed_ssl_cert: build_args.railpack_embed_ssl_cert,
