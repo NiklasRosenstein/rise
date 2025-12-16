@@ -1837,9 +1837,22 @@ function ProjectDetail({ projectName, initialTab }) {
                         <dd className="mt-1 text-gray-200">{project.visibility}</dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">URL</dt>
-                        <dd className="mt-1">
-                            {project.primary_url ? <a href={project.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{project.primary_url}</a> : '-'}
+                        <dt className="text-gray-400">URLs</dt>
+                        <dd className="mt-1 space-y-1">
+                            {project.primary_url ? (
+                                <>
+                                    <div>
+                                        <a href={project.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{project.primary_url}</a>
+                                    </div>
+                                    {project.custom_domain_urls && project.custom_domain_urls.map((url, idx) => (
+                                        <div key={idx}>
+                                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{url}</a>
+                                        </div>
+                                    ))}
+                                </>
+                            ) : (
+                                <span className="text-gray-500">-</span>
+                            )}
                         </dd>
                     </div>
                     <div>
@@ -2362,9 +2375,22 @@ function DeploymentDetail({ projectName, deploymentId }) {
                         <dd className="mt-1 text-gray-200">{deployment.deployment_group}</dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">URL</dt>
-                        <dd className="mt-1">
-                            {deployment.primary_url ? <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{deployment.primary_url}</a> : '-'}
+                        <dt className="text-gray-400">URLs</dt>
+                        <dd className="mt-1 space-y-1">
+                            {deployment.primary_url ? (
+                                <>
+                                    <div>
+                                        <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{deployment.primary_url}</a>
+                                    </div>
+                                    {deployment.custom_domain_urls && deployment.custom_domain_urls.map((url, idx) => (
+                                        <div key={idx}>
+                                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{url}</a>
+                                        </div>
+                                    ))}
+                                </>
+                            ) : (
+                                <span className="text-gray-500">-</span>
+                            )}
                         </dd>
                     </div>
                     <div>
