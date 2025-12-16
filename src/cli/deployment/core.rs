@@ -177,7 +177,12 @@ pub async fn list_deployments(
     for deployment in deployments {
         // Just use deployment_id in the table, project is already in context
         let deployment_display = deployment.deployment_id.clone();
-        let url = deployment.primary_url.as_deref().unwrap_or("-");
+        // Only show URL for Healthy deployments (inactive deployments can't be connected to)
+        let url = if deployment.status == DeploymentStatus::Healthy {
+            deployment.primary_url.as_deref().unwrap_or("-")
+        } else {
+            "-"
+        };
 
         // Format created time (just show date and time, not full RFC3339)
         let created = if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(&deployment.created) {

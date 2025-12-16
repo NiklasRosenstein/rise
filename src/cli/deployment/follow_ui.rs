@@ -14,7 +14,7 @@ use super::core::{fetch_deployment, parse_duration};
 #[derive(Deserialize)]
 struct ProjectInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
-    project_url: Option<String>,
+    primary_url: Option<String>,
 }
 
 // Legacy Docker controller metadata structures (for backward compatibility with old deployments)
@@ -505,7 +505,7 @@ pub async fn follow_deployment_with_ui(
             if let Ok(project_info) =
                 fetch_project_info(http_client, backend_url, &token, project).await
             {
-                if let Some(url) = project_info.project_url {
+                if let Some(url) = project_info.primary_url {
                     println!();
                     println!("Project URL: {}", url);
                 }
@@ -557,7 +557,7 @@ async fn follow_deployment_simple(
                 if let Ok(project_info) =
                     fetch_project_info(http_client, backend_url, token, project).await
                 {
-                    if let Some(url) = project_info.project_url {
+                    if let Some(url) = project_info.primary_url {
                         println!();
                         println!("Project URL: {}", url);
                     }

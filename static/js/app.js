@@ -331,15 +331,15 @@ function ProjectsList() {
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{owner}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{p.visibility}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                        {p.project_url ? (
+                                        {p.primary_url ? (
                                             <a
-                                                href={p.project_url}
+                                                href={p.primary_url}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
                                                 className="text-indigo-400 hover:text-indigo-300"
                                                 onClick={(e) => e.stopPropagation()}
                                             >
-                                                {p.project_url}
+                                                {p.primary_url}
                                             </a>
                                         ) : '-'}
                                     </td>
@@ -754,7 +754,7 @@ function ActiveDeploymentsSummary({ projectName }) {
                             </div>
                             <div>
                                 <dt className="text-gray-400">URL</dt>
-                                <dd>{latest.deployment_url ? <a href={latest.deployment_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{latest.deployment_url}</a> : '-'}</dd>
+                                <dd>{latest.primary_url ? <a href={latest.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{latest.primary_url}</a> : '-'}</dd>
                             </div>
                             <div>
                                 <dt className="text-gray-400">Created</dt>
@@ -976,9 +976,9 @@ function DeploymentsList({ projectName }) {
                                         <td className="px-6 py-4 whitespace-nowrap text-xs font-mono text-gray-300">{d.image ? d.image.split('/').pop() : '-'}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{d.deployment_group}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                            {d.deployment_url ? (
+                                            {d.primary_url ? (
                                                 <a
-                                                    href={d.deployment_url}
+                                                    href={d.primary_url}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
                                                     className="text-indigo-400 hover:text-indigo-300"
@@ -1839,7 +1839,7 @@ function ProjectDetail({ projectName, initialTab }) {
                     <div>
                         <dt className="text-gray-400">URL</dt>
                         <dd className="mt-1">
-                            {project.project_url ? <a href={project.project_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{project.project_url}</a> : '-'}
+                            {project.primary_url ? <a href={project.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{project.primary_url}</a> : '-'}
                         </dd>
                     </div>
                     <div>
@@ -2359,7 +2359,7 @@ function DeploymentDetail({ projectName, deploymentId }) {
                     <div>
                         <dt className="text-gray-400">URL</dt>
                         <dd className="mt-1">
-                            {deployment.deployment_url ? <a href={deployment.deployment_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{deployment.deployment_url}</a> : '-'}
+                            {deployment.primary_url ? <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{deployment.primary_url}</a> : '-'}
                         </dd>
                     </div>
                     <div>

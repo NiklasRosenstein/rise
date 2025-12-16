@@ -120,9 +120,9 @@ struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     active_deployment_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    deployment_url: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    project_url: Option<String>,
+    primary_url: Option<String>,
+    #[serde(default)]
+    custom_domain_urls: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -154,7 +154,9 @@ struct ProjectWithOwnerInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     owner: Option<OwnerInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    deployment_url: Option<String>,
+    primary_url: Option<String>,
+    #[serde(default)]
+    custom_domain_urls: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     deployment_groups: Option<Vec<String>>,
     #[serde(default)]
@@ -325,11 +327,7 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                 ]);
 
             for project in projects {
-                let url = project
-                    .project_url
-                    .as_deref()
-                    .or(project.deployment_url.as_deref())
-                    .unwrap_or("(not deployed)");
+                let url = project.primary_url.as_deref().unwrap_or("(not deployed)");
 
                 // Format active deployment with status
                 let active_deployment = match (
@@ -412,10 +410,16 @@ pub async fn show_project(
         println!("ID: {}", project.id);
         println!("Status: {}", project.status);
         println!("Visibility: {}", project.visibility);
-        if let Some(url) = project.deployment_url {
-            println!("URL: {}", url);
+        if let Some(url) = project.primary_url {
+            println!("Primary URL: {}", url);
         } else {
-            println!("URL: (not deployed)");
+            println!("Primary URL: (not deployed)");
+        }
+        if !project.custom_domain_urls.is_empty() {
+            println!("Custom Domains:");
+            for domain_url in &project.custom_domain_urls {
+                println!("  - {}", domain_url);
+            }
         }
 
         println!("\nOwner:");
