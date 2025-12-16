@@ -33,6 +33,13 @@ securityContext:
   readOnlyRootFilesystem: true
   allowPrivilegeEscalation: false
 
+# Additional environment variables (key-value pairs)
+env: []
+  # - name: RUST_LOG
+  #   value: "info"
+  # - name: AWS_REGION
+  #   value: "us-east-1"
+
 # Environment variables from ConfigMaps and Secrets
 envFrom: []
   # - secretRef:

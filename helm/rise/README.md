@@ -22,31 +22,36 @@ Create a `values-prod.yaml` file:
 
 ```yaml
 image:
-  repository: ghcr.io/niklasrosenstein/rise-backend
-  tag: "v0.1.0"
+  repository: ghcr.io/niklasrosenstein/rise
+  tag: "0.4.0"
   pullPolicy: IfNotPresent
 
-# Rise configuration in TOML format
-config: |
-  [server]
-  host = "0.0.0.0"
-  port = 3000
-  public_url = "https://rise.example.com"
+# Rise configuration in YAML format
+config:
+  server:
+    host: "0.0.0.0"
+    port: 3000
+    public_url: "https://rise.example.com"
 
-  [auth]
-  issuer = "https://dex.example.com/dex"
-  client_id = "rise-backend"
-  admin_users = ["admin@example.com"]
+  auth:
+    issuer: "https://dex.example.com/dex"
+    client_id: "rise-backend"
+    client_secret: ""  # Provided via envFrom
+    admin_users:
+      - "admin@example.com"
 
-  [registry]
-  type = "oci-client-auth"
-  registry_url = "registry.example.com"
-  namespace = "rise-apps"
+  registry:
+    type: "oci-client-auth"
+    registry_url: "registry.example.com"
+    namespace: "rise-apps"
 
-  [kubernetes]
-  ingress_class = "nginx"
-  production_ingress_url_template = "{project_name}.apps.example.com"
-  staging_ingress_url_template = "{project_name}-{deployment_group}.preview.example.com"
+  kubernetes:
+    ingress_class: "nginx"
+    production_ingress_url_template: "{project_name}.apps.example.com"
+    staging_ingress_url_template: "{project_name}-{deployment_group}.preview.example.com"
+    auth_backend_url: "http://rise.default.svc.cluster.local:3000"
+    auth_signin_url: "https://rise.example.com"
+    namespace_format: "rise-{project_name}"
 
 ingress:
   enabled: true
@@ -132,11 +137,12 @@ The following table lists the configurable parameters of the Rise chart and thei
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `replicaCount` | Number of server replicas | `1` |
-| `image.repository` | Image repository | `ghcr.io/niklasrosenstein/rise-backend` |
+| `image.repository` | Image repository | `ghcr.io/niklasrosenstein/rise` |
 | `image.tag` | Image tag | `""` (uses Chart appVersion) |
 | `image.pullPolicy` | Image pull policy | `IfNotPresent` |
-| `config` | Rise configuration in TOML format | See values.yaml |
-| `envFrom` | List of sources to populate environment variables (required for secrets) | `[]` |
+| `config` | Rise configuration in YAML format | See values.yaml |
+| `env` | Additional environment variables as key-value pairs | `[]` |
+| `envFrom` | List of sources to populate environment variables (ConfigMaps/Secrets) | `[]` |
 | `ingress.enabled` | Enable ingress | `false` |
 
 ### Server
@@ -251,28 +257,28 @@ When Kubernetes deployment is configured (via `config.kubernetes`), Rise require
 
 ### Rise Configuration
 
-The `config` parameter accepts a TOML string that is passed directly to the ConfigMap. This allows for flexible configuration without requiring Helm chart updates for new options.
+The `config` parameter accepts a YAML structure that is converted to YAML and mounted as `/config/default.yaml`. This allows for flexible configuration without requiring Helm chart updates for new options.
 
-**Sensitive Values:** For sensitive configuration like secrets and passwords, use environment variables via `envFrom` instead of hardcoding in TOML. See [Environment Variables from Secrets/ConfigMaps](#environment-variables-from-secretsconfigmaps) below.
+**Sensitive Values:** For sensitive configuration like secrets and passwords, leave them empty in the config and provide them via `envFrom` instead. See [Environment Variables](#environment-variables) below.
 
 Example:
 
 ```yaml
-config: |
-  [server]
-  host = "0.0.0.0"
-  port = 3000
-  public_url = "https://rise.example.com"
+config:
+  server:
+    host: "0.0.0.0"
+    port: 3000
+    public_url: "https://rise.example.com"
 
-  [auth]
-  issuer = "https://dex.example.com/dex"
-  client_id = "rise-backend"
-  client_secret = "${AUTH_CLIENT_SECRET}"
+  auth:
+    issuer: "https://dex.example.com/dex"
+    client_id: "rise-backend"
+    client_secret: ""  # Provided via envFrom
 
-  [registry]
-  type = "oci-client-auth"
-  registry_url = "registry.example.com"
-  namespace = "rise-apps"
+  registry:
+    type: "oci-client-auth"
+    registry_url: "registry.example.com"
+    namespace: "rise-apps"
 ```
 
 ### Dex Configuration
@@ -334,31 +340,42 @@ dex:
 
 **Note:** The `issuerUrl` is automatically injected as the `issuer:` field in the Dex config, so you don't need to specify it in the config YAML.
 
-### Environment Variables from Secrets/ConfigMaps
+### Environment Variables
 
-The `envFrom` parameter allows you to inject environment variables from Secrets and ConfigMaps into the Rise backend container. This is useful for:
+Rise supports two ways to inject environment variables:
 
-- Injecting sensitive configuration that shouldn't be in the TOML config
-- Overriding specific configuration values
-- Managing environment-specific settings
+1. **`env`**: Direct key-value pairs for non-sensitive configuration
+2. **`envFrom`**: Reference Secrets and ConfigMaps for sensitive values
 
-#### How Environment Variable Substitution Works
+#### Direct Environment Variables (`env`)
 
-Rise uses a layered configuration system with environment variable substitution:
+Use the `env` parameter for simple key-value environment variables:
 
-1. Load TOML config from ConfigMap
-2. Replace `${VAR}` and `${VAR:-default}` patterns with environment variable values
-3. Fail startup if required variables are missing
+```yaml
+env:
+  - name: RUST_LOG
+    value: "info"
+  - name: AWS_REGION
+    value: "us-east-1"
+```
+
+#### Environment Variables from Secrets/ConfigMaps (`envFrom`)
+
+The `envFrom` parameter allows you to inject environment variables from Secrets and ConfigMaps. This is the recommended approach for:
+
+- Sensitive configuration (secrets, passwords, API keys)
+- Database connection strings
+- Cloud provider credentials
 
 **Example:**
 
 ```yaml
 # values.yaml
-config: |
-  [auth]
-  issuer = "http://dex:5556/dex"
-  client_id = "rise-backend"
-  client_secret = "${AUTH_CLIENT_SECRET}"
+config:
+  auth:
+    issuer: "http://dex:5556/dex"
+    client_id: "rise-backend"
+    client_secret: ""  # Provided via environment variable
 
 envFrom:
   - secretRef:
@@ -371,7 +388,7 @@ kubectl create secret generic rise-secrets \
   --from-literal=AUTH_CLIENT_SECRET=your-actual-secret
 ```
 
-The configuration substitutes `${AUTH_CLIENT_SECRET}` with the value from the environment variable.
+The backend reads `AUTH_CLIENT_SECRET` from the environment and uses it for the auth configuration.
 
 **Example: Using a Secret for AWS credentials**
 
@@ -409,7 +426,7 @@ envFrom:
       name: rise-overrides
 ```
 
-**Note:** Environment variables set via `envFrom` are available for substitution in TOML configuration using `${VAR_NAME}` syntax.
+**Note:** The Rise backend automatically reads certain environment variables for sensitive configuration. Common examples include `DATABASE_URL`, `AUTH_CLIENT_SECRET`, `AWS_ACCESS_KEY_ID`, and `AWS_SECRET_ACCESS_KEY`.
 
 ## Upgrading
 
