@@ -279,6 +279,9 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
         },
     )?);
 
+    // Test Kubernetes API connection before proceeding
+    backend.test_connection().await?;
+
     let controller = Arc::new(deployment::controller::DeploymentController::new(
         Arc::new(controller_state),
         backend.clone(),

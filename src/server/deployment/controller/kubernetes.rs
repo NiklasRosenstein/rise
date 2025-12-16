@@ -146,6 +146,34 @@ impl KubernetesController {
         })
     }
 
+    /// Test connection to Kubernetes API
+    ///
+    /// Validates that the controller can successfully connect to and communicate with
+    /// the Kubernetes API server. This should be called during initialization to catch
+    /// credential or connectivity issues early.
+    ///
+    /// Returns Ok with server version info on success, or Err on connection failure.
+    pub async fn test_connection(&self) -> Result<()> {
+        info!("Testing Kubernetes API connection...");
+
+        // Try to get the server version - this is a lightweight API call that validates:
+        // 1. Network connectivity to the API server
+        // 2. Authentication credentials are valid
+        // 3. Basic API permissions are working
+        let version_info = self
+            .kube_client
+            .apiserver_version()
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to connect to Kubernetes API: {}", e))?;
+
+        info!(
+            "Successfully connected to Kubernetes API server (version: {}.{})",
+            version_info.major, version_info.minor
+        );
+
+        Ok(())
+    }
+
     /// Start namespace cleanup loop
     ///
     /// This loop runs independently and handles namespace deletion when projects are deleted.
