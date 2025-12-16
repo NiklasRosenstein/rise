@@ -92,15 +92,8 @@ fn serve_file(path: &str, state: &AppState) -> Response {
                 .unwrap()
         }
         None => {
-            // Check if this is an API route
-            if path.starts_with("api/")
-                || path.starts_with("auth/")
-                || path.starts_with("projects/")
-                || path.starts_with("teams/")
-                || path.starts_with("deployments/")
-                || path == "health"
-                || path == "me"
-            {
+            // Check if this is an API route (all API routes now under /api/v1)
+            if path.starts_with("api/v1/") {
                 // Let it 404 as an API route
                 return (StatusCode::NOT_FOUND, "Not found").into_response();
             }

@@ -21,6 +21,6 @@ pub fn public_routes() -> Router<AppState> {
 /// Protected routes that require authentication
 pub fn protected_routes() -> Router<AppState> {
     Router::new()
-        .route("/me", get(handlers::me))
+        .route("/users/me", get(handlers::me))
         .route("/users/lookup", post(handlers::users_lookup))
 }
