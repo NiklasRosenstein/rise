@@ -24,7 +24,21 @@
     <!-- API and Auth utilities (plain JS) -->
     <script src="/js/auth.js"></script>
     <script src="/js/api.js"></script>
-    <!-- React App (JSX) -->
+
+    <!-- Utility functions and helpers (JSX) -->
+    <script type="text/babel" src="/js/utils.js"></script>
+
+    <!-- Reusable UI components (JSX) -->
+    <script type="text/babel" src="/js/components/ui.js"></script>
+    <script type="text/babel" src="/js/components/toast.js"></script>
+
+    <!-- Feature components (JSX) -->
+    <script type="text/babel" src="/js/components/projects.js"></script>
+    <script type="text/babel" src="/js/components/teams.js"></script>
+    <script type="text/babel" src="/js/components/deployments.js"></script>
+    <script type="text/babel" src="/js/components/resources.js"></script>
+
+    <!-- Main App router (JSX) -->
     <script type="text/babel" src="/js/app.js"></script>
 </body>
 </html>
