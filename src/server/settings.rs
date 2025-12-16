@@ -395,7 +395,7 @@ impl Settings {
         for ext in extensions {
             let path = format!("{}/{}.{}", config_dir, name, ext);
             if std::path::Path::new(&path).exists() {
-                tracing::debug!("Loading config file: {}", path);
+                tracing::info!("Loading config file: {}", path);
                 *builder = builder
                     .clone()
                     .add_source(config::File::with_name(&format!("{}/{}", config_dir, name)));

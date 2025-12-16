@@ -1847,16 +1847,6 @@ impl DeploymentBackend for KubernetesController {
                     let ingress_api: Api<Ingress> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
-                    // Fetch custom domains (only for DEFAULT group)
-                    info!(
-                        project = project.name,
-                        deployment_id = %deployment.id,
-                        deployment_group = %deployment.deployment_group,
-                        default_group = DEFAULT_DEPLOYMENT_GROUP,
-                        is_default_group = (deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP),
-                        "Checking deployment group for custom domain fetch"
-                    );
-
                     let custom_domains = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP
                     {
                         let domains = crate::db::custom_domains::list_project_custom_domains(
@@ -1865,41 +1855,13 @@ impl DeploymentBackend for KubernetesController {
                         )
                         .await
                         .unwrap_or_default();
-
-                        info!(
-                            project = project.name,
-                            deployment_id = %deployment.id,
-                            custom_domain_count = domains.len(),
-                            domains = ?domains.iter().map(|d| &d.domain).collect::<Vec<_>>(),
-                            "Fetched custom domains for Ingress reconciliation"
-                        );
-
                         domains
                     } else {
-                        info!(
-                            project = project.name,
-                            deployment_id = %deployment.id,
-                            deployment_group = %deployment.deployment_group,
-                            "Skipping custom domain fetch - not in default deployment group"
-                        );
                         Vec::new()
                     };
 
                     let ingress =
                         self.create_ingress(project, deployment, &metadata, &custom_domains);
-
-                    // Log the Ingress rules that will be applied
-                    if let Some(ref spec) = ingress.spec {
-                        if let Some(ref rules) = spec.rules {
-                            info!(
-                                project = project.name,
-                                deployment_id = %deployment.id,
-                                rule_count = rules.len(),
-                                hosts = ?rules.iter().filter_map(|r| r.host.as_ref()).collect::<Vec<_>>(),
-                                "Applying Ingress with rules"
-                            );
-                        }
-                    }
 
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&ingress);
@@ -1908,12 +1870,6 @@ impl DeploymentBackend for KubernetesController {
                         .await
                     {
                         Ok(patched_ingress) => {
-                            info!(
-                                project = project.name,
-                                deployment_id = %deployment.id,
-                                "Ingress drift check completed and patched successfully"
-                            );
-
                             // Log the result to confirm it was applied
                             if let Some(ref spec) = patched_ingress.spec {
                                 if let Some(ref rules) = spec.rules {
