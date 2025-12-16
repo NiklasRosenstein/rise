@@ -59,7 +59,7 @@ async fn test_create_project() {
         .oneshot(
             Request::builder()
                 .method("POST")
-                .uri("/api/projects")
+                .uri("/api/v1/projects")
                 .header("content-type", "application/json")
                 .body(r#"{"name": "test-app", "visibility": "public"}"#)
                 .unwrap(),

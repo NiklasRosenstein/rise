@@ -34,9 +34,9 @@ Protected endpoints require `Authorization: Bearer <token>` header (401 if missi
 
 ### Authentication Endpoints
 
-**Public**: `POST /auth/code/exchange` - Exchange auth code for JWT
+**Public**: `POST /api/v1/auth/code/exchange` - Exchange auth code for JWT
 
-**Protected**: `GET /me`, `POST /users/lookup`
+**Protected**: `GET /api/v1/users/me`, `POST /users/lookup`
 
 ## Service Accounts (Workload Identity)
 

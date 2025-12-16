@@ -179,28 +179,28 @@ When a user visits a private project, the following flow occurs:
 ```
 User → myapp.apps.rise.local (private)
   ↓
-Nginx calls GET /auth/ingress?project=myapp
+Nginx calls GET /api/v1/auth/ingress?project=myapp
   - 🍪 NO COOKIE or invalid JWT
   ↓ Returns 401 Unauthorized
   ↓
-Nginx redirects to /auth/signin?project=myapp&redirect=http://myapp.apps.rise.local
+Nginx redirects to /api/v1/auth/signin?project=myapp&redirect=http://myapp.apps.rise.local
   ↓
-GET /auth/signin (Pre-Auth Page):
+GET /api/v1/auth/signin (Pre-Auth Page):
   - Renders auth-signin.html.tera
   - Shows: "Project 'myapp' is private. Sign in to access."
-  - Button: "Sign In" → /auth/signin/start?project=myapp&redirect=...
+  - Button: "Sign In" → /api/v1/auth/signin/start?project=myapp&redirect=...
   ↓
 User clicks "Sign In" button
   ↓
-GET /auth/signin/start (OAuth Start):
+GET /api/v1/auth/signin/start (OAuth Start):
   - Stores project_name='myapp' in OAuth2State (PKCE state)
   - Redirects to Dex IdP authorize endpoint
   ↓
 User completes OAuth at Dex
   ↓
-Dex redirects to /auth/callback?code=xyz&state=abc
+Dex redirects to /api/v1/auth/callback?code=xyz&state=abc
   ↓
-GET /auth/callback (Token Exchange):
+GET /api/v1/auth/callback (Token Exchange):
   - Retrieve OAuth2State (includes project_name='myapp' for UI context only)
   - Exchange code for IdP tokens
   - Validate IdP JWT
@@ -214,7 +214,7 @@ GET /auth/callback (Token Exchange):
   ↓
 After 3 seconds, browser redirects to http://myapp.apps.rise.local
   ↓
-Nginx calls GET /auth/ingress?project=myapp
+Nginx calls GET /api/v1/auth/ingress?project=myapp
   - 🍪 READS COOKIE: _rise_ingress
   - Verifies Rise JWT signature (HS256)
   - Validates expiry
@@ -287,8 +287,8 @@ For private projects, the controller adds these Nginx annotations:
 
 ```yaml
 annotations:
-  nginx.ingress.kubernetes.io/auth-url: "http://rise-backend.default.svc.cluster.local:3000/auth/ingress?project=myapp"
-  nginx.ingress.kubernetes.io/auth-signin: "http://rise.local/auth/signin?project=myapp&redirect=$escaped_request_uri"
+  nginx.ingress.kubernetes.io/auth-url: "http://rise-backend.default.svc.cluster.local:3000/api/v1/auth/ingress?project=myapp"
+  nginx.ingress.kubernetes.io/auth-signin: "http://rise.local/api/v1/auth/signin?project=myapp&redirect=$escaped_request_uri"
   nginx.ingress.kubernetes.io/auth-response-headers: "X-Auth-Request-Email,X-Auth-Request-User"
 ```
 
