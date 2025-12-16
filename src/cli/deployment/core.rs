@@ -759,7 +759,10 @@ async fn cancel_deployment(
     token: &str,
     deployment_id: &str,
 ) -> Result<()> {
-    let url = format!("{}/api/v1/deployments/{}/status", backend_url, deployment_id);
+    let url = format!(
+        "{}/api/v1/deployments/{}/status",
+        backend_url, deployment_id
+    );
 
     let payload = serde_json::json!({
         "status": "Cancelling"
@@ -793,7 +796,10 @@ async fn update_deployment_status(
     status: &str,
     error_message: Option<&str>,
 ) -> Result<()> {
-    let url = format!("{}/api/v1/deployments/{}/status", backend_url, deployment_id);
+    let url = format!(
+        "{}/api/v1/deployments/{}/status",
+        backend_url, deployment_id
+    );
     let mut payload = serde_json::json!({
         "status": status,
     });

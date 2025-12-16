@@ -406,7 +406,10 @@ pub async fn update_team(
     let remove_member_ids = lookup_users(http_client, backend_url, &token, remove_members).await?;
 
     // First, get the current team state (without expand for now)
-    let get_url = format!("{}/api/v1/teams/{}?by_id={}", backend_url, team_identifier, by_id);
+    let get_url = format!(
+        "{}/api/v1/teams/{}?by_id={}",
+        backend_url, team_identifier, by_id
+    );
     let get_response = http_client
         .get(&get_url)
         .header("Authorization", format!("Bearer {}", token))
@@ -519,7 +522,10 @@ pub async fn delete_team(
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    let url = format!("{}/api/v1/teams/{}?by_id={}", backend_url, team_identifier, by_id);
+    let url = format!(
+        "{}/api/v1/teams/{}?by_id={}",
+        backend_url, team_identifier, by_id
+    );
     let response = http_client
         .delete(&url)
         .header("Authorization", format!("Bearer {}", token))

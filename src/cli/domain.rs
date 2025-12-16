@@ -129,7 +129,10 @@ pub async fn remove_domain(
     project: &str,
     domain: &str,
 ) -> Result<()> {
-    let url = format!("{}/api/v1/projects/{}/domains/{}", backend_url, project, domain);
+    let url = format!(
+        "{}/api/v1/projects/{}/domains/{}",
+        backend_url, project, domain
+    );
 
     let response = http_client
         .delete(&url)
