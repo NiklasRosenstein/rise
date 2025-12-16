@@ -26,3 +26,5 @@ deployment_controller:
   auth_signin_url: "http://localhost:3000"  # Domain for user-facing OAuth redirects
   ingress_annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+  # Optional: Port for ingress URLs (e.g., for kubectl port-forward)
+  # ingress_port: 8080

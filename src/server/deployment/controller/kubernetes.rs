@@ -100,6 +100,7 @@ pub struct KubernetesControllerConfig {
     pub ingress_class: String,
     pub production_ingress_url_template: String,
     pub staging_ingress_url_template: Option<String>,
+    pub ingress_port: Option<u16>,
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub auth_backend_url: String,
     pub auth_signin_url: String,
@@ -117,6 +118,7 @@ pub struct KubernetesController {
     ingress_class: String,
     production_ingress_url_template: String,
     staging_ingress_url_template: Option<String>,
+    ingress_port: Option<u16>,
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     auth_backend_url: String,
     auth_signin_url: String,
@@ -140,6 +142,7 @@ impl KubernetesController {
             ingress_class: config.ingress_class,
             production_ingress_url_template: config.production_ingress_url_template,
             staging_ingress_url_template: config.staging_ingress_url_template,
+            ingress_port: config.ingress_port,
             registry_provider: config.registry_provider,
             auth_backend_url: config.auth_backend_url,
             auth_signin_url: config.auth_signin_url,
@@ -582,7 +585,23 @@ impl KubernetesController {
 
     /// Get full ingress URL for deployment_url field
     fn full_ingress_url(&self, project: &Project, deployment: &Deployment) -> String {
-        self.resolved_ingress_url(project, deployment)
+        let url = self.resolved_ingress_url(project, deployment);
+
+        if let Some(port) = self.ingress_port {
+            // Parse URL to separate host and path
+            let parsed = Self::parse_ingress_url(&url);
+
+            // Append port to host
+            let host_with_port = format!("{}:{}", parsed.host, port);
+
+            // Reconstruct URL
+            match parsed.path_prefix {
+                Some(path) => format!("{}{}", host_with_port, path),
+                None => host_with_port,
+            }
+        } else {
+            url
+        }
     }
 
     /// Clean up deployment group resources (Service and Ingress) if no other deployments exist in the group
@@ -2392,6 +2411,7 @@ mod tests {
             ingress_class: "nginx".to_string(),
             production_ingress_url_template: "{project_name}.test.local".to_string(),
             staging_ingress_url_template: None,
+            ingress_port: None,
             registry_provider: None,
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),

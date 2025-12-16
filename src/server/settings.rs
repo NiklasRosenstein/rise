@@ -212,6 +212,13 @@ pub enum DeploymentControllerSettings {
         #[serde(default)]
         staging_ingress_url_template: Option<String>,
 
+        /// Optional port number to append to all generated ingress URLs
+        /// Used for development environments with port-forwarding (e.g., kubectl port-forward)
+        /// Example: 8080 → "https://myapp.apps.rise.local:8080"
+        /// If not set, URLs use standard ports (80 for HTTP, 443 for HTTPS)
+        #[serde(default)]
+        ingress_port: Option<u16>,
+
         /// Backend URL for Nginx auth subrequests (internal cluster URL)
         /// Example: "http://rise-backend.default.svc.cluster.local:3000"
         /// This is the URL Nginx will use internally within the cluster to validate authentication.
