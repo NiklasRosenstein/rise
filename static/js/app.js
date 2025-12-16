@@ -636,33 +636,37 @@ function ActiveDeploymentsSummary({ projectName }) {
         try {
             const deployments = await api.getProjectDeployments(projectName, { limit: 100 });
 
-            // Group ALL deployments by deployment group
-            const allGrouped = deployments.reduce((acc, d) => {
+            // Group deployments by deployment group
+            const grouped = deployments.reduce((acc, d) => {
                 const group = d.deployment_group || 'default';
-                if (!acc[group]) acc[group] = [];
-                acc[group].push(d);
+                if (!acc[group]) {
+                    acc[group] = {
+                        active: null,
+                        progressing: []
+                    };
+                }
+
+                // Track the active deployment (is_active === true)
+                if (d.is_active) {
+                    acc[group].active = d;
+                }
+
+                // Track progressing (non-terminal) deployments
+                if (!isTerminal(d.status)) {
+                    acc[group].progressing.push(d);
+                }
+
                 return acc;
             }, {});
 
-            // Sort each group by created date (newest first)
-            Object.keys(allGrouped).forEach(group => {
-                allGrouped[group].sort((a, b) => new Date(b.created) - new Date(a.created));
-            });
-
-            // Filter groups based on visibility rules:
-            // - "default" group: always include if it exists (show latest deployment regardless of status)
-            // - Other groups: only include if they have at least one non-terminal deployment
+            // Filter to only include groups that have an active deployment or progressing deployments
             const filtered = {};
-            Object.keys(allGrouped).forEach(group => {
-                if (group === 'default') {
-                    // Always include default group - show latest deployment regardless of status
-                    filtered[group] = allGrouped[group];
-                } else {
-                    // Only include non-default groups if they have non-terminal deployments
-                    const nonTerminal = allGrouped[group].filter(d => !isTerminal(d.status));
-                    if (nonTerminal.length > 0) {
-                        filtered[group] = nonTerminal;
-                    }
+            Object.keys(grouped).forEach(group => {
+                const groupData = grouped[group];
+                // Always include default group if it has an active deployment
+                // Include other groups if they have active OR progressing deployments
+                if (groupData.active || (group !== 'default' && groupData.progressing.length > 0)) {
+                    filtered[group] = groupData;
                 }
             });
 
@@ -708,35 +712,54 @@ function ActiveDeploymentsSummary({ projectName }) {
     const groups = Object.keys(activeDeployments);
     if (groups.length === 0) return <p className="text-gray-400">No active deployments.</p>;
 
-    // Sort groups: "default" first, then by latest deployment's created timestamp
+    // Sort groups: "default" first, then by active deployment's created timestamp
     const sortedGroups = groups.sort((a, b) => {
         if (a === 'default') return -1;
         if (b === 'default') return 1;
 
-        // Both non-default: sort by latest deployment's created timestamp (descending)
-        const latestA = activeDeployments[a][0];
-        const latestB = activeDeployments[b][0];
-        return new Date(latestB.created) - new Date(latestA.created);
+        // Both non-default: sort by active deployment's created timestamp (descending)
+        const activeA = activeDeployments[a].active;
+        const activeB = activeDeployments[b].active;
+
+        // If both have active deployments, sort by created timestamp
+        if (activeA && activeB) {
+            return new Date(activeB.created) - new Date(activeA.created);
+        }
+
+        // Groups with active deployments come first
+        if (activeA && !activeB) return -1;
+        if (!activeA && activeB) return 1;
+
+        return 0;
     });
 
     return (
         <>
             <div className="space-y-4">
                 {sortedGroups.map(group => {
-                    const deps = activeDeployments[group];
-                    const latest = deps[0];
-                    const canStop = !isTerminal(latest.status);
+                    const groupData = activeDeployments[group];
+                    const deployment = groupData.active;
+
+                    // Skip if no active deployment (shouldn't happen due to filtering, but be safe)
+                    if (!deployment) {
+                        return null;
+                    }
+
+                    const canStop = !isTerminal(deployment.status);
+                    // Count other progressing deployments (exclude the active one)
+                    const otherProgressing = groupData.progressing.filter(d => d.deployment_id !== deployment.deployment_id).length;
+
                     return (
                         <div key={group} className="bg-gray-900 border border-gray-800 rounded-lg p-6">
                             <div className="flex justify-between items-center mb-4">
                                 <h5 className="text-lg font-semibold">Group: {group}</h5>
                                 <div className="flex items-center gap-3">
-                                    <StatusBadge status={latest.status} />
+                                    <StatusBadge status={deployment.status} />
                                     {canStop && (
                                         <Button
                                             variant="danger"
                                             size="sm"
-                                            onClick={() => handleStopClick(latest)}
+                                            onClick={() => handleStopClick(deployment)}
                                         >
                                             Stop
                                         </Button>
@@ -746,37 +769,37 @@ function ActiveDeploymentsSummary({ projectName }) {
                         <dl className="grid grid-cols-2 gap-4 text-sm">
                             <div>
                                 <dt className="text-gray-400">Deployment ID</dt>
-                                <dd className="font-mono text-gray-200">{latest.deployment_id}</dd>
+                                <dd className="font-mono text-gray-200">{deployment.deployment_id}</dd>
                             </div>
                             <div>
                                 <dt className="text-gray-400">Image</dt>
-                                <dd className="font-mono text-gray-200 text-xs">{latest.image ? latest.image.split('/').pop() : '-'}</dd>
+                                <dd className="font-mono text-gray-200 text-xs">{deployment.image ? deployment.image.split('/').pop() : '-'}</dd>
                             </div>
                             <div>
                                 <dt className="text-gray-400">URL</dt>
-                                <dd>{latest.primary_url ? <a href={latest.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{latest.primary_url}</a> : '-'}</dd>
+                                <dd>{deployment.primary_url ? <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{deployment.primary_url}</a> : '-'}</dd>
                             </div>
                             <div>
                                 <dt className="text-gray-400">Created</dt>
-                                <dd className="text-gray-200">{formatDate(latest.created)}</dd>
+                                <dd className="text-gray-200">{formatDate(deployment.created)}</dd>
                             </div>
-                            {latest.expires_at && (
+                            {deployment.expires_at && (
                                 <div>
                                     <dt className="text-gray-400">Expires</dt>
                                     <dd className="text-gray-200">
-                                        {formatTimeRemaining(latest.expires_at)}
-                                        <span className="text-gray-500 text-xs ml-2">({formatDate(latest.expires_at)})</span>
+                                        {formatTimeRemaining(deployment.expires_at)}
+                                        <span className="text-gray-500 text-xs ml-2">({formatDate(deployment.expires_at)})</span>
                                     </dd>
                                 </div>
                             )}
                         </dl>
                         <div className="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between">
-                            <a href={`#deployment/${projectName}/${latest.deployment_id}`} className="text-indigo-400 hover:text-indigo-300">
+                            <a href={`#deployment/${projectName}/${deployment.deployment_id}`} className="text-indigo-400 hover:text-indigo-300">
                                 View Details
                             </a>
-                            {deps.length > 1 && (
+                            {otherProgressing > 0 && (
                                 <span className="text-sm text-gray-500">
-                                    (+{deps.length - 1} more active)
+                                    +{otherProgressing} other{otherProgressing === 1 ? '' : 's'} progressing
                                 </span>
                             )}
                         </div>
