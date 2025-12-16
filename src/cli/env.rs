@@ -33,7 +33,7 @@ pub async fn set_env(
     value: &str,
     is_secret: bool,
 ) -> Result<()> {
-    let url = format!("{}/projects/{}/env/{}", backend_url, project, key);
+    let url = format!("{}/api/v1/projects/{}/env/{}", backend_url, project, key);
 
     let payload = SetEnvVarRequest {
         value: value.to_string(),
@@ -77,7 +77,7 @@ pub async fn list_env(
     token: &str,
     project: &str,
 ) -> Result<()> {
-    let url = format!("{}/projects/{}/env", backend_url, project);
+    let url = format!("{}/api/v1/projects/{}/env", backend_url, project);
 
     let response = http_client
         .get(&url)
@@ -146,7 +146,7 @@ pub async fn unset_env(
     project: &str,
     key: &str,
 ) -> Result<()> {
-    let url = format!("{}/projects/{}/env/{}", backend_url, project, key);
+    let url = format!("{}/api/v1/projects/{}/env/{}", backend_url, project, key);
 
     let response = http_client
         .delete(&url)
@@ -285,7 +285,7 @@ pub async fn list_deployment_env(
     deployment_id: &str,
 ) -> Result<()> {
     let url = format!(
-        "{}/projects/{}/deployments/{}/env",
+        "{}/api/v1/projects/{}/deployments/{}/env",
         backend_url, project, deployment_id
     );
 

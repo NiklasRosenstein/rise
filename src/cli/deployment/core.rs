@@ -57,7 +57,7 @@ pub(super) async fn fetch_deployment(
     deployment_id: &str,
 ) -> Result<Deployment> {
     let url = format!(
-        "{}/projects/{}/deployments/{}",
+        "{}/api/v1/projects/{}/deployments/{}",
         backend_url, project, deployment_id
     );
 
@@ -107,7 +107,7 @@ pub async fn list_deployments(
         info!("Listing deployments for project '{}'", project);
     }
 
-    let mut url = format!("{}/projects/{}/deployments", backend_url, project);
+    let mut url = format!("{}/api/v1/projects/{}/deployments", backend_url, project);
 
     // Add group query parameter if provided
     if let Some(g) = group {
@@ -354,7 +354,7 @@ pub async fn rollback_deployment(
 
     // Call the rollback endpoint
     let url = format!(
-        "{}/projects/{}/deployments/{}/rollback",
+        "{}/api/v1/projects/{}/deployments/{}/rollback",
         backend_url, project, deployment_id
     );
     let response = http_client
@@ -454,7 +454,7 @@ pub async fn stop_deployments_by_group(
     );
 
     let url = format!(
-        "{}/projects/{}/deployments/stop?group={}",
+        "{}/api/v1/projects/{}/deployments/stop?group={}",
         backend_url,
         project,
         urlencoding::encode(group)
@@ -706,7 +706,7 @@ async fn call_create_deployment_api(
     expires_in: Option<&str>,
     http_port: u16,
 ) -> Result<CreateDeploymentResponse> {
-    let url = format!("{}/deployments", backend_url);
+    let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
         "project": project_name,
         "http_port": http_port,
@@ -759,7 +759,7 @@ async fn cancel_deployment(
     token: &str,
     deployment_id: &str,
 ) -> Result<()> {
-    let url = format!("{}/deployments/{}/status", backend_url, deployment_id);
+    let url = format!("{}/api/v1/deployments/{}/status", backend_url, deployment_id);
 
     let payload = serde_json::json!({
         "status": "Cancelling"
@@ -793,7 +793,7 @@ async fn update_deployment_status(
     status: &str,
     error_message: Option<&str>,
 ) -> Result<()> {
-    let url = format!("{}/deployments/{}/status", backend_url, deployment_id);
+    let url = format!("{}/api/v1/deployments/{}/status", backend_url, deployment_id);
     let mut payload = serde_json::json!({
         "status": status,
     });
@@ -848,7 +848,7 @@ pub async fn get_logs(
 
     // Build URL with query parameters
     let mut url = format!(
-        "{}/projects/{}/deployments/{}/logs",
+        "{}/api/v1/projects/{}/deployments/{}/logs",
         backend_url, params.project, params.deployment_id
     );
 

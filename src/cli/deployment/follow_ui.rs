@@ -390,7 +390,7 @@ async fn fetch_project_info(
     token: &str,
     project: &str,
 ) -> Result<ProjectInfo> {
-    let url = format!("{}/projects/{}", backend_url, project);
+    let url = format!("{}/api/v1/projects/{}", backend_url, project);
 
     let response = http_client.get(&url).bearer_auth(token).send().await?;
 

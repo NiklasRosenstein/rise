@@ -30,7 +30,7 @@ pub async fn add_domain(
     project: &str,
     domain: &str,
 ) -> Result<()> {
-    let url = format!("{}/projects/{}/domains", backend_url, project);
+    let url = format!("{}/api/v1/projects/{}/domains", backend_url, project);
 
     let payload = AddCustomDomainRequest {
         domain: domain.to_string(),
@@ -71,7 +71,7 @@ pub async fn list_domains(
     token: &str,
     project: &str,
 ) -> Result<()> {
-    let url = format!("{}/projects/{}/domains", backend_url, project);
+    let url = format!("{}/api/v1/projects/{}/domains", backend_url, project);
 
     let response = http_client
         .get(&url)
@@ -129,7 +129,7 @@ pub async fn remove_domain(
     project: &str,
     domain: &str,
 ) -> Result<()> {
-    let url = format!("{}/projects/{}/domains/{}", backend_url, project, domain);
+    let url = format!("{}/api/v1/projects/{}/domains/{}", backend_url, project, domain);
 
     let response = http_client
         .delete(&url)

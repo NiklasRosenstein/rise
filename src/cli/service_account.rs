@@ -40,7 +40,7 @@ pub async fn create_service_account(
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     let url = format!(
-        "{}/projects/{}/workload-identities",
+        "{}/api/v1/projects/{}/workload-identities",
         backend_url, project_name
     );
 
@@ -101,7 +101,7 @@ pub async fn list_service_accounts(
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     let url = format!(
-        "{}/projects/{}/workload-identities",
+        "{}/api/v1/projects/{}/workload-identities",
         backend_url, project_name
     );
 
@@ -181,7 +181,7 @@ pub async fn show_service_account(
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     let url = format!(
-        "{}/projects/{}/workload-identities/{}",
+        "{}/api/v1/projects/{}/workload-identities/{}",
         backend_url, project_name, service_account_id
     );
 
@@ -237,7 +237,7 @@ pub async fn delete_service_account(
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     let url = format!(
-        "{}/projects/{}/workload-identities/{}",
+        "{}/api/v1/projects/{}/workload-identities/{}",
         backend_url, project_name, service_account_id
     );
 
