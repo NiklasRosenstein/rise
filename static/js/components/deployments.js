@@ -346,7 +346,7 @@ function DeploymentsList({ projectName }) {
                 </label>
             </div>
 
-            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+            <div className="bg-gray-900 rounded-lg overflow-x-auto border border-gray-800">
                 <table className="w-full">
                     <thead className="bg-gray-800">
                         <tr>
