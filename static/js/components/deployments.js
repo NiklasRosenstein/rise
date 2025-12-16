@@ -532,7 +532,7 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
 
         const token = localStorage.getItem('rise_token');
         const baseUrl = window.API_BASE_URL || '';
-        const url = `${baseUrl}/projects/${projectName}/deployments/${deploymentId}/logs?follow=true`;
+        const url = `${baseUrl}/api/v1/projects/${projectName}/deployments/${deploymentId}/logs?follow=true`;
 
         // Create new AbortController for this stream
         const abortController = new AbortController();
@@ -611,7 +611,7 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
     const loadInitialLogs = useCallback(async () => {
         const token = localStorage.getItem('rise_token');
         const baseUrl = window.API_BASE_URL || '';
-        const url = `${baseUrl}/projects/${projectName}/deployments/${deploymentId}/logs`;
+        const url = `${baseUrl}/api/v1/projects/${projectName}/deployments/${deploymentId}/logs`;
 
         try {
             const response = await fetch(url, {

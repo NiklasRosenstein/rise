@@ -273,7 +273,7 @@ function App() {
     useEffect(() => {
         async function fetchVersion() {
             try {
-                const response = await fetch(`${CONFIG.backendUrl}/api/version`);
+                const response = await fetch(`${CONFIG.backendUrl}/api/v1/version`);
                 const data = await response.json();
                 setVersion(data);
             } catch (err) {

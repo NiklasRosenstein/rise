@@ -88,7 +88,7 @@ async function handleOAuthCallback() {
 
     try {
         // Exchange code for token
-        const response = await fetch(`${CONFIG.backendUrl}/auth/code/exchange`, {
+        const response = await fetch(`${CONFIG.backendUrl}/api/v1/auth/code/exchange`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({

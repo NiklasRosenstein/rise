@@ -17,7 +17,7 @@ class RiseAPI {
             ...options.headers,
         };
 
-        const response = await fetch(`${this.baseUrl}${endpoint}`, {
+        const response = await fetch(`${this.baseUrl}/api/v1${endpoint}`, {
             ...options,
             headers,
         });
@@ -44,7 +44,7 @@ class RiseAPI {
 
     // User endpoints
     async getMe() {
-        return this.request('/me');
+        return this.request('/users/me');
     }
 
     async lookupUsers(emails) {
