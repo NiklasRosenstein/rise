@@ -902,30 +902,58 @@ impl KubernetesController {
     }
 
     /// Create Deployment resource
-    fn create_deployment(
+    async fn create_deployment(
         &self,
         project: &Project,
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
         env_vars: Vec<k8s_openapi::api::core::v1::EnvVar>,
     ) -> K8sDeployment {
-        // Build image reference from deployment.image_digest or registry_provider
+        // Build image reference - same logic as API layer's get_deployment_image_tag()
+        // This ensures rollback deployments use the correct source image tag
         let image = if let Some(ref image_digest) = deployment.image_digest {
-            // image_digest already contains the full reference with digest
-            // (e.g., "docker.io/library/nginx@sha256:...")
+            // Pre-built images use the pinned digest
             image_digest.clone()
-        } else if let Some(ref registry_provider) = self.registry_provider {
-            // Use Internal variant to ignore client_registry_url configuration (Kubernetes always uses internal registry)
-            registry_provider.get_image_tag(
-                &project.name,
-                &deployment.deployment_id,
-                crate::server::registry::ImageTagType::Internal,
-            )
         } else {
-            deployment
-                .image
-                .clone()
-                .unwrap_or_else(|| "unknown".to_string())
+            // For rollback deployments, use the source deployment's deployment_id for the image tag
+            let deployment_id_for_tag = if let Some(source_deployment_id) =
+                deployment.rolled_back_from_deployment_id
+            {
+                // Fetch the source deployment to get its deployment_id
+                match db_deployments::find_by_id(&self.state.db_pool, source_deployment_id).await {
+                    Ok(Some(source_deployment)) => source_deployment.deployment_id,
+                    Ok(None) => {
+                        tracing::warn!(
+                            "Rollback deployment {} references non-existent source deployment {}",
+                            deployment.deployment_id,
+                            source_deployment_id
+                        );
+                        deployment.deployment_id.clone()
+                    }
+                    Err(e) => {
+                        tracing::error!(
+                            "Failed to fetch source deployment {} for rollback {}: {}",
+                            source_deployment_id,
+                            deployment.deployment_id,
+                            e
+                        );
+                        deployment.deployment_id.clone()
+                    }
+                }
+            } else {
+                deployment.deployment_id.clone()
+            };
+
+            // Build-from-source: construct from registry config using the appropriate deployment_id
+            if let Some(ref registry_provider) = self.registry_provider {
+                registry_provider.get_image_tag(
+                    &project.name,
+                    &deployment_id_for_tag,
+                    crate::server::registry::ImageTagType::Internal,
+                )
+            } else {
+                format!("{}:{}", project.name, deployment_id_for_tag)
+            }
         };
 
         K8sDeployment {
@@ -1482,12 +1510,9 @@ impl DeploymentBackend for KubernetesController {
                     match deploy_api.get(&deploy_name).await {
                         Ok(existing_deploy) => {
                             // Deployment exists - check for drift
-                            let desired_deploy = self.create_deployment(
-                                project,
-                                deployment,
-                                &metadata,
-                                env_vars.clone(),
-                            );
+                            let desired_deploy = self
+                                .create_deployment(project, deployment, &metadata, env_vars.clone())
+                                .await;
 
                             if self.deployment_has_drifted(&existing_deploy, &desired_deploy) {
                                 info!(
@@ -1547,8 +1572,9 @@ impl DeploymentBackend for KubernetesController {
                         }
                         Err(kube::Error::Api(ae)) if ae.code == 404 => {
                             // Deployment doesn't exist - create it
-                            let rs =
-                                self.create_deployment(project, deployment, &metadata, env_vars);
+                            let rs = self
+                                .create_deployment(project, deployment, &metadata, env_vars)
+                                .await;
                             match deploy_api.create(&PostParams::default(), &rs).await {
                                 Ok(_) => {
                                     info!(
@@ -1895,12 +1921,9 @@ impl DeploymentBackend for KubernetesController {
 
                     match deploy_api.get(deploy_name).await {
                         Ok(existing_deploy) => {
-                            let desired_deploy = self.create_deployment(
-                                project,
-                                deployment,
-                                &metadata,
-                                env_vars.clone(),
-                            );
+                            let desired_deploy = self
+                                .create_deployment(project, deployment, &metadata, env_vars.clone())
+                                .await;
 
                             if self.deployment_has_drifted(&existing_deploy, &desired_deploy) {
                                 info!(
