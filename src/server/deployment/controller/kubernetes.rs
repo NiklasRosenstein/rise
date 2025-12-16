@@ -20,7 +20,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-use super::{DeploymentBackend, HealthStatus, ReconcileResult};
+use super::{DeploymentBackend, DeploymentUrls, HealthStatus, ReconcileResult};
 use crate::db::deployments as db_deployments;
 use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectVisibility};
 use crate::db::projects as db_projects;
@@ -2168,6 +2168,36 @@ impl DeploymentBackend for KubernetesController {
 
         // DO NOT delete Secret or Namespace (shared across all groups in the project)
         Ok(())
+    }
+
+    async fn get_deployment_urls(
+        &self,
+        deployment: &Deployment,
+        project: &Project,
+    ) -> Result<DeploymentUrls> {
+        // Calculate primary URL from templates
+        let primary_url = self.full_ingress_url(project, deployment);
+
+        // Fetch custom domains from database
+        let custom_domains =
+            crate::db::custom_domains::list_project_custom_domains(&self.state.db_pool, project.id)
+                .await?;
+
+        // Build custom domain URLs
+        let mut custom_domain_urls = Vec::new();
+        for domain in custom_domains {
+            let url = if let Some(port) = self.ingress_port {
+                format!("{}:{}", domain.domain, port)
+            } else {
+                domain.domain
+            };
+            custom_domain_urls.push(url);
+        }
+
+        Ok(DeploymentUrls {
+            primary_url,
+            custom_domain_urls,
+        })
     }
 }
 

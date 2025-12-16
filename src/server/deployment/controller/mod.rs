@@ -31,6 +31,15 @@ pub struct HealthStatus {
     pub last_check: DateTime<Utc>,
 }
 
+/// URLs where a deployment can be accessed
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DeploymentUrls {
+    /// Primary URL based on ingress template configuration
+    pub primary_url: String,
+    /// Additional URLs for custom domains
+    pub custom_domain_urls: Vec<String>,
+}
+
 /// Trait that all deployment backends must implement
 ///
 /// This trait allows for multiple controller implementations (Docker, Kubernetes, etc.)
@@ -86,6 +95,23 @@ pub trait DeploymentBackend: Send + Sync {
     /// # Arguments
     /// * `deployment` - The deployment to terminate
     async fn terminate(&self, deployment: &Deployment) -> anyhow::Result<()>;
+
+    /// Calculate URLs where this deployment can be accessed
+    ///
+    /// Returns the primary URL (from ingress templates) and any custom domain URLs.
+    /// URLs are calculated dynamically based on current controller configuration.
+    ///
+    /// # Arguments
+    /// * `deployment` - The deployment to get URLs for
+    /// * `project` - The project this deployment belongs to
+    ///
+    /// # Returns
+    /// A DeploymentUrls struct containing the primary URL and custom domain URLs
+    async fn get_deployment_urls(
+        &self,
+        deployment: &Deployment,
+        project: &Project,
+    ) -> anyhow::Result<DeploymentUrls>;
 }
 
 /// Main controller orchestrator

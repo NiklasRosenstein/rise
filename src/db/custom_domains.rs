@@ -1,5 +1,6 @@
 use anyhow::{Context, Result};
 use sqlx::PgPool;
+use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::db::models::CustomDomain;
@@ -87,4 +88,34 @@ pub async fn delete_custom_domain(pool: &PgPool, project_id: Uuid, domain: &str)
     .context("Failed to delete custom domain")?;
 
     Ok(result.rows_affected() > 0)
+}
+
+/// Get all custom domains for multiple projects in one query
+/// Returns a HashMap mapping project_id to a vector of custom domains
+pub async fn get_custom_domains_batch(
+    pool: &PgPool,
+    project_ids: &[Uuid],
+) -> Result<HashMap<Uuid, Vec<CustomDomain>>> {
+    let domains = sqlx::query_as!(
+        CustomDomain,
+        r#"
+        SELECT id, project_id, domain, created_at, updated_at
+        FROM project_custom_domains
+        WHERE project_id = ANY($1)
+        ORDER BY project_id, domain
+        "#,
+        project_ids
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to fetch custom domains batch")?;
+
+    let mut map: HashMap<Uuid, Vec<CustomDomain>> = HashMap::new();
+    for domain in domains {
+        map.entry(domain.project_id)
+            .or_insert_with(Vec::new)
+            .push(domain);
+    }
+
+    Ok(map)
 }
