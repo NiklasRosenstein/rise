@@ -1,5 +1,5 @@
 // React-based Rise Dashboard Application with Tailwind CSS
-const { useState, useEffect, useCallback } = React;
+const { useState, useEffect, useCallback, useRef } = React;
 // CONFIG is already defined in auth.js which loads before this script
 
 // Utility functions
