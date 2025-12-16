@@ -2268,6 +2268,10 @@ function DeploymentDetail({ projectName, deploymentId }) {
     const [rolling, setRolling] = useState(false);
     const { showToast } = useToast();
 
+    const isTerminal = (status) => {
+        return ['Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired'].includes(status);
+    };
+
     const loadDeployment = useCallback(async () => {
         try {
             const data = await api.getDeployment(projectName, deploymentId);
@@ -2300,14 +2304,15 @@ function DeploymentDetail({ projectName, deploymentId }) {
 
     useEffect(() => {
         loadDeployment();
+    }, [loadDeployment]);
 
-        // Auto-refresh if deployment is in progress
-        const inProgressStatuses = ['Pending', 'Building', 'Pushing', 'Pushed', 'Deploying'];
-        if (deployment && inProgressStatuses.includes(deployment.status)) {
-            const interval = setInterval(loadDeployment, 3000);
+    // Auto-refresh only if deployment is not in a terminal state
+    useEffect(() => {
+        if (deployment && !isTerminal(deployment.status)) {
+            const interval = setInterval(loadDeployment, 5000);
             return () => clearInterval(interval);
         }
-    }, [loadDeployment, deployment]);
+    }, [deployment?.status, loadDeployment]);
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading deployment: {error}</p>;
