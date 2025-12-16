@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest,\n            http_port, needs_reconcile,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE status = $1\n        ORDER BY created_at DESC\n        ",
+  "query": "\n        UPDATE deployments\n        SET\n            status = 'Healthy',\n            error_message = NULL,\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -40,46 +40,6 @@
       },
       {
         "ordinal": 7,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 8,
-        "name": "error_message",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 9,
-        "name": "build_logs",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 10,
-        "name": "controller_metadata: serde_json::Value",
-        "type_info": "Jsonb"
-      },
-      {
-        "ordinal": 11,
-        "name": "image",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 12,
-        "name": "image_digest",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 13,
-        "name": "http_port",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 14,
-        "name": "needs_reconcile",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 15,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -97,19 +57,64 @@
         }
       },
       {
+        "ordinal": 8,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "build_logs",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 11,
+        "name": "controller_metadata: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 12,
+        "name": "image",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "image_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 14,
+        "name": "rolled_back_from_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 15,
+        "name": "http_port",
+        "type_info": "Int4"
+      },
+      {
         "ordinal": 16,
+        "name": "needs_reconcile",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -126,12 +131,13 @@
       true,
       true,
       true,
-      false,
-      false,
       true,
+      true,
+      false,
+      false,
       false,
       false
     ]
   },
-  "hash": "85786f262ec2c0c08faf0cec34cf0b4bb1525d743c1c3691b31887405a0fd861"
+  "hash": "9e9624579815951c5f0c42e5739417e6197aacca1cb4d5bd3cf6516ac83439a1"
 }

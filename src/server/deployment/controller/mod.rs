@@ -761,7 +761,7 @@ impl DeploymentController {
                    status as "status: DeploymentStatus",
                    deployment_group, expires_at, error_message, completed_at,
                    build_logs, controller_metadata,
-                   image, image_digest, http_port, needs_reconcile,
+                   image, image_digest, rolled_back_from_deployment_id, http_port, needs_reconcile,
                    created_at, updated_at,
                    termination_reason as "termination_reason: _"
             FROM deployments

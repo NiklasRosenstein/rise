@@ -2167,9 +2167,11 @@ impl DeploymentBackend for KubernetesController {
         // Custom domains only apply to deployments in the default group
         let custom_domain_urls = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP {
             // Fetch custom domains from database
-            let custom_domains =
-                crate::db::custom_domains::list_project_custom_domains(&self.state.db_pool, project.id)
-                    .await?;
+            let custom_domains = crate::db::custom_domains::list_project_custom_domains(
+                &self.state.db_pool,
+                project.id,
+            )
+            .await?;
 
             // Build custom domain URLs with schema
             let mut urls = Vec::new();

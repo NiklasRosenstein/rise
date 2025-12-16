@@ -142,6 +142,7 @@ pub struct Deployment {
     pub controller_metadata: serde_json::Value,
     pub image: Option<String>,
     pub image_digest: Option<String>,
+    pub rolled_back_from_deployment_id: Option<Uuid>,
     pub http_port: i32,
     pub needs_reconcile: bool,
     pub created_at: DateTime<Utc>,

@@ -258,7 +258,7 @@ async fn get_creator_email(pool: &sqlx::PgPool, created_by_id: uuid::Uuid) -> St
 ///
 /// Dynamically calculates the image tag when not stored in the database,
 /// using the registry provider's configuration to construct the full image reference.
-fn convert_deployment(
+async fn convert_deployment(
     state: &AppState,
     deployment: crate::db::models::Deployment,
     project: &crate::db::models::Project,
@@ -269,13 +269,11 @@ fn convert_deployment(
     // Backfill image field for locally-built deployments
     // For pre-built images, deployment.image is already set
     // For build-from-source, calculate the internal registry tag
-    let image = deployment.image.clone().or_else(|| {
-        Some(super::utils::get_deployment_image_tag(
-            state,
-            &deployment,
-            project,
-        ))
-    });
+    let image = if deployment.image.is_some() {
+        deployment.image.clone()
+    } else {
+        Some(super::utils::get_deployment_image_tag(state, &deployment, project).await)
+    };
 
     Deployment {
         id: deployment.id.to_string(),
@@ -427,6 +425,7 @@ pub async fn create_deployment(
                 status: DbDeploymentStatus::Pushed, // Pre-built images skip build/push, go straight to Pushed
                 image: Some(user_image),            // Store original user input
                 image_digest: Some(&image_digest),  // Store resolved digest
+                rolled_back_from_deployment_id: None, // Not a rollback
                 deployment_group: &payload.group,   // deployment_group
                 expires_at,                         // expires_at
                 http_port: payload.http_port as i32, // http_port
@@ -509,10 +508,11 @@ pub async fn create_deployment(
                 project_id: project.id,
                 created_by_id: user.id,
                 status: DbDeploymentStatus::Pending,
-                image: None,                         // image - NULL for build-from-source
-                image_digest: None,                  // image_digest - NULL for build-from-source
-                deployment_group: &payload.group,    // deployment_group
-                expires_at,                          // expires_at
+                image: None,        // image - NULL for build-from-source
+                image_digest: None, // image_digest - NULL for build-from-source
+                rolled_back_from_deployment_id: None, // Not a rollback
+                deployment_group: &payload.group, // deployment_group
+                expires_at,         // expires_at
                 http_port: payload.http_port as i32, // http_port
             },
         )
@@ -698,14 +698,17 @@ pub async fn update_deployment_status(
 
     let created_by_email =
         get_creator_email(&state.db_pool, updated_deployment.created_by_id).await;
-    Ok(Json(convert_deployment(
-        &state,
-        updated_deployment,
-        &project,
-        created_by_email,
-        primary_url,
-        custom_domain_urls,
-    )))
+    Ok(Json(
+        convert_deployment(
+            &state,
+            updated_deployment,
+            &project,
+            created_by_email,
+            primary_url,
+            custom_domain_urls,
+        )
+        .await,
+    ))
 }
 
 /// Query parameters for listing deployments
@@ -793,14 +796,17 @@ pub async fn list_deployments(
             }
         };
 
-        deployments.push(convert_deployment(
-            &state,
-            db_deployment,
-            &project,
-            created_by_email,
-            primary_url,
-            custom_domain_urls,
-        ));
+        deployments.push(
+            convert_deployment(
+                &state,
+                db_deployment,
+                &project,
+                created_by_email,
+                primary_url,
+                custom_domain_urls,
+            )
+            .await,
+        );
     }
 
     Ok(Json(deployments))
@@ -1044,14 +1050,17 @@ pub async fn stop_deployment(
     // Get creator email and convert to API model
     let created_by_email =
         get_creator_email(&state.db_pool, updated_deployment.created_by_id).await;
-    Ok(Json(convert_deployment(
-        &state,
-        updated_deployment,
-        &project,
-        created_by_email,
-        primary_url,
-        custom_domain_urls,
-    )))
+    Ok(Json(
+        convert_deployment(
+            &state,
+            updated_deployment,
+            &project,
+            created_by_email,
+            primary_url,
+            custom_domain_urls,
+        )
+        .await,
+    ))
 }
 
 /// GET /projects/{project_name}/deployments/{deployment_id} - Get a specific deployment
@@ -1132,14 +1141,17 @@ pub async fn get_deployment_by_project(
     };
 
     let created_by_email = get_creator_email(&state.db_pool, deployment.created_by_id).await;
-    Ok(Json(convert_deployment(
-        &state,
-        deployment,
-        &project,
-        created_by_email,
-        primary_url,
-        custom_domain_urls,
-    )))
+    Ok(Json(
+        convert_deployment(
+            &state,
+            deployment,
+            &project,
+            created_by_email,
+            primary_url,
+            custom_domain_urls,
+        )
+        .await,
+    ))
 }
 
 /// GET /projects/{project_name}/deployment-groups - List all deployment groups for a project
@@ -1267,7 +1279,7 @@ pub async fn rollback_deployment(
     // Create new deployment with Pushed status
     // Copy image and image_digest from source - the helper function will determine the tag
     // For pre-built images: image_digest is copied, helper returns it
-    // For build-from-source: both are NULL, helper constructs tag from deployment_id
+    // For build-from-source: rolled_back_from_deployment_id is used to find the source deployment's image
     let new_deployment = db_deployments::create(
         &state.db_pool,
         db_deployments::CreateDeploymentParams {
@@ -1277,7 +1289,8 @@ pub async fn rollback_deployment(
             status: DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
             image: source_deployment.image.as_deref(), // Copy image from source if present
             image_digest: source_deployment.image_digest.as_deref(), // Copy digest from source if present
-            deployment_group: &source_deployment.deployment_group,   // Copy group from source
+            rolled_back_from_deployment_id: Some(source_deployment.id), // Track rollback source for image tag calculation
+            deployment_group: &source_deployment.deployment_group,      // Copy group from source
             expires_at: None, // expires_at - rollbacks don't inherit expiration
             http_port: source_deployment.http_port, // Copy http_port from source
         },
@@ -1295,7 +1308,8 @@ pub async fn rollback_deployment(
         &state,
         &new_deployment,
         &project,
-    );
+    )
+    .await;
 
     info!(
         "Created rollback deployment {} from {} (image: {})",

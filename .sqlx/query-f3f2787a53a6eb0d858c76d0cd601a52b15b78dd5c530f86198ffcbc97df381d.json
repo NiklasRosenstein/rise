@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id, deployment_id, project_id, created_by_id,\n                   status as \"status: DeploymentStatus\",\n                   deployment_group, expires_at, error_message, completed_at,\n                   build_logs, controller_metadata,\n                   image, image_digest, http_port, needs_reconcile,\n                   created_at, updated_at,\n                   termination_reason as \"termination_reason: _\"\n            FROM deployments\n            WHERE status IN ('Pending', 'Building', 'Pushing')\n              AND created_at < $1\n              AND NOT is_protected(status)\n            LIMIT 50\n            ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE NOT is_terminal(status)\n        ORDER BY updated_at ASC\n        LIMIT $1\n        ",
   "describe": {
     "columns": [
       {
@@ -40,13 +40,13 @@
       },
       {
         "ordinal": 7,
-        "name": "error_message",
-        "type_info": "Text"
+        "name": "completed_at",
+        "type_info": "Timestamptz"
       },
       {
         "ordinal": 8,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
+        "name": "error_message",
+        "type_info": "Text"
       },
       {
         "ordinal": 9,
@@ -55,7 +55,7 @@
       },
       {
         "ordinal": 10,
-        "name": "controller_metadata",
+        "name": "controller_metadata: serde_json::Value",
         "type_info": "Jsonb"
       },
       {
@@ -70,26 +70,21 @@
       },
       {
         "ordinal": 13,
+        "name": "rolled_back_from_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 14,
         "name": "http_port",
         "type_info": "Int4"
       },
       {
-        "ordinal": 14,
+        "ordinal": 15,
         "name": "needs_reconcile",
         "type_info": "Bool"
       },
       {
-        "ordinal": 15,
-        "name": "created_at",
-        "type_info": "Timestamptz"
-      },
-      {
         "ordinal": 16,
-        "name": "updated_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 17,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -105,11 +100,21 @@
             }
           }
         }
+      },
+      {
+        "ordinal": 17,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Timestamptz"
+        "Int8"
       ]
     },
     "nullable": [
@@ -126,12 +131,13 @@
       true,
       true,
       true,
+      true,
       false,
       false,
+      true,
       false,
-      false,
-      true
+      false
     ]
   },
-  "hash": "bfb7c29885e87a1e30d8ac2c397964485c02069d260703463385094a758b8667"
+  "hash": "f3f2787a53a6eb0d858c76d0cd601a52b15b78dd5c530f86198ffcbc97df381d"
 }

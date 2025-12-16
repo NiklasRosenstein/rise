@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, deployment_id, project_id, created_by_id,\n                status as \"status: DeploymentStatus\",\n                deployment_group, expires_at,\n                termination_reason as \"termination_reason: _\",\n                completed_at, error_message, build_logs,\n                controller_metadata as \"controller_metadata: serde_json::Value\",\n                image, image_digest,\n                http_port, needs_reconcile,\n                created_at, updated_at\n            FROM deployments\n            WHERE project_id = $1\n            ORDER BY created_at DESC\n            LIMIT $2 OFFSET $3\n            ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n                        deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile,\n            created_at, updated_at\n        FROM deployments\n        WHERE expires_at IS NOT NULL\n          AND expires_at <= NOW()\n          AND NOT is_terminal(status)\n        ORDER BY expires_at ASC\n        LIMIT $1\n        ",
   "describe": {
     "columns": [
       {
@@ -88,29 +88,32 @@
       },
       {
         "ordinal": 14,
+        "name": "rolled_back_from_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 15,
         "name": "http_port",
         "type_info": "Int4"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "needs_reconcile",
         "type_info": "Bool"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Int8",
         "Int8"
       ]
     },
@@ -129,11 +132,12 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "f947ef4e641ff44b680c362cdc808563b9b71cbaf53de5f5ef618362010473ae"
+  "hash": "b9975be659110b7a52a2c96c9b6fbf622470d9dd1a86bc5af946ecf5f179e864"
 }

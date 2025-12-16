@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest,\n            http_port, needs_reconcile,\n            created_at, updated_at\n        FROM deployments\n        WHERE needs_reconcile = TRUE\n          AND status IN ('Healthy', 'Unhealthy')\n        ORDER BY updated_at ASC\n        LIMIT $1\n        ",
+  "query": "\n        UPDATE deployments\n        SET\n            status = 'Terminating',\n            termination_reason = $2,\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -88,28 +88,47 @@
       },
       {
         "ordinal": 14,
+        "name": "rolled_back_from_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 15,
         "name": "http_port",
         "type_info": "Int4"
       },
       {
-        "ordinal": 15,
+        "ordinal": 16,
         "name": "needs_reconcile",
         "type_info": "Bool"
       },
       {
-        "ordinal": 16,
+        "ordinal": 17,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 17,
+        "ordinal": 18,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid",
+        {
+          "Custom": {
+            "name": "termination_reason",
+            "kind": {
+              "Enum": [
+                "UserStopped",
+                "Superseded",
+                "Cancelled",
+                "Failed",
+                "Expired"
+              ]
+            }
+          }
+        }
       ]
     },
     "nullable": [
@@ -127,11 +146,12 @@
       true,
       true,
       true,
+      true,
       false,
       false,
       false,
       false
     ]
   },
-  "hash": "412957547db27d883edc68b12f0092d63d1d3f07f41470d9919261027da82a01"
+  "hash": "28c47bf23b61a8c004490128fe2a11f8935a729433aadf447f7ff2241f9631fa"
 }
