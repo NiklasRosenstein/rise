@@ -2298,6 +2298,253 @@ function TeamDetail({ teamName, currentUser }) {
 }
 
 // Deployment Detail Component
+// Deployment Logs Component with SSE streaming
+function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
+    const [logs, setLogs] = useState([]);
+    const [streaming, setStreaming] = useState(false);
+    const [error, setError] = useState(null);
+    const [autoScroll, setAutoScroll] = useState(true);
+    const logsEndRef = useRef(null);
+    const eventSourceRef = useRef(null);
+
+    const isLoggable = (status) => {
+        // Can view logs for deployments that are running or have run
+        return ['Deploying', 'Healthy', 'Unhealthy', 'Stopped', 'Failed', 'Superseded'].includes(status);
+    };
+
+    const scrollToBottom = () => {
+        if (autoScroll && logsEndRef.current) {
+            logsEndRef.current.scrollIntoView({ behavior: 'smooth' });
+        }
+    };
+
+    useEffect(() => {
+        scrollToBottom();
+    }, [logs]);
+
+    const startStreaming = useCallback(() => {
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+        }
+
+        setError(null);
+        setStreaming(true);
+
+        const token = localStorage.getItem('rise_token');
+        const baseUrl = window.API_BASE_URL || '';
+        const url = `${baseUrl}/projects/${projectName}/deployments/${deploymentId}/logs?follow=true`;
+
+        // Use fetch for SSE with authorization header
+        fetch(url, {
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Accept': 'text/event-stream',
+            },
+        })
+        .then(response => {
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+
+            const processStream = () => {
+                reader.read().then(({ done, value }) => {
+                    if (done) {
+                        setStreaming(false);
+                        return;
+                    }
+
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // Keep incomplete line in buffer
+
+                    lines.forEach(line => {
+                        if (line.startsWith('data: ')) {
+                            const logLine = line.substring(6); // Remove 'data: ' prefix
+                            if (logLine.trim()) {
+                                setLogs(prevLogs => [...prevLogs, logLine]);
+                            }
+                        }
+                    });
+
+                    processStream();
+                }).catch(err => {
+                    console.error('Stream error:', err);
+                    setError(err.message);
+                    setStreaming(false);
+                });
+            };
+
+            processStream();
+        })
+        .catch(err => {
+            console.error('Failed to start log stream:', err);
+            setError(err.message);
+            setStreaming(false);
+        });
+    }, [projectName, deploymentId]);
+
+    const stopStreaming = useCallback(() => {
+        if (eventSourceRef.current) {
+            eventSourceRef.current.close();
+            eventSourceRef.current = null;
+        }
+        setStreaming(false);
+    }, []);
+
+    const loadInitialLogs = useCallback(async () => {
+        const token = localStorage.getItem('rise_token');
+        const baseUrl = window.API_BASE_URL || '';
+        const url = `${baseUrl}/projects/${projectName}/deployments/${deploymentId}/logs`;
+
+        try {
+            const response = await fetch(url, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Accept': 'text/event-stream',
+                },
+            });
+
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            const newLogs = [];
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop();
+
+                lines.forEach(line => {
+                    if (line.startsWith('data: ')) {
+                        const logLine = line.substring(6);
+                        if (logLine.trim()) {
+                            newLogs.push(logLine);
+                        }
+                    }
+                });
+            }
+
+            setLogs(newLogs);
+        } catch (err) {
+            console.error('Failed to load logs:', err);
+            setError(err.message);
+        }
+    }, [projectName, deploymentId]);
+
+    const clearLogs = () => {
+        setLogs([]);
+    };
+
+    useEffect(() => {
+        return () => {
+            stopStreaming();
+        };
+    }, [stopStreaming]);
+
+    if (!isLoggable(deploymentStatus)) {
+        return null;
+    }
+
+    return (
+        <div className="mb-6">
+            <div className="flex justify-between items-center mb-3">
+                <h3 className="text-xl font-bold">Runtime Logs</h3>
+                <div className="flex gap-2">
+                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                        <input
+                            type="checkbox"
+                            checked={autoScroll}
+                            onChange={(e) => setAutoScroll(e.target.checked)}
+                            className="rounded border-gray-600 bg-gray-800 text-indigo-600 focus:ring-indigo-500"
+                        />
+                        Auto-scroll
+                    </label>
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={clearLogs}
+                        disabled={logs.length === 0}
+                    >
+                        Clear
+                    </Button>
+                    {!streaming ? (
+                        <>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={loadInitialLogs}
+                            >
+                                Load Logs
+                            </Button>
+                            <Button
+                                variant="primary"
+                                size="sm"
+                                onClick={startStreaming}
+                            >
+                                Follow Logs
+                            </Button>
+                        </>
+                    ) : (
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={stopStreaming}
+                        >
+                            Stop
+                        </Button>
+                    )}
+                </div>
+            </div>
+
+            {error && (
+                <div className="mb-3 p-3 bg-red-900/20 border border-red-800 rounded text-red-400 text-sm">
+                    Error: {error}
+                </div>
+            )}
+
+            <div className="bg-gray-950 border border-gray-800 rounded-lg overflow-hidden">
+                <div
+                    className="p-4 overflow-y-auto font-mono text-xs text-gray-300"
+                    style={{ height: '400px' }}
+                >
+                    {logs.length === 0 ? (
+                        <div className="text-gray-500 text-center py-8">
+                            {streaming ? 'Waiting for logs...' : 'No logs yet. Click "Load Logs" or "Follow Logs" to view.'}
+                        </div>
+                    ) : (
+                        <>
+                            {logs.map((log, idx) => (
+                                <div key={idx} className="whitespace-pre-wrap break-all">
+                                    {log}
+                                </div>
+                            ))}
+                            <div ref={logsEndRef} />
+                        </>
+                    )}
+                </div>
+            </div>
+
+            {streaming && (
+                <div className="mt-2 flex items-center gap-2 text-sm text-gray-400">
+                    <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                    Live streaming logs...
+                </div>
+            )}
+        </div>
+    );
+}
+
 function DeploymentDetail({ projectName, deploymentId }) {
     const [deployment, setDeployment] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -2453,6 +2700,8 @@ function DeploymentDetail({ projectName, deploymentId }) {
                     </details>
                 )}
             </div>
+
+            <DeploymentLogs projectName={projectName} deploymentId={deploymentId} deploymentStatus={deployment.status} />
 
             <h3 className="text-xl font-bold mb-4">Environment Variables</h3>
             <EnvVarsList projectName={projectName} deploymentId={deploymentId} />
