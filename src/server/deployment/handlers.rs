@@ -1279,10 +1279,25 @@ pub async fn rollback_deployment(
         new_deployment_id
     );
 
+    // For chained rollbacks (rollback of a rollback), follow the chain to find the original source
+    // This ensures we use the correct image tag from the original deployment that built the image
+    let original_source_id =
+        if let Some(chained_source) = source_deployment.rolled_back_from_deployment_id {
+            // Source is itself a rollback - use its source instead
+            debug!(
+                "Source deployment {} is a rollback, following chain to original source {}",
+                source_deployment_id, chained_source
+            );
+            chained_source
+        } else {
+            // Source is the original - use it directly
+            source_deployment.id
+        };
+
     // Create new deployment with Pushed status
     // Copy image and image_digest from source - the helper function will determine the tag
     // For pre-built images: image_digest is copied, helper returns it
-    // For build-from-source: rolled_back_from_deployment_id is used to find the source deployment's image
+    // For build-from-source: rolled_back_from_deployment_id is used to find the original source deployment's image
     let new_deployment = db_deployments::create(
         &state.db_pool,
         db_deployments::CreateDeploymentParams {
@@ -1292,8 +1307,8 @@ pub async fn rollback_deployment(
             status: DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
             image: source_deployment.image.as_deref(), // Copy image from source if present
             image_digest: source_deployment.image_digest.as_deref(), // Copy digest from source if present
-            rolled_back_from_deployment_id: Some(source_deployment.id), // Track rollback source for image tag calculation
-            deployment_group: &source_deployment.deployment_group,      // Copy group from source
+            rolled_back_from_deployment_id: Some(original_source_id), // Track original source for image tag calculation
+            deployment_group: &source_deployment.deployment_group,    // Copy group from source
             expires_at: None, // expires_at - rollbacks don't inherit expiration
             http_port: source_deployment.http_port, // Copy http_port from source
             is_active: false, // Rollback deployments also start as inactive
