@@ -18,7 +18,7 @@ async fn get_current_user(
     backend_url: &str,
     token: &str,
 ) -> Result<MeResponse> {
-    let url = format!("{}/me", backend_url);
+    let url = format!("{}/api/v1/users/me", backend_url);
 
     let response = http_client
         .get(&url)
@@ -251,7 +251,7 @@ pub async fn create_project(
         owner: owner_payload,
     };
 
-    let url = format!("{}/projects", backend_url);
+    let url = format!("{}/api/v1/projects", backend_url);
     let response = http_client
         .post(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -294,7 +294,7 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    let url = format!("{}/projects", backend_url);
+    let url = format!("{}/api/v1/projects", backend_url);
     let response = http_client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -385,7 +385,7 @@ pub async fn show_project(
 
     // Always request expanded data with owner info
     let url = format!(
-        "{}/projects/{}?expand=owner&by_id={}",
+        "{}/api/v1/projects/{}?expand=owner&by_id={}",
         backend_url, project_identifier, by_id
     );
     let response = http_client
@@ -529,7 +529,7 @@ pub async fn update_project(
     };
 
     let url = format!(
-        "{}/projects/{}?by_id={}",
+        "{}/api/v1/projects/{}?by_id={}",
         backend_url, project_identifier, by_id
     );
     let response = http_client
@@ -594,7 +594,7 @@ pub async fn delete_project(
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
     let url = format!(
-        "{}/projects/{}?by_id={}",
+        "{}/api/v1/projects/{}?by_id={}",
         backend_url, project_identifier, by_id
     );
     let response = http_client

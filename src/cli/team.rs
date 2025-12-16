@@ -38,7 +38,7 @@ async fn lookup_users(
         return Ok(Vec::new());
     }
 
-    let url = format!("{}/users/lookup", backend_url);
+    let url = format!("{}/api/v1/users/lookup", backend_url);
     let request = UsersLookupRequest {
         emails: emails.clone(),
     };
@@ -74,7 +74,7 @@ async fn get_current_user(
     backend_url: &str,
     token: &str,
 ) -> Result<MeResponse> {
-    let url = format!("{}/me", backend_url);
+    let url = format!("{}/api/v1/users/me", backend_url);
 
     let response = http_client
         .get(&url)
@@ -178,7 +178,7 @@ pub async fn create_team(
         members: member_ids,
     };
 
-    let url = format!("{}/teams", backend_url);
+    let url = format!("{}/api/v1/teams", backend_url);
     let response = http_client
         .post(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -218,7 +218,7 @@ pub async fn list_teams(http_client: &Client, backend_url: &str, config: &Config
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    let url = format!("{}/teams", backend_url);
+    let url = format!("{}/api/v1/teams", backend_url);
     let response = http_client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -290,7 +290,7 @@ pub async fn show_team(
 
     // Always request expanded data with user emails
     let url = format!(
-        "{}/teams/{}?expand=members,owners&by_id={}",
+        "{}/api/v1/teams/{}?expand=members,owners&by_id={}",
         backend_url, team_identifier, by_id
     );
     let response = http_client
@@ -406,7 +406,7 @@ pub async fn update_team(
     let remove_member_ids = lookup_users(http_client, backend_url, &token, remove_members).await?;
 
     // First, get the current team state (without expand for now)
-    let get_url = format!("{}/teams/{}?by_id={}", backend_url, team_identifier, by_id);
+    let get_url = format!("{}/api/v1/teams/{}?by_id={}", backend_url, team_identifier, by_id);
     let get_response = http_client
         .get(&get_url)
         .header("Authorization", format!("Bearer {}", token))
@@ -474,7 +474,7 @@ pub async fn update_team(
         members: Some(team.members.clone()),
     };
 
-    let url = format!("{}/teams/{}?by_id={}", backend_url, team.id, by_id);
+    let url = format!("{}/api/v1/teams/{}?by_id={}", backend_url, team.id, by_id);
     let response = http_client
         .put(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -519,7 +519,7 @@ pub async fn delete_team(
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    let url = format!("{}/teams/{}?by_id={}", backend_url, team_identifier, by_id);
+    let url = format!("{}/api/v1/teams/{}?by_id={}", backend_url, team_identifier, by_id);
     let response = http_client
         .delete(&url)
         .header("Authorization", format!("Bearer {}", token))
