@@ -2241,6 +2241,84 @@ impl DeploymentBackend for KubernetesController {
             custom_domain_urls,
         })
     }
+
+    async fn stream_logs(
+        &self,
+        deployment: &Deployment,
+        follow: bool,
+        tail_lines: Option<i64>,
+        timestamps: bool,
+        since_seconds: Option<i64>,
+    ) -> Result<futures::stream::BoxStream<'static, Result<bytes::Bytes, anyhow::Error>>> {
+        use futures::StreamExt;
+        use k8s_openapi::api::core::v1::Pod;
+        use kube::api::{Api, ListParams, LogParams};
+
+        // Extract namespace from controller_metadata
+        let namespace = deployment
+            .controller_metadata
+            .get("namespace")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| anyhow::anyhow!("Namespace not found in controller metadata"))?
+            .to_string();
+
+        // Find pod using label selector
+        let pod_api: Api<Pod> = Api::namespaced(self.kube_client.clone(), &namespace);
+        let pods = pod_api
+            .list(&ListParams::default().labels(&format!(
+                "rise.dev/deployment-id={}",
+                deployment.deployment_id
+            )))
+            .await?;
+
+        let pod = pods
+            .items
+            .first()
+            .ok_or_else(|| anyhow::anyhow!("Pod not found - deployment may not be ready yet"))?;
+
+        let pod_name = pod
+            .metadata
+            .name
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Pod name not found"))?
+            .clone();
+
+        // Build LogParams
+        let mut log_params = LogParams {
+            follow,
+            timestamps,
+            ..Default::default()
+        };
+        if let Some(tail) = tail_lines {
+            log_params.tail_lines = Some(tail);
+        }
+        if let Some(since) = since_seconds {
+            log_params.since_seconds = Some(since);
+        }
+
+        // Stream logs from pod (will stream from first container)
+        let mut log_stream = pod_api.log_stream(&pod_name, &log_params).await?;
+
+        // Convert AsyncBufRead to Stream of Bytes by reading chunks
+        use futures::AsyncReadExt;
+        let stream = async_stream::stream! {
+            let mut buffer = vec![0u8; 8192];
+            loop {
+                match log_stream.read(&mut buffer).await {
+                    Ok(0) => break, // EOF
+                    Ok(n) => {
+                        yield Ok(bytes::Bytes::copy_from_slice(&buffer[..n]));
+                    }
+                    Err(e) => {
+                        yield Err(anyhow::anyhow!("Log stream error: {}", e));
+                        break;
+                    }
+                }
+            }
+        };
+
+        Ok(stream.boxed())
+    }
 }
 
 impl KubernetesController {

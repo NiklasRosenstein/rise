@@ -2,9 +2,11 @@ use anyhow::Context;
 use axum::{
     extract::{Extension, Path, Query, State},
     http::StatusCode,
+    response::sse::{Event, KeepAlive, Sse},
     Json,
 };
 use chrono::{DateTime, Utc};
+use futures::StreamExt;
 use regex::Regex;
 use tracing::{debug, error, info};
 
@@ -1340,4 +1342,140 @@ pub async fn rollback_deployment(
         rolled_back_from: source_deployment_id,
         image_tag,
     }))
+}
+
+/// Query parameters for log streaming
+#[derive(serde::Deserialize)]
+pub struct LogStreamParams {
+    /// Follow the logs (stream continuously)
+    #[serde(default)]
+    pub follow: bool,
+    /// Number of lines to show from the end
+    pub tail: Option<i64>,
+    /// Include timestamps in the output
+    #[serde(default)]
+    pub timestamps: bool,
+    /// Show logs since this many seconds ago
+    pub since: Option<i64>,
+}
+
+/// Stream logs from a deployment via Server-Sent Events
+///
+/// GET /projects/{project_name}/deployments/{deployment_id}/logs
+pub async fn stream_deployment_logs(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((project_name, deployment_id)): Path<(String, String)>,
+    Query(params): Query<LogStreamParams>,
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, anyhow::Error>>>, (StatusCode, String)> {
+    // Fetch project
+    let project = projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to fetch project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
+
+    // Check permission
+    check_deploy_permission(&state, &project, &user)
+        .await
+        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
+
+    // Fetch deployment
+    let deployment = db_deployments::find_by_project_and_deployment_id(
+        &state.db_pool,
+        project.id,
+        &deployment_id,
+    )
+    .await
+    .map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to fetch deployment: {}", e),
+        )
+    })?
+    .ok_or_else(|| {
+        (
+            StatusCode::NOT_FOUND,
+            format!(
+                "Deployment '{}' not found for project '{}'",
+                deployment_id, project_name
+            ),
+        )
+    })?;
+
+    // Check if deployment is in a state where logs make sense
+    if state_machine::is_terminal(&deployment.status) {
+        return Err((
+            StatusCode::GONE,
+            "Deployment is no longer running - logs may not be available".to_string(),
+        ));
+    }
+
+    // Don't allow streaming logs from deployments that haven't reached Deploying yet
+    if matches!(
+        deployment.status,
+        DbDeploymentStatus::Pending
+            | DbDeploymentStatus::Building
+            | DbDeploymentStatus::Pushing
+            | DbDeploymentStatus::Pushed
+    ) {
+        return Err((
+            StatusCode::SERVICE_UNAVAILABLE,
+            "Deployment not ready yet - no logs available. Try again when deployment is running."
+                .to_string(),
+        ));
+    }
+
+    // Get log stream from deployment backend
+    let log_stream = state
+        .deployment_backend
+        .stream_logs(
+            &deployment,
+            params.follow,
+            params.tail,
+            params.timestamps,
+            params.since,
+        )
+        .await
+        .map_err(|e| {
+            let error_msg = e.to_string();
+            if error_msg.contains("Pod not found") || error_msg.contains("not ready yet") {
+                (
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "Deployment pod not ready yet. Please try again in a moment.".to_string(),
+                )
+            } else {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to stream logs: {}", e),
+                )
+            }
+        })?;
+
+    // Convert log stream to SSE events
+    let sse_stream = log_stream.map(|result| match result {
+        Ok(bytes) => {
+            // Convert bytes to string (log lines)
+            let log_text = String::from_utf8_lossy(&bytes).to_string();
+            // Split into lines and send each as a separate event
+            // This ensures proper SSE formatting
+            Ok(Event::default().data(log_text))
+        }
+        Err(e) => {
+            // Send error as SSE event
+            error!("Log stream error: {}", e);
+            Err(e)
+        }
+    });
+
+    Ok(Sse::new(sse_stream).keep_alive(KeepAlive::default()))
 }

@@ -111,6 +111,29 @@ pub trait DeploymentBackend: Send + Sync {
         deployment: &Deployment,
         project: &Project,
     ) -> anyhow::Result<DeploymentUrls>;
+
+    /// Stream logs from a deployment
+    ///
+    /// Returns a stream of log bytes from the deployment's runtime (pod/container).
+    /// Each backend implements this in its own way (Kubernetes pods, CloudWatch, etc.).
+    ///
+    /// # Arguments
+    /// * `deployment` - The deployment to stream logs from
+    /// * `follow` - Whether to follow the logs (stream continuously)
+    /// * `tail_lines` - Optional number of lines to show from the end
+    /// * `timestamps` - Whether to include timestamps in the output
+    /// * `since_seconds` - Optional number of seconds to look back
+    ///
+    /// # Returns
+    /// A boxed stream of log bytes, or an error if logs are not available
+    async fn stream_logs(
+        &self,
+        deployment: &Deployment,
+        follow: bool,
+        tail_lines: Option<i64>,
+        timestamps: bool,
+        since_seconds: Option<i64>,
+    ) -> anyhow::Result<futures::stream::BoxStream<'static, Result<bytes::Bytes, anyhow::Error>>>;
 }
 
 /// Main controller orchestrator
