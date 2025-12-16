@@ -2164,22 +2164,29 @@ impl DeploymentBackend for KubernetesController {
         let primary_url_host = self.full_ingress_url(project, deployment);
         let primary_url = format!("{}://{}", self.ingress_schema, primary_url_host);
 
-        // Fetch custom domains from database
-        let custom_domains =
-            crate::db::custom_domains::list_project_custom_domains(&self.state.db_pool, project.id)
-                .await?;
+        // Custom domains only apply to deployments in the default group
+        let custom_domain_urls = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP {
+            // Fetch custom domains from database
+            let custom_domains =
+                crate::db::custom_domains::list_project_custom_domains(&self.state.db_pool, project.id)
+                    .await?;
 
-        // Build custom domain URLs with schema
-        let mut custom_domain_urls = Vec::new();
-        for domain in custom_domains {
-            let url_host = if let Some(port) = self.ingress_port {
-                format!("{}:{}", domain.domain, port)
-            } else {
-                domain.domain
-            };
-            let url = format!("{}://{}", self.ingress_schema, url_host);
-            custom_domain_urls.push(url);
-        }
+            // Build custom domain URLs with schema
+            let mut urls = Vec::new();
+            for domain in custom_domains {
+                let url_host = if let Some(port) = self.ingress_port {
+                    format!("{}:{}", domain.domain, port)
+                } else {
+                    domain.domain
+                };
+                let url = format!("{}://{}", self.ingress_schema, url_host);
+                urls.push(url);
+            }
+            urls
+        } else {
+            // Non-default groups don't get custom domain URLs
+            Vec::new()
+        };
 
         Ok(DeploymentUrls {
             primary_url,
