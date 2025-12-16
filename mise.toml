@@ -69,4 +69,13 @@ for node in $(minikube node list | awk '{print $1}'); do
 [host."http://${REGISTRY_NAME}:5000"]
 EOF
 done
+
+docker network connect "${NETWORK_NAME}" minikube || true
+
+echo
+echo "Minikube started. Port-forawrding ingress-nginx-controller to localhost:8080 (HTTP) and localhost:8443 (HTTPS)..."
+echo "You might want to update your /etc/hosts to point your local domains to 127.0.0.1"
+echo
+
+kubectl port-forward --namespace ingress-nginx svc/ingress-nginx-controller 8080:80 8443:443
 """
