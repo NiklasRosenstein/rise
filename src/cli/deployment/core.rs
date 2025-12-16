@@ -826,3 +826,160 @@ async fn update_deployment_status(
         }
     }
 }
+
+/// Get logs from a deployment
+pub async fn get_logs(
+    http_client: &reqwest::Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    deployment_id: &str,
+    follow: bool,
+    tail: Option<usize>,
+    timestamps: bool,
+    since: Option<&str>,
+) -> anyhow::Result<()> {
+    use futures::StreamExt;
+
+    // Build URL with query parameters
+    let mut url = format!(
+        "{}/projects/{}/deployments/{}/logs",
+        backend_url, project, deployment_id
+    );
+
+    let mut query_params = vec![];
+    let tail_param;
+    let since_param;
+
+    if follow {
+        query_params.push("follow=true");
+    }
+    if let Some(t) = tail {
+        tail_param = format!("tail={}", t);
+        query_params.push(&tail_param);
+    }
+    if timestamps {
+        query_params.push("timestamps=true");
+    }
+    if let Some(s) = since {
+        // Parse duration like "5m", "1h" into seconds
+        let seconds = parse_duration_to_seconds(s)?;
+        since_param = format!("since={}", seconds);
+        query_params.push(&since_param);
+    }
+
+    if !query_params.is_empty() {
+        url.push_str("?");
+        url.push_str(&query_params.join("&"));
+    }
+
+    debug!("Fetching logs from: {}", url);
+
+    // Send request
+    let response = http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await?;
+
+    // Check status
+    if !response.status().is_success() {
+        let status = response.status();
+        let error = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown".to_string());
+        return Err(anyhow::anyhow!(
+            "Failed to get logs ({}): {}",
+            status,
+            error
+        ));
+    }
+
+    // Setup Ctrl+C handler for graceful shutdown
+    let ctrl_c = tokio::signal::ctrl_c();
+    tokio::pin!(ctrl_c);
+
+    // Stream response bytes
+    let mut stream = response.bytes_stream();
+    let mut buffer = String::new();
+
+    loop {
+        tokio::select! {
+            // Handle Ctrl+C
+            _ = &mut ctrl_c => {
+                debug!("Received Ctrl+C, stopping log stream");
+                break;
+            }
+            // Process stream chunks
+            chunk_result = stream.next() => {
+                match chunk_result {
+                    Some(Ok(chunk)) => {
+                        let text = String::from_utf8_lossy(&chunk);
+                        buffer.push_str(&text);
+
+                        // Process complete lines from buffer
+                        while let Some(newline_pos) = buffer.find('\n') {
+                            let line = buffer.drain(..=newline_pos).collect::<String>();
+                            let line = line.trim_end();
+
+                            // Parse SSE format: lines starting with "data: "
+                            if let Some(data) = line.strip_prefix("data: ") {
+                                // Print log line directly to stdout
+                                println!("{}", data);
+                            } else if !line.is_empty() && !line.starts_with(':') {
+                                // SSE comments start with ':', skip them
+                                // Print other non-empty lines (in case format changes)
+                                println!("{}", line);
+                            }
+                        }
+                    }
+                    Some(Err(e)) => {
+                        return Err(anyhow::anyhow!("Stream error: {}", e));
+                    }
+                    None => {
+                        // Stream ended
+                        debug!("Log stream ended");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    // Print any remaining buffered content
+    if !buffer.is_empty() {
+        let line = buffer.trim();
+        if let Some(data) = line.strip_prefix("data: ") {
+            println!("{}", data);
+        } else if !line.is_empty() && !line.starts_with(':') {
+            println!("{}", line);
+        }
+    }
+
+    Ok(())
+}
+
+/// Parse duration string (e.g., "5m", "1h", "30s") into seconds
+fn parse_duration_to_seconds(duration: &str) -> anyhow::Result<i64> {
+    let duration = duration.trim();
+
+    if let Some(num_str) = duration.strip_suffix('s') {
+        let num: i64 = num_str.parse()?;
+        Ok(num)
+    } else if let Some(num_str) = duration.strip_suffix('m') {
+        let num: i64 = num_str.parse()?;
+        Ok(num * 60)
+    } else if let Some(num_str) = duration.strip_suffix('h') {
+        let num: i64 = num_str.parse()?;
+        Ok(num * 3600)
+    } else if let Some(num_str) = duration.strip_suffix('d') {
+        let num: i64 = num_str.parse()?;
+        Ok(num * 86400)
+    } else {
+        Err(anyhow::anyhow!(
+            "Invalid duration format '{}'. Use format like '5m', '1h', '30s', '7d'",
+            duration
+        ))
+    }
+}

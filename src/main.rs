@@ -276,6 +276,25 @@ enum DeploymentCommands {
         #[arg(long, short)]
         group: String,
     },
+    /// Show logs from a deployment
+    Logs {
+        /// Project name
+        project: String,
+        /// Deployment ID (YYYYMMDD-HHMMSS format)
+        deployment_id: String,
+        /// Follow log output (stream continuously)
+        #[arg(short, long)]
+        follow: bool,
+        /// Number of lines to show from end of logs
+        #[arg(long)]
+        tail: Option<usize>,
+        /// Show timestamps in log output
+        #[arg(long)]
+        timestamps: bool,
+        /// Show logs since duration (e.g., "5m", "1h")
+        #[arg(long)]
+        since: Option<String>,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -726,6 +745,30 @@ async fn main() -> Result<()> {
                     &config,
                     project,
                     group,
+                )
+                .await?;
+            }
+            DeploymentCommands::Logs {
+                project,
+                deployment_id,
+                follow,
+                tail,
+                timestamps,
+                since,
+            } => {
+                let token = config.get_token().ok_or_else(|| {
+                    anyhow::anyhow!("Not logged in. Please run 'rise login' first.")
+                })?;
+                deployment::get_logs(
+                    &http_client,
+                    &backend_url,
+                    &token,
+                    project,
+                    deployment_id,
+                    *follow,
+                    *tail,
+                    *timestamps,
+                    since.as_deref(),
                 )
                 .await?;
             }
