@@ -93,9 +93,9 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_deployment_status: Option<String>, // Status of the active deployment
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_url: Option<String>, // DEPRECATED: use project_url
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_url: Option<String>, // Stable project URL
+    pub primary_url: Option<String>, // Primary URL from ingress template
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_domain_urls: Vec<String>, // Additional custom domain URLs
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_groups: Option<Vec<String>>, // Active deployment groups
     // Timestamps
@@ -164,9 +164,9 @@ pub struct ProjectWithOwnerInfo {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_deployment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_url: Option<String>, // DEPRECATED: use project_url
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub project_url: Option<String>,
+    pub primary_url: Option<String>, // Primary URL from ingress template
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_domain_urls: Vec<String>, // Additional custom domain URLs
     pub finalizers: Vec<String>,
     pub created: String,
     pub updated: String,

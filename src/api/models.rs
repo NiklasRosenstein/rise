@@ -87,7 +87,9 @@ mod client_models {
         #[serde(default)]
         pub controller_metadata: serde_json::Value,
         #[serde(skip_serializing_if = "Option::is_none")]
-        pub deployment_url: Option<String>,
+        pub primary_url: Option<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        pub custom_domain_urls: Vec<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         pub image: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
