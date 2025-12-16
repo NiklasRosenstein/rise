@@ -501,7 +501,7 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
     const [error, setError] = useState(null);
     const [autoScroll, setAutoScroll] = useState(true);
     const logsEndRef = useRef(null);
-    const eventSourceRef = useRef(null);
+    const abortControllerRef = useRef(null);
 
     const isLoggable = (status) => {
         // Can view logs for deployments that are running or have run
@@ -519,8 +519,10 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
     }, [logs]);
 
     const startStreaming = useCallback(() => {
-        if (eventSourceRef.current) {
-            eventSourceRef.current.close();
+        // Stop any existing stream first
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
         }
 
         setError(null);
@@ -530,12 +532,17 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
         const baseUrl = window.API_BASE_URL || '';
         const url = `${baseUrl}/projects/${projectName}/deployments/${deploymentId}/logs?follow=true`;
 
+        // Create new AbortController for this stream
+        const abortController = new AbortController();
+        abortControllerRef.current = abortController;
+
         // Use fetch for SSE with authorization header
         fetch(url, {
             headers: {
                 'Authorization': `Bearer ${token}`,
                 'Accept': 'text/event-stream',
             },
+            signal: abortController.signal,
         })
         .then(response => {
             if (!response.ok) {
@@ -568,6 +575,10 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
 
                     processStream();
                 }).catch(err => {
+                    // Ignore abort errors
+                    if (err.name === 'AbortError') {
+                        return;
+                    }
                     console.error('Stream error:', err);
                     setError(err.message);
                     setStreaming(false);
@@ -577,6 +588,10 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
             processStream();
         })
         .catch(err => {
+            // Ignore abort errors
+            if (err.name === 'AbortError') {
+                return;
+            }
             console.error('Failed to start log stream:', err);
             setError(err.message);
             setStreaming(false);
@@ -584,9 +599,9 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
     }, [projectName, deploymentId]);
 
     const stopStreaming = useCallback(() => {
-        if (eventSourceRef.current) {
-            eventSourceRef.current.close();
-            eventSourceRef.current = null;
+        if (abortControllerRef.current) {
+            abortControllerRef.current.abort();
+            abortControllerRef.current = null;
         }
         setStreaming(false);
     }, []);
