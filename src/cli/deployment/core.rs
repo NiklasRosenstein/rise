@@ -925,8 +925,10 @@ pub async fn get_logs(
 
                             // Parse SSE format: lines starting with "data: "
                             if let Some(data) = line.strip_prefix("data: ") {
-                                // Print log line directly to stdout
-                                println!("{}", data);
+                                // Only print non-empty data lines
+                                if !data.is_empty() {
+                                    println!("{}", data);
+                                }
                             } else if !line.is_empty() && !line.starts_with(':') {
                                 // SSE comments start with ':', skip them
                                 // Print other non-empty lines (in case format changes)
@@ -951,7 +953,10 @@ pub async fn get_logs(
     if !buffer.is_empty() {
         let line = buffer.trim();
         if let Some(data) = line.strip_prefix("data: ") {
-            println!("{}", data);
+            // Only print non-empty data
+            if !data.is_empty() {
+                println!("{}", data);
+            }
         } else if !line.is_empty() && !line.starts_with(':') {
             println!("{}", line);
         }
