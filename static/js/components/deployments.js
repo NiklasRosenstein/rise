@@ -525,6 +525,8 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
             abortControllerRef.current = null;
         }
 
+        // Clear existing logs when starting a new stream
+        setLogs([]);
         setError(null);
         setStreaming(true);
 
