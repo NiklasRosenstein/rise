@@ -1499,7 +1499,7 @@ pub async fn stream_deployment_logs(
             let events: Vec<Result<Event, anyhow::Error>> = log_text
                 .lines()
                 .filter(|line| !line.is_empty())
-                .map(|line| Ok(Event::default().data(line.to_string())))
+                .map(|line| Ok(Event::default().data(line)))
                 .collect();
             stream::iter(events)
         }

@@ -827,41 +827,46 @@ async fn update_deployment_status(
     }
 }
 
+/// Parameters for get_logs function
+pub struct GetLogsParams<'a> {
+    pub project: &'a str,
+    pub deployment_id: &'a str,
+    pub follow: bool,
+    pub tail: Option<usize>,
+    pub timestamps: bool,
+    pub since: Option<&'a str>,
+}
+
 /// Get logs from a deployment
 pub async fn get_logs(
     http_client: &reqwest::Client,
     backend_url: &str,
     token: &str,
-    project: &str,
-    deployment_id: &str,
-    follow: bool,
-    tail: Option<usize>,
-    timestamps: bool,
-    since: Option<&str>,
+    params: GetLogsParams<'_>,
 ) -> anyhow::Result<()> {
     use futures::StreamExt;
 
     // Build URL with query parameters
     let mut url = format!(
         "{}/projects/{}/deployments/{}/logs",
-        backend_url, project, deployment_id
+        backend_url, params.project, params.deployment_id
     );
 
     let mut query_params = vec![];
     let tail_param;
     let since_param;
 
-    if follow {
+    if params.follow {
         query_params.push("follow=true");
     }
-    if let Some(t) = tail {
+    if let Some(t) = params.tail {
         tail_param = format!("tail={}", t);
         query_params.push(&tail_param);
     }
-    if timestamps {
+    if params.timestamps {
         query_params.push("timestamps=true");
     }
-    if let Some(s) = since {
+    if let Some(s) = params.since {
         // Parse duration like "5m", "1h" into seconds
         let seconds = parse_duration_to_seconds(s)?;
         since_param = format!("since={}", seconds);
@@ -869,7 +874,7 @@ pub async fn get_logs(
     }
 
     if !query_params.is_empty() {
-        url.push_str("?");
+        url.push('?');
         url.push_str(&query_params.join("&"));
     }
 

@@ -763,12 +763,14 @@ async fn main() -> Result<()> {
                     &http_client,
                     &backend_url,
                     &token,
-                    project,
-                    deployment_id,
-                    *follow,
-                    *tail,
-                    *timestamps,
-                    since.as_deref(),
+                    deployment::GetLogsParams {
+                        project,
+                        deployment_id,
+                        follow: *follow,
+                        tail: *tail,
+                        timestamps: *timestamps,
+                        since: since.as_deref(),
+                    },
                 )
                 .await?;
             }
