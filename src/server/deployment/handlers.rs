@@ -1469,18 +1469,24 @@ pub async fn stream_deployment_logs(
         })?;
 
     // Convert log stream to SSE events
-    let sse_stream = log_stream.map(|result| match result {
+    // We need to flatten the stream since each chunk may contain multiple lines
+    use futures::stream;
+    let sse_stream = log_stream.flat_map(|result| match result {
         Ok(bytes) => {
             // Convert bytes to string (log lines)
             let log_text = String::from_utf8_lossy(&bytes).to_string();
-            // Split into lines and send each as a separate event
-            // This ensures proper SSE formatting
-            Ok(Event::default().data(log_text))
+            // Split into individual lines and create an event for each
+            let events: Vec<Result<Event, anyhow::Error>> = log_text
+                .lines()
+                .filter(|line| !line.is_empty())
+                .map(|line| Ok(Event::default().data(line.to_string())))
+                .collect();
+            stream::iter(events)
         }
         Err(e) => {
             // Send error as SSE event
             error!("Log stream error: {}", e);
-            Err(e)
+            stream::iter(vec![Err(e)])
         }
     });
 
