@@ -107,6 +107,7 @@ pub struct KubernetesControllerConfig {
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub auth_backend_url: String,
     pub auth_signin_url: String,
+    pub namespace_labels: std::collections::HashMap<String, String>,
     pub namespace_annotations: std::collections::HashMap<String, String>,
     pub ingress_annotations: std::collections::HashMap<String, String>,
     pub ingress_tls_secret_name: Option<String>,
@@ -126,6 +127,7 @@ pub struct KubernetesController {
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     auth_backend_url: String,
     auth_signin_url: String,
+    namespace_labels: std::collections::HashMap<String, String>,
     namespace_annotations: std::collections::HashMap<String, String>,
     ingress_annotations: std::collections::HashMap<String, String>,
     ingress_tls_secret_name: Option<String>,
@@ -151,6 +153,7 @@ impl KubernetesController {
             registry_provider: config.registry_provider,
             auth_backend_url: config.auth_backend_url,
             auth_signin_url: config.auth_signin_url,
+            namespace_labels: config.namespace_labels,
             namespace_annotations: config.namespace_annotations,
             ingress_annotations: config.ingress_annotations,
             ingress_tls_secret_name: config.ingress_tls_secret_name,
@@ -820,6 +823,12 @@ impl KubernetesController {
 
     /// Create Namespace resource
     fn create_namespace(&self, project: &Project) -> Namespace {
+        // Start with common labels and merge in configured namespace labels
+        let mut labels = Self::common_labels(project);
+        for (k, v) in &self.namespace_labels {
+            labels.insert(k.clone(), v.clone());
+        }
+
         // Convert HashMap to BTreeMap for annotations
         let annotations = if !self.namespace_annotations.is_empty() {
             Some(
@@ -835,7 +844,7 @@ impl KubernetesController {
         Namespace {
             metadata: ObjectMeta {
                 name: Some(Self::namespace_name(project)),
-                labels: Some(Self::common_labels(project)),
+                labels: Some(labels),
                 annotations,
                 ..Default::default()
             },
@@ -2648,6 +2657,7 @@ mod tests {
             registry_provider: None,
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
+            namespace_labels: std::collections::HashMap::new(),
             namespace_annotations: std::collections::HashMap::new(),
             ingress_annotations: std::collections::HashMap::new(),
             ingress_tls_secret_name: None,

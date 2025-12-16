@@ -93,6 +93,11 @@ deployment_controller:
   # auth_backend_url: "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL
   # auth_signin_url: "https://rise.example.com"  # Public API URL
 
+  # Optional: Labels to apply to all managed namespaces
+  # namespace_labels:
+  #   environment: "production"
+  #   team: "platform"
+
   # Optional: Annotations to apply to all managed namespaces
   # namespace_annotations:
   #   company.com/team: "platform"

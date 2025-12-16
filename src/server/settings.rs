@@ -249,6 +249,11 @@ pub enum DeploymentControllerSettings {
         #[serde(default = "default_namespace_format")]
         namespace_format: String,
 
+        /// Labels to apply to all managed namespaces
+        /// Example: {"environment": "production", "team": "platform"}
+        #[serde(default)]
+        namespace_labels: std::collections::HashMap<String, String>,
+
         /// Annotations to apply to all managed namespaces
         /// Example: {"company.com/team": "platform", "cost-center": "engineering"}
         #[serde(default)]
