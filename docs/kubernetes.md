@@ -1,12 +1,12 @@
 # Kubernetes Deployment Backend
 
-The Kubernetes deployment backend deploys applications to Kubernetes clusters using ReplicaSets, Services, and Ingresses.
+The Kubernetes deployment backend deploys applications to Kubernetes clusters using Deployments, Services, and Ingresses.
 
 ## Overview
 
 The Kubernetes controller manages application deployments on Kubernetes by:
 - Creating namespace-scoped resources for each project
-- Deploying applications as ReplicaSets with rolling updates
+- Deploying applications as Deployments with rolling updates
 - Managing traffic routing with Services and Ingresses
 - Implementing blue/green deployments via Service selector updates
 - Automatically refreshing image pull secrets for private registries
@@ -83,7 +83,7 @@ The Kubernetes controller creates and manages the following resources per projec
 | Resource | Scope | Purpose |
 |----------|-------|---------|
 | Namespace | One per project | Isolates project resources |
-| ReplicaSet | One per deployment | Runs application pods |
+| Deployment | One per deployment | Runs application pods |
 | Service | One per deployment group | Routes traffic to active deployment |
 | Ingress | One per deployment group | Exposes HTTP/HTTPS endpoints |
 | Secret | One per project | Stores image pull credentials |
@@ -95,7 +95,7 @@ Resources follow consistent naming patterns:
 | Resource | Pattern | Example |
 |----------|---------|---------|
 | Namespace | `rise-{project}` | `rise-my-app` |
-| ReplicaSet | `{project}-{deployment_id}` | `my-app-20251207-143022` |
+| Deployment | `{project}-{deployment_id}` | `my-app-20251207-143022` |
 | Service | `{escaped_group}` | `default`, `mr--26` |
 | Ingress | `{escaped_group}` | `default`, `mr--26` |
 | Secret | `rise-registry-creds` | `rise-registry-creds` |
@@ -357,10 +357,10 @@ Error: Failed to initialize JWT signer: Invalid base64
 
 The controller implements blue/green deployments using Service selector updates:
 
-1. **Deploy new ReplicaSet**: Create new ReplicaSet with deployment-specific labels
-2. **Wait for health**: Wait until new ReplicaSet pods are ready and pass health checks
+1. **Deploy new Deployment**: Create new Deployment with deployment-specific labels
+2. **Wait for health**: Wait until new Deployment pods are ready and pass health checks
 3. **Switch traffic**: Update Service selector to point to new deployment labels
-4. **Previous deployment**: Old ReplicaSet remains but receives no traffic
+4. **Previous deployment**: Old Deployment remains but receives no traffic
 
 This ensures zero-downtime deployments with instant rollback capability.
 
@@ -411,13 +411,13 @@ data:
 
 **Auto-refresh**: Secrets are automatically refreshed every hour to handle short-lived credentials (e.g., ECR tokens expire after 12 hours).
 
-### ReplicaSet
+### Deployment
 
 One per deployment:
 
 ```yaml
 apiVersion: apps/v1
-kind: ReplicaSet
+kind: Deployment
 metadata:
   name: my-app-20251207-143022
   namespace: rise-my-app
@@ -535,7 +535,7 @@ rules:
     resources: ["secrets", "services"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
   - apiGroups: ["apps"]
-    resources: ["replicasets"]
+    resources: ["deployments", "replicasets"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
   - apiGroups: [""]
     resources: ["pods"]
