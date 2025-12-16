@@ -52,7 +52,7 @@ pub async fn handle_device_flow(
     // Step 1: Initialize device flow via backend
     println!("Initializing device authorization flow...");
 
-    let authorize_url = format!("{}/auth/authorize", backend_url);
+    let authorize_url = format!("{}/api/v1/auth/authorize", backend_url);
     let authorize_request = AuthorizeRequest {
         flow: "device".to_string(),
     };
@@ -125,7 +125,7 @@ pub async fn handle_device_flow(
         error_description: Option<String>,
     }
 
-    let exchange_url = format!("{}/auth/device/exchange", backend_url);
+    let exchange_url = format!("{}/api/v1/auth/device/exchange", backend_url);
     let poll_interval = Duration::from_secs(interval);
     let timeout = Duration::from_secs(expires_in);
     let start_time = std::time::Instant::now();

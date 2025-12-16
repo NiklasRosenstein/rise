@@ -149,7 +149,7 @@ pub async fn handle_authorization_code_flow(
         code_challenge_method: Some("S256".to_string()),
     };
 
-    let authorize_url = format!("{}/auth/authorize", backend_url);
+    let authorize_url = format!("{}/api/v1/auth/authorize", backend_url);
 
     let response = http_client
         .post(&authorize_url)
@@ -210,7 +210,7 @@ pub async fn handle_authorization_code_flow(
         redirect_uri,
     };
 
-    let exchange_url = format!("{}/auth/code/exchange", backend_url);
+    let exchange_url = format!("{}/api/v1/auth/code/exchange", backend_url);
 
     let response = http_client
         .post(&exchange_url)
