@@ -2348,7 +2348,7 @@ function DeploymentDetail({ projectName, deploymentId }) {
                                 size="sm"
                                 onClick={handleRollbackClick}
                             >
-                                Rollback
+                                {deployment.status === 'Healthy' ? 'Redeploy' : 'Rollback'}
                             </Button>
                         )}
                     </div>
@@ -2436,9 +2436,11 @@ function DeploymentDetail({ projectName, deploymentId }) {
                 isOpen={rollbackDialogOpen}
                 onClose={() => setRollbackDialogOpen(false)}
                 onConfirm={handleRollback}
-                title="Rollback to Deployment"
-                message={`Are you sure you want to rollback to deployment ${deploymentId}? This will create a new deployment with the same image and configuration.`}
-                confirmText="Rollback"
+                title={deployment?.status === 'Healthy' ? 'Redeploy' : 'Rollback to Deployment'}
+                message={deployment?.status === 'Healthy'
+                    ? `Are you sure you want to redeploy ${deploymentId}? This will create a new deployment with the same image and configuration.`
+                    : `Are you sure you want to rollback to deployment ${deploymentId}? This will create a new deployment with the same image and configuration.`}
+                confirmText={deployment?.status === 'Healthy' ? 'Redeploy' : 'Rollback'}
                 variant="primary"
                 loading={rolling}
             />
