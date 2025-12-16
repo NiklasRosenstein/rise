@@ -1,6 +1,13 @@
 # Rise
 
-A Rust-based platform for deploying containerized applications with minimal configuration.
+<p align="center">
+    <img src="./screenshot.png" alt="Rise Web Dashboard Screenshot"/>
+    <p align="center">A Rust-based platform for deploying containerized applications with minimal configuration.</p>
+</p>
+
+---
+
+&nbsp;
 
 > [!WARNING]
 > **Early Work in Progress**
