@@ -197,23 +197,14 @@ resource "aws_secretsmanager_secret_version" "rise_ecr_creds" {
 
 ## Configuration
 
-Registry configuration is in `config/`:
+Registry configuration is in `config/` directory. See the registry examples at the top of this document for TOML configuration format.
 
-**Precedence** (highest to lowest):
-1. Local config (`local.toml`)
-2. Environment-specific config (`production.toml`)
-3. Default config (`default.toml`)
-4. Environment variable substitution (`${VAR}`)
+**Configuration file precedence** (highest to lowest):
+1. `local.yaml` (not checked into git, for local overrides)
+2. `{RISE_CONFIG_RUN_MODE}.yaml` (e.g., `production.yaml`, `development.yaml`)
+3. `default.yaml`
 
-**Environment variables:**
-```bash
-export RISE_REGISTRY__TYPE="ecr"
-export RISE_REGISTRY__REGION="us-east-1"
-export RISE_REGISTRY__ACCOUNT_ID="123456789012"
-export RISE_REGISTRY__REPO_PREFIX="rise/"
-export RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend"
-export RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend-ecr-push"
-```
+**Environment variable substitution**: You can reference environment variables in config files using `${VAR_NAME}` or `${VAR_NAME:-default}` syntax.
 
 ## API Endpoint
 

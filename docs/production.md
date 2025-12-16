@@ -45,30 +45,15 @@ Use AWS Secrets Manager or HashiCorp Vault for: `DATABASE_URL`, OAuth2 client se
 Key environment variables for production:
 
 ```bash
-# Database
+# Database (explicitly supported)
 DATABASE_URL="postgres://rise:password@rds-endpoint:5432/rise"
 
-# Backend configuration
-RISE_CONFIG_DIR="/etc/rise/config"
-RISE_CONFIG_RUN_MODE="production"
-RISE_SERVER__HOST="0.0.0.0"
-RISE_SERVER__PORT="3000"
-
-# Registry (ECR)
-RISE_REGISTRY__TYPE="ecr"
-RISE_REGISTRY__REGION="us-east-1"
-RISE_REGISTRY__ACCOUNT_ID="123456789012"
-RISE_REGISTRY__REPO_PREFIX="rise/"
-RISE_REGISTRY__ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend"
-RISE_REGISTRY__PUSH_ROLE_ARN="arn:aws:iam::123456789012:role/rise-backend-ecr-push"
-
-# Kubernetes (if using Kubernetes backend)
-RISE_KUBERNETES__INGRESS_CLASS="nginx"
-RISE_KUBERNETES__HOSTNAME_FORMAT="{project_name}.apps.rise.dev"
-RISE_KUBERNETES__NONDEFAULT_HOSTNAME_FORMAT="{project_name}-{deployment_group}.preview.rise.dev"
-RISE_KUBERNETES__NAMESPACE_FORMAT="rise-{project_name}"
-# RISE_KUBERNETES__KUBECONFIG="/path/to/kubeconfig"  # Optional, defaults to in-cluster
+# Configuration system
+RISE_CONFIG_DIR="/etc/rise/config"         # Path to config directory
+RISE_CONFIG_RUN_MODE="production"          # Which config file to load (production.yaml)
 ```
+
+**Note**: Additional configuration should be placed in YAML config files rather than environment variables. See the configuration files in `config/` directory for all available options (registry, Kubernetes, auth, etc.).
 
 ## Database Setup
 
