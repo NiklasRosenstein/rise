@@ -78,6 +78,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     // Public routes (no authentication)
     let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
+        .route("/api/version", axum::routing::get(version_info))
         .merge(auth::routes::public_routes());
 
     // Protected routes (require authentication)
@@ -319,6 +320,13 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
 
 async fn health_check() -> &'static str {
     "OK"
+}
+
+async fn version_info() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({
+        "version": env!("CARGO_PKG_VERSION"),
+        "repository": env!("CARGO_PKG_REPOSITORY"),
+    }))
 }
 
 /// Wait for a shutdown signal (SIGTERM or SIGINT)

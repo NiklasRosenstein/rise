@@ -4,7 +4,7 @@ const { useState, useEffect } = React;
 // CONFIG is already defined in auth.js which loads before this script
 
 // Header Component
-function Header({ user, onLogout, currentView }) {
+function Header({ user, onLogout, currentView, onShowGettingStarted }) {
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const profileRef = React.useRef(null);
     const { showToast } = useToast();
@@ -43,14 +43,25 @@ function Header({ user, onLogout, currentView }) {
         <header className="bg-gray-900 border-b border-gray-800">
             <nav className="container mx-auto px-4 py-4">
                 <div className="flex items-center justify-between">
-                    <a href="#projects" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
-                        <strong className="text-lg font-bold">Rise Dashboard</strong>
-                    </a>
+                    <div className="flex items-center gap-4">
+                        <a href="#projects" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                            <strong className="text-lg font-bold">Rise Dashboard</strong>
+                        </a>
+                        <button
+                            onClick={onShowGettingStarted}
+                            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors"
+                        >
+                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                            </svg>
+                            Getting Started
+                        </button>
+                    </div>
                     <div className="flex items-center gap-6">
                         <a
                             href="#projects"
@@ -115,6 +126,43 @@ function Header({ user, onLogout, currentView }) {
                 </div>
             </nav>
         </header>
+    );
+}
+
+// Getting Started Modal Component
+function GettingStartedModal({ isOpen, onClose, publicUrl, version }) {
+    const installCommand = version ? `cargo install rise-deploy@${version}` : 'cargo install rise-deploy';
+
+    return (
+        <Modal isOpen={isOpen} onClose={onClose} title="Getting Started" maxWidth="max-w-3xl">
+            <div className="space-y-4 text-gray-300">
+                <p>This is how you get started with your first Rise project:</p>
+
+                <div className="bg-gray-800 rounded-lg p-4 space-y-4">
+                    <div>
+                        <h4 className="text-sm font-semibold text-gray-400 mb-2"># Install the Rise CLI and log-in</h4>
+                        <pre className="text-sm text-indigo-300 overflow-x-auto whitespace-pre-wrap">$ {installCommand}{'\n'}$ rise login --url {publicUrl || window.location.origin}</pre>
+                    </div>
+
+                    <div>
+                        <h4 className="text-sm font-semibold text-gray-400 mb-2"># Deploy a sample project</h4>
+                        <pre className="text-sm text-indigo-300 overflow-x-auto whitespace-pre-wrap">$ git clone https://github.com/GoogleCloudPlatform/buildpack-samples{'\n'}$ rise project create my-project # Pick a unique project name{'\n'}$ rise env set my-project PORT 8080{'\n'}$ rise deployment create my-project buildpack-samples/sample-python/</pre>
+                    </div>
+                </div>
+
+                <p className="text-sm text-gray-400 mt-4">
+                    For more information, visit the{' '}
+                    <a
+                        href="https://github.com/NiklasRosenstein/rise"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-indigo-400 hover:text-indigo-300 underline"
+                    >
+                        Rise documentation on GitHub
+                    </a>.
+                </p>
+            </div>
+        </Modal>
     );
 }
 
@@ -190,6 +238,8 @@ function LoginPage() {
 function App() {
     const [user, setUser] = useState(null);
     const [authChecked, setAuthChecked] = useState(false);
+    const [showGettingStarted, setShowGettingStarted] = useState(false);
+    const [version, setVersion] = useState(null);
     const hash = useHashLocation();
 
     useEffect(() => {
@@ -218,6 +268,19 @@ function App() {
             }
         }
         loadUser();
+    }, []);
+
+    useEffect(() => {
+        async function fetchVersion() {
+            try {
+                const response = await fetch(`${CONFIG.backendUrl}/api/version`);
+                const data = await response.json();
+                setVersion(data);
+            } catch (err) {
+                console.error('Failed to fetch version:', err);
+            }
+        }
+        fetchVersion();
     }, []);
 
     const handleLogout = () => {
@@ -260,16 +323,28 @@ function App() {
     }
 
     return (
-        <>
-            <Header user={user} onLogout={handleLogout} currentView={view} />
-            <main className="container mx-auto px-4 py-8">
+        <div className="min-h-screen flex flex-col">
+            <Header
+                user={user}
+                onLogout={handleLogout}
+                currentView={view}
+                onShowGettingStarted={() => setShowGettingStarted(true)}
+            />
+            <main className="container mx-auto px-4 py-8 flex-1">
                 {view === 'projects' && <ProjectsList />}
                 {view === 'teams' && <TeamsList currentUser={user} />}
                 {view === 'project-detail' && <ProjectDetail projectName={params.projectName} initialTab={params.tab} />}
                 {view === 'team-detail' && <TeamDetail teamName={params.teamName} currentUser={user} />}
                 {view === 'deployment-detail' && <DeploymentDetail projectName={params.projectName} deploymentId={params.deploymentId} />}
             </main>
-        </>
+            <Footer version={version} />
+            <GettingStartedModal
+                isOpen={showGettingStarted}
+                onClose={() => setShowGettingStarted(false)}
+                publicUrl={CONFIG?.backendUrl}
+                version={version?.version}
+            />
+        </div>
     );
 }
 

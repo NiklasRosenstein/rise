@@ -21,3 +21,6 @@ todo.txt
 
 # Railpack build artifacts
 .railpack-build/
+
+# Buildpack samples (example repo)
+buildpack-samples/
