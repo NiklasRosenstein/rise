@@ -21,7 +21,6 @@ pub struct Project {
     pub visibility: ProjectVisibility,
     pub owner_user_id: Option<Uuid>,
     pub owner_team_id: Option<Uuid>,
-    pub active_deployment_id: Option<Uuid>,
     /// Finalizers that must be removed before the project can be deleted.
     /// Each controller adds its own finalizer when it creates external resources.
     pub finalizers: Vec<String>,

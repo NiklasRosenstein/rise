@@ -420,13 +420,14 @@ impl DeploymentController {
                 }
             }
 
-            // If default group, update active_deployment_id
-            if deployment.deployment_group
-                == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP
-            {
-                projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id)
-                    .await?;
-            }
+            // Mark deployment as active
+            db_deployments::mark_as_active(
+                &self.state.db_pool,
+                deployment.id,
+                project.id,
+                &deployment.deployment_group,
+            )
+            .await?;
         }
 
         // Update project status

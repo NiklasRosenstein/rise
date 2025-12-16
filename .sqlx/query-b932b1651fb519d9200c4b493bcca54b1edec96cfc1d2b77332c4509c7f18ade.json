@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE projects\n        SET visibility = $2\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id, active_deployment_id,\n            finalizers,\n            created_at, updated_at\n        ",
+  "query": "\n            SELECT\n                id, name,\n                status as \"status: ProjectStatus\",\n                visibility as \"visibility: ProjectVisibility\",\n                owner_user_id, owner_team_id,\n                finalizers,\n                created_at, updated_at\n            FROM projects\n            WHERE owner_user_id = $1\n            ORDER BY created_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -35,29 +35,23 @@
       },
       {
         "ordinal": 6,
-        "name": "active_deployment_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 7,
         "name": "finalizers",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -67,11 +61,10 @@
       false,
       true,
       true,
-      true,
       false,
       false,
       false
     ]
   },
-  "hash": "aa08c7a4dfac0bc759fc775c281c5bca9676834f467e2600764fa17bce2633c1"
+  "hash": "b932b1651fb519d9200c4b493bcca54b1edec96cfc1d2b77332c4509c7f18ade"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            active_deployment_id,\n            finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE status NOT IN ('Deleting', 'Terminated')\n        ORDER BY created_at DESC\n        ",
+  "query": "\n        INSERT INTO projects (name, status, visibility, owner_user_id, owner_team_id)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -35,27 +35,28 @@
       },
       {
         "ordinal": 6,
-        "name": "active_deployment_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 7,
         "name": "finalizers",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Text",
+        "Text",
+        "Text",
+        "Uuid",
+        "Uuid"
+      ]
     },
     "nullable": [
       false,
@@ -64,11 +65,10 @@
       false,
       true,
       true,
-      true,
       false,
       false,
       false
     ]
   },
-  "hash": "2da94ee177a87d528551a5d6dd596c3012f2e839b2e9b26836c3b145d9a4e90d"
+  "hash": "214e9288042dc6044c50f1a7fc86f7afc7debb2e4a901b59078d2900a5078ebd"
 }

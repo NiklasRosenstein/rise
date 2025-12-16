@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO projects (name, status, visibility, owner_user_id, owner_team_id)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id, active_deployment_id,\n            finalizers,\n            created_at, updated_at\n        ",
+  "query": "\n        UPDATE projects\n        SET owner_user_id = $2, owner_team_id = $3\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -35,30 +35,23 @@
       },
       {
         "ordinal": 6,
-        "name": "active_deployment_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 7,
         "name": "finalizers",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Text",
+        "Uuid",
         "Uuid",
         "Uuid"
       ]
@@ -70,11 +63,10 @@
       false,
       true,
       true,
-      true,
       false,
       false,
       false
     ]
   },
-  "hash": "4df8bd59d718a798826b1680cd15f5a4d4aa634cd1bf7975f8ddce2cef7ef67a"
+  "hash": "76b6119510524e24d91fc0be699b18ae81efda004234b58e485bf24dc1711665"
 }

@@ -116,8 +116,6 @@ struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     owner_team_name: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
-    active_deployment_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
     active_deployment_status: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     primary_url: Option<String>,
@@ -329,15 +327,12 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
             for project in projects {
                 let url = project.primary_url.as_deref().unwrap_or("(not deployed)");
 
-                // Format active deployment with status
-                let active_deployment = match (
-                    project.active_deployment_id.as_deref(),
-                    project.active_deployment_status.as_deref(),
-                ) {
-                    (Some(id), Some(status)) => format!("{} ({})", id, status),
-                    (Some(id), None) => id.to_string(),
-                    _ => "-".to_string(),
-                };
+                // Format active deployment status
+                let active_deployment = project
+                    .active_deployment_status
+                    .as_deref()
+                    .unwrap_or("-")
+                    .to_string();
 
                 // Format owner
                 let owner = if let Some(user_email) = &project.owner_user_email {

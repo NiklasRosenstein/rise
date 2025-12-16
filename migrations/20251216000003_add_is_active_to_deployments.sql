@@ -13,5 +13,6 @@ CREATE INDEX idx_deployments_active
 ON deployments(is_active)
 WHERE is_active = TRUE;
 
--- Note: We'll drop projects.active_deployment_id in a later phase
--- after all code is updated to use deployments.is_active
+-- Drop projects.active_deployment_id column as it's now replaced by deployments.is_active
+ALTER TABLE projects
+DROP COLUMN active_deployment_id;

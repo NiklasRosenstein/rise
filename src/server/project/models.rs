@@ -89,8 +89,6 @@ pub struct Project {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_team_name: Option<String>, // Name of the team owner (for display)
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_deployment_id: Option<String>, // ID of the active deployment
-    #[serde(skip_serializing_if = "Option::is_none")]
     pub active_deployment_status: Option<String>, // Status of the active deployment
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_url: Option<String>, // Primary URL from ingress template
@@ -161,8 +159,6 @@ pub struct ProjectWithOwnerInfo {
     pub visibility: ProjectVisibility,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<OwnerInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub active_deployment_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_url: Option<String>, // Primary URL from ingress template
     #[serde(default, skip_serializing_if = "Vec::is_empty")]

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, name, status as \"status: _\", visibility as \"visibility: _\",\n               owner_user_id, owner_team_id, active_deployment_id, finalizers,\n               created_at, updated_at\n        FROM projects\n        WHERE id = $1\n        ",
+  "query": "\n        UPDATE projects\n        SET status = 'Deleting', updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -15,12 +15,12 @@
       },
       {
         "ordinal": 2,
-        "name": "status: _",
+        "name": "status: ProjectStatus",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "visibility: _",
+        "name": "visibility: ProjectVisibility",
         "type_info": "Text"
       },
       {
@@ -35,21 +35,16 @@
       },
       {
         "ordinal": 6,
-        "name": "active_deployment_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 7,
         "name": "finalizers",
         "type_info": "TextArray"
       },
       {
-        "ordinal": 8,
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 9,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -66,11 +61,10 @@
       false,
       true,
       true,
-      true,
       false,
       false,
       false
     ]
   },
-  "hash": "3f73a7d7ce9b542fe7438914be5a5061601e4d3ed822cb1b057fb99cccdf0535"
+  "hash": "93e9c42642d9f1ddf426f3e362a789043c43f712bba773eb73964576a2685575"
 }

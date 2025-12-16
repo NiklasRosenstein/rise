@@ -1050,7 +1050,6 @@ pub async fn mark_as_inactive(pool: &PgPool, deployment_id: Uuid) -> Result<()> 
 }
 
 /// Get all active deployments for a project across all deployment groups
-#[allow(dead_code)]
 pub async fn get_active_deployments_for_project(
     pool: &PgPool,
     project_id: Uuid,

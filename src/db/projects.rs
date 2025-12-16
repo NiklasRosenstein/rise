@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::db::deployments;
-use crate::db::models::{Deployment, Project, ProjectStatus, ProjectVisibility};
+use crate::db::models::{Project, ProjectStatus, ProjectVisibility};
 
 /// List all projects (optionally filtered by owner)
 pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Project>> {
@@ -16,7 +16,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 id, name,
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
-                owner_user_id, owner_team_id, active_deployment_id,
+                owner_user_id, owner_team_id,
                 finalizers,
                 created_at, updated_at
             FROM projects
@@ -35,7 +35,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 id, name,
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
-                owner_user_id, owner_team_id, active_deployment_id,
+                owner_user_id, owner_team_id,
                 finalizers,
                 created_at, updated_at
             FROM projects
@@ -58,7 +58,7 @@ pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
             p.id, p.name,
             p.status as "status: ProjectStatus",
             p.visibility as "visibility: ProjectVisibility",
-            p.owner_user_id, p.owner_team_id, p.active_deployment_id,
+            p.owner_user_id, p.owner_team_id,
             p.finalizers,
             p.created_at, p.updated_at
         FROM projects p
@@ -95,7 +95,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id, active_deployment_id,
+            owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
         FROM projects
@@ -119,7 +119,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id, active_deployment_id,
+            owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
         FROM projects
@@ -155,7 +155,7 @@ pub async fn create(
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id, active_deployment_id,
+            owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
         "#,
@@ -186,7 +186,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id, active_deployment_id,
+            owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
         "#,
@@ -218,7 +218,7 @@ pub async fn update_visibility(
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id, active_deployment_id,
+            owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
         "#,
@@ -249,7 +249,7 @@ pub async fn update_owner(
             id, name,
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id, active_deployment_id,
+            owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
         "#,
@@ -300,37 +300,6 @@ pub async fn user_can_access(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> 
     Ok(result.exists)
 }
 
-/// Set the active deployment for a project
-#[cfg(any(feature = "k8s", feature = "aws"))]
-pub async fn set_active_deployment(
-    pool: &PgPool,
-    project_id: Uuid,
-    deployment_id: Uuid,
-) -> Result<Project> {
-    let project = sqlx::query_as!(
-        Project,
-        r#"
-        UPDATE projects
-        SET active_deployment_id = $2
-        WHERE id = $1
-        RETURNING
-            id, name,
-            status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id, active_deployment_id,
-            finalizers,
-            created_at, updated_at
-        "#,
-        project_id,
-        deployment_id
-    )
-    .fetch_one(pool)
-    .await
-    .context("Failed to set active deployment")?;
-
-    Ok(project)
-}
-
 /// Calculate and update project status based on active deployment and last deployment
 pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result<Project> {
     use crate::db::models::DeploymentStatus;
@@ -358,81 +327,34 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
     )
     .await?;
 
-    // Determine status based on active deployment and last deployment in "default" group
-    let status = if let Some(active_id) = project.active_deployment_id {
-        // Get active deployment to check its status and group
-        let active_deployment =
-            sqlx::query_as::<_, Deployment>("SELECT * FROM deployments WHERE id = $1")
-                .bind(active_id)
-                .fetch_optional(pool)
-                .await?;
-
-        match active_deployment {
-            Some(deployment)
-                if deployment.deployment_group
-                    == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP =>
-            {
-                // Only use active deployment status if it's in the "default" group
-                match deployment.status {
-                    DeploymentStatus::Healthy => ProjectStatus::Running,
-                    DeploymentStatus::Unhealthy => ProjectStatus::Failed,
-                    // Termination/cancellation in progress - show as Deploying (transitional)
-                    DeploymentStatus::Terminating | DeploymentStatus::Cancelling => {
-                        ProjectStatus::Deploying
-                    }
-                    // Other in-progress states
-                    DeploymentStatus::Pending
-                    | DeploymentStatus::Building
-                    | DeploymentStatus::Pushing
-                    | DeploymentStatus::Pushed
-                    | DeploymentStatus::Deploying => ProjectStatus::Deploying,
-                    // Terminal states shouldn't be active, but handle gracefully
-                    DeploymentStatus::Stopped
-                    | DeploymentStatus::Cancelled
-                    | DeploymentStatus::Superseded
-                    | DeploymentStatus::Failed
-                    | DeploymentStatus::Expired => ProjectStatus::Stopped,
+    // Determine status based on active deployment (using is_active flag)
+    // or last deployment if no active deployment exists
+    let status = if let Some(last) = last_deployment.as_ref() {
+        // Check if this deployment is marked as active
+        if last.is_active {
+            // Active deployment determines project status
+            match last.status {
+                DeploymentStatus::Healthy => ProjectStatus::Running,
+                DeploymentStatus::Unhealthy => ProjectStatus::Failed,
+                // Termination/cancellation in progress - show as Deploying (transitional)
+                DeploymentStatus::Terminating | DeploymentStatus::Cancelling => {
+                    ProjectStatus::Deploying
                 }
+                // Other in-progress states
+                DeploymentStatus::Pending
+                | DeploymentStatus::Building
+                | DeploymentStatus::Pushing
+                | DeploymentStatus::Pushed
+                | DeploymentStatus::Deploying => ProjectStatus::Deploying,
+                // Terminal states shouldn't be active, but handle gracefully
+                DeploymentStatus::Stopped
+                | DeploymentStatus::Cancelled
+                | DeploymentStatus::Superseded
+                | DeploymentStatus::Failed
+                | DeploymentStatus::Expired => ProjectStatus::Stopped,
             }
-            Some(_) | None => {
-                // Active deployment is not in "default" group or was deleted
-                // Fall through to use last_deployment from default group
-                if let Some(last) = last_deployment.as_ref() {
-                    match last.status {
-                        DeploymentStatus::Failed => ProjectStatus::Failed,
-
-                        // In-progress states
-                        DeploymentStatus::Pending
-                        | DeploymentStatus::Building
-                        | DeploymentStatus::Pushing
-                        | DeploymentStatus::Pushed
-                        | DeploymentStatus::Deploying => ProjectStatus::Deploying,
-
-                        // Cancellation/Termination in progress
-                        DeploymentStatus::Cancelling | DeploymentStatus::Terminating => {
-                            ProjectStatus::Deploying
-                        }
-
-                        // Terminal states (no active deployment)
-                        DeploymentStatus::Cancelled
-                        | DeploymentStatus::Stopped
-                        | DeploymentStatus::Superseded
-                        | DeploymentStatus::Expired => ProjectStatus::Stopped,
-
-                        // Running states without being active (shouldn't happen)
-                        DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => {
-                            ProjectStatus::Stopped
-                        }
-                    }
-                } else {
-                    // No deployments in default group at all
-                    ProjectStatus::Stopped
-                }
-            }
-        }
-    } else {
-        // No active_deployment_id, use last deployment from default group
-        if let Some(last) = last_deployment.as_ref() {
+        } else {
+            // Not active deployment - use last deployment status
             match last.status {
                 DeploymentStatus::Failed => ProjectStatus::Failed,
 
@@ -457,10 +379,10 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
                 // Running states without being active (shouldn't happen)
                 DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => ProjectStatus::Stopped,
             }
-        } else {
-            // No deployments in default group at all
-            ProjectStatus::Stopped
         }
+    } else {
+        // No deployments in default group at all
+        ProjectStatus::Stopped
     };
 
     update_status(pool, project_id, status).await
@@ -470,12 +392,12 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
 #[derive(Debug, Clone)]
 pub struct ActiveDeploymentInfo {
     pub id: Uuid,
-    pub deployment_id: String,
     pub status: crate::db::models::DeploymentStatus,
 }
 
 /// Get active deployment info (deployment_id and status) for multiple projects (batch operation)
 /// Returns a map of project_id -> ActiveDeploymentInfo
+/// Fetches the active deployment from the default deployment group using the is_active flag
 pub async fn get_active_deployment_info_batch(
     pool: &PgPool,
     project_ids: &[Uuid],
@@ -485,12 +407,11 @@ pub async fn get_active_deployment_info_batch(
         SELECT
             p.id as project_id,
             d.id as "id?",
-            d.deployment_id as "deployment_id?",
             d.status as "status?: crate::db::models::DeploymentStatus"
         FROM unnest($1::uuid[]) AS p(id)
-        LEFT JOIN deployments d ON d.id = (
-            SELECT active_deployment_id FROM projects WHERE id = p.id
-        )
+        LEFT JOIN deployments d ON d.project_id = p.id
+            AND d.is_active = TRUE
+            AND d.deployment_group = 'default'
         "#,
         project_ids
     )
@@ -503,12 +424,8 @@ pub async fn get_active_deployment_info_batch(
         .filter_map(|r| {
             r.project_id.map(|project_id| {
                 // In sqlx 0.8, LEFT JOIN makes fields Option<T> (already nullable)
-                let info = match (r.id, r.deployment_id, r.status) {
-                    (Some(id), Some(deployment_id), Some(status)) => Some(ActiveDeploymentInfo {
-                        id,
-                        deployment_id,
-                        status,
-                    }),
+                let info = match (r.id, r.status) {
+                    (Some(id), Some(status)) => Some(ActiveDeploymentInfo { id, status }),
                     _ => None,
                 };
                 (project_id, info)
@@ -530,7 +447,6 @@ pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
-            active_deployment_id,
             finalizers,
             created_at, updated_at
         "#,
@@ -553,7 +469,6 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
-            active_deployment_id,
             finalizers,
             created_at, updated_at
         FROM projects
@@ -630,7 +545,6 @@ pub async fn find_deleting_with_finalizer(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
-            active_deployment_id,
             finalizers,
             created_at, updated_at
         FROM projects
@@ -676,7 +590,6 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
-            active_deployment_id,
             finalizers,
             created_at, updated_at
         FROM projects
