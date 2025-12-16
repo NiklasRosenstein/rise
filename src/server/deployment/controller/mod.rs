@@ -19,7 +19,6 @@ use crate::server::state::ControllerState;
 /// Result of a reconciliation operation
 pub struct ReconcileResult {
     pub status: DeploymentStatus,
-    pub deployment_url: Option<String>,
     pub controller_metadata: serde_json::Value,
     pub error_message: Option<String>,
 }
@@ -328,10 +327,6 @@ impl DeploymentController {
             }
         }
 
-        if let Some(ref url) = result.deployment_url {
-            db_deployments::update_deployment_url(&self.state.db_pool, deployment.id, url).await?;
-        }
-
         db_deployments::update_controller_metadata(
             &self.state.db_pool,
             deployment.id,
@@ -402,16 +397,12 @@ impl DeploymentController {
                 }
             }
 
-            // If default group, update active_deployment_id and project_url for backward compatibility
+            // If default group, update active_deployment_id
             if deployment.deployment_group
                 == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP
             {
                 projects::set_active_deployment(&self.state.db_pool, project.id, deployment.id)
                     .await?;
-
-                if let Some(ref url) = result.deployment_url {
-                    projects::update_project_url(&self.state.db_pool, project.id, url).await?;
-                }
             }
         }
 
@@ -769,7 +760,7 @@ impl DeploymentController {
             SELECT id, deployment_id, project_id, created_by_id,
                    status as "status: DeploymentStatus",
                    deployment_group, expires_at, error_message, completed_at,
-                   build_logs, controller_metadata, deployment_url,
+                   build_logs, controller_metadata,
                    image, image_digest, http_port, needs_reconcile,
                    created_at, updated_at,
                    termination_reason as "termination_reason: _"

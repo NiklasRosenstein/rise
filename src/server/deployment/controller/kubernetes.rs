@@ -513,6 +513,7 @@ impl KubernetesController {
     }
 
     /// Get hostname (without path) for deployment
+    #[allow(dead_code)]
     fn hostname(&self, project: &Project, deployment: &Deployment) -> String {
         let url = self.resolved_ingress_url(project, deployment);
         let parsed = Self::parse_ingress_url(&url);
@@ -1188,7 +1189,6 @@ impl DeploymentBackend for KubernetesController {
             );
             return Ok(ReconcileResult {
                 status: deployment.status.clone(),
-                deployment_url: None,
                 controller_metadata: deployment.controller_metadata.clone(),
                 error_message: None,
             });
@@ -1582,7 +1582,6 @@ impl DeploymentBackend for KubernetesController {
                     // Return here - need to wait for pods to become ready
                     return Ok(ReconcileResult {
                         status,
-                        deployment_url: None,
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
                     });
@@ -1622,7 +1621,6 @@ impl DeploymentBackend for KubernetesController {
                         // Mark deployment as Failed
                         return Ok(ReconcileResult {
                             status: DeploymentStatus::Failed,
-                            deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: error_msg,
                         });
@@ -1661,7 +1659,6 @@ impl DeploymentBackend for KubernetesController {
                         // Return here - still waiting for pods
                         return Ok(ReconcileResult {
                             status,
-                            deployment_url: None,
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: None,
                         });
@@ -1729,8 +1726,6 @@ impl DeploymentBackend for KubernetesController {
                 ReconcilePhase::WaitingForHealth => {
                     // Use health_check to verify deployment is healthy before switching traffic
                     let health = self.health_check(deployment).await?;
-                    let deployment_url =
-                        format!("https://{}", self.full_ingress_url(project, deployment));
 
                     if health.healthy {
                         info!(
@@ -1749,7 +1744,6 @@ impl DeploymentBackend for KubernetesController {
 
                         return Ok(ReconcileResult {
                             status,
-                            deployment_url: Some(deployment_url),
                             controller_metadata: serde_json::to_value(&metadata)?,
                             error_message: health.message,
                         });
@@ -1792,12 +1786,9 @@ impl DeploymentBackend for KubernetesController {
                     }
 
                     metadata.reconcile_phase = ReconcilePhase::Completed;
-                    let deployment_url =
-                        format!("https://{}", self.full_ingress_url(project, deployment));
 
                     return Ok(ReconcileResult {
                         status: DeploymentStatus::Healthy,
-                        deployment_url: Some(deployment_url),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
                     });
@@ -1925,7 +1916,6 @@ impl DeploymentBackend for KubernetesController {
                                             ReconcilePhase::WaitingForDeployment;
                                         return Ok(ReconcileResult {
                                             status,
-                                            deployment_url: None,
                                             controller_metadata: serde_json::to_value(&metadata)?,
                                             error_message: None,
                                         });
@@ -1960,10 +1950,6 @@ impl DeploymentBackend for KubernetesController {
 
                             return Ok(ReconcileResult {
                                 status: DeploymentStatus::Deploying,
-                                deployment_url: Some(format!(
-                                    "https://{}",
-                                    self.hostname(project, deployment)
-                                )),
                                 controller_metadata: serde_json::to_value(&metadata)?,
                                 error_message: None,
                             });
@@ -1979,12 +1965,8 @@ impl DeploymentBackend for KubernetesController {
                         Err(e) => return Err(e.into()),
                     }
 
-                    let deployment_url =
-                        format!("https://{}", self.full_ingress_url(project, deployment));
-
                     return Ok(ReconcileResult {
                         status: DeploymentStatus::Healthy,
-                        deployment_url: Some(deployment_url),
                         controller_metadata: serde_json::to_value(&metadata)?,
                         error_message: None,
                     });

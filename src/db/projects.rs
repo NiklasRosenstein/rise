@@ -17,7 +17,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
                 owner_user_id, owner_team_id, active_deployment_id,
-                project_url, finalizers,
+                finalizers,
                 created_at, updated_at
             FROM projects
             WHERE owner_user_id = $1
@@ -36,7 +36,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 visibility as "visibility: ProjectVisibility",
                 owner_user_id, owner_team_id, active_deployment_id,
-                project_url, finalizers,
+                finalizers,
                 created_at, updated_at
             FROM projects
             ORDER BY created_at DESC
@@ -59,7 +59,7 @@ pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
             p.status as "status: ProjectStatus",
             p.visibility as "visibility: ProjectVisibility",
             p.owner_user_id, p.owner_team_id, p.active_deployment_id,
-            p.project_url, p.finalizers,
+            p.finalizers,
             p.created_at, p.updated_at
         FROM projects p
         WHERE
@@ -96,7 +96,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         FROM projects
         WHERE name = $1
@@ -120,7 +120,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         FROM projects
         WHERE id = $1
@@ -156,7 +156,7 @@ pub async fn create(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         "#,
         name,
@@ -187,7 +187,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         "#,
         id,
@@ -219,7 +219,7 @@ pub async fn update_visibility(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         "#,
         id,
@@ -250,7 +250,7 @@ pub async fn update_owner(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         "#,
         id,
@@ -318,7 +318,7 @@ pub async fn set_active_deployment(
             status as "status: ProjectStatus",
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id, active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         "#,
         project_id,
@@ -466,82 +466,10 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
     update_status(pool, project_id, status).await
 }
 
-/// Get deployment URL for a project
-/// Returns URL from active deployment if exists, otherwise from most recent deployment
-pub async fn get_deployment_url(pool: &PgPool, project_id: Uuid) -> Result<Option<String>> {
-    let result = sqlx::query!(
-        r#"
-        SELECT d.deployment_url
-        FROM projects p
-        LEFT JOIN deployments d ON (
-            CASE
-                WHEN p.active_deployment_id IS NOT NULL
-                THEN d.id = p.active_deployment_id
-                ELSE d.id = (
-                    SELECT id FROM deployments
-                    WHERE project_id = p.id
-                    ORDER BY created_at DESC
-                    LIMIT 1
-                )
-            END
-        )
-        WHERE p.id = $1
-        LIMIT 1
-        "#,
-        project_id
-    )
-    .fetch_optional(pool)
-    .await
-    .context("Failed to get deployment URL")?;
-
-    Ok(result.and_then(|r| r.deployment_url))
-}
-
-/// Get deployment URLs for multiple projects (batch operation)
-/// Returns a map of project_id -> deployment_url
-pub async fn get_deployment_urls_batch(
-    pool: &PgPool,
-    project_ids: &[Uuid],
-) -> Result<HashMap<Uuid, Option<String>>> {
-    let results = sqlx::query!(
-        r#"
-        WITH latest_deployments AS (
-            SELECT DISTINCT ON (project_id)
-                project_id,
-                id,
-                deployment_url,
-                created_at
-            FROM deployments
-            WHERE project_id = ANY($1)
-            ORDER BY project_id, created_at DESC
-        )
-        SELECT
-            p.id as project_id,
-            COALESCE(
-                active_d.deployment_url,
-                latest_d.deployment_url
-            ) as deployment_url
-        FROM unnest($1::uuid[]) AS p(id)
-        LEFT JOIN deployments active_d ON active_d.id = (
-            SELECT active_deployment_id FROM projects WHERE id = p.id
-        )
-        LEFT JOIN latest_deployments latest_d ON latest_d.project_id = p.id
-        "#,
-        project_ids
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to get deployment URLs in batch")?;
-
-    Ok(results
-        .into_iter()
-        .filter_map(|r| r.project_id.map(|id| (id, r.deployment_url)))
-        .collect())
-}
-
 /// Active deployment info returned by batch queries
 #[derive(Debug, Clone)]
 pub struct ActiveDeploymentInfo {
+    pub id: Uuid,
     pub deployment_id: String,
     pub status: crate::db::models::DeploymentStatus,
 }
@@ -556,6 +484,7 @@ pub async fn get_active_deployment_info_batch(
         r#"
         SELECT
             p.id as project_id,
+            d.id as "id?",
             d.deployment_id as "deployment_id?",
             d.status as "status?: crate::db::models::DeploymentStatus"
         FROM unnest($1::uuid[]) AS p(id)
@@ -572,16 +501,17 @@ pub async fn get_active_deployment_info_batch(
     Ok(results
         .into_iter()
         .filter_map(|r| {
-            r.project_id.map(|id| {
+            r.project_id.map(|project_id| {
                 // In sqlx 0.8, LEFT JOIN makes fields Option<T> (already nullable)
-                let info = match (r.deployment_id, r.status) {
-                    (Some(deployment_id), Some(status)) => Some(ActiveDeploymentInfo {
+                let info = match (r.id, r.deployment_id, r.status) {
+                    (Some(id), Some(deployment_id), Some(status)) => Some(ActiveDeploymentInfo {
+                        id,
                         deployment_id,
                         status,
                     }),
                     _ => None,
                 };
-                (id, info)
+                (project_id, info)
             })
         })
         .collect())
@@ -601,7 +531,7 @@ pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         "#,
         id
@@ -624,7 +554,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting'
@@ -638,34 +568,6 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
     .context("Failed to find deleting projects")?;
 
     Ok(projects)
-}
-
-/// Update project URL
-#[cfg(any(feature = "k8s", feature = "aws"))]
-pub async fn update_project_url(pool: &PgPool, project_id: Uuid, url: &str) -> Result<Project> {
-    let project = sqlx::query_as!(
-        Project,
-        r#"
-        UPDATE projects
-        SET project_url = $2, updated_at = NOW()
-        WHERE id = $1
-        RETURNING
-            id, name,
-            status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
-            owner_user_id, owner_team_id,
-            active_deployment_id,
-            project_url, finalizers,
-            created_at, updated_at
-        "#,
-        project_id,
-        url
-    )
-    .fetch_one(pool)
-    .await
-    .context("Failed to update project URL")?;
-
-    Ok(project)
 }
 
 // ==================== Finalizer Operations ====================
@@ -729,7 +631,7 @@ pub async fn find_deleting_with_finalizer(
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting' AND $1 = ANY(finalizers)
@@ -775,7 +677,7 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
             visibility as "visibility: ProjectVisibility",
             owner_user_id, owner_team_id,
             active_deployment_id,
-            project_url, finalizers,
+            finalizers,
             created_at, updated_at
         FROM projects
         WHERE status NOT IN ('Deleting', 'Terminated')

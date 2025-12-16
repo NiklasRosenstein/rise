@@ -92,6 +92,7 @@ pub async fn delete_custom_domain(pool: &PgPool, project_id: Uuid, domain: &str)
 
 /// Get all custom domains for multiple projects in one query
 /// Returns a HashMap mapping project_id to a vector of custom domains
+#[allow(dead_code)]
 pub async fn get_custom_domains_batch(
     pool: &PgPool,
     project_ids: &[Uuid],
@@ -112,9 +113,7 @@ pub async fn get_custom_domains_batch(
 
     let mut map: HashMap<Uuid, Vec<CustomDomain>> = HashMap::new();
     for domain in domains {
-        map.entry(domain.project_id)
-            .or_insert_with(Vec::new)
-            .push(domain);
+        map.entry(domain.project_id).or_default().push(domain);
     }
 
     Ok(map)

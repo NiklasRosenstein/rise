@@ -258,6 +258,8 @@ async fn get_creator_email(pool: &sqlx::PgPool, created_by_id: uuid::Uuid) -> St
 fn convert_deployment(
     deployment: crate::db::models::Deployment,
     created_by_email: String,
+    primary_url: Option<String>,
+    custom_domain_urls: Vec<String>,
 ) -> Deployment {
     Deployment {
         id: deployment.id.to_string(),
@@ -272,7 +274,8 @@ fn convert_deployment(
         completed_at: deployment.completed_at.map(|dt| dt.to_rfc3339()),
         build_logs: deployment.build_logs,
         controller_metadata: deployment.controller_metadata,
-        deployment_url: deployment.deployment_url,
+        primary_url,
+        custom_domain_urls,
         image: deployment.image,
         image_digest: deployment.image_digest,
         created: deployment.created_at.to_rfc3339(),
@@ -661,11 +664,29 @@ pub async fn update_deployment_status(
         deployment_id, status_copy
     );
 
+    // Calculate deployment URLs dynamically
+    let (primary_url, custom_domain_urls) = match state
+        .deployment_backend
+        .get_deployment_urls(&updated_deployment, &project)
+        .await
+    {
+        Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
+        Err(e) => {
+            error!(
+                "Failed to calculate URLs for deployment {}: {}",
+                deployment_id, e
+            );
+            (None, vec![])
+        }
+    };
+
     let created_by_email =
         get_creator_email(&state.db_pool, updated_deployment.created_by_id).await;
     Ok(Json(convert_deployment(
         updated_deployment,
         created_by_email,
+        primary_url,
+        custom_domain_urls,
     )))
 }
 
@@ -733,11 +754,33 @@ pub async fn list_deployments(
         )
     })?;
 
-    // Convert to API models (fetch creator emails)
+    // Convert to API models (fetch creator emails and calculate URLs)
     let mut deployments = Vec::with_capacity(db_deployments.len());
     for db_deployment in db_deployments {
         let created_by_email = get_creator_email(&state.db_pool, db_deployment.created_by_id).await;
-        deployments.push(convert_deployment(db_deployment, created_by_email));
+
+        // Calculate deployment URLs dynamically
+        let (primary_url, custom_domain_urls) = match state
+            .deployment_backend
+            .get_deployment_urls(&db_deployment, &project)
+            .await
+        {
+            Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
+            Err(e) => {
+                error!(
+                    "Failed to calculate URLs for deployment {}: {}",
+                    db_deployment.deployment_id, e
+                );
+                (None, vec![])
+            }
+        };
+
+        deployments.push(convert_deployment(
+            db_deployment,
+            created_by_email,
+            primary_url,
+            custom_domain_urls,
+        ));
     }
 
     Ok(Json(deployments))
@@ -962,12 +1005,30 @@ pub async fn stop_deployment(
             )
         })?;
 
+    // Calculate deployment URLs dynamically
+    let (primary_url, custom_domain_urls) = match state
+        .deployment_backend
+        .get_deployment_urls(&updated_deployment, &project)
+        .await
+    {
+        Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
+        Err(e) => {
+            error!(
+                "Failed to calculate URLs for deployment {}: {}",
+                deployment_id, e
+            );
+            (None, vec![])
+        }
+    };
+
     // Get creator email and convert to API model
     let created_by_email =
         get_creator_email(&state.db_pool, updated_deployment.created_by_id).await;
     Ok(Json(convert_deployment(
         updated_deployment,
         created_by_email,
+        primary_url,
+        custom_domain_urls,
     )))
 }
 
@@ -1032,8 +1093,29 @@ pub async fn get_deployment_by_project(
         )
     })?;
 
+    // Calculate deployment URLs dynamically
+    let (primary_url, custom_domain_urls) = match state
+        .deployment_backend
+        .get_deployment_urls(&deployment, &project)
+        .await
+    {
+        Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
+        Err(e) => {
+            error!(
+                "Failed to calculate URLs for deployment {}: {}",
+                deployment_id, e
+            );
+            (None, vec![])
+        }
+    };
+
     let created_by_email = get_creator_email(&state.db_pool, deployment.created_by_id).await;
-    Ok(Json(convert_deployment(deployment, created_by_email)))
+    Ok(Json(convert_deployment(
+        deployment,
+        created_by_email,
+        primary_url,
+        custom_domain_urls,
+    )))
 }
 
 /// GET /projects/{project_name}/deployment-groups - List all deployment groups for a project

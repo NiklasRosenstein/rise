@@ -21,6 +21,11 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 
+#[cfg(feature = "k8s")]
+use crate::server::deployment::controller::{
+    DeploymentBackend, KubernetesController, KubernetesControllerConfig,
+};
+
 /// Minimal state for controllers - database access and encryption
 #[derive(Clone)]
 pub struct ControllerState {
@@ -44,6 +49,7 @@ pub struct AppState {
     pub cookie_settings: CookieSettings,
     pub public_url: String,
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
+    pub deployment_backend: Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
 }
 
 /// Initialize encryption provider from settings
@@ -131,6 +137,79 @@ async fn test_encryption_provider(provider: &dyn EncryptionProvider) -> Result<(
     }
 
     Ok(())
+}
+
+/// Initialize Kubernetes deployment backend from settings
+#[cfg(feature = "k8s")]
+async fn init_kubernetes_backend(
+    settings: &Settings,
+    controller_state: Arc<ControllerState>,
+    registry_provider: Option<Arc<dyn RegistryProvider>>,
+) -> Result<Arc<dyn DeploymentBackend>> {
+    use crate::server::settings::DeploymentControllerSettings;
+
+    if let Some(DeploymentControllerSettings::Kubernetes {
+        kubeconfig,
+        ingress_class,
+        production_ingress_url_template,
+        staging_ingress_url_template,
+        ingress_port,
+        auth_backend_url,
+        auth_signin_url,
+        namespace_annotations,
+        ingress_annotations,
+        ingress_tls_secret_name,
+        custom_domain_tls_mode,
+        node_selector,
+        ..
+    }) = &settings.deployment_controller
+    {
+        // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+
+        // Create kube client
+        let kube_config = if kubeconfig.is_some() {
+            // Use explicit kubeconfig if provided
+            kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
+                context: None,
+                cluster: None,
+                user: None,
+            })
+            .await?
+        } else {
+            kube::Config::infer().await? // In-cluster or ~/.kube/config
+        };
+        let kube_client = kube::Client::try_from(kube_config)?;
+
+        let k8s_backend = KubernetesController::new(
+            (*controller_state).clone(),
+            kube_client,
+            KubernetesControllerConfig {
+                ingress_class: ingress_class.clone(),
+                production_ingress_url_template: production_ingress_url_template.clone(),
+                staging_ingress_url_template: staging_ingress_url_template.clone(),
+                ingress_port: *ingress_port,
+                registry_provider,
+                auth_backend_url: auth_backend_url.clone(),
+                auth_signin_url: auth_signin_url.clone(),
+                namespace_annotations: namespace_annotations.clone(),
+                ingress_annotations: ingress_annotations.clone(),
+                ingress_tls_secret_name: ingress_tls_secret_name.clone(),
+                custom_domain_tls_mode: custom_domain_tls_mode.clone(),
+                node_selector: node_selector.clone(),
+            },
+        )?;
+
+        // Test Kubernetes API connection
+        k8s_backend.test_connection().await?;
+        tracing::info!("✓ Kubernetes deployment backend initialized and connection tested");
+
+        Ok(Arc::new(k8s_backend) as Arc<dyn DeploymentBackend>)
+    } else {
+        anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
+    }
 }
 
 impl ControllerState {
@@ -338,6 +417,21 @@ impl AppState {
         // Initialize encryption provider
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
 
+        // Initialize deployment backend
+        #[cfg(not(feature = "k8s"))]
+        compile_error!(
+            "At least one deployment backend must be enabled. Please build with --features k8s"
+        );
+
+        #[cfg(feature = "k8s")]
+        let deployment_backend = {
+            let controller_state = Arc::new(ControllerState {
+                db_pool: db_pool.clone(),
+                encryption_provider: encryption_provider.clone(),
+            });
+            init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
+        };
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -352,6 +446,7 @@ impl AppState {
             cookie_settings,
             public_url,
             encryption_provider,
+            deployment_backend,
         })
     }
 
@@ -491,6 +586,21 @@ impl AppState {
         // Initialize encryption provider
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
 
+        // Initialize deployment backend
+        #[cfg(not(feature = "k8s"))]
+        compile_error!(
+            "At least one deployment backend must be enabled. Please build with --features k8s"
+        );
+
+        #[cfg(feature = "k8s")]
+        let deployment_backend = {
+            let controller_state = Arc::new(ControllerState {
+                db_pool: db_pool.clone(),
+                encryption_provider: encryption_provider.clone(),
+            });
+            init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
+        };
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -505,6 +615,7 @@ impl AppState {
             cookie_settings,
             public_url,
             encryption_provider,
+            deployment_backend,
         })
     }
 }

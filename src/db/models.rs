@@ -22,7 +22,6 @@ pub struct Project {
     pub owner_user_id: Option<Uuid>,
     pub owner_team_id: Option<Uuid>,
     pub active_deployment_id: Option<Uuid>,
-    pub project_url: Option<String>,
     /// Finalizers that must be removed before the project can be deleted.
     /// Each controller adds its own finalizer when it creates external resources.
     pub finalizers: Vec<String>,
@@ -141,7 +140,6 @@ pub struct Deployment {
     pub error_message: Option<String>,
     pub build_logs: Option<String>,
     pub controller_metadata: serde_json::Value,
-    pub deployment_url: Option<String>,
     pub image: Option<String>,
     pub image_digest: Option<String>,
     pub http_port: i32,

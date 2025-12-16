@@ -108,17 +108,8 @@ pub async fn list_projects(
             })?
     };
 
-    // Batch fetch deployment URLs and active deployment info for efficiency
+    // Batch fetch active deployment info for efficiency
     let project_ids: Vec<uuid::Uuid> = projects.iter().map(|p| p.id).collect();
-    let deployment_urls = projects::get_deployment_urls_batch(&state.db_pool, &project_ids)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get deployment URLs: {}", e),
-            )
-        })?;
-
     let active_deployment_info =
         projects::get_active_deployment_info_batch(&state.db_pool, &project_ids)
             .await
@@ -128,6 +119,25 @@ pub async fn list_projects(
                     format!("Failed to get active deployment info: {}", e),
                 )
             })?;
+
+    // Batch fetch active deployments to calculate URLs
+    let deployment_ids: Vec<Uuid> = active_deployment_info
+        .values()
+        .filter_map(|info| info.as_ref().map(|i| i.id))
+        .collect();
+
+    let deployments_map = if !deployment_ids.is_empty() {
+        crate::db::deployments::get_deployments_batch(&state.db_pool, &deployment_ids)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get deployments: {}", e),
+                )
+            })?
+    } else {
+        std::collections::HashMap::new()
+    };
 
     // Batch fetch owner information (user emails and team names)
     let user_ids: Vec<Uuid> = projects.iter().filter_map(|p| p.owner_user_id).collect();
@@ -159,47 +169,82 @@ pub async fn list_projects(
         std::collections::HashMap::new()
     };
 
-    let api_projects = projects
-        .into_iter()
-        .map(|project| {
-            let deployment_url = deployment_urls.get(&project.id).and_then(|u| u.clone());
-            let (active_deployment_id, active_deployment_status) = active_deployment_info
-                .get(&project.id)
-                .and_then(|info| info.as_ref())
-                .map(|info| {
+    // Calculate URLs for all projects
+    let mut api_projects = Vec::new();
+    for project in projects {
+        let (active_deployment_id, active_deployment_status, primary_url, custom_domain_urls) =
+            if let Some(Some(info)) = active_deployment_info.get(&project.id) {
+                if let Some(deployment) = deployments_map.get(&info.id) {
+                    let db_project = crate::db::models::Project {
+                        id: project.id,
+                        name: project.name.clone(),
+                        status: project.status.clone(),
+                        visibility: project.visibility.clone(),
+                        owner_user_id: project.owner_user_id,
+                        owner_team_id: project.owner_team_id,
+                        active_deployment_id: Some(info.id),
+                        finalizers: vec![],
+                        created_at: project.created_at,
+                        updated_at: project.updated_at,
+                    };
+                    match state
+                        .deployment_backend
+                        .get_deployment_urls(deployment, &db_project)
+                        .await
+                    {
+                        Ok(urls) => (
+                            Some(info.deployment_id.clone()),
+                            Some(info.status.to_string()),
+                            Some(urls.primary_url),
+                            urls.custom_domain_urls,
+                        ),
+                        Err(e) => {
+                            return Err((
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!(
+                                    "Failed to calculate URLs for project {}: {}",
+                                    project.name, e
+                                ),
+                            ));
+                        }
+                    }
+                } else {
                     (
                         Some(info.deployment_id.clone()),
                         Some(info.status.to_string()),
+                        None,
+                        vec![],
                     )
-                })
-                .unwrap_or((None, None));
+                }
+            } else {
+                (None, None, None, vec![])
+            };
 
-            let owner_user_email = project
-                .owner_user_id
-                .and_then(|id| user_emails.get(&id).cloned());
-            let owner_team_name = project
-                .owner_team_id
-                .and_then(|id| team_names.get(&id).cloned());
+        let owner_user_email = project
+            .owner_user_id
+            .and_then(|id| user_emails.get(&id).cloned());
+        let owner_team_name = project
+            .owner_team_id
+            .and_then(|id| team_names.get(&id).cloned());
 
-            ApiProject {
-                id: project.id.to_string(),
-                created: project.created_at.to_rfc3339(),
-                updated: project.updated_at.to_rfc3339(),
-                name: project.name,
-                status: ProjectStatus::from(project.status),
-                visibility: ProjectVisibility::from(project.visibility),
-                owner_user: project.owner_user_id.map(|id| id.to_string()),
-                owner_team: project.owner_team_id.map(|id| id.to_string()),
-                owner_user_email,
-                owner_team_name,
-                active_deployment_id,
-                active_deployment_status,
-                deployment_url,
-                project_url: project.project_url,
-                deployment_groups: None, // Not populated in list view for performance
-            }
-        })
-        .collect();
+        api_projects.push(ApiProject {
+            id: project.id.to_string(),
+            created: project.created_at.to_rfc3339(),
+            updated: project.updated_at.to_rfc3339(),
+            name: project.name,
+            status: ProjectStatus::from(project.status),
+            visibility: ProjectVisibility::from(project.visibility),
+            owner_user: project.owner_user_id.map(|id| id.to_string()),
+            owner_team: project.owner_team_id.map(|id| id.to_string()),
+            owner_user_email,
+            owner_team_name,
+            active_deployment_id,
+            active_deployment_status,
+            primary_url,
+            custom_domain_urls,
+            deployment_groups: None, // Not populated in list view for performance
+        });
+    }
 
     Ok(Json(api_projects))
 }
@@ -237,18 +282,47 @@ pub async fn get_project(
         ));
     }
 
-    // Get deployment URL
-    let deployment_url = projects::get_deployment_url(&state.db_pool, project.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to get deployment URL: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+    // Calculate deployment URLs if there's an active deployment
+    let (primary_url, custom_domain_urls) = if let Some(deployment_id) =
+        project.active_deployment_id
+    {
+        match crate::db::deployments::get_deployments_batch(&state.db_pool, &[deployment_id]).await
+        {
+            Ok(deployments) => {
+                if let Some(deployment) = deployments.get(&deployment_id) {
+                    match state
+                        .deployment_backend
+                        .get_deployment_urls(deployment, &project)
+                        .await
+                    {
+                        Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
+                        Err(e) => {
+                            return Err((
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                Json(ProjectErrorResponse {
+                                    error: format!("Failed to calculate URLs: {}", e),
+                                    suggestions: None,
+                                }),
+                            ));
+                        }
+                    }
+                } else {
+                    (None, vec![])
+                }
+            }
+            Err(e) => {
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ProjectErrorResponse {
+                        error: format!("Failed to get deployment: {}", e),
+                        suggestions: None,
+                    }),
+                ));
+            }
+        }
+    } else {
+        (None, vec![])
+    };
 
     // Check if we should expand owner information
     if params.should_expand("owner") {
@@ -264,11 +338,13 @@ pub async fn get_project(
                 )
             })?;
 
-        expanded.deployment_url = deployment_url;
+        expanded.primary_url = primary_url;
+        expanded.custom_domain_urls = custom_domain_urls;
         Ok(Json(serde_json::to_value(expanded).unwrap()))
     } else {
         let mut api_project = convert_project(project.clone());
-        api_project.deployment_url = deployment_url;
+        api_project.primary_url = primary_url;
+        api_project.custom_domain_urls = custom_domain_urls;
 
         // Get active deployment groups
         let deployment_groups =
@@ -671,8 +747,8 @@ async fn expand_project_with_owner(
         visibility: ProjectVisibility::from(project.visibility),
         owner: owner_info,
         active_deployment_id: project.active_deployment_id.map(|id| id.to_string()),
-        deployment_url: None, // Will be populated by caller
-        project_url: project.project_url,
+        primary_url: None,          // Will be populated by caller
+        custom_domain_urls: vec![], // Will be populated by caller
         finalizers: project.finalizers.clone(),
         created: project.created_at.to_rfc3339(),
         updated: project.updated_at.to_rfc3339(),
@@ -758,9 +834,9 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         owner_team_name: None,  // Will be populated by caller if needed
         active_deployment_id: project.active_deployment_id.map(|id| id.to_string()),
         active_deployment_status: None, // Will be populated by caller if needed
-        deployment_url: None,           // Will be populated by caller
-        project_url: project.project_url,
-        deployment_groups: None, // Will be populated by caller if needed
+        primary_url: None,              // Will be populated by caller
+        custom_domain_urls: vec![],     // Will be populated by caller
+        deployment_groups: None,        // Will be populated by caller if needed
     }
 }
 

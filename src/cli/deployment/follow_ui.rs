@@ -94,7 +94,7 @@ impl FollowState {
         self.last_status = deployment.status.clone();
         self.last_controller_phase = controller_phase;
         self.last_error = deployment.error_message.clone();
-        self.last_url = deployment.deployment_url.clone();
+        self.last_url = deployment.primary_url.clone();
         self.last_metadata = deployment.controller_metadata.clone();
         self.is_first_poll = false;
     }
@@ -165,7 +165,7 @@ impl LiveStatusSection {
         line_count += 1;
 
         // URL if available
-        if let Some(ref url) = deployment.deployment_url {
+        if let Some(ref url) = deployment.primary_url {
             output.push_str(&format!("   URL:       {}\n", url));
             line_count += 1;
         }
@@ -368,7 +368,7 @@ pub fn print_deployment_snapshot(deployment: &Deployment) {
     }
 
     // URL if available
-    if let Some(ref url) = deployment.deployment_url {
+    if let Some(ref url) = deployment.primary_url {
         println!("   URL:            {}", url);
     }
 
