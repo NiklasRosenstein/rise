@@ -255,12 +255,28 @@ async fn get_creator_email(pool: &sqlx::PgPool, created_by_id: uuid::Uuid) -> St
 }
 
 /// Convert DB Deployment to API Deployment
+///
+/// Dynamically calculates the image tag when not stored in the database,
+/// using the registry provider's configuration to construct the full image reference.
 fn convert_deployment(
+    state: &AppState,
     deployment: crate::db::models::Deployment,
+    project: &crate::db::models::Project,
     created_by_email: String,
     primary_url: Option<String>,
     custom_domain_urls: Vec<String>,
 ) -> Deployment {
+    // Backfill image field for locally-built deployments
+    // For pre-built images, deployment.image is already set
+    // For build-from-source, calculate the internal registry tag
+    let image = deployment.image.clone().or_else(|| {
+        Some(super::utils::get_deployment_image_tag(
+            state,
+            &deployment,
+            project,
+        ))
+    });
+
     Deployment {
         id: deployment.id.to_string(),
         deployment_id: deployment.deployment_id,
@@ -276,7 +292,7 @@ fn convert_deployment(
         controller_metadata: deployment.controller_metadata,
         primary_url,
         custom_domain_urls,
-        image: deployment.image,
+        image,
         image_digest: deployment.image_digest,
         created: deployment.created_at.to_rfc3339(),
         updated: deployment.updated_at.to_rfc3339(),
@@ -683,7 +699,9 @@ pub async fn update_deployment_status(
     let created_by_email =
         get_creator_email(&state.db_pool, updated_deployment.created_by_id).await;
     Ok(Json(convert_deployment(
+        &state,
         updated_deployment,
+        &project,
         created_by_email,
         primary_url,
         custom_domain_urls,
@@ -776,7 +794,9 @@ pub async fn list_deployments(
         };
 
         deployments.push(convert_deployment(
+            &state,
             db_deployment,
+            &project,
             created_by_email,
             primary_url,
             custom_domain_urls,
@@ -1025,7 +1045,9 @@ pub async fn stop_deployment(
     let created_by_email =
         get_creator_email(&state.db_pool, updated_deployment.created_by_id).await;
     Ok(Json(convert_deployment(
+        &state,
         updated_deployment,
+        &project,
         created_by_email,
         primary_url,
         custom_domain_urls,
@@ -1111,7 +1133,9 @@ pub async fn get_deployment_by_project(
 
     let created_by_email = get_creator_email(&state.db_pool, deployment.created_by_id).await;
     Ok(Json(convert_deployment(
+        &state,
         deployment,
+        &project,
         created_by_email,
         primary_url,
         custom_domain_urls,
