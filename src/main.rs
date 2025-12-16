@@ -457,6 +457,16 @@ async fn main() -> Result<()> {
     let mut config = config::Config::load()?;
     let backend_url = config.get_backend_url();
 
+    // Check version compatibility for all commands except Login and Backend
+    // (Login doesn't have a token yet, Backend doesn't need it)
+    let should_check_version =
+        !matches!(&cli.command, Commands::Login { .. } | Commands::Backend(_));
+
+    if should_check_version {
+        // Non-fatal version check - just warns user
+        let _ = version::check_version_compatibility(&http_client, &backend_url).await;
+    }
+
     match &cli.command {
         Commands::Login {
             url,
