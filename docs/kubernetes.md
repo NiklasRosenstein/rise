@@ -39,27 +39,6 @@ staging_ingress_url_template = "{project_name}-{deployment_group}.preview.rise.l
 namespace_format = "rise-{project_name}"
 ```
 
-### Environment Variables
-
-Configure the Kubernetes backend using environment variables:
-
-```bash
-# Optional: Kubeconfig path (omit to use in-cluster config)
-RISE_KUBERNETES__KUBECONFIG="/path/to/kubeconfig"
-
-# Ingress class (required)
-RISE_KUBERNETES__INGRESS_CLASS="nginx"
-
-# Ingress URL template for production deployment group (required, must contain {project_name})
-RISE_KUBERNETES__PRODUCTION_INGRESS_URL_TEMPLATE="{project_name}.apps.rise.local"
-
-# Optional: Ingress URL template for staging groups (must contain {project_name} and {deployment_group})
-RISE_KUBERNETES__STAGING_INGRESS_URL_TEMPLATE="{project_name}-{deployment_group}.preview.rise.local"
-
-# Namespace format (must contain {project_name})
-RISE_KUBERNETES__NAMESPACE_FORMAT="rise-{project_name}"
-```
-
 ### Kubeconfig Options
 
 The controller supports two authentication modes:
