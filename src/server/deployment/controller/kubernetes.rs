@@ -412,7 +412,7 @@ impl KubernetesController {
         secret_api
             .patch(
                 IMAGE_PULL_SECRET_NAME,
-                &PatchParams::apply("rise-controller"),
+                &PatchParams::apply("rise-controller").force(),
                 &Patch::Apply(&secret),
             )
             .await?;
@@ -1442,7 +1442,7 @@ impl DeploymentBackend for KubernetesController {
                         match secret_api
                             .patch(
                                 IMAGE_PULL_SECRET_NAME,
-                                &PatchParams::apply("rise-controller"),
+                                &PatchParams::apply("rise-controller").force(),
                                 &Patch::Apply(&secret),
                             )
                             .await
