@@ -22,7 +22,12 @@ rules:
   resources: ["namespaces"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
-# ReplicaSet management
+# Deployment management (creates and manages application workloads)
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+# ReplicaSet management (Deployments create ReplicaSets internally; kept for visibility)
 - apiGroups: ["apps"]
   resources: ["replicasets"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
