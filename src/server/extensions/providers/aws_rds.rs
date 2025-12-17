@@ -1,5 +1,6 @@
 use crate::db::{
-    self, env_vars as db_env_vars, extensions as db_extensions, postgres_admin, projects,
+    self, env_vars as db_env_vars, extensions as db_extensions, postgres_admin,
+    projects as db_projects,
 };
 use crate::server::encryption::EncryptionProvider;
 use crate::server::extensions::Extension;
@@ -106,7 +107,7 @@ impl AwsRdsProvisioner {
         &self,
         project_extension: db::models::ProjectExtension,
     ) -> Result<()> {
-        let project = projects::find_by_id(&self.db_pool, project_extension.project_id)
+        let project = db_projects::find_by_id(&self.db_pool, project_extension.project_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
 
@@ -139,8 +140,27 @@ impl AwsRdsProvisioner {
                 )
                 .await?;
 
-                // If deletion is complete, hard delete the record
+                // If deletion is complete, hard delete the record and remove finalizer
                 if status.state == RdsState::Deleted {
+                    // Remove finalizer so project can be deleted
+                    if let Err(e) = db_projects::remove_finalizer(
+                        &self.db_pool,
+                        project_extension.project_id,
+                        &self.name,
+                    )
+                    .await
+                    {
+                        error!(
+                            "Failed to remove finalizer from project {}: {}",
+                            project.name, e
+                        );
+                    } else {
+                        info!(
+                            "Removed finalizer '{}' from project {}",
+                            self.name, project.name
+                        );
+                    }
+
                     db_extensions::delete_permanently(
                         &self.db_pool,
                         project_extension.project_id,
@@ -163,7 +183,8 @@ impl AwsRdsProvisioner {
                     .await?;
             }
             RdsState::Creating => {
-                self.handle_creating(&mut status, &project.name).await?;
+                self.handle_creating(&mut status, &project.name, project.id)
+                    .await?;
             }
             RdsState::Available => {
                 // Check if instance still exists
@@ -256,7 +277,12 @@ impl AwsRdsProvisioner {
         Ok(())
     }
 
-    async fn handle_creating(&self, status: &mut AwsRdsStatus, project_name: &str) -> Result<()> {
+    async fn handle_creating(
+        &self,
+        status: &mut AwsRdsStatus,
+        project_name: &str,
+        project_id: Uuid,
+    ) -> Result<()> {
         let instance_id = status
             .instance_id
             .as_ref()
@@ -278,6 +304,25 @@ impl AwsRdsProvisioner {
                             "available" => {
                                 info!("RDS instance {} is now available", instance_id);
                                 status.state = RdsState::Available;
+
+                                // Add finalizer to ensure cleanup before project deletion
+                                if let Err(e) = db_projects::add_finalizer(
+                                    &self.db_pool,
+                                    project_id,
+                                    &self.name,
+                                )
+                                .await
+                                {
+                                    error!(
+                                        "Failed to add finalizer for project {}: {}",
+                                        project_name, e
+                                    );
+                                } else {
+                                    info!(
+                                        "Added finalizer '{}' to project {}",
+                                        self.name, project_name
+                                    );
+                                }
 
                                 // Extract endpoint
                                 if let Some(endpoint) = instance.endpoint() {
@@ -538,6 +583,7 @@ impl AwsRdsProvisioner {
     }
 
     /// Create a copy of a database using PostgreSQL's CREATE DATABASE ... WITH TEMPLATE
+    /// Falls back to creating an empty database if the template doesn't exist
     async fn create_database_copy(
         &self,
         admin_db_url: &str,
@@ -564,32 +610,36 @@ impl AwsRdsProvisioner {
         // Check if the template database exists
         let template_exists = postgres_admin::database_exists(&pool, template_database).await?;
 
-        if !template_exists {
-            pool.close().await;
-            anyhow::bail!(
-                "Template database '{}' does not exist. Create a deployment in the 'default' group first.",
-                template_database
-            );
-        }
-
-        // Create the new database from the template
-        // Note: We can't use parameterized queries for database names, so we need to sanitize
         let sanitized_new_db = sanitize_identifier(new_database)?;
-        let sanitized_template_db = sanitize_identifier(template_database)?;
         let sanitized_owner = sanitize_identifier("postgres")?;
 
-        postgres_admin::create_database_from_template(
-            &pool,
-            &sanitized_new_db,
-            &sanitized_template_db,
-            &sanitized_owner,
-        )
-        .await?;
+        if template_exists {
+            // Create from template if it exists
+            let sanitized_template_db = sanitize_identifier(template_database)?;
 
-        info!(
-            "Successfully created database '{}' from template '{}'",
-            new_database, template_database
-        );
+            postgres_admin::create_database_from_template(
+                &pool,
+                &sanitized_new_db,
+                &sanitized_template_db,
+                &sanitized_owner,
+            )
+            .await?;
+
+            info!(
+                "Successfully created database '{}' from template '{}'",
+                new_database, template_database
+            );
+        } else {
+            // Fall back to creating an empty database
+            warn!(
+                "Template database '{}' does not exist, creating empty database '{}' instead",
+                template_database, new_database
+            );
+
+            postgres_admin::create_database(&pool, &sanitized_new_db, &sanitized_owner).await?;
+
+            info!("Successfully created empty database '{}'", new_database);
+        }
 
         pool.close().await;
         Ok(())
@@ -687,7 +737,7 @@ impl Extension for AwsRdsProvisioner {
             .ok_or_else(|| anyhow::anyhow!("Extension '{}' not found for project", self.name))?;
 
         // Get project info for database naming
-        let project = projects::find_by_id(&self.db_pool, project_id)
+        let project = db_projects::find_by_id(&self.db_pool, project_id)
             .await
             .context("Failed to find project")?
             .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
@@ -733,6 +783,12 @@ impl Extension for AwsRdsProvisioner {
             format!("{}_{}", project.name, deployment_group)
         };
 
+        // Connect to the RDS instance to manage databases and users
+        let admin_db_url = format!(
+            "postgres://{}:{}@{}/postgres",
+            master_username, master_password, endpoint
+        );
+
         // If deployment_group is not "default", create a copy of the default database
         if deployment_group != "default" {
             info!(
@@ -740,21 +796,62 @@ impl Extension for AwsRdsProvisioner {
                 database_name, project.name
             );
 
-            // Connect to the RDS instance to create the database
-            let admin_db_url = format!(
-                "postgres://{}:{}@{}/postgres",
-                master_username, master_password, endpoint
-            );
-
             self.create_database_copy(&admin_db_url, &database_name, &project.name)
                 .await
                 .context("Failed to create database copy for deployment group")?;
         }
 
-        // Build DATABASE_URL for the deployment
+        // Create a dedicated user for this database
+        let db_username = if deployment_group == "default" {
+            format!("{}_user", project.name)
+        } else {
+            format!("{}_{}_user", project.name, deployment_group)
+        };
+        let db_password = self.generate_password();
+
+        info!("Creating database user '{}' for deployment", db_username);
+
+        let pool = PgPool::connect(&admin_db_url)
+            .await
+            .context("Failed to connect to RDS instance for user creation")?;
+
+        // Check if user already exists
+        let user_exists = postgres_admin::user_exists(&pool, &db_username)
+            .await
+            .context("Failed to check if user exists")?;
+
+        if !user_exists {
+            // Sanitize username for CREATE USER
+            let sanitized_username = sanitize_identifier(&db_username)?;
+
+            postgres_admin::create_user(&pool, &sanitized_username, &db_password)
+                .await
+                .context("Failed to create database user")?;
+
+            info!("Created database user '{}'", db_username);
+        } else {
+            info!("Database user '{}' already exists", db_username);
+        }
+
+        // Grant privileges on the database to the user
+        let sanitized_username = sanitize_identifier(&db_username)?;
+        let sanitized_database = sanitize_identifier(&database_name)?;
+
+        postgres_admin::grant_database_privileges(&pool, &sanitized_database, &sanitized_username)
+            .await
+            .context("Failed to grant database privileges")?;
+
+        info!(
+            "Granted privileges on database '{}' to user '{}'",
+            database_name, db_username
+        );
+
+        pool.close().await;
+
+        // Build DATABASE_URL for the deployment using the dedicated user
         let database_url = format!(
             "postgres://{}:{}@{}/{}",
-            master_username, master_password, endpoint, database_name
+            db_username, db_password, endpoint, database_name
         );
 
         // Encrypt the DATABASE_URL before storing

@@ -50,3 +50,51 @@ pub async fn create_database_from_template(
 
     Ok(())
 }
+
+/// Check if a PostgreSQL role/user exists
+pub async fn user_exists(pool: &PgPool, username: &str) -> Result<bool> {
+    let exists: bool =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = $1)")
+            .bind(username)
+            .fetch_one(pool)
+            .await
+            .context("Failed to check if user exists")?;
+
+    Ok(exists)
+}
+
+/// Create a PostgreSQL user with a password
+///
+/// Note: Username must be sanitized before calling this function to prevent SQL injection
+pub async fn create_user(pool: &PgPool, username: &str, password: &str) -> Result<()> {
+    let create_sql = format!("CREATE USER {} WITH PASSWORD $1", username);
+
+    sqlx::query(&create_sql)
+        .bind(password)
+        .execute(pool)
+        .await
+        .context("Failed to create user")?;
+
+    Ok(())
+}
+
+/// Grant all privileges on a database to a user
+///
+/// Note: Database and username must be sanitized before calling this function
+pub async fn grant_database_privileges(
+    pool: &PgPool,
+    database_name: &str,
+    username: &str,
+) -> Result<()> {
+    let grant_sql = format!(
+        "GRANT ALL PRIVILEGES ON DATABASE {} TO {}",
+        database_name, username
+    );
+
+    sqlx::query(&grant_sql)
+        .execute(pool)
+        .await
+        .context("Failed to grant database privileges")?;
+
+    Ok(())
+}
