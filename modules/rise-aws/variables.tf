@@ -50,6 +50,12 @@ variable "enable_rds" {
   default     = false
 }
 
+variable "create_rds_service_linked_role" {
+  description = "Create the RDS service-linked role. Only needed once per AWS account. Set to false if the role already exists."
+  type        = bool
+  default     = true
+}
+
 # ECR settings
 
 variable "image_tag_mutability" {

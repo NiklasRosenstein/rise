@@ -424,3 +424,16 @@ resource "aws_iam_user_policy_attachment" "controller_assume_push" {
   user       = aws_iam_user.backend[0].name
   policy_arn = aws_iam_policy.assume_push_role[0].arn
 }
+
+# -----------------------------------------------------------------------------
+# RDS Service-Linked Role
+# -----------------------------------------------------------------------------
+# This role is required for RDS to manage resources on your behalf.
+# It only needs to be created once per AWS account.
+
+resource "aws_iam_service_linked_role" "rds" {
+  count = var.enable_rds && var.create_rds_service_linked_role ? 1 : 0
+
+  aws_service_name = "rds.amazonaws.com"
+  description      = "Service-linked role for Amazon RDS"
+}

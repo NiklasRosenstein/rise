@@ -86,6 +86,8 @@ pub struct AwsRdsProvisionerConfig {
     pub instance_size: String,
     pub disk_size: i32,
     pub instance_id_template: String,
+    pub vpc_security_group_ids: Option<Vec<String>>,
+    pub db_subnet_group_name: Option<String>,
 }
 
 pub struct AwsRdsProvisioner {
@@ -97,6 +99,8 @@ pub struct AwsRdsProvisioner {
     instance_size: String,
     disk_size: i32,
     instance_id_template: String,
+    vpc_security_group_ids: Option<Vec<String>>,
+    db_subnet_group_name: Option<String>,
 }
 
 impl AwsRdsProvisioner {
@@ -110,6 +114,8 @@ impl AwsRdsProvisioner {
             instance_size: config.instance_size,
             disk_size: config.disk_size,
             instance_id_template: config.instance_id_template,
+            vpc_security_group_ids: config.vpc_security_group_ids,
+            db_subnet_group_name: config.db_subnet_group_name,
         }
     }
 
@@ -260,7 +266,7 @@ impl AwsRdsProvisioner {
             .clone()
             .unwrap_or_else(|| "16.2".to_string());
 
-        match self
+        let mut create_request = self
             .rds_client
             .create_db_instance()
             .db_instance_identifier(&instance_id)
@@ -271,10 +277,21 @@ impl AwsRdsProvisioner {
             .master_user_password(&master_password)
             .allocated_storage(self.disk_size)
             .publicly_accessible(false)
-            .storage_encrypted(true)
-            .send()
-            .await
-        {
+            .storage_encrypted(true);
+
+        // Add VPC security groups if configured
+        if let Some(ref security_groups) = self.vpc_security_group_ids {
+            for sg in security_groups {
+                create_request = create_request.vpc_security_group_ids(sg);
+            }
+        }
+
+        // Add DB subnet group if configured
+        if let Some(ref subnet_group) = self.db_subnet_group_name {
+            create_request = create_request.db_subnet_group_name(subnet_group);
+        }
+
+        match create_request.send().await {
             Ok(_) => {
                 info!("RDS create request sent for instance {}", instance_id);
                 status.state = RdsState::Creating;
@@ -703,6 +720,8 @@ impl Extension for AwsRdsProvisioner {
         let instance_size = self.instance_size.clone();
         let disk_size = self.disk_size;
         let instance_id_template = self.instance_id_template.clone();
+        let vpc_security_group_ids = self.vpc_security_group_ids.clone();
+        let db_subnet_group_name = self.db_subnet_group_name.clone();
 
         tokio::spawn(async move {
             info!(
@@ -723,6 +742,8 @@ impl Extension for AwsRdsProvisioner {
                                 instance_size: instance_size.clone(),
                                 disk_size,
                                 instance_id_template: instance_id_template.clone(),
+                                vpc_security_group_ids: vpc_security_group_ids.clone(),
+                                db_subnet_group_name: db_subnet_group_name.clone(),
                             });
 
                             if let Err(e) = provisioner.reconcile_single(ext).await {

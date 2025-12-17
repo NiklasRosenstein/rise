@@ -108,12 +108,16 @@ registry:
 # If using AWS RDS extension (requires enable_rds = true):
 extensions:
   providers:
-    - type: aws_rds_provisioner
+    - type: aws-rds-provisioner
       name: aws-rds-postgres  # Extension identifier (required)
       region: eu-west-1
       instance_size: db.t3.micro
       disk_size: 20
       instance_id_template: "rise-{project_name}"
+      # VPC configuration (required for production):
+      vpc_security_group_ids:
+        - sg-0123456789abcdef0  # Security group allowing access from your cluster
+      db_subnet_group_name: my-db-subnet-group  # DB subnet group for VPC placement
       # If using IAM user (otherwise uses role):
       # access_key_id: AKIA...
       # secret_access_key: ...
@@ -127,6 +131,7 @@ extensions:
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
 | enable_ecr | Enable ECR permissions | `bool` | `true` | no |
 | enable_rds | Enable RDS permissions | `bool` | `false` | no |
+| create_rds_service_linked_role | Create RDS service-linked role (only needed once per AWS account) | `bool` | `true` | no |
 | enable_kms | Enable KMS encryption for ECR | `bool` | `false` | no |
 | create_iam_user | Create an IAM user with access keys | `bool` | `false` | no |
 | irsa_oidc_provider_arn | OIDC provider ARN for IRSA | `string` | `null` | no |
@@ -165,13 +170,16 @@ extensions:
 - `ecr:DeleteRepository`, `ecr:BatchDeleteImage` - For deleting repos
 - `sts:AssumeRole` on push role - To generate scoped credentials
 
-**RDS Permissions:**
+**RDS Permissions (if `enable_rds = true`):**
 - `rds:CreateDBInstance`, `rds:DeleteDBInstance`, `rds:DescribeDBInstances`, `rds:ModifyDBInstance` - For managing database instances
 - `rds:ListTagsForResource`, `rds:AddTagsToResource`, `rds:RemoveTagsFromResource` - For tagging
 - `rds:CreateDBSubnetGroup`, `rds:DeleteDBSubnetGroup`, `rds:DescribeDBSubnetGroups` - For VPC placement
 - `ec2:DescribeSecurityGroups`, `ec2:CreateSecurityGroup`, `ec2:DeleteSecurityGroup` - For network security
 - `ec2:AuthorizeSecurityGroupIngress`, `ec2:RevokeSecurityGroupIngress` - For security group rules
 - `ec2:DescribeVpcs`, `ec2:DescribeSubnets` - For VPC discovery
+
+**RDS Service-Linked Role:**
+The module also creates the RDS service-linked role (`AWSServiceRoleForRDS`) if `create_rds_service_linked_role = true`. This role is required for RDS to manage resources on your behalf. It only needs to be created once per AWS account. If the role already exists, set `create_rds_service_linked_role = false`.
 
 **KMS Permissions (if `enable_kms = true`):**
 - `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - For KMS-encrypted ECR repositories

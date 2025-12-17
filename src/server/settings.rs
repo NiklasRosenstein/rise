@@ -621,6 +621,12 @@ pub enum ExtensionProviderConfig {
         disk_size: i32, // in GiB
         #[serde(default = "default_instance_id_template")]
         instance_id_template: String,
+        /// VPC security group IDs for the RDS instance
+        #[serde(default)]
+        vpc_security_group_ids: Option<Vec<String>>,
+        /// DB subnet group name for VPC placement
+        #[serde(default)]
+        db_subnet_group_name: Option<String>,
         #[serde(default)]
         access_key_id: Option<String>,
         #[serde(default)]
