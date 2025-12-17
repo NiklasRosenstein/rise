@@ -61,6 +61,29 @@ module "rise_aws" {
 }
 ```
 
+### With RDS and VPC Configuration
+
+```hcl
+module "rise_aws" {
+  source = "./modules/rise-aws"
+
+  name       = "rise-backend"
+  enable_ecr = true
+  enable_rds = true
+
+  # RDS VPC configuration
+  rds_vpc_id                  = module.vpc.vpc_id
+  rds_allowed_security_groups = [
+    module.eks.cluster_security_group_id  # Allow access from EKS cluster
+  ]
+}
+
+# Use the created security group in your Rise backend config
+output "rise_rds_security_group" {
+  value = module.rise_aws.rds_security_group_id
+}
+```
+
 ### With IAM User (Non-AWS Deployment)
 
 ```hcl
@@ -116,8 +139,8 @@ extensions:
       instance_id_template: "rise-{project_name}"
       # VPC configuration (required for production):
       vpc_security_group_ids:
-        - sg-0123456789abcdef0  # Security group allowing access from your cluster
-      db_subnet_group_name: my-db-subnet-group  # DB subnet group for VPC placement
+        - sg-0123456789abcdef0  # Use module.rise_aws.rds_security_group_id from Terraform
+      db_subnet_group_name: my-db-subnet-group  # Create this DB subnet group separately in your VPC
       # If using IAM user (otherwise uses role):
       # access_key_id: AKIA...
       # secret_access_key: ...
@@ -132,6 +155,8 @@ extensions:
 | enable_ecr | Enable ECR permissions | `bool` | `true` | no |
 | enable_rds | Enable RDS permissions | `bool` | `false` | no |
 | create_rds_service_linked_role | Create RDS service-linked role (only needed once per AWS account) | `bool` | `true` | no |
+| rds_vpc_id | VPC ID for RDS security group | `string` | `null` | no |
+| rds_allowed_security_groups | Security groups allowed to access RDS | `list(string)` | `[]` | no |
 | enable_kms | Enable KMS encryption for ECR | `bool` | `false` | no |
 | create_iam_user | Create an IAM user with access keys | `bool` | `false` | no |
 | irsa_oidc_provider_arn | OIDC provider ARN for IRSA | `string` | `null` | no |
@@ -158,6 +183,8 @@ extensions:
 | policy_document | The controller IAM policy document JSON |
 | rise_config | Configuration values for Rise backend |
 | lifecycle_policy | ECR lifecycle policy JSON |
+| rds_security_group_id | ID of the RDS security group (use in `vpc_security_group_ids`) |
+| rds_security_group_name | Name of the RDS security group |
 
 ## IAM Permissions
 
@@ -179,7 +206,13 @@ extensions:
 - `ec2:DescribeVpcs`, `ec2:DescribeSubnets` - For VPC discovery
 
 **RDS Service-Linked Role:**
-The module also creates the RDS service-linked role (`AWSServiceRoleForRDS`) if `create_rds_service_linked_role = true`. This role is required for RDS to manage resources on your behalf. It only needs to be created once per AWS account. If the role already exists, set `create_rds_service_linked_role = false`.
+The module creates the RDS service-linked role (`AWSServiceRoleForRDS`) if `create_rds_service_linked_role = true`. This role is required for RDS to manage resources on your behalf. It only needs to be created once per AWS account. If the role already exists, set `create_rds_service_linked_role = false`.
+
+**RDS Security Group:**
+If both `enable_rds = true` and `rds_vpc_id` are provided, the module creates a security group that:
+- Allows inbound PostgreSQL (port 5432) traffic from the security groups specified in `rds_allowed_security_groups`
+- Allows all outbound traffic
+- Use the output `rds_security_group_id` in your Rise backend configuration's `vpc_security_group_ids`
 
 **KMS Permissions (if `enable_kms = true`):**
 - `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - For KMS-encrypted ECR repositories

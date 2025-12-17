@@ -56,6 +56,18 @@ variable "create_rds_service_linked_role" {
   default     = true
 }
 
+variable "rds_vpc_id" {
+  description = "VPC ID where RDS instances will be created. Required if enable_rds = true."
+  type        = string
+  default     = null
+}
+
+variable "rds_allowed_security_groups" {
+  description = "List of security group IDs allowed to access RDS instances (e.g., your EKS cluster security group)"
+  type        = list(string)
+  default     = []
+}
+
 # ECR settings
 
 variable "image_tag_mutability" {

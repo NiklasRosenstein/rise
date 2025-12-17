@@ -437,3 +437,42 @@ resource "aws_iam_service_linked_role" "rds" {
   aws_service_name = "rds.amazonaws.com"
   description      = "Service-linked role for Amazon RDS"
 }
+
+# -----------------------------------------------------------------------------
+# RDS Security Group
+# -----------------------------------------------------------------------------
+# Security group for RDS instances, allowing access from specified security groups
+
+resource "aws_security_group" "rds" {
+  count = var.enable_rds && var.rds_vpc_id != null ? 1 : 0
+
+  name_prefix = "${var.name}-rds-"
+  description = "Security group for Rise RDS instances"
+  vpc_id      = var.rds_vpc_id
+
+  tags = merge(local.tags, {
+    Name = "${var.name}-rds"
+  })
+}
+
+# Allow ingress from specified security groups on PostgreSQL port
+resource "aws_vpc_security_group_ingress_rule" "rds_from_allowed_sgs" {
+  count = var.enable_rds && var.rds_vpc_id != null ? length(var.rds_allowed_security_groups) : 0
+
+  security_group_id            = aws_security_group.rds[0].id
+  referenced_security_group_id = var.rds_allowed_security_groups[count.index]
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  description                  = "PostgreSQL access from allowed security group"
+}
+
+# Allow all egress (RDS instances need to reach out for updates, etc.)
+resource "aws_vpc_security_group_egress_rule" "rds_egress" {
+  count = var.enable_rds && var.rds_vpc_id != null ? 1 : 0
+
+  security_group_id = aws_security_group.rds[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+  description       = "Allow all outbound traffic"
+}

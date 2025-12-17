@@ -104,3 +104,17 @@ output "lifecycle_policy" {
   description = "The ECR lifecycle policy JSON that will be applied to repositories"
   value       = local.lifecycle_policy
 }
+
+# -----------------------------------------------------------------------------
+# RDS outputs
+# -----------------------------------------------------------------------------
+
+output "rds_security_group_id" {
+  description = "ID of the RDS security group (null if RDS not enabled or VPC not specified)"
+  value       = var.enable_rds && var.rds_vpc_id != null ? aws_security_group.rds[0].id : null
+}
+
+output "rds_security_group_name" {
+  description = "Name of the RDS security group (null if RDS not enabled or VPC not specified)"
+  value       = var.enable_rds && var.rds_vpc_id != null ? aws_security_group.rds[0].name : null
+}
