@@ -799,82 +799,77 @@ impl AwsRdsProvisioner {
             }
         };
 
-        info!(
-            "Deleting RDS instance {} for project {}",
-            instance_id, project_name
-        );
-        status.state = RdsState::Deleting;
+        match status.state {
+            RdsState::Available | RdsState::Failed => {
+                // First time seeing deletion request, initiate delete
+                info!(
+                    "Initiating deletion of RDS instance {} for project {}",
+                    instance_id, project_name
+                );
 
-        // Delete the RDS instance
-        match self
-            .rds_client
-            .delete_db_instance()
-            .db_instance_identifier(&instance_id)
-            .skip_final_snapshot(true)
-            .send()
-            .await
-        {
-            Ok(_) => {
-                info!("RDS delete request sent for instance {}", instance_id);
-                // Wait briefly for deletion to start
-                sleep(Duration::from_secs(5)).await;
-
-                // Verify deletion
-                let mut retries = 0;
-                while retries < 30 {
-                    match self
-                        .rds_client
-                        .describe_db_instances()
-                        .db_instance_identifier(&instance_id)
-                        .send()
-                        .await
-                    {
-                        Ok(resp) => {
-                            let instances = resp.db_instances();
-                            if instances.is_empty() {
-                                info!("RDS instance {} successfully deleted", instance_id);
-                                status.state = RdsState::Deleted;
-                                return Ok(());
-                            }
-                            // Instance still exists, check status
-                            if let Some(instance) = instances.first() {
-                                if let Some(instance_status) = instance.db_instance_status() {
-                                    info!(
-                                        "RDS instance {} deletion in progress (status: {})",
-                                        instance_id, instance_status
-                                    );
-                                }
+                match self
+                    .rds_client
+                    .delete_db_instance()
+                    .db_instance_identifier(&instance_id)
+                    .skip_final_snapshot(true)
+                    .send()
+                    .await
+                {
+                    Ok(_) => {
+                        info!("RDS delete request sent for instance {}", instance_id);
+                        status.state = RdsState::Deleting;
+                    }
+                    Err(e) => {
+                        let error_str = format!("{:?}", e);
+                        if error_str.contains("DBInstanceNotFound") {
+                            info!("RDS instance {} already deleted", instance_id);
+                            status.state = RdsState::Deleted;
+                        } else if error_str.contains("InvalidDBInstanceState") {
+                            info!("RDS instance {} already being deleted", instance_id);
+                            status.state = RdsState::Deleting;
+                        } else {
+                            error!("Failed to delete RDS instance {}: {:?}", instance_id, e);
+                            status.error = Some(format!("Failed to delete instance: {:?}", e));
+                        }
+                    }
+                }
+            }
+            RdsState::Deleting => {
+                // Check deletion progress
+                match self
+                    .rds_client
+                    .describe_db_instances()
+                    .db_instance_identifier(&instance_id)
+                    .send()
+                    .await
+                {
+                    Ok(resp) => {
+                        let instances = resp.db_instances();
+                        if instances.is_empty() {
+                            info!("RDS instance {} successfully deleted", instance_id);
+                            status.state = RdsState::Deleted;
+                        } else if let Some(instance) = instances.first() {
+                            if let Some(instance_status) = instance.db_instance_status() {
+                                info!(
+                                    "RDS instance {} deletion in progress (status: {})",
+                                    instance_id, instance_status
+                                );
                             }
                         }
-                        Err(e) => {
-                            let error_str = format!("{:?}", e);
-                            if error_str.contains("DBInstanceNotFound") {
-                                info!("RDS instance {} successfully deleted", instance_id);
-                                status.state = RdsState::Deleted;
-                                return Ok(());
-                            }
+                    }
+                    Err(e) => {
+                        let error_str = format!("{:?}", e);
+                        if error_str.contains("DBInstanceNotFound") {
+                            info!("RDS instance {} successfully deleted", instance_id);
+                            status.state = RdsState::Deleted;
+                        } else {
                             error!("Error checking RDS instance deletion: {:?}", e);
                         }
                     }
-                    retries += 1;
-                    sleep(Duration::from_secs(10)).await;
                 }
-
-                warn!(
-                    "RDS instance {} deletion timeout, marking as deleted anyway",
-                    instance_id
-                );
-                status.state = RdsState::Deleted;
             }
-            Err(e) => {
-                let error_str = format!("{:?}", e);
-                if error_str.contains("DBInstanceNotFound") {
-                    info!("RDS instance {} already deleted", instance_id);
-                    status.state = RdsState::Deleted;
-                } else {
-                    error!("Failed to delete RDS instance {}: {:?}", instance_id, e);
-                    status.error = Some(format!("Failed to delete instance: {:?}", e));
-                }
+            _ => {
+                // Already deleted or in another state
             }
         }
 
