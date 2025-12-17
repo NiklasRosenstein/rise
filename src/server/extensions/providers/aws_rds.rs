@@ -882,17 +882,22 @@ impl AwsRdsProvisioner {
 
     /// Create a copy of a database using PostgreSQL's CREATE DATABASE ... WITH TEMPLATE
     /// Falls back to creating an empty database if the template doesn't exist
+    ///
+    /// Connects as the template database owner to perform the copy, since only the owner
+    /// or a superuser can copy a database in PostgreSQL
     async fn create_database_copy(
         &self,
-        admin_db_url: &str,
+        template_owner_db_url: &str,
         new_database: &str,
         template_database: &str,
         owner: &str,
     ) -> Result<()> {
-        // Connect to the postgres database to run administrative commands
-        let pool = PgPool::connect(admin_db_url)
+        // Connect to the postgres database using template owner's credentials
+        // This is necessary because CREATE DATABASE ... WITH TEMPLATE requires
+        // the executing user to own the template database
+        let pool = PgPool::connect(template_owner_db_url)
             .await
-            .context("Failed to connect to RDS instance")?;
+            .context("Failed to connect to RDS instance as template owner")?;
 
         // Check if the new database already exists
         let exists = postgres_admin::database_exists(&pool, new_database).await?;
@@ -1145,19 +1150,97 @@ impl Extension for AwsRdsProvisioner {
 
         // If deployment_group is not "default", create a copy of the default database
         if deployment_group != "default" {
+            // First, create the user for the new database if it doesn't exist
+            let new_db_username = format!("{}_{}_user", project.name, safe_deployment_group);
+            let new_db_password = self.generate_password();
+
+            let pool = PgPool::connect(&admin_db_url)
+                .await
+                .context("Failed to connect to RDS instance for user creation")?;
+
+            let user_exists = postgres_admin::user_exists(&pool, &new_db_username)
+                .await
+                .context("Failed to check if user exists")?;
+
+            if !user_exists {
+                let sanitized_username = sanitize_identifier(&new_db_username)?;
+                postgres_admin::create_user(&pool, &sanitized_username, &new_db_password)
+                    .await
+                    .context("Failed to create database user for new deployment group")?;
+
+                info!(
+                    "Created database user '{}' for deployment group '{}'",
+                    new_db_username, deployment_group
+                );
+            }
+
+            pool.close().await;
+
             info!(
                 "Creating database copy '{}' from template '{}'",
                 database_name, project.name
             );
 
+            // Get the default database's owner credentials to create the copy
+            // (only the owner can copy a database in PostgreSQL)
+            let default_db_status = status
+                .databases
+                .get(&project.name)
+                .ok_or_else(|| anyhow::anyhow!("Default database not found in status"))?;
+
+            let template_owner_username = &default_db_status.user;
+            let template_owner_password = self
+                .encryption_provider
+                .decrypt(&default_db_status.password_encrypted)
+                .await
+                .context("Failed to decrypt template owner password")?;
+
+            // Create connection URL using template owner's credentials
+            let template_owner_db_url = format!(
+                "postgres://{}:{}@{}/{}",
+                template_owner_username, template_owner_password, endpoint, RDS_ADMIN_DATABASE
+            );
+
+            // Create the database copy with the new user as owner
             self.create_database_copy(
-                &admin_db_url,
+                &template_owner_db_url,
                 &database_name,
                 &project.name,
-                master_username,
+                &sanitize_identifier(&new_db_username)?,
             )
             .await
             .context("Failed to create database copy for deployment group")?;
+
+            // Store the credentials for this database in the extension status
+            let encrypted_password = self
+                .encryption_provider
+                .encrypt(&new_db_password)
+                .await
+                .context("Failed to encrypt new database user password")?;
+
+            status.databases.insert(
+                database_name.clone(),
+                DatabaseStatus {
+                    user: new_db_username.clone(),
+                    password_encrypted: encrypted_password,
+                    status: DatabaseState::Available,
+                },
+            );
+
+            // Update extension status
+            db_extensions::update_status(
+                &self.db_pool,
+                project_id,
+                &self.name,
+                &serde_json::to_value(&status)?,
+            )
+            .await
+            .context("Failed to update extension status with new database")?;
+
+            info!(
+                "Stored credentials for database '{}' in extension status",
+                database_name
+            );
         }
 
         // Check if we already have credentials for this database

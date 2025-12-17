@@ -459,7 +459,7 @@ pub async fn create_deployment(
                 .await
             {
                 error!(
-                    "Extension '{}' before_deployment hook failed: {}",
+                    "Extension '{}' before_deployment hook failed: {:?}",
                     extension.name(),
                     e
                 );
@@ -571,7 +571,7 @@ pub async fn create_deployment(
                 .await
             {
                 error!(
-                    "Extension '{}' before_deployment hook failed: {}",
+                    "Extension '{}' before_deployment hook failed: {:?}",
                     extension.name(),
                     e
                 );
@@ -1389,7 +1389,7 @@ pub async fn rollback_deployment(
             .await
         {
             error!(
-                "Extension '{}' before_deployment hook failed: {}",
+                "Extension '{}' before_deployment hook failed: {:?}",
                 extension.name(),
                 e
             );
