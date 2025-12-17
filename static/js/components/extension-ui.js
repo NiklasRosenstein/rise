@@ -76,16 +76,16 @@ function AwsRdsExtensionUI({ spec, onChange }) {
 }
 
 // Extension UI Registry
-// Maps extension names to their UI components
+// Maps extension type identifiers to their UI components
 const ExtensionUIRegistry = {
-    'aws-rds-postgres': AwsRdsExtensionUI,
+    'aws-rds-provisioner': AwsRdsExtensionUI,
     // Add more extension UIs here as needed
 };
 
 // Extension Icon Registry
 // Maps extension type identifiers to their icon URLs
 const ExtensionIconRegistry = {
-    'aws-rds-postgres': '/assets/aws_rds_aurora.jpg',
+    'aws-rds-provisioner': '/assets/aws_rds_aurora.jpg',
     // Add more extension icons here as needed
 };
 

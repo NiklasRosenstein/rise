@@ -960,7 +960,7 @@ impl Extension for AwsRdsProvisioner {
     }
 
     fn extension_type(&self) -> &str {
-        "aws-rds-postgres"
+        "aws-rds-provisioner"
     }
 
     async fn validate_spec(&self, spec: &Value) -> Result<()> {
