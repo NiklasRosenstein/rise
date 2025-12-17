@@ -14,7 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -152,11 +152,6 @@ impl AwsRdsProvisioner {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
 
-        info!(
-            "Reconciling RDS extension for project '{}' (extension: {}, project_id: {})",
-            project.name, project_extension.extension, project_extension.project_id
-        );
-
         // Parse spec
         let spec: AwsRdsSpec = serde_json::from_value(project_extension.spec.clone())
             .context("Failed to parse AWS RDS spec")?;
@@ -284,11 +279,6 @@ impl AwsRdsProvisioner {
         // - In Creating state (might have made progress on database provisioning)
         let needs_more_work =
             state_changed || db_states_changed || status.state == RdsState::Creating;
-
-        info!(
-            "Reconciliation complete for project '{}': state={:?}, needs_more_work={}",
-            project.name, status.state, needs_more_work
-        );
 
         Ok(needs_more_work)
     }
@@ -715,7 +705,7 @@ impl AwsRdsProvisioner {
                                 }
                             }
                             "creating" | "backing-up" | "modifying" => {
-                                info!(
+                                debug!(
                                     "RDS instance {} is still creating (status: {})",
                                     instance_id, instance_status
                                 );
@@ -1034,8 +1024,6 @@ impl Extension for AwsRdsProvisioner {
                 name
             );
             loop {
-                let mut has_immediate_work = false;
-
                 // List ALL project extensions (not filtered by project)
                 match db_extensions::list_by_extension_name(&db_pool, &name).await {
                     Ok(extensions) => {
@@ -1059,15 +1047,11 @@ impl Extension for AwsRdsProvisioner {
                             });
 
                             match provisioner.reconcile_single(ext).await {
-                                Ok(needs_more_work) => {
-                                    if needs_more_work {
-                                        has_immediate_work = true;
-                                    }
-                                }
                                 Err(e) => {
                                     error!("Failed to reconcile AWS RDS extension: {:?}", e);
                                     // On error, retry after normal interval (not immediate)
                                 }
+                                _ => {}
                             }
                         }
                     }
@@ -1076,38 +1060,29 @@ impl Extension for AwsRdsProvisioner {
                     }
                 }
 
-                // Adaptive wait time:
-                // - No wait if immediate work available (state transitions)
-                // - 10s if waiting for external state (AWS provisioning)
-                // - 60s if everything is stable
-                if has_immediate_work {
-                    info!("Immediate work available, continuing without delay");
-                    // Continue loop immediately
-                } else {
-                    // Check if any extension is in a transitional state
-                    let needs_active_polling =
-                        match db_extensions::list_by_extension_name(&db_pool, &name).await {
-                            Ok(extensions) => extensions.iter().any(|ext| {
-                                if let Ok(status) =
-                                    serde_json::from_value::<AwsRdsStatus>(ext.status.clone())
-                                {
-                                    matches!(
-                                        status.state,
-                                        RdsState::Pending
-                                            | RdsState::Creating
-                                            | RdsState::Deleting
-                                            | RdsState::Failed
-                                    ) || ext.deleted_at.is_some()
-                                } else {
-                                    false
-                                }
-                            }),
-                            Err(_) => false,
-                        };
+                // Check if any extension is in a transitional state
+                let needs_active_polling =
+                    match db_extensions::list_by_extension_name(&db_pool, &name).await {
+                        Ok(extensions) => extensions.iter().any(|ext| {
+                            if let Ok(status) =
+                                serde_json::from_value::<AwsRdsStatus>(ext.status.clone())
+                            {
+                                matches!(
+                                    status.state,
+                                    RdsState::Pending
+                                        | RdsState::Creating
+                                        | RdsState::Deleting
+                                        | RdsState::Failed
+                                ) || ext.deleted_at.is_some()
+                            } else {
+                                false
+                            }
+                        }),
+                        Err(_) => false,
+                    };
 
-                    let wait_time = if needs_active_polling { 10 } else { 60 };
-                    sleep(Duration::from_secs(wait_time)).await;
-                }
+                let wait_time = if needs_active_polling { 2 } else { 5 };
+                sleep(Duration::from_secs(wait_time)).await;
             }
         });
     }
