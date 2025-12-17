@@ -63,16 +63,18 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
             <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-blue-300 mb-2">Environment Variables</h4>
                 <p className="text-sm text-blue-200 mb-2">
-                    The following environment variables will be automatically injected into your deployments:
+                    The following standard PostgreSQL environment variables will be automatically injected into your deployments:
                 </p>
                 <ul className="text-sm text-blue-200 space-y-1 list-disc list-inside">
-                    <li><code className="bg-blue-900/30 px-1 rounded">DATABASE_URL</code> - Full connection string</li>
-                    <li><code className="bg-blue-900/30 px-1 rounded">DB_HOST</code> - Database hostname</li>
-                    <li><code className="bg-blue-900/30 px-1 rounded">DB_PORT</code> - Database port (5432)</li>
-                    <li><code className="bg-blue-900/30 px-1 rounded">DB_NAME</code> - Database name</li>
-                    <li><code className="bg-blue-900/30 px-1 rounded">DB_USER</code> - Database username</li>
-                    <li><code className="bg-blue-900/30 px-1 rounded">DB_PASSWORD</code> - Database password</li>
+                    <li><code className="bg-blue-900/30 px-1 rounded">PGHOST</code> - Database hostname</li>
+                    <li><code className="bg-blue-900/30 px-1 rounded">PGPORT</code> - Database port (5432)</li>
+                    <li><code className="bg-blue-900/30 px-1 rounded">PGDATABASE</code> - Database name</li>
+                    <li><code className="bg-blue-900/30 px-1 rounded">PGUSER</code> - Database username</li>
+                    <li><code className="bg-blue-900/30 px-1 rounded">PGPASSWORD</code> - Database password</li>
                 </ul>
+                <p className="text-sm text-blue-200 mt-2">
+                    These are recognized by <code className="bg-blue-900/30 px-1 rounded">psql</code> and most PostgreSQL client libraries.
+                </p>
             </div>
         </div>
     );

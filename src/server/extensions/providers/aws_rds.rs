@@ -1257,32 +1257,47 @@ impl Extension for AwsRdsProvisioner {
                 (username, password)
             };
 
-        // Build DATABASE_URL for the deployment using the dedicated user
-        let database_url = format!(
-            "postgres://{}:{}@{}/{}",
-            db_username, db_password, endpoint, database_name
-        );
+        // Parse endpoint to extract host and port
+        // RDS endpoints are in format: instance-id.region.rds.amazonaws.com:5432
+        let (host, port) = if let Some(colon_pos) = endpoint.rfind(':') {
+            let host = &endpoint[..colon_pos];
+            let port = &endpoint[colon_pos + 1..];
+            (host.to_string(), port.to_string())
+        } else {
+            (endpoint.clone(), "5432".to_string())
+        };
 
-        // Encrypt the DATABASE_URL before storing
-        let encrypted_database_url = self
+        // Encrypt sensitive values before storing
+        let encrypted_password = self
             .encryption_provider
-            .encrypt(&database_url)
+            .encrypt(&db_password)
             .await
-            .context("Failed to encrypt DATABASE_URL")?;
+            .context("Failed to encrypt password")?;
 
-        // Write env var to deployment_env_vars table
-        db_env_vars::upsert_deployment_env_var(
-            &self.db_pool,
-            deployment_id,
-            "DATABASE_URL",
-            &encrypted_database_url,
-            true, // is_secret
-        )
-        .await
-        .context("Failed to write DATABASE_URL to deployment_env_vars")?;
+        // Inject PostgreSQL standard environment variables
+        // These are recognized by psql and most PostgreSQL client libraries
+        let env_vars = vec![
+            ("PGHOST", host.as_str(), false),
+            ("PGPORT", port.as_str(), false),
+            ("PGDATABASE", database_name.as_str(), false),
+            ("PGUSER", db_username.as_str(), false),
+            ("PGPASSWORD", encrypted_password.as_str(), true),
+        ];
+
+        for (key, value, is_secret) in env_vars {
+            db_env_vars::upsert_deployment_env_var(
+                &self.db_pool,
+                deployment_id,
+                key,
+                value,
+                is_secret,
+            )
+            .await
+            .with_context(|| format!("Failed to write {} to deployment_env_vars", key))?;
+        }
 
         info!(
-            "Set DATABASE_URL for deployment {} (group: {}, database: {})",
+            "Set PostgreSQL env vars for deployment {} (group: {}, database: {})",
             deployment_id, deployment_group, database_name
         );
 
@@ -1358,14 +1373,16 @@ With custom engine version:
 
 ## Environment Variables Injected
 
-The extension automatically injects the following environment variables into each deployment:
+The extension automatically injects the following standard PostgreSQL environment variables into each deployment:
 
-- `DATABASE_URL`: Full PostgreSQL connection string (postgres://user:password@host:port/database)
-- `DB_HOST`: Database hostname
-- `DB_PORT`: Database port (usually 5432)
-- `DB_NAME`: Database name for this deployment
-- `DB_USER`: Database username for this deployment
-- `DB_PASSWORD`: Database password (encrypted at rest, injected at deployment time)
+- `PGHOST`: Database hostname
+- `PGPORT`: Database port (5432)
+- `PGDATABASE`: Database name for this deployment
+- `PGUSER`: Database username for this deployment
+- `PGPASSWORD`: Database password (encrypted at rest, injected at deployment time)
+
+These variables are recognized by `psql` and most PostgreSQL client libraries, allowing you to connect
+with just `psql` without any connection string arguments.
 
 ## Provisioning Lifecycle
 
