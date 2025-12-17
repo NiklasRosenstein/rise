@@ -214,6 +214,13 @@ If both `enable_rds = true` and `rds_vpc_id` are provided, the module creates a 
 - Allows all outbound traffic
 - Use the output `rds_security_group_id` in your Rise backend configuration's `vpc_security_group_ids`
 
+**RDS VPC Networking:**
+RDS instances are placed in VPCs using DB subnet groups:
+- You must create a DB subnet group in your VPC (outside of this module)
+- The DB subnet group defines which subnets RDS can use
+- When you specify `vpc_security_group_ids` in the Rise config, you MUST also specify `db_subnet_group_name`
+- RDS will automatically use the VPC associated with the subnet group (no need to specify VPC ID in the Rise config)
+
 **KMS Permissions (if `enable_kms = true`):**
 - `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - For KMS-encrypted ECR repositories
 

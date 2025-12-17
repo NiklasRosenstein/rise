@@ -260,6 +260,16 @@ impl AwsRdsProvisioner {
             .await
             .context("Failed to encrypt master password")?;
 
+        // Validate VPC configuration
+        // If VPC security groups are specified, a subnet group is required to place the instance in the VPC
+        if self.vpc_security_group_ids.is_some() && self.db_subnet_group_name.is_none() {
+            let error_msg = "vpc_security_group_ids requires db_subnet_group_name to be set";
+            error!("{}", error_msg);
+            status.state = RdsState::Failed;
+            status.error = Some(error_msg.to_string());
+            return Ok(());
+        }
+
         // Create RDS instance
         let engine_version = spec
             .engine_version
