@@ -142,6 +142,13 @@ pub(crate) fn build_image_with_railpacks(
         );
     }
 
+    // Embed proxy environment variables as secrets
+    let proxy_vars = super::proxy::read_and_transform_proxy_vars();
+    if !proxy_vars.is_empty() {
+        info!("Embedding proxy variables into railpack plan as secrets");
+        super::proxy::embed_as_secrets_in_plan(&plan_file, &proxy_vars)?;
+    }
+
     // Debug log plan contents
     if let Ok(plan_contents) = fs::read_to_string(&plan_file) {
         debug!("Railpack plan.json contents:\n{}", plan_contents);
