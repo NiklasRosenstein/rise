@@ -485,6 +485,18 @@ resource "aws_vpc_security_group_ingress_rule" "rds_from_allowed_sgs" {
   description                  = "PostgreSQL access from allowed security group"
 }
 
+# Allow ingress from specified CIDR blocks on PostgreSQL port
+resource "aws_vpc_security_group_ingress_rule" "rds_from_allowed_cidrs" {
+  count = var.enable_rds && var.rds_vpc_id != null ? length(var.rds_allowed_cidr_blocks) : 0
+
+  security_group_id = aws_security_group.rds[0].id
+  cidr_ipv4         = var.rds_allowed_cidr_blocks[count.index]
+  from_port         = 5432
+  to_port           = 5432
+  ip_protocol       = "tcp"
+  description       = "PostgreSQL access from allowed CIDR block"
+}
+
 # Allow all egress (RDS instances need to reach out for updates, etc.)
 resource "aws_vpc_security_group_egress_rule" "rds_egress" {
   count = var.enable_rds && var.rds_vpc_id != null ? 1 : 0

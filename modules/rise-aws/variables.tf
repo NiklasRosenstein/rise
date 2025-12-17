@@ -68,6 +68,12 @@ variable "rds_allowed_security_groups" {
   default     = []
 }
 
+variable "rds_allowed_cidr_blocks" {
+  description = "List of CIDR blocks allowed to access RDS instances on PostgreSQL port (5432)"
+  type        = list(string)
+  default     = []
+}
+
 variable "rds_subnet_ids" {
   description = "List of subnet IDs for the RDS subnet group (must be in the VPC specified by rds_vpc_id)"
   type        = list(string)

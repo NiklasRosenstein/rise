@@ -77,6 +77,9 @@ module "rise_aws" {
   rds_allowed_security_groups = [
     module.eks.cluster_security_group_id  # Allow access from EKS cluster
   ]
+  rds_allowed_cidr_blocks = [
+    "10.0.0.0/16"  # Optional: Allow access from specific CIDR blocks
+  ]
 }
 
 # Use the rise_config output in your Rise backend config
@@ -172,6 +175,7 @@ This makes it easy to reference in your configuration management tool (e.g., usi
 | rds_vpc_id | VPC ID for RDS resources | `string` | `null` | no |
 | rds_subnet_ids | Subnet IDs for RDS DB subnet group | `list(string)` | `[]` | no |
 | rds_allowed_security_groups | Security groups allowed to access RDS | `list(string)` | `[]` | no |
+| rds_allowed_cidr_blocks | CIDR blocks allowed to access RDS on port 5432 | `list(string)` | `[]` | no |
 | enable_kms | Enable KMS encryption for ECR | `bool` | `false` | no |
 | create_iam_user | Create an IAM user with access keys | `bool` | `false` | no |
 | irsa_oidc_provider_arn | OIDC provider ARN for IRSA | `string` | `null` | no |
