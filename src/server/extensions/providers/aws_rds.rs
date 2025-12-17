@@ -959,6 +959,10 @@ impl Extension for AwsRdsProvisioner {
         &self.name
     }
 
+    fn extension_type(&self) -> &str {
+        "aws-rds-postgres"
+    }
+
     async fn validate_spec(&self, spec: &Value) -> Result<()> {
         let parsed: AwsRdsSpec =
             serde_json::from_value(spec.clone()).context("Failed to parse AWS RDS spec")?;

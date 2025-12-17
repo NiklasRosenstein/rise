@@ -21,6 +21,7 @@ pub async fn list_extension_types(
         .iter()
         .map(|(name, extension)| ExtensionTypeMetadata {
             name: name.clone(),
+            extension_type: extension.extension_type().to_string(),
             description: extension.description().to_string(),
             documentation: extension.documentation().to_string(),
             spec_schema: extension.spec_schema(),
@@ -73,6 +74,7 @@ pub async fn create_extension(
     Ok(Json(CreateExtensionResponse {
         extension: Extension {
             extension: ext_record.extension,
+            extension_type: extension.extension_type().to_string(),
             spec: ext_record.spec,
             status: ext_record.status,
             status_summary,
@@ -125,6 +127,7 @@ pub async fn update_extension(
     Ok(Json(UpdateExtensionResponse {
         extension: Extension {
             extension: ext_record.extension,
+            extension_type: extension.extension_type().to_string(),
             spec: ext_record.spec,
             status: ext_record.status,
             status_summary,
@@ -189,6 +192,7 @@ pub async fn patch_extension(
     Ok(Json(UpdateExtensionResponse {
         extension: Extension {
             extension: ext_record.extension,
+            extension_type: extension.extension_type().to_string(),
             spec: ext_record.spec,
             status: ext_record.status,
             status_summary,
@@ -221,15 +225,21 @@ pub async fn list_extensions(
     let extensions: Vec<Extension> = extensions
         .into_iter()
         .map(|e| {
-            // Get extension provider to format status
-            let status_summary = state
+            // Get extension provider to format status and extension type
+            let (status_summary, extension_type) = state
                 .extension_registry
                 .get(&e.extension)
-                .map(|ext| ext.format_status(&e.status))
-                .unwrap_or_else(|| "Unknown".to_string());
+                .map(|ext| {
+                    (
+                        ext.format_status(&e.status),
+                        ext.extension_type().to_string(),
+                    )
+                })
+                .unwrap_or_else(|| ("Unknown".to_string(), "unknown".to_string()));
 
             Extension {
                 extension: e.extension,
+                extension_type,
                 spec: e.spec,
                 status: e.status,
                 status_summary,
@@ -263,15 +273,21 @@ pub async fn get_extension(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
 
-    // Get extension provider to format status
-    let status_summary = state
+    // Get extension provider to format status and extension type
+    let (status_summary, extension_type) = state
         .extension_registry
         .get(&extension_name)
-        .map(|ext_provider| ext_provider.format_status(&ext.status))
-        .unwrap_or_else(|| "Unknown".to_string());
+        .map(|ext_provider| {
+            (
+                ext_provider.format_status(&ext.status),
+                ext_provider.extension_type().to_string(),
+            )
+        })
+        .unwrap_or_else(|| ("Unknown".to_string(), "unknown".to_string()));
 
     Ok(Json(Extension {
         extension: ext.extension,
+        extension_type,
         spec: ext.spec,
         status: ext.status,
         status_summary,

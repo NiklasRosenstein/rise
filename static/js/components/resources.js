@@ -719,19 +719,19 @@ function ExtensionsList({ projectName }) {
         setFormData({ spec: JSON.stringify(defaultSpec, null, 2) });
         setUiSpec(defaultSpec);
         // Start on UI tab if extension has custom UI, otherwise config tab
-        setModalTab(hasExtensionUI(extensionType.name) ? 'ui' : 'config');
+        setModalTab(hasExtensionUI(extensionType.extension_type) ? 'ui' : 'config');
         setIsEnableModalOpen(true);
     };
 
     const handleEditClick = (enabledExt) => {
         // Find the extension type metadata
-        const extType = availableExtensions.find(e => e.name === enabledExt.extension);
+        const extType = availableExtensions.find(e => e.extension_type === enabledExt.extension_type);
         setSelectedExtension(extType);
         setEditMode(true);
         setFormData({ spec: JSON.stringify(enabledExt.spec, null, 2) });
         setUiSpec(enabledExt.spec);
         // Start on UI tab if extension has custom UI, otherwise config tab
-        setModalTab(hasExtensionUI(enabledExt.extension) ? 'ui' : 'config');
+        setModalTab(hasExtensionUI(enabledExt.extension_type) ? 'ui' : 'config');
         setIsEnableModalOpen(true);
     };
 
@@ -827,12 +827,12 @@ function ExtensionsList({ projectName }) {
 
     // Helper to check if an extension type is enabled
     const isEnabled = (extensionTypeName) => {
-        return enabledExtensions.some(e => e.extension === extensionTypeName);
+        return enabledExtensions.some(e => e.extension_type === extensionTypeName);
     };
 
     // Helper to get enabled extension data
     const getEnabledExtension = (extensionTypeName) => {
-        return enabledExtensions.find(e => e.extension === extensionTypeName);
+        return enabledExtensions.find(e => e.extension_type === extensionTypeName);
     };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
@@ -941,7 +941,7 @@ function ExtensionsList({ projectName }) {
                             {/* Tab Navigation */}
                             <div className="border-b border-gray-700">
                                 <div className="flex gap-6">
-                                    {hasExtensionUI(selectedExtension.name) && (
+                                    {hasExtensionUI(selectedExtension.extension_type) && (
                                         <button
                                             className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'ui' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
                                             onClick={() => setModalTab('ui')}
@@ -953,7 +953,7 @@ function ExtensionsList({ projectName }) {
                                         className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
                                         onClick={() => setModalTab('config')}
                                     >
-                                        {hasExtensionUI(selectedExtension.name) ? 'JSON' : 'Configuration'}
+                                        {hasExtensionUI(selectedExtension.extension_type) ? 'JSON' : 'Configuration'}
                                     </button>
                                     <button
                                         className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
@@ -971,9 +971,9 @@ function ExtensionsList({ projectName }) {
                             </div>
 
                             {/* Tab Content */}
-                            {modalTab === 'ui' && hasExtensionUI(selectedExtension.name) && (
+                            {modalTab === 'ui' && hasExtensionUI(selectedExtension.extension_type) && (
                                 <div className="space-y-4">
-                                    {React.createElement(getExtensionUI(selectedExtension.name), {
+                                    {React.createElement(getExtensionUI(selectedExtension.extension_type), {
                                         spec: uiSpec,
                                         onChange: handleUiSpecChange
                                     })}
@@ -994,7 +994,7 @@ function ExtensionsList({ projectName }) {
                                     />
                                     <p className="text-sm text-gray-500">
                                         Enter the extension configuration as a JSON object. See the Schema and Documentation tabs for valid fields and examples.
-                                        {hasExtensionUI(selectedExtension.name) && <span> Use the Configure tab for a form-based interface.</span>}
+                                        {hasExtensionUI(selectedExtension.extension_type) && <span> Use the Configure tab for a form-based interface.</span>}
                                     </p>
                                 </div>
                             )}

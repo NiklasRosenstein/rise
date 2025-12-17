@@ -4,7 +4,10 @@ use serde_json::Value;
 /// Extension API response model
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Extension {
+    /// Extension instance name (configurable)
     pub extension: String,
+    /// Extension type (constant identifier for UI registry lookup)
+    pub extension_type: String,
     pub spec: Value,
     pub status: Value,
     /// Human-readable status summary formatted by the extension provider
@@ -46,8 +49,10 @@ pub struct ListExtensionsResponse {
 /// Metadata about an available extension type
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExtensionTypeMetadata {
-    /// Extension name/identifier (e.g., "aws-rds-postgres")
+    /// Extension name/identifier (configurable, e.g., "aws-rds")
     pub name: String,
+    /// Extension type (constant identifier for UI registry lookup, e.g., "aws-rds-postgres")
+    pub extension_type: String,
     /// Human-readable description
     pub description: String,
     /// Full documentation (markdown)
