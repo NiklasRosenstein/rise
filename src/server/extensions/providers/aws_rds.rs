@@ -17,6 +17,11 @@ use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
+// Constants
+const RDS_ENGINE_POSTGRES: &str = "postgres";
+const RDS_MASTER_USERNAME: &str = "riseadmin";
+const RDS_ADMIN_DATABASE: &str = "postgres";
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AwsRdsSpec {
     /// Database engine (currently only "postgres" is supported)
@@ -28,7 +33,7 @@ pub struct AwsRdsSpec {
 }
 
 fn default_engine() -> String {
-    "postgres".to_string()
+    RDS_ENGINE_POSTGRES.to_string()
 }
 
 /// Status and credentials for a specific database
@@ -298,7 +303,7 @@ impl AwsRdsProvisioner {
         );
 
         // Generate master credentials
-        let master_username = "riseadmin".to_string();
+        let master_username = RDS_MASTER_USERNAME.to_string();
         let master_password = self.generate_password();
 
         // Encrypt password
@@ -340,7 +345,7 @@ impl AwsRdsProvisioner {
             .create_db_instance()
             .db_instance_identifier(&instance_id)
             .db_instance_class(&self.instance_size)
-            .engine("postgres")
+            .engine(RDS_ENGINE_POSTGRES)
             .engine_version(&engine_version)
             .master_username(&master_username)
             .master_user_password(&master_password)
@@ -594,8 +599,8 @@ impl AwsRdsProvisioner {
 
                     let master_username = status.master_username.as_ref().unwrap();
                     let admin_db_url = format!(
-                        "postgres://{}:{}@{}:{}/postgres",
-                        master_username, master_password, address, port
+                        "postgres://{}:{}@{}:{}/{}",
+                        master_username, master_password, address, port, RDS_ADMIN_DATABASE
                     );
 
                     // Create database
@@ -648,11 +653,12 @@ impl AwsRdsProvisioner {
 
                     // Create user and grant privileges
                     let admin_db_url = format!(
-                        "postgres://{}:{}@{}:{}/postgres",
+                        "postgres://{}:{}@{}:{}/{}",
                         status.master_username.as_ref().unwrap(),
                         master_password,
                         address,
-                        port
+                        port,
+                        RDS_ADMIN_DATABASE
                     );
 
                     match PgPool::connect(&admin_db_url).await {
@@ -952,8 +958,11 @@ impl Extension for AwsRdsProvisioner {
         let parsed: AwsRdsSpec =
             serde_json::from_value(spec.clone()).context("Failed to parse AWS RDS spec")?;
 
-        if parsed.engine != "postgres" {
-            anyhow::bail!("Only 'postgres' engine is currently supported");
+        if parsed.engine != RDS_ENGINE_POSTGRES {
+            anyhow::bail!(
+                "Only '{}' engine is currently supported",
+                RDS_ENGINE_POSTGRES
+            );
         }
 
         Ok(())
@@ -1101,8 +1110,8 @@ impl Extension for AwsRdsProvisioner {
 
         // Connect to the RDS instance to manage databases and users
         let admin_db_url = format!(
-            "postgres://{}:{}@{}/postgres",
-            master_username, master_password, endpoint
+            "postgres://{}:{}@{}/{}",
+            master_username, master_password, endpoint, RDS_ADMIN_DATABASE
         );
 
         // If deployment_group is not "default", create a copy of the default database
