@@ -1,4 +1,4 @@
-use crate::db::{self, extensions as db_extensions, projects};
+use crate::db::{self, env_vars as db_env_vars, extensions as db_extensions, projects};
 use crate::server::encryption::EncryptionProvider;
 use crate::server::extensions::Extension;
 use anyhow::{Context, Result};
@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use aws_sdk_rds::Client as RdsClient;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -250,7 +251,7 @@ impl AwsRdsProvisioner {
         Ok(())
     }
 
-    async fn handle_creating(&self, status: &mut AwsRdsStatus, _project_name: &str) -> Result<()> {
+    async fn handle_creating(&self, status: &mut AwsRdsStatus, project_name: &str) -> Result<()> {
         let instance_id = status
             .instance_id
             .as_ref()
@@ -279,6 +280,44 @@ impl AwsRdsProvisioner {
                                         (endpoint.address(), endpoint.port())
                                     {
                                         status.endpoint = Some(format!("{}:{}", address, port));
+
+                                        // Create the default database for the project
+                                        if let (Some(username), Some(encrypted_pass)) = (
+                                            status.master_username.as_ref(),
+                                            status.master_password_encrypted.as_ref(),
+                                        ) {
+                                            match self
+                                                .encryption_provider
+                                                .decrypt(encrypted_pass)
+                                                .await
+                                            {
+                                                Ok(password) => {
+                                                    let admin_db_url = format!(
+                                                        "postgres://{}:{}@{}:{}/postgres",
+                                                        username, password, address, port
+                                                    );
+
+                                                    if let Err(e) = self
+                                                        .create_default_database(
+                                                            &admin_db_url,
+                                                            project_name,
+                                                        )
+                                                        .await
+                                                    {
+                                                        error!(
+                                                            "Failed to create default database for project '{}': {}",
+                                                            project_name, e
+                                                        );
+                                                    }
+                                                }
+                                                Err(e) => {
+                                                    error!(
+                                                        "Failed to decrypt master password: {}",
+                                                        e
+                                                    );
+                                                }
+                                            }
+                                        }
                                     }
                                 }
                                 status.error = None;
@@ -461,6 +500,135 @@ impl AwsRdsProvisioner {
             })
             .collect()
     }
+
+    /// Create the default database for a project
+    async fn create_default_database(&self, admin_db_url: &str, database_name: &str) -> Result<()> {
+        // Connect to the postgres database to run administrative commands
+        let pool = PgPool::connect(admin_db_url)
+            .await
+            .context("Failed to connect to RDS instance")?;
+
+        // Check if the database already exists
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+                .bind(database_name)
+                .fetch_one(&pool)
+                .await
+                .context("Failed to check if database exists")?;
+
+        if exists {
+            info!(
+                "Database '{}' already exists, skipping creation",
+                database_name
+            );
+            pool.close().await;
+            return Ok(());
+        }
+
+        // Create the database
+        let sanitized_db = sanitize_identifier(database_name)?;
+        let create_sql = format!(
+            "CREATE DATABASE {} OWNER {}",
+            sanitized_db,
+            sanitize_identifier("postgres")? // Use the master user as owner
+        );
+
+        sqlx::query(&create_sql)
+            .execute(&pool)
+            .await
+            .context("Failed to create default database")?;
+
+        info!("Successfully created default database '{}'", database_name);
+
+        pool.close().await;
+        Ok(())
+    }
+
+    /// Create a copy of a database using PostgreSQL's CREATE DATABASE ... WITH TEMPLATE
+    async fn create_database_copy(
+        &self,
+        admin_db_url: &str,
+        new_database: &str,
+        template_database: &str,
+    ) -> Result<()> {
+        // Connect to the postgres database to run administrative commands
+        let pool = PgPool::connect(admin_db_url)
+            .await
+            .context("Failed to connect to RDS instance")?;
+
+        // Check if the new database already exists
+        let exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+                .bind(new_database)
+                .fetch_one(&pool)
+                .await
+                .context("Failed to check if database exists")?;
+
+        if exists {
+            info!(
+                "Database '{}' already exists, skipping creation",
+                new_database
+            );
+            pool.close().await;
+            return Ok(());
+        }
+
+        // Check if the template database exists
+        let template_exists: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
+                .bind(template_database)
+                .fetch_one(&pool)
+                .await
+                .context("Failed to check if template database exists")?;
+
+        if !template_exists {
+            pool.close().await;
+            anyhow::bail!(
+                "Template database '{}' does not exist. Create a deployment in the 'default' group first.",
+                template_database
+            );
+        }
+
+        // Create the new database from the template
+        // Note: We can't use parameterized queries for database names, so we need to sanitize
+        let sanitized_new_db = sanitize_identifier(new_database)?;
+        let sanitized_template_db = sanitize_identifier(template_database)?;
+
+        let create_sql = format!(
+            "CREATE DATABASE {} WITH TEMPLATE {} OWNER {}",
+            sanitized_new_db,
+            sanitized_template_db,
+            sanitize_identifier("postgres")? // Use the master user as owner
+        );
+
+        sqlx::query(&create_sql)
+            .execute(&pool)
+            .await
+            .context("Failed to create database from template")?;
+
+        info!(
+            "Successfully created database '{}' from template '{}'",
+            new_database, template_database
+        );
+
+        pool.close().await;
+        Ok(())
+    }
+}
+
+/// Sanitize a PostgreSQL identifier (database name, user name, etc.)
+/// to prevent SQL injection
+fn sanitize_identifier(identifier: &str) -> Result<String> {
+    // Only allow alphanumeric characters, underscores, and hyphens
+    if !identifier
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+    {
+        anyhow::bail!("Invalid identifier: contains illegal characters");
+    }
+
+    // Quote the identifier to handle reserved words and special characters
+    Ok(format!("\"{}\"", identifier))
 }
 
 #[async_trait]
@@ -537,7 +705,7 @@ impl Extension for AwsRdsProvisioner {
 
     async fn before_deployment(
         &self,
-        _deployment_id: Uuid,
+        deployment_id: Uuid,
         project_id: Uuid,
         deployment_group: &str,
     ) -> Result<()> {
@@ -546,6 +714,12 @@ impl Extension for AwsRdsProvisioner {
             db_extensions::find_by_project_and_name(&self.db_pool, project_id, EXTENSION_NAME)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("AWS RDS extension not found for project"))?;
+
+        // Get project info for database naming
+        let project = projects::find_by_id(&self.db_pool, project_id)
+            .await
+            .context("Failed to find project")?
+            .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
 
         // Parse status
         let status: AwsRdsStatus =
@@ -581,23 +755,59 @@ impl Extension for AwsRdsProvisioner {
             .await
             .context("Failed to decrypt master password")?;
 
-        // Set environment variables for the deployment
-        let _database_url = format!(
-            "postgres://{}:{}@{}/postgres",
-            master_username, master_password, endpoint
+        // Determine database name based on deployment group
+        let database_name = if deployment_group == "default" {
+            project.name.clone()
+        } else {
+            format!("{}_{}", project.name, deployment_group)
+        };
+
+        // If deployment_group is not "default", create a copy of the default database
+        if deployment_group != "default" {
+            info!(
+                "Creating database copy '{}' from template '{}'",
+                database_name, project.name
+            );
+
+            // Connect to the RDS instance to create the database
+            let admin_db_url = format!(
+                "postgres://{}:{}@{}/postgres",
+                master_username, master_password, endpoint
+            );
+
+            self.create_database_copy(&admin_db_url, &database_name, &project.name)
+                .await
+                .context("Failed to create database copy for deployment group")?;
+        }
+
+        // Build DATABASE_URL for the deployment
+        let database_url = format!(
+            "postgres://{}:{}@{}/{}",
+            master_username, master_password, endpoint, database_name
         );
 
-        // Write env vars to deployment_env_vars table
-        // This is a simplified version - in reality you'd use the deployment env vars module
-        // For now, we'll just log what would be set
+        // Encrypt the DATABASE_URL before storing
+        let encrypted_database_url = self
+            .encryption_provider
+            .encrypt(&database_url)
+            .await
+            .context("Failed to encrypt DATABASE_URL")?;
+
+        // Write env var to deployment_env_vars table
+        db_env_vars::upsert_deployment_env_var(
+            &self.db_pool,
+            deployment_id,
+            "DATABASE_URL",
+            &encrypted_database_url,
+            true, // is_secret
+        )
+        .await
+        .context("Failed to write DATABASE_URL to deployment_env_vars")?;
+
         info!(
-            "Setting DATABASE_URL for deployment group: {}",
-            deployment_group
+            "Set DATABASE_URL for deployment {} (group: {}, database: {})",
+            deployment_id, deployment_group, database_name
         );
-
-        // TODO: If deployment_group != "default", create a copy of the default database
-        // using PostgreSQL's CREATE DATABASE ... WITH TEMPLATE command
-        // TODO: Write env vars to deployment_env_vars table
 
         Ok(())
     }

@@ -206,3 +206,4 @@ The project `visibility` field (Public/Private) is currently stored but not enfo
 - When removing a feature, do a comprehensive check on the codebase to ensure any remaining references to that feature are removed or updated. This includes documentation files/READMEs, config files, code comments, etc.
 - Run `mise sqlx:check` and `mise sqlx:prepare` (if needed) as part of the finalizing steps
 - The CLI should first and foremost always accept the names of things (e.g. project names, or project names + deployment timestamp). The UUIDs in our tables are only for internal book-keeping.
+- The admin user(s) should always have full access to perform any operation. When we work on a new API endpoint, we make sure admin users don't need to pass regular permission checks.
