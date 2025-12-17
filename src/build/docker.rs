@@ -51,10 +51,21 @@ pub(crate) fn build_image_with_dockerfile(
         info!("Building image with {}: {}", container_cli, image_tag);
     }
 
-    cmd.arg("build").arg("-t").arg(image_tag).arg(app_path);
+    cmd.arg("build").arg("-t").arg(image_tag);
 
     // Add platform flag for consistent architecture
     cmd.arg("--platform").arg("linux/amd64");
+
+    // Add proxy build arguments
+    let proxy_vars = super::proxy::read_and_transform_proxy_vars();
+    if !proxy_vars.is_empty() {
+        info!("Injecting proxy variables for docker build");
+        for (key, value) in &proxy_vars {
+            cmd.arg("--build-arg").arg(format!("{}={}", key, value));
+        }
+    }
+
+    cmd.arg(app_path);
 
     // Set BUILDKIT_HOST if provided and using buildx
     if use_buildx {
