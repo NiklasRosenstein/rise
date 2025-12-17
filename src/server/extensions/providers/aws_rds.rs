@@ -1182,8 +1182,9 @@ impl Extension for AwsRdsProvisioner {
                 .await
                 .context("Failed to check if user exists")?;
 
+            let sanitized_username = sanitize_identifier(&new_db_username)?;
+
             if !user_exists {
-                let sanitized_username = sanitize_identifier(&new_db_username)?;
                 postgres_admin::create_user(&pool, &sanitized_username, &new_db_password)
                     .await
                     .context("Failed to create database user for new deployment group")?;
@@ -1193,6 +1194,28 @@ impl Extension for AwsRdsProvisioner {
                     new_db_username, deployment_group
                 );
             }
+
+            // Grant the new user role to the default database owner
+            // This allows the default database owner to SET ROLE to the new user,
+            // which is required for creating databases owned by the new user
+            // We do this even if the user already exists to handle the case where
+            // a previous attempt failed before granting the role
+            let default_db_status = status
+                .databases
+                .get(&project.name)
+                .ok_or_else(|| anyhow::anyhow!("Default database not found in status"))?;
+
+            let template_owner_username = &default_db_status.user;
+            let sanitized_template_owner = sanitize_identifier(template_owner_username)?;
+
+            postgres_admin::grant_role(&pool, &sanitized_username, &sanitized_template_owner)
+                .await
+                .context("Failed to grant new user role to template owner")?;
+
+            info!(
+                "Granted role '{}' to template owner '{}' for database copy operations",
+                new_db_username, template_owner_username
+            );
 
             pool.close().await;
 

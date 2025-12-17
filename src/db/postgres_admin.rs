@@ -102,3 +102,24 @@ pub async fn change_database_owner(
 
     Ok(())
 }
+
+/// Grant a role to another role (role membership)
+///
+/// This allows the grantee to SET ROLE to the granted role, which is required
+/// for operations like creating databases owned by the granted role.
+///
+/// Note: Both role names must be sanitized before calling this function
+pub async fn grant_role(
+    pool: &PgPool,
+    role_to_grant: &str,
+    grantee: &str,
+) -> Result<()> {
+    let grant_sql = format!("GRANT {} TO {}", role_to_grant, grantee);
+
+    sqlx::query(&grant_sql)
+        .execute(pool)
+        .await
+        .context("Failed to grant role")?;
+
+    Ok(())
+}
