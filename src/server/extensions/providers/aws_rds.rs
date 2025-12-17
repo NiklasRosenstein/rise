@@ -751,6 +751,8 @@ impl Extension for AwsRdsProvisioner {
                 name
             );
             loop {
+                let mut needs_work = false;
+
                 // List ALL project extensions (not filtered by project)
                 match db_extensions::list_by_extension_name(&db_pool, &name).await {
                     Ok(extensions) => {
@@ -768,18 +770,44 @@ impl Extension for AwsRdsProvisioner {
                                 db_subnet_group_name: db_subnet_group_name.clone(),
                             });
 
+                            // Parse status to determine if this extension needs work
+                            if let Ok(status) =
+                                serde_json::from_value::<AwsRdsStatus>(ext.status.clone())
+                            {
+                                // Check if this extension is in a transitional state
+                                match status.state {
+                                    RdsState::Pending
+                                    | RdsState::Creating
+                                    | RdsState::Deleting
+                                    | RdsState::Failed => {
+                                        needs_work = true;
+                                    }
+                                    _ => {}
+                                }
+                            }
+
+                            // Also check if marked for deletion
+                            if ext.deleted_at.is_some() {
+                                needs_work = true;
+                            }
+
                             if let Err(e) = provisioner.reconcile_single(ext).await {
                                 error!("Failed to reconcile AWS RDS extension: {:?}", e);
+                                needs_work = true; // Retry sooner on errors
                             }
                         }
                     }
                     Err(e) => {
                         error!("Failed to list extensions: {:?}", e);
+                        needs_work = true; // Retry sooner on errors
                     }
                 }
 
-                // Wait before next reconcile
-                sleep(Duration::from_secs(30)).await;
+                // Adaptive wait time:
+                // - 10s if there's active work or errors (faster feedback)
+                // - 60s if everything is stable (less resource usage)
+                let wait_time = if needs_work { 10 } else { 60 };
+                sleep(Duration::from_secs(wait_time)).await;
             }
         });
     }
