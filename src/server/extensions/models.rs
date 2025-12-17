@@ -7,6 +7,8 @@ pub struct Extension {
     pub extension: String,
     pub spec: Value,
     pub status: Value,
+    /// Human-readable status summary formatted by the extension provider
+    pub status_summary: String,
     pub created: String,
     pub updated: String,
 }

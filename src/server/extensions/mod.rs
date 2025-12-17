@@ -68,4 +68,23 @@ pub trait Extension: Send + Sync {
         project_id: Uuid,
         deployment_group: &str,
     ) -> Result<()>;
+
+    /// Format the extension status for human-readable display
+    ///
+    /// This allows each extension provider to control how its status is
+    /// displayed in the CLI without the CLI needing to know about provider-specific
+    /// status structures.
+    ///
+    /// # Arguments
+    /// * `status` - The status JSONB value from the database
+    ///
+    /// # Returns
+    /// A human-readable string summarizing the extension status
+    ///
+    /// # Example
+    /// For an RDS extension, this might return:
+    /// - "Available (db.t4g.micro)"
+    /// - "Creating..."
+    /// - "Failed: Invalid subnet group"
+    fn format_status(&self, status: &Value) -> String;
 }

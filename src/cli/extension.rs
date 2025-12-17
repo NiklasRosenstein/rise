@@ -10,6 +10,7 @@ struct Extension {
     extension: String,
     spec: Value,
     status: Value,
+    status_summary: String,
     created: String,
     updated: String,
 }
@@ -251,19 +252,9 @@ pub async fn list_extensions(project: &str) -> Result<()> {
         ]);
 
     for ext in list_response.extensions {
-        let status_summary = if ext.status.is_object() {
-            ext.status
-                .get("state")
-                .and_then(|s| s.as_str())
-                .unwrap_or("unknown")
-                .to_string()
-        } else {
-            "unknown".to_string()
-        };
-
         table.add_row(vec![
             Cell::new(&ext.extension),
-            Cell::new(status_summary),
+            Cell::new(&ext.status_summary),
             Cell::new(&ext.created),
             Cell::new(&ext.updated),
         ]);

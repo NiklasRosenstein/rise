@@ -414,7 +414,7 @@ impl AwsRdsProvisioner {
                                                         .await
                                                     {
                                                         error!(
-                                                            "Failed to create default database for project '{}': {}",
+                                                            "Failed to create default database for project '{}': {:?}",
                                                             project_name, e
                                                         );
                                                     }
@@ -1035,5 +1035,33 @@ impl Extension for AwsRdsProvisioner {
         );
 
         Ok(())
+    }
+
+    fn format_status(&self, status: &Value) -> String {
+        // Try to parse as AwsRdsStatus
+        let parsed: AwsRdsStatus = match serde_json::from_value(status.clone()) {
+            Ok(s) => s,
+            Err(_) => return "Unknown".to_string(),
+        };
+
+        // Format based on state
+        match parsed.state {
+            RdsState::Pending => "Pending".to_string(),
+            RdsState::Creating => "Creating...".to_string(),
+            RdsState::Available => {
+                // Show instance size if available in a nice format
+                format!("Available ({})", self.instance_size)
+            }
+            RdsState::Deleting => "Deleting...".to_string(),
+            RdsState::Deleted => "Deleted".to_string(),
+            RdsState::Failed => {
+                // Include error message if available
+                if let Some(error) = parsed.error {
+                    format!("Failed: {}", error)
+                } else {
+                    "Failed".to_string()
+                }
+            }
+        }
     }
 }

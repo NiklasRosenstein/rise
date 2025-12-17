@@ -45,11 +45,15 @@ pub async fn create_extension(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Format status using the extension provider
+    let status_summary = extension.format_status(&ext_record.status);
+
     Ok(Json(CreateExtensionResponse {
         extension: Extension {
             extension: ext_record.extension,
             spec: ext_record.spec,
             status: ext_record.status,
+            status_summary,
             created: ext_record.created_at.to_rfc3339(),
             updated: ext_record.updated_at.to_rfc3339(),
         },
@@ -93,11 +97,15 @@ pub async fn update_extension(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Format status using the extension provider
+    let status_summary = extension.format_status(&ext_record.status);
+
     Ok(Json(UpdateExtensionResponse {
         extension: Extension {
             extension: ext_record.extension,
             spec: ext_record.spec,
             status: ext_record.status,
+            status_summary,
             created: ext_record.created_at.to_rfc3339(),
             updated: ext_record.updated_at.to_rfc3339(),
         },
@@ -153,11 +161,15 @@ pub async fn patch_extension(
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // Format status using the extension provider
+    let status_summary = extension.format_status(&ext_record.status);
+
     Ok(Json(UpdateExtensionResponse {
         extension: Extension {
             extension: ext_record.extension,
             spec: ext_record.spec,
             status: ext_record.status,
+            status_summary,
             created: ext_record.created_at.to_rfc3339(),
             updated: ext_record.updated_at.to_rfc3339(),
         },
@@ -186,12 +198,22 @@ pub async fn list_extensions(
 
     let extensions: Vec<Extension> = extensions
         .into_iter()
-        .map(|e| Extension {
-            extension: e.extension,
-            spec: e.spec,
-            status: e.status,
-            created: e.created_at.to_rfc3339(),
-            updated: e.updated_at.to_rfc3339(),
+        .map(|e| {
+            // Get extension provider to format status
+            let status_summary = state
+                .extension_registry
+                .get(&e.extension)
+                .map(|ext| ext.format_status(&e.status))
+                .unwrap_or_else(|| "Unknown".to_string());
+
+            Extension {
+                extension: e.extension,
+                spec: e.spec,
+                status: e.status,
+                status_summary,
+                created: e.created_at.to_rfc3339(),
+                updated: e.updated_at.to_rfc3339(),
+            }
         })
         .collect();
 
@@ -219,10 +241,18 @@ pub async fn get_extension(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
 
+    // Get extension provider to format status
+    let status_summary = state
+        .extension_registry
+        .get(&extension_name)
+        .map(|ext_provider| ext_provider.format_status(&ext.status))
+        .unwrap_or_else(|| "Unknown".to_string());
+
     Ok(Json(Extension {
         extension: ext.extension,
         spec: ext.spec,
         status: ext.status,
+        status_summary,
         created: ext.created_at.to_rfc3339(),
         updated: ext.updated_at.to_rfc3339(),
     }))
