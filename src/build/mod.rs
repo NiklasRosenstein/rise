@@ -8,6 +8,7 @@ mod buildkit;
 mod docker;
 mod method;
 mod pack;
+mod proxy;
 mod railpack;
 mod registry;
 mod ssl;

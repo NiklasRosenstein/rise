@@ -3339,6 +3339,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sqlx",
+ "tempfile",
  "tera",
  "thiserror 2.0.17",
  "tokio",
