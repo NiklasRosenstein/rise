@@ -61,6 +61,9 @@ pub struct AwsRdsStatus {
     /// Map of database names to their user credentials (deployment_group -> credentials)
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub database_users: HashMap<String, DatabaseUserCredentials>,
+    /// Whether the default database has been created successfully
+    #[serde(default)]
+    pub default_database_created: bool,
     /// Last error message
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -148,6 +151,7 @@ impl AwsRdsProvisioner {
                 master_username: None,
                 master_password_encrypted: None,
                 database_users: HashMap::new(),
+                default_database_created: false,
                 error: None,
             });
 
@@ -390,46 +394,77 @@ impl AwsRdsProvisioner {
                                     {
                                         status.endpoint = Some(format!("{}:{}", address, port));
 
-                                        // Create the default database for the project
-                                        if let (Some(username), Some(encrypted_pass)) = (
-                                            status.master_username.as_ref(),
-                                            status.master_password_encrypted.as_ref(),
-                                        ) {
-                                            match self
-                                                .encryption_provider
-                                                .decrypt(encrypted_pass)
-                                                .await
-                                            {
-                                                Ok(password) => {
-                                                    let admin_db_url = format!(
-                                                        "postgres://{}:{}@{}:{}/postgres",
-                                                        username, password, address, port
-                                                    );
-
-                                                    if let Err(e) = self
-                                                        .create_default_database(
-                                                            &admin_db_url,
-                                                            project_name,
-                                                        )
-                                                        .await
-                                                    {
-                                                        error!(
-                                                            "Failed to create default database for project '{}': {:?}",
-                                                            project_name, e
+                                        // Create the default database if not already created
+                                        if !status.default_database_created {
+                                            if let (Some(username), Some(encrypted_pass)) = (
+                                                status.master_username.as_ref(),
+                                                status.master_password_encrypted.as_ref(),
+                                            ) {
+                                                match self
+                                                    .encryption_provider
+                                                    .decrypt(encrypted_pass)
+                                                    .await
+                                                {
+                                                    Ok(password) => {
+                                                        let admin_db_url = format!(
+                                                            "postgres://{}:{}@{}:{}/postgres",
+                                                            username, password, address, port
                                                         );
+
+                                                        match self
+                                                            .create_default_database(
+                                                                &admin_db_url,
+                                                                project_name,
+                                                            )
+                                                            .await
+                                                        {
+                                                            Ok(_) => {
+                                                                info!(
+                                                                    "Created default database for project '{}'",
+                                                                    project_name
+                                                                );
+                                                                status.default_database_created =
+                                                                    true;
+                                                            }
+                                                            Err(e) => {
+                                                                error!(
+                                                                    "Failed to create default database for project '{}': {:?}",
+                                                                    project_name, e
+                                                                );
+                                                                // Don't mark as Available yet, will retry
+                                                                status.state = RdsState::Creating;
+                                                                status.error = Some(format!(
+                                                                    "Failed to create default database: {}",
+                                                                    e
+                                                                ));
+                                                                // Return early to retry on next reconciliation
+                                                                return Ok(());
+                                                            }
+                                                        }
                                                     }
-                                                }
-                                                Err(e) => {
-                                                    error!(
-                                                        "Failed to decrypt master password: {}",
-                                                        e
-                                                    );
+                                                    Err(e) => {
+                                                        error!(
+                                                            "Failed to decrypt master password: {}",
+                                                            e
+                                                        );
+                                                        status.state = RdsState::Failed;
+                                                        status.error = Some(
+                                                            "Failed to decrypt master password"
+                                                                .to_string(),
+                                                        );
+                                                        // Return early, marked as Failed
+                                                        return Ok(());
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
-                                status.error = None;
+
+                                // Only mark as Available if database creation succeeded
+                                if status.default_database_created {
+                                    status.error = None;
+                                }
                             }
                             "creating" | "backing-up" | "modifying" => {
                                 info!(
