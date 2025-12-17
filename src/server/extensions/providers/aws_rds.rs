@@ -592,16 +592,17 @@ impl AwsRdsProvisioner {
                         }
                     };
 
+                    let master_username = status.master_username.as_ref().unwrap();
                     let admin_db_url = format!(
                         "postgres://{}:{}@{}:{}/postgres",
-                        status.master_username.as_ref().unwrap(),
-                        master_password,
-                        address,
-                        port
+                        master_username, master_password, address, port
                     );
 
                     // Create database
-                    match self.create_default_database(&admin_db_url, db_name).await {
+                    match self
+                        .create_default_database(&admin_db_url, db_name, master_username)
+                        .await
+                    {
                         Ok(_) => {
                             info!("Created database '{}'", db_name);
                             db_status.status = DatabaseState::CreatingUser;
@@ -826,7 +827,12 @@ impl AwsRdsProvisioner {
     }
 
     /// Create the default database for a project
-    async fn create_default_database(&self, admin_db_url: &str, database_name: &str) -> Result<()> {
+    async fn create_default_database(
+        &self,
+        admin_db_url: &str,
+        database_name: &str,
+        owner: &str,
+    ) -> Result<()> {
         // Connect to the postgres database to run administrative commands
         let pool = PgPool::connect(admin_db_url)
             .await
@@ -846,7 +852,7 @@ impl AwsRdsProvisioner {
 
         // Create the database
         let sanitized_db = sanitize_identifier(database_name)?;
-        let sanitized_owner = sanitize_identifier("postgres")?;
+        let sanitized_owner = sanitize_identifier(owner)?;
 
         postgres_admin::create_database(&pool, &sanitized_db, &sanitized_owner).await?;
 
@@ -863,6 +869,7 @@ impl AwsRdsProvisioner {
         admin_db_url: &str,
         new_database: &str,
         template_database: &str,
+        owner: &str,
     ) -> Result<()> {
         // Connect to the postgres database to run administrative commands
         let pool = PgPool::connect(admin_db_url)
@@ -885,7 +892,7 @@ impl AwsRdsProvisioner {
         let template_exists = postgres_admin::database_exists(&pool, template_database).await?;
 
         let sanitized_new_db = sanitize_identifier(new_database)?;
-        let sanitized_owner = sanitize_identifier("postgres")?;
+        let sanitized_owner = sanitize_identifier(owner)?;
 
         if template_exists {
             // Create from template if it exists
@@ -1105,9 +1112,14 @@ impl Extension for AwsRdsProvisioner {
                 database_name, project.name
             );
 
-            self.create_database_copy(&admin_db_url, &database_name, &project.name)
-                .await
-                .context("Failed to create database copy for deployment group")?;
+            self.create_database_copy(
+                &admin_db_url,
+                &database_name,
+                &project.name,
+                master_username,
+            )
+            .await
+            .context("Failed to create database copy for deployment group")?;
         }
 
         // Check if we already have credentials for this database
