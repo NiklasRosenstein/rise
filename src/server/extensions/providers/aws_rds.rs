@@ -1202,7 +1202,8 @@ impl Extension for AwsRdsProvisioner {
             );
 
             // Get the default database's owner credentials to create the copy
-            // (only the owner can copy a database in PostgreSQL)
+            // The template owner must execute CREATE DATABASE ... WITH TEMPLATE
+            // because only the database owner (or superuser) can copy a database
             let default_db_status = status
                 .databases
                 .get(&project.name)
@@ -1216,6 +1217,7 @@ impl Extension for AwsRdsProvisioner {
                 .context("Failed to decrypt template owner password")?;
 
             // Create connection URL using template owner's credentials
+            // The template owner has CREATEDB privilege, allowing them to create database copies
             let template_owner_db_url = format!(
                 "postgres://{}:{}@{}/{}",
                 template_owner_username, template_owner_password, endpoint, RDS_ADMIN_DATABASE

@@ -63,15 +63,17 @@ pub async fn user_exists(pool: &PgPool, username: &str) -> Result<bool> {
     Ok(exists)
 }
 
-/// Create a PostgreSQL user with a password
+/// Create a PostgreSQL user with a password and CREATEDB privilege
 ///
 /// Note: Username must be sanitized before calling this function to prevent SQL injection
 /// Password will be properly escaped for SQL
+///
+/// CREATEDB privilege is required for users to create database copies from databases they own
 pub async fn create_user(pool: &PgPool, username: &str, password: &str) -> Result<()> {
     // Escape single quotes in password by doubling them
     let escaped_password = password.replace('\'', "''");
     let create_sql = format!(
-        "CREATE USER {} WITH PASSWORD '{}'",
+        "CREATE USER {} WITH PASSWORD '{}' CREATEDB",
         username, escaped_password
     );
 
