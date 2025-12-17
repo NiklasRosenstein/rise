@@ -672,18 +672,16 @@ function ExtensionsList({ projectName }) {
     const [enabledExtensions, setEnabledExtensions] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
-    const [isEnableModalOpen, setIsEnableModalOpen] = useState(false);
-    const [isStatusModalOpen, setIsStatusModalOpen] = useState(false);
+    const [isConfigModalOpen, setIsConfigModalOpen] = useState(false);
     const [selectedExtension, setSelectedExtension] = useState(null);
+    const [selectedExtensionData, setSelectedExtensionData] = useState(null);
     const [formData, setFormData] = useState({ spec: '{}' });
-    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-    const [extensionToDelete, setExtensionToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
     const [saving, setSaving] = useState(false);
     const [editMode, setEditMode] = useState(false);
-    const [selectedStatus, setSelectedStatus] = useState(null);
     const [modalTab, setModalTab] = useState('ui');
     const [uiSpec, setUiSpec] = useState({});
+    const [deleteConfirmName, setDeleteConfirmName] = useState('');
     const { showToast } = useToast();
 
     const loadExtensions = useCallback(async () => {
@@ -711,33 +709,28 @@ function ExtensionsList({ projectName }) {
         return () => clearInterval(interval);
     }, [loadExtensions]);
 
-    const handleEnableClick = (extensionType) => {
-        setSelectedExtension(extensionType);
-        setEditMode(false);
-        // Default to empty object
-        const defaultSpec = {};
-        setFormData({ spec: JSON.stringify(defaultSpec, null, 2) });
-        setUiSpec(defaultSpec);
-        // Start on UI tab if extension has custom UI, otherwise config tab
-        setModalTab(hasExtensionUI(extensionType.extension_type) ? 'ui' : 'config');
-        setIsEnableModalOpen(true);
-    };
-
-    const handleEditClick = (enabledExt) => {
-        // Find the extension type metadata
-        const extType = availableExtensions.find(e => e.extension_type === enabledExt.extension_type);
+    const handleRowClick = (extType, enabledData = null) => {
         setSelectedExtension(extType);
-        setEditMode(true);
-        setFormData({ spec: JSON.stringify(enabledExt.spec, null, 2) });
-        setUiSpec(enabledExt.spec);
-        // Start on UI tab if extension has custom UI, otherwise config tab
-        setModalTab(hasExtensionUI(enabledExt.extension_type) ? 'ui' : 'config');
-        setIsEnableModalOpen(true);
-    };
+        setSelectedExtensionData(enabledData);
+        setEditMode(!!enabledData);
+        setDeleteConfirmName('');
 
-    const handleViewStatusClick = (enabledExt) => {
-        setSelectedStatus(enabledExt);
-        setIsStatusModalOpen(true);
+        if (enabledData) {
+            // Editing existing extension
+            setFormData({ spec: JSON.stringify(enabledData.spec, null, 2) });
+            setUiSpec(enabledData.spec);
+            // Start on UI tab if extension has custom UI, otherwise config tab
+            setModalTab(hasExtensionUI(enabledData.extension_type) ? 'ui' : 'config');
+        } else {
+            // Enabling new extension
+            const defaultSpec = {};
+            setFormData({ spec: JSON.stringify(defaultSpec, null, 2) });
+            setUiSpec(defaultSpec);
+            // Start on UI tab if extension has custom UI, otherwise config tab
+            setModalTab(hasExtensionUI(extType.extension_type) ? 'ui' : 'config');
+        }
+
+        setIsConfigModalOpen(true);
     };
 
     // Handle UI spec changes - merge with JSON spec (upsert)
@@ -773,11 +766,6 @@ function ExtensionsList({ projectName }) {
         }
     }, []);
 
-    const handleDeleteClick = (enabledExt) => {
-        setExtensionToDelete(enabledExt);
-        setConfirmDialogOpen(true);
-    };
-
     const handleSave = async () => {
         if (!selectedExtension) return;
 
@@ -799,7 +787,7 @@ function ExtensionsList({ projectName }) {
                 await api.createExtension(projectName, selectedExtension.name, spec);
                 showToast(`Extension ${selectedExtension.name} enabled successfully`, 'success');
             }
-            setIsEnableModalOpen(false);
+            setIsConfigModalOpen(false);
             loadExtensions();
         } catch (err) {
             showToast(`Failed to ${editMode ? 'update' : 'enable'} extension: ${err.message}`, 'error');
@@ -808,15 +796,17 @@ function ExtensionsList({ projectName }) {
         }
     };
 
-    const handleDeleteConfirm = async () => {
-        if (!extensionToDelete) return;
+    const handleDelete = async () => {
+        if (!selectedExtensionData || deleteConfirmName !== selectedExtensionData.extension) {
+            showToast('Please enter the extension name to confirm deletion', 'error');
+            return;
+        }
 
         setDeleting(true);
         try {
-            await api.deleteExtension(projectName, extensionToDelete.extension);
-            showToast(`Extension ${extensionToDelete.extension} deleted successfully`, 'success');
-            setConfirmDialogOpen(false);
-            setExtensionToDelete(null);
+            await api.deleteExtension(projectName, selectedExtensionData.extension);
+            showToast(`Extension ${selectedExtensionData.extension} deleted successfully`, 'success');
+            setIsConfigModalOpen(false);
             loadExtensions();
         } catch (err) {
             showToast(`Failed to delete extension: ${err.message}`, 'error');
@@ -848,13 +838,12 @@ function ExtensionsList({ projectName }) {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Extension</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Description</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-800">
                         {availableExtensions.length === 0 ? (
                             <tr>
-                                <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
+                                <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
                                     No extensions available.
                                 </td>
                             </tr>
@@ -870,7 +859,8 @@ function ExtensionsList({ projectName }) {
                                     return (
                                         <tr
                                             key={extType.name}
-                                            className={`hover:bg-gray-800/50 transition-colors ${!enabled ? 'opacity-60' : ''}`}
+                                            className="hover:bg-gray-800/50 transition-colors cursor-pointer"
+                                            onClick={() => handleRowClick(extType, enabledData)}
                                         >
                                             <td className="px-3 py-4">
                                                 {iconUrl ? (
@@ -883,9 +873,15 @@ function ExtensionsList({ projectName }) {
                                                     <div className="w-8 h-8"></div>
                                                 )}
                                             </td>
-                                            <td className="px-6 py-4 text-sm font-mono text-gray-200">
-                                                {extType.name}
-                                                {!enabled && <span className="ml-2 text-xs text-gray-500">(not enabled)</span>}
+                                            <td className="px-6 py-4 text-sm">
+                                                <div className="flex items-center gap-3">
+                                                    <span className="font-mono text-gray-200">{extType.name}</span>
+                                                    {enabled ? (
+                                                        <span className="bg-indigo-600 text-white text-xs font-semibold px-2 py-0.5 rounded uppercase">Enabled</span>
+                                                    ) : (
+                                                        <span className="bg-gray-600 text-white text-xs font-semibold px-2 py-0.5 rounded uppercase">Not Enabled</span>
+                                                    )}
+                                                </div>
                                             </td>
                                             <td className="px-6 py-4 text-sm text-gray-300">
                                                 {extType.description}
@@ -897,43 +893,6 @@ function ExtensionsList({ projectName }) {
                                                     <span className="text-gray-500">-</span>
                                                 )}
                                             </td>
-                                            <td className="px-6 py-4 text-sm">
-                                                <div className="flex gap-2">
-                                                    {enabled && enabledData ? (
-                                                        <>
-                                                            <Button
-                                                                variant="secondary"
-                                                                size="sm"
-                                                                onClick={() => handleEditClick(enabledData)}
-                                                            >
-                                                                Edit
-                                                            </Button>
-                                                            <Button
-                                                                variant="secondary"
-                                                                size="sm"
-                                                                onClick={() => handleViewStatusClick(enabledData)}
-                                                            >
-                                                                View Status
-                                                            </Button>
-                                                            <Button
-                                                                variant="danger"
-                                                                size="sm"
-                                                                onClick={() => handleDeleteClick(enabledData)}
-                                                            >
-                                                                Delete
-                                                            </Button>
-                                                        </>
-                                                    ) : (
-                                                        <Button
-                                                            variant="primary"
-                                                            size="sm"
-                                                            onClick={() => handleEnableClick(extType)}
-                                                        >
-                                                            Enable
-                                                        </Button>
-                                                    )}
-                                                </div>
-                                            </td>
                                         </tr>
                                     );
                                 })
@@ -942,11 +901,11 @@ function ExtensionsList({ projectName }) {
                 </table>
             </div>
 
-            {/* Enable/Edit Modal */}
+            {/* Configuration Modal */}
             <Modal
-                isOpen={isEnableModalOpen}
-                onClose={() => setIsEnableModalOpen(false)}
-                title={editMode ? `Edit Extension: ${selectedExtension?.name}` : `Enable Extension: ${selectedExtension?.name}`}
+                isOpen={isConfigModalOpen}
+                onClose={() => setIsConfigModalOpen(false)}
+                title={editMode ? `Extension: ${selectedExtension?.name}` : `Enable Extension: ${selectedExtension?.name}`}
                 maxWidth="max-w-4xl"
             >
                 <div className="space-y-4">
@@ -981,6 +940,22 @@ function ExtensionsList({ projectName }) {
                                     >
                                         Documentation
                                     </button>
+                                    {editMode && selectedExtensionData && (
+                                        <>
+                                            <button
+                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'status' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                                onClick={() => setModalTab('status')}
+                                            >
+                                                Status
+                                            </button>
+                                            <button
+                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'delete' ? 'border-red-500 text-red-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                                onClick={() => setModalTab('delete')}
+                                            >
+                                                Delete
+                                            </button>
+                                        </>
+                                    )}
                                 </div>
                             </div>
 
@@ -1038,88 +1013,97 @@ function ExtensionsList({ projectName }) {
                                 </div>
                             )}
 
-                            <div className="flex justify-end gap-3 pt-4">
-                                <Button
-                                    variant="secondary"
-                                    onClick={() => setIsEnableModalOpen(false)}
-                                    disabled={saving}
-                                >
-                                    Cancel
-                                </Button>
-                                <Button
-                                    variant="primary"
-                                    onClick={handleSave}
-                                    loading={saving}
-                                >
-                                    {editMode ? 'Update' : 'Enable'}
-                                </Button>
-                            </div>
+                            {modalTab === 'status' && editMode && selectedExtensionData && (
+                                <div className="space-y-4">
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Status Summary</h4>
+                                        <p className="text-gray-200">{selectedExtensionData.status_summary}</p>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Current Spec</h4>
+                                        <pre className="text-xs font-mono text-gray-300 bg-gray-800 p-3 rounded overflow-x-auto">
+                                            {JSON.stringify(selectedExtensionData.spec, null, 2)}
+                                        </pre>
+                                    </div>
+
+                                    <div>
+                                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Full Status</h4>
+                                        <pre className="text-xs font-mono text-gray-300 bg-gray-800 p-3 rounded overflow-x-auto max-h-96">
+                                            {JSON.stringify(selectedExtensionData.status, null, 2)}
+                                        </pre>
+                                    </div>
+
+                                    <div className="text-xs text-gray-500">
+                                        <p>Created: {formatDate(selectedExtensionData.created)}</p>
+                                        <p>Updated: {formatDate(selectedExtensionData.updated)}</p>
+                                    </div>
+                                </div>
+                            )}
+
+                            {modalTab === 'delete' && editMode && selectedExtensionData && (
+                                <div className="space-y-4">
+                                    <div className="bg-red-900/20 border border-red-700 rounded-lg p-4">
+                                        <h4 className="text-sm font-semibold text-red-300 mb-2">Warning: Permanent Deletion</h4>
+                                        <p className="text-sm text-red-200">
+                                            Deleting this extension will deprovision all resources created by this extension.
+                                            This action cannot be undone.
+                                        </p>
+                                    </div>
+
+                                    <FormField
+                                        label={`Type "${selectedExtensionData.extension}" to confirm deletion`}
+                                        id="delete-confirm-name"
+                                        value={deleteConfirmName}
+                                        onChange={(e) => setDeleteConfirmName(e.target.value)}
+                                        placeholder={selectedExtensionData.extension}
+                                        required
+                                    />
+
+                                    <div className="flex justify-end gap-3 pt-4">
+                                        <Button
+                                            variant="secondary"
+                                            onClick={() => setModalTab(hasExtensionUI(selectedExtension.extension_type) ? 'ui' : 'config')}
+                                            disabled={deleting}
+                                        >
+                                            Cancel
+                                        </Button>
+                                        <Button
+                                            variant="danger"
+                                            onClick={handleDelete}
+                                            loading={deleting}
+                                            disabled={deleteConfirmName !== selectedExtensionData.extension}
+                                        >
+                                            Delete Extension
+                                        </Button>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Action buttons - only shown when not on delete tab */}
+                            {modalTab !== 'delete' && (
+                                <div className="flex justify-end gap-3 pt-4">
+                                    <Button
+                                        variant="secondary"
+                                        onClick={() => setIsConfigModalOpen(false)}
+                                        disabled={saving}
+                                    >
+                                        Cancel
+                                    </Button>
+                                    <Button
+                                        variant="primary"
+                                        onClick={handleSave}
+                                        loading={saving}
+                                    >
+                                        {editMode ? 'Update' : 'Enable'}
+                                    </Button>
+                                </div>
+                            )}
                         </>
                     )}
                 </div>
             </Modal>
 
-            {/* View Status Modal */}
-            <Modal
-                isOpen={isStatusModalOpen}
-                onClose={() => setIsStatusModalOpen(false)}
-                title={`Extension Status: ${selectedStatus?.extension}`}
-                maxWidth="max-w-3xl"
-            >
-                <div className="space-y-4">
-                    {selectedStatus && (
-                        <>
-                            <div>
-                                <h4 className="text-sm font-semibold text-gray-300 mb-2">Status Summary</h4>
-                                <p className="text-gray-200">{selectedStatus.status_summary}</p>
-                            </div>
-
-                            <div>
-                                <h4 className="text-sm font-semibold text-gray-300 mb-2">Current Spec</h4>
-                                <pre className="text-xs font-mono text-gray-300 bg-gray-800 p-3 rounded overflow-x-auto">
-                                    {JSON.stringify(selectedStatus.spec, null, 2)}
-                                </pre>
-                            </div>
-
-                            <div>
-                                <h4 className="text-sm font-semibold text-gray-300 mb-2">Full Status</h4>
-                                <pre className="text-xs font-mono text-gray-300 bg-gray-800 p-3 rounded overflow-x-auto max-h-96">
-                                    {JSON.stringify(selectedStatus.status, null, 2)}
-                                </pre>
-                            </div>
-
-                            <div className="text-xs text-gray-500">
-                                <p>Created: {formatDate(selectedStatus.created)}</p>
-                                <p>Updated: {formatDate(selectedStatus.updated)}</p>
-                            </div>
-
-                            <div className="flex justify-end pt-4">
-                                <Button
-                                    variant="secondary"
-                                    onClick={() => setIsStatusModalOpen(false)}
-                                >
-                                    Close
-                                </Button>
-                            </div>
-                        </>
-                    )}
-                </div>
-            </Modal>
-
-            {/* Delete Confirmation Dialog */}
-            <ConfirmDialog
-                isOpen={confirmDialogOpen}
-                onClose={() => {
-                    setConfirmDialogOpen(false);
-                    setExtensionToDelete(null);
-                }}
-                onConfirm={handleDeleteConfirm}
-                title="Delete Extension"
-                message={`Are you sure you want to delete the extension "${extensionToDelete?.extension}"? This will deprovision all resources created by this extension. This action cannot be undone.`}
-                confirmText="Delete Extension"
-                variant="danger"
-                loading={deleting}
-            />
         </div>
     );
 }
