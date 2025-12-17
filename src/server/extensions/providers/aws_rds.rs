@@ -10,6 +10,7 @@ use aws_sdk_rds::Client as RdsClient;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
@@ -30,6 +31,17 @@ fn default_engine() -> String {
     "postgres".to_string()
 }
 
+/// Credentials for a database user
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct DatabaseUserCredentials {
+    /// Database name
+    pub database_name: String,
+    /// Username for this database
+    pub username: String,
+    /// Encrypted password for this user
+    pub password_encrypted: String,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AwsRdsStatus {
     /// Current state of the RDS instance
@@ -46,6 +58,9 @@ pub struct AwsRdsStatus {
     /// Encrypted master password
     #[serde(skip_serializing_if = "Option::is_none")]
     pub master_password_encrypted: Option<String>,
+    /// Map of database names to their user credentials (deployment_group -> credentials)
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub database_users: HashMap<String, DatabaseUserCredentials>,
     /// Last error message
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -123,6 +138,7 @@ impl AwsRdsProvisioner {
                 endpoint: None,
                 master_username: None,
                 master_password_encrypted: None,
+                database_users: HashMap::new(),
                 error: None,
             });
 
@@ -742,8 +758,8 @@ impl Extension for AwsRdsProvisioner {
             .context("Failed to find project")?
             .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
 
-        // Parse status
-        let status: AwsRdsStatus =
+        // Parse status (mutable so we can update database_users)
+        let mut status: AwsRdsStatus =
             serde_json::from_value(ext.status.clone()).context("Failed to parse AWS RDS status")?;
 
         // Check if instance is available
@@ -777,10 +793,13 @@ impl Extension for AwsRdsProvisioner {
             .context("Failed to decrypt master password")?;
 
         // Determine database name based on deployment group
+        // Sanitize deployment_group for use in database/user names (replace slashes and special chars)
+        let safe_deployment_group = deployment_group.replace(['/', '-'], "_");
+
         let database_name = if deployment_group == "default" {
             project.name.clone()
         } else {
-            format!("{}_{}", project.name, deployment_group)
+            format!("{}_{}", project.name, safe_deployment_group)
         };
 
         // Connect to the RDS instance to manage databases and users
@@ -801,52 +820,113 @@ impl Extension for AwsRdsProvisioner {
                 .context("Failed to create database copy for deployment group")?;
         }
 
-        // Create a dedicated user for this database
-        let db_username = if deployment_group == "default" {
-            format!("{}_user", project.name)
-        } else {
-            format!("{}_{}_user", project.name, deployment_group)
-        };
-        let db_password = self.generate_password();
+        // Check if we already have credentials for this deployment group
+        let (db_username, db_password) =
+            if let Some(creds) = status.database_users.get(deployment_group) {
+                // Reuse existing credentials
+                info!(
+                    "Reusing existing database user '{}' for deployment group '{}'",
+                    creds.username, deployment_group
+                );
 
-        info!("Creating database user '{}' for deployment", db_username);
+                let password = self
+                    .encryption_provider
+                    .decrypt(&creds.password_encrypted)
+                    .await
+                    .context("Failed to decrypt database user password")?;
 
-        let pool = PgPool::connect(&admin_db_url)
-            .await
-            .context("Failed to connect to RDS instance for user creation")?;
+                (creds.username.clone(), password)
+            } else {
+                // Create new database user credentials
+                let username = if deployment_group == "default" {
+                    format!("{}_user", project.name)
+                } else {
+                    format!("{}_{}_user", project.name, safe_deployment_group)
+                };
+                let password = self.generate_password();
 
-        // Check if user already exists
-        let user_exists = postgres_admin::user_exists(&pool, &db_username)
-            .await
-            .context("Failed to check if user exists")?;
+                info!(
+                    "Creating new database user '{}' for deployment group '{}'",
+                    username, deployment_group
+                );
 
-        if !user_exists {
-            // Sanitize username for CREATE USER
-            let sanitized_username = sanitize_identifier(&db_username)?;
+                let pool = PgPool::connect(&admin_db_url)
+                    .await
+                    .context("Failed to connect to RDS instance for user creation")?;
 
-            postgres_admin::create_user(&pool, &sanitized_username, &db_password)
+                // Check if user already exists (shouldn't happen, but handle it)
+                let user_exists = postgres_admin::user_exists(&pool, &username)
+                    .await
+                    .context("Failed to check if user exists")?;
+
+                if !user_exists {
+                    // Sanitize username for CREATE USER
+                    let sanitized_username = sanitize_identifier(&username)?;
+
+                    postgres_admin::create_user(&pool, &sanitized_username, &password)
+                        .await
+                        .context("Failed to create database user")?;
+
+                    info!("Created database user '{}'", username);
+                } else {
+                    warn!(
+                    "Database user '{}' already exists in PostgreSQL but not in status, reusing it",
+                    username
+                );
+                }
+
+                // Grant privileges on the database to the user
+                let sanitized_username = sanitize_identifier(&username)?;
+                let sanitized_database = sanitize_identifier(&database_name)?;
+
+                postgres_admin::grant_database_privileges(
+                    &pool,
+                    &sanitized_database,
+                    &sanitized_username,
+                )
                 .await
-                .context("Failed to create database user")?;
+                .context("Failed to grant database privileges")?;
 
-            info!("Created database user '{}'", db_username);
-        } else {
-            info!("Database user '{}' already exists", db_username);
-        }
+                info!(
+                    "Granted privileges on database '{}' to user '{}'",
+                    database_name, username
+                );
 
-        // Grant privileges on the database to the user
-        let sanitized_username = sanitize_identifier(&db_username)?;
-        let sanitized_database = sanitize_identifier(&database_name)?;
+                pool.close().await;
 
-        postgres_admin::grant_database_privileges(&pool, &sanitized_database, &sanitized_username)
-            .await
-            .context("Failed to grant database privileges")?;
+                // Store credentials in status
+                let encrypted_password = self
+                    .encryption_provider
+                    .encrypt(&password)
+                    .await
+                    .context("Failed to encrypt database user password")?;
 
-        info!(
-            "Granted privileges on database '{}' to user '{}'",
-            database_name, db_username
-        );
+                status.database_users.insert(
+                    deployment_group.to_string(),
+                    DatabaseUserCredentials {
+                        database_name: database_name.clone(),
+                        username: username.clone(),
+                        password_encrypted: encrypted_password,
+                    },
+                );
 
-        pool.close().await;
+                // Update extension status in database
+                db_extensions::update_status(
+                    &self.db_pool,
+                    project_id,
+                    &self.name,
+                    &serde_json::to_value(&status)?,
+                )
+                .await
+                .context("Failed to update extension status with new database user")?;
+
+                info!(
+                    "Stored credentials for deployment group '{}' in extension status",
+                    deployment_group
+                );
+
+                (username, password)
+            };
 
         // Build DATABASE_URL for the deployment using the dedicated user
         let database_url = format!(
