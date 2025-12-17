@@ -1247,12 +1247,6 @@ impl Extension for AwsRdsProvisioner {
         let (db_username, db_password) = if let Some(db_status) =
             status.databases.get(&database_name)
         {
-            // Reuse existing credentials
-            info!(
-                "Reusing existing database user '{}' for database '{}'",
-                db_status.user, database_name
-            );
-
             // Ensure database is Available before using it
             if db_status.status != DatabaseState::Available {
                 anyhow::bail!(
@@ -1261,6 +1255,29 @@ impl Extension for AwsRdsProvisioner {
                     db_status.status
                 );
             }
+
+            // Verify the database actually exists in PostgreSQL
+            let pool = PgPool::connect(&admin_db_url)
+                .await
+                .context("Failed to connect to RDS instance to verify database")?;
+
+            let db_exists = postgres_admin::database_exists(&pool, &database_name)
+                .await
+                .context("Failed to check if database exists")?;
+
+            pool.close().await;
+
+            if !db_exists {
+                anyhow::bail!(
+                    "Database '{}' is marked as Available in status but does not exist in PostgreSQL",
+                    database_name
+                );
+            }
+
+            info!(
+                "Reusing existing database user '{}' for database '{}'",
+                db_status.user, database_name
+            );
 
             let password = self
                 .encryption_provider
