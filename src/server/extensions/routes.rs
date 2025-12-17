@@ -7,6 +7,9 @@ use axum::{
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        // Global route to list all available extension types
+        .route("/extensions/types", get(handlers::list_extension_types))
+        // Project-specific extension routes
         .route(
             "/projects/{project}/extensions",
             get(handlers::list_extensions),

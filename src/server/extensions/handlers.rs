@@ -8,6 +8,28 @@ use axum::{
     Json,
 };
 
+/// List all available extension types (registered providers)
+pub async fn list_extension_types(
+    State(state): State<AppState>,
+    AxumExtension(_user): AxumExtension<User>,
+) -> Result<Json<ListExtensionTypesResponse>, (StatusCode, String)> {
+    // Note: This endpoint doesn't require project access - it lists all available
+    // extension types that any authenticated user can see and potentially enable on their projects
+
+    let extension_types: Vec<ExtensionTypeMetadata> = state
+        .extension_registry
+        .iter()
+        .map(|(name, extension)| ExtensionTypeMetadata {
+            name: name.clone(),
+            description: extension.description().to_string(),
+            documentation: extension.documentation().to_string(),
+            spec_schema: extension.spec_schema(),
+        })
+        .collect();
+
+    Ok(Json(ListExtensionTypesResponse { extension_types }))
+}
+
 /// Create or upsert extension for project
 pub async fn create_extension(
     State(state): State<AppState>,
