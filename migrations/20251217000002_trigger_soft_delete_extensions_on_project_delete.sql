@@ -2,8 +2,8 @@
 CREATE OR REPLACE FUNCTION soft_delete_project_extensions()
 RETURNS TRIGGER AS $$
 BEGIN
-    -- Only act when status changes to 'Terminating'
-    IF NEW.status = 'Terminating' AND (OLD.status IS DISTINCT FROM 'Terminating') THEN
+    -- Only act when status changes to 'Terminating' or 'Deleting'
+    IF NEW.status = 'Deleting' THEN
         -- Mark all extensions for this project as deleted
         UPDATE project_extensions
         SET deleted_at = NOW()
