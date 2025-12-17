@@ -36,6 +36,20 @@ variable "irsa_service_account" {
   default     = "rise-backend"
 }
 
+# Feature flags
+
+variable "enable_ecr" {
+  description = "Enable ECR permissions for the Rise backend. Set to true if using ECR for container registry."
+  type        = bool
+  default     = true
+}
+
+variable "enable_rds" {
+  description = "Enable RDS permissions for the Rise backend. Set to true if using the AWS RDS extension."
+  type        = bool
+  default     = false
+}
+
 # ECR settings
 
 variable "image_tag_mutability" {
@@ -57,14 +71,6 @@ variable "scan_on_push" {
 
 variable "enable_kms" {
   description = "Enable KMS encryption for ECR repositories. If true, a KMS key will be automatically created. If false, AES256 encryption is used."
-  type        = bool
-  default     = false
-}
-
-# RDS settings
-
-variable "enable_rds" {
-  description = "Enable RDS permissions for the Rise backend. Set to true if using the AWS RDS extension."
   type        = bool
   default     = false
 }

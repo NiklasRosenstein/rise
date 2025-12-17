@@ -39,7 +39,7 @@ locals {
 # -----------------------------------------------------------------------------
 
 resource "aws_kms_key" "ecr" {
-  count = var.enable_kms ? 1 : 0
+  count = var.enable_ecr && var.enable_kms ? 1 : 0
 
   description             = "KMS key for Rise ECR repository encryption"
   deletion_window_in_days = 30
@@ -48,7 +48,7 @@ resource "aws_kms_key" "ecr" {
 }
 
 resource "aws_kms_alias" "ecr" {
-  count = var.enable_kms ? 1 : 0
+  count = var.enable_ecr && var.enable_kms ? 1 : 0
 
   name          = "alias/${var.name}-ecr"
   target_key_id = aws_kms_key.ecr[0].key_id
@@ -59,72 +59,83 @@ resource "aws_kms_alias" "ecr" {
 # -----------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "backend" {
-  # Allow getting authorization tokens (required for any ECR operation)
-  statement {
-    sid    = "GetAuthorizationToken"
-    effect = "Allow"
-    actions = [
-      "ecr:GetAuthorizationToken"
-    ]
-    resources = ["*"]
+  # ECR permissions (if enabled)
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "GetAuthorizationToken"
+      effect = "Allow"
+      actions = [
+        "ecr:GetAuthorizationToken"
+      ]
+      resources = ["*"]
+    }
   }
 
-  # Allow listing and describing repositories (for discovery)
-  statement {
-    sid    = "DescribeRepositories"
-    effect = "Allow"
-    actions = [
-      "ecr:DescribeRepositories",
-      "ecr:ListTagsForResource"
-    ]
-    resources = ["*"]
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "DescribeRepositories"
+      effect = "Allow"
+      actions = [
+        "ecr:DescribeRepositories",
+        "ecr:ListTagsForResource"
+      ]
+      resources = ["*"]
+    }
   }
 
-  # Allow creating repositories with the configured prefix
-  statement {
-    sid    = "CreateRepository"
-    effect = "Allow"
-    actions = [
-      "ecr:CreateRepository",
-      "ecr:TagResource",
-      "ecr:PutImageScanningConfiguration",
-      "ecr:PutImageTagMutability",
-      "ecr:PutLifecyclePolicy"
-    ]
-    resources = [
-      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
-    ]
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "CreateRepository"
+      effect = "Allow"
+      actions = [
+        "ecr:CreateRepository",
+        "ecr:TagResource",
+        "ecr:PutImageScanningConfiguration",
+        "ecr:PutImageTagMutability",
+        "ecr:PutLifecyclePolicy"
+      ]
+      resources = [
+        "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
+      ]
+    }
   }
 
-  # Allow deleting repositories
-  statement {
-    sid    = "DeleteRepository"
-    effect = "Allow"
-    actions = [
-      "ecr:DeleteRepository",
-      "ecr:BatchDeleteImage"
-    ]
-    resources = [
-      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
-    ]
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "DeleteRepository"
+      effect = "Allow"
+      actions = [
+        "ecr:DeleteRepository",
+        "ecr:BatchDeleteImage"
+      ]
+      resources = [
+        "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
+      ]
+    }
   }
 
-  # Allow tagging repositories
-  statement {
-    sid    = "TagRepository"
-    effect = "Allow"
-    actions = [
-      "ecr:TagResource",
-      "ecr:UntagResource"
-    ]
-    resources = [
-      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
-    ]
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "TagRepository"
+      effect = "Allow"
+      actions = [
+        "ecr:TagResource",
+        "ecr:UntagResource"
+      ]
+      resources = [
+        "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
+      ]
+    }
   }
 
   # KMS permissions if using KMS encryption
   dynamic "statement" {
-    for_each = var.enable_kms ? [1] : []
+    for_each = var.enable_ecr && var.enable_kms ? [1] : []
     content {
       sid    = "KMSEncryption"
       effect = "Allow"
@@ -285,13 +296,15 @@ resource "aws_iam_access_key" "backend" {
 }
 
 # -----------------------------------------------------------------------------
-# Push Role - for scoped image push credentials
+# Push Role - for scoped image push credentials (if ECR enabled)
 # -----------------------------------------------------------------------------
 # This role is assumed by the Rise backend to generate temporary credentials
 # for clients to push images. The credentials are scoped per-repository using
 # an inline session policy during AssumeRole.
 
 data "aws_iam_policy_document" "push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   # Allow getting authorization tokens (required for docker login)
   statement {
     sid    = "GetAuthorizationToken"
@@ -323,14 +336,18 @@ data "aws_iam_policy_document" "push_role" {
 }
 
 resource "aws_iam_policy" "push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   name        = "${var.name}-ecr-push"
   description = "IAM policy for Rise ECR push operations"
-  policy      = data.aws_iam_policy_document.push_role.json
+  policy      = data.aws_iam_policy_document.push_role[0].json
   tags        = local.tags
 }
 
 # The push role can be assumed by the controller role or user
 data "aws_iam_policy_document" "push_role_assume" {
+  count = var.enable_ecr ? 1 : 0
+
   # Allow the controller role to assume the push role
   statement {
     effect = "Allow"
@@ -356,44 +373,54 @@ data "aws_iam_policy_document" "push_role_assume" {
 }
 
 resource "aws_iam_role" "push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   name               = "${var.name}-ecr-push"
   description        = "IAM role for Rise ECR push operations (assumed to generate scoped credentials)"
-  assume_role_policy = data.aws_iam_policy_document.push_role_assume.json
+  assume_role_policy = data.aws_iam_policy_document.push_role_assume[0].json
   tags               = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "push_role" {
-  role       = aws_iam_role.push_role.name
-  policy_arn = aws_iam_policy.push_role.arn
+  count = var.enable_ecr ? 1 : 0
+
+  role       = aws_iam_role.push_role[0].name
+  policy_arn = aws_iam_policy.push_role[0].arn
 }
 
 # The controller also needs permission to assume the push role
 data "aws_iam_policy_document" "assume_push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   statement {
     sid    = "AssumePushRole"
     effect = "Allow"
     actions = [
       "sts:AssumeRole"
     ]
-    resources = [aws_iam_role.push_role.arn]
+    resources = [aws_iam_role.push_role[0].arn]
   }
 }
 
 resource "aws_iam_policy" "assume_push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   name        = "${var.name}-ecr-assume-push"
   description = "Allow assuming the ECR push role"
-  policy      = data.aws_iam_policy_document.assume_push_role.json
+  policy      = data.aws_iam_policy_document.assume_push_role[0].json
   tags        = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "controller_assume_push" {
+  count = var.enable_ecr ? 1 : 0
+
   role       = aws_iam_role.backend.name
-  policy_arn = aws_iam_policy.assume_push_role.arn
+  policy_arn = aws_iam_policy.assume_push_role[0].arn
 }
 
 resource "aws_iam_user_policy_attachment" "controller_assume_push" {
-  count = var.create_iam_user ? 1 : 0
+  count = var.create_iam_user && var.enable_ecr ? 1 : 0
 
   user       = aws_iam_user.backend[0].name
-  policy_arn = aws_iam_policy.assume_push_role.arn
+  policy_arn = aws_iam_policy.assume_push_role[0].arn
 }

@@ -36,7 +36,8 @@ module "rise_aws" {
   source = "./modules/rise-aws"
 
   name       = "rise-backend"
-  enable_rds = true  # Enable if using AWS RDS extension
+  enable_ecr = true  # Enable for ECR container registry
+  enable_rds = true  # Enable for AWS RDS extension
 
   tags = {
     Environment = "production"
@@ -51,6 +52,7 @@ module "rise_aws" {
   source = "./modules/rise-aws"
 
   name                   = "rise-backend"
+  enable_ecr             = true
   enable_rds             = true
   enable_kms             = true  # Enable KMS encryption for ECR
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
@@ -66,6 +68,7 @@ module "rise_aws" {
   source = "./modules/rise-aws"
 
   name            = "rise-backend"
+  enable_ecr      = true
   enable_rds      = true
   create_iam_user = true
 }
@@ -121,14 +124,15 @@ extensions:
 |------|-------------|------|---------|:--------:|
 | name | Name for the IAM role and policy | `string` | `"rise-backend"` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
+| enable_ecr | Enable ECR permissions | `bool` | `true` | no |
+| enable_rds | Enable RDS permissions | `bool` | `false` | no |
+| enable_kms | Enable KMS encryption for ECR | `bool` | `false` | no |
 | create_iam_user | Create an IAM user with access keys | `bool` | `false` | no |
 | irsa_oidc_provider_arn | OIDC provider ARN for IRSA | `string` | `null` | no |
 | irsa_namespace | Kubernetes namespace for IRSA | `string` | `"rise-system"` | no |
 | irsa_service_account | Kubernetes service account for IRSA | `string` | `"rise-backend"` | no |
 | image_tag_mutability | Tag mutability for repositories | `string` | `"MUTABLE"` | no |
 | scan_on_push | Enable image scanning on push | `bool` | `true` | no |
-| enable_kms | Enable KMS encryption for ECR | `bool` | `false` | no |
-| enable_rds | Enable RDS permissions | `bool` | `false` | no |
 | max_image_count | Max images to retain per repository | `number` | `100` | no |
 
 ## Outputs

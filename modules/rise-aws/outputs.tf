@@ -43,13 +43,13 @@ output "secret_access_key" {
 # -----------------------------------------------------------------------------
 
 output "push_role_arn" {
-  description = "ARN of the IAM role for push operations"
-  value       = aws_iam_role.push_role.arn
+  description = "ARN of the IAM role for push operations (null if ECR not enabled)"
+  value       = var.enable_ecr ? aws_iam_role.push_role[0].arn : null
 }
 
 output "push_role_name" {
-  description = "Name of the IAM role for push operations"
-  value       = aws_iam_role.push_role.name
+  description = "Name of the IAM role for push operations (null if ECR not enabled)"
+  value       = var.enable_ecr ? aws_iam_role.push_role[0].name : null
 }
 
 # -----------------------------------------------------------------------------
@@ -62,8 +62,8 @@ output "controller_policy_arn" {
 }
 
 output "push_policy_arn" {
-  description = "ARN of the IAM policy for push operations"
-  value       = aws_iam_policy.push_role.arn
+  description = "ARN of the IAM policy for push operations (null if ECR not enabled)"
+  value       = var.enable_ecr ? aws_iam_policy.push_role[0].arn : null
 }
 
 output "policy_document" {
@@ -90,13 +90,13 @@ output "kms_key_id" {
 # -----------------------------------------------------------------------------
 
 output "rise_config" {
-  description = "Configuration values for the Rise backend ECR settings"
+  description = "Configuration values for the Rise backend"
   value = {
     region        = local.region
     account_id    = local.account_id
     repo_prefix   = local.repo_prefix
     role_arn      = aws_iam_role.backend.arn
-    push_role_arn = aws_iam_role.push_role.arn
+    push_role_arn = var.enable_ecr ? aws_iam_role.push_role[0].arn : null
   }
 }
 
