@@ -139,13 +139,23 @@ impl AwsRdsProvisioner {
             .replace("{project_name}", project_name)
     }
 
+    /// Reconcile a single RDS extension
+    ///
+    /// Returns `Ok(true)` if more work can be done immediately (should not wait),
+    /// `Ok(false)` if reconciliation is complete or waiting for external state change,
+    /// `Err(...)` on error.
     async fn reconcile_single(
         &self,
         project_extension: db::models::ProjectExtension,
-    ) -> Result<()> {
+    ) -> Result<bool> {
         let project = db_projects::find_by_id(&self.db_pool, project_extension.project_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
+
+        info!(
+            "Reconciling RDS extension for project '{}' (extension: {}, project_id: {})",
+            project.name, project_extension.extension, project_extension.project_id
+        );
 
         // Parse spec
         let spec: AwsRdsSpec = serde_json::from_value(project_extension.spec.clone())
@@ -210,8 +220,16 @@ impl AwsRdsProvisioner {
                     );
                 }
             }
-            return Ok(());
+            return Ok(false); // Deletion complete, no more work
         }
+
+        // Track if state changed during this reconciliation
+        let initial_state = status.state.clone();
+        let initial_db_states: Vec<_> = status
+            .databases
+            .values()
+            .map(|db| db.status.clone())
+            .collect();
 
         // Handle normal lifecycle
         match status.state {
@@ -229,9 +247,9 @@ impl AwsRdsProvisioner {
                     .await?;
             }
             RdsState::Failed => {
-                // Retry creation after a delay
-                warn!(
-                    "RDS instance for project {} is in failed state, will retry",
+                // Retry creation immediately
+                info!(
+                    "RDS instance for project {} is in failed state, retrying immediately",
                     project.name
                 );
                 status.state = RdsState::Pending;
@@ -249,7 +267,30 @@ impl AwsRdsProvisioner {
         )
         .await?;
 
-        Ok(())
+        // Determine if more work can be done immediately
+        let state_changed = status.state != initial_state;
+        let db_states_changed = {
+            let current_db_states: Vec<_> = status
+                .databases
+                .values()
+                .map(|db| db.status.clone())
+                .collect();
+            current_db_states != initial_db_states
+        };
+
+        // More work needed if:
+        // - State transitioned (e.g., Pending → Creating, Failed → Pending)
+        // - Database states changed (e.g., Pending → CreatingDatabase)
+        // - In Creating state (might have made progress on database provisioning)
+        let needs_more_work =
+            state_changed || db_states_changed || status.state == RdsState::Creating;
+
+        info!(
+            "Reconciliation complete for project '{}': state={:?}, needs_more_work={}",
+            project.name, status.state, needs_more_work
+        );
+
+        Ok(needs_more_work)
     }
 
     async fn handle_pending(
@@ -998,11 +1039,15 @@ impl Extension for AwsRdsProvisioner {
                 name
             );
             loop {
-                let mut needs_work = false;
+                let mut has_immediate_work = false;
 
                 // List ALL project extensions (not filtered by project)
                 match db_extensions::list_by_extension_name(&db_pool, &name).await {
                     Ok(extensions) => {
+                        if extensions.is_empty() {
+                            info!("No RDS extensions found, waiting for work");
+                        }
+
                         for ext in extensions {
                             let provisioner = AwsRdsProvisioner::new(AwsRdsProvisionerConfig {
                                 name: name.clone(),
@@ -1018,44 +1063,56 @@ impl Extension for AwsRdsProvisioner {
                                 db_subnet_group_name: db_subnet_group_name.clone(),
                             });
 
-                            // Parse status to determine if this extension needs work
-                            if let Ok(status) =
-                                serde_json::from_value::<AwsRdsStatus>(ext.status.clone())
-                            {
-                                // Check if this extension is in a transitional state
-                                match status.state {
-                                    RdsState::Pending
-                                    | RdsState::Creating
-                                    | RdsState::Deleting
-                                    | RdsState::Failed => {
-                                        needs_work = true;
+                            match provisioner.reconcile_single(ext).await {
+                                Ok(needs_more_work) => {
+                                    if needs_more_work {
+                                        has_immediate_work = true;
                                     }
-                                    _ => {}
                                 }
-                            }
-
-                            // Also check if marked for deletion
-                            if ext.deleted_at.is_some() {
-                                needs_work = true;
-                            }
-
-                            if let Err(e) = provisioner.reconcile_single(ext).await {
-                                error!("Failed to reconcile AWS RDS extension: {:?}", e);
-                                needs_work = true; // Retry sooner on errors
+                                Err(e) => {
+                                    error!("Failed to reconcile AWS RDS extension: {:?}", e);
+                                    // On error, retry after normal interval (not immediate)
+                                }
                             }
                         }
                     }
                     Err(e) => {
                         error!("Failed to list extensions: {:?}", e);
-                        needs_work = true; // Retry sooner on errors
                     }
                 }
 
                 // Adaptive wait time:
-                // - 10s if there's active work or errors (faster feedback)
-                // - 60s if everything is stable (less resource usage)
-                let wait_time = if needs_work { 10 } else { 60 };
-                sleep(Duration::from_secs(wait_time)).await;
+                // - No wait if immediate work available (state transitions)
+                // - 10s if waiting for external state (AWS provisioning)
+                // - 60s if everything is stable
+                if has_immediate_work {
+                    info!("Immediate work available, continuing without delay");
+                    // Continue loop immediately
+                } else {
+                    // Check if any extension is in a transitional state
+                    let needs_active_polling =
+                        match db_extensions::list_by_extension_name(&db_pool, &name).await {
+                            Ok(extensions) => extensions.iter().any(|ext| {
+                                if let Ok(status) =
+                                    serde_json::from_value::<AwsRdsStatus>(ext.status.clone())
+                                {
+                                    matches!(
+                                        status.state,
+                                        RdsState::Pending
+                                            | RdsState::Creating
+                                            | RdsState::Deleting
+                                            | RdsState::Failed
+                                    ) || ext.deleted_at.is_some()
+                                } else {
+                                    false
+                                }
+                            }),
+                            Err(_) => false,
+                        };
+
+                    let wait_time = if needs_active_polling { 10 } else { 60 };
+                    sleep(Duration::from_secs(wait_time)).await;
+                }
             }
         });
     }
