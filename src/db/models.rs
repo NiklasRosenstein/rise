@@ -257,3 +257,15 @@ pub struct CustomDomain {
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
+
+/// Project extension - represents external resources provisioned for a project
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct ProjectExtension {
+    pub project_id: Uuid,
+    pub extension: String,
+    pub spec: serde_json::Value,
+    pub status: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}

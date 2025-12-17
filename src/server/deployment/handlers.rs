@@ -418,6 +418,28 @@ pub async fn create_deployment(
 
         info!("Successfully resolved image to digest: {}", image_digest);
 
+        // Call before_deployment hooks for all registered extensions
+        for (_, extension) in state.extension_registry.iter() {
+            if let Err(e) = extension
+                .before_deployment(
+                    uuid::Uuid::parse_str(&deployment_id).unwrap(),
+                    project.id,
+                    &payload.group,
+                )
+                .await
+            {
+                error!(
+                    "Extension '{}' before_deployment hook failed: {}",
+                    extension.name(),
+                    e
+                );
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Extension '{}' failed: {}", extension.name(), e),
+                ));
+            }
+        }
+
         // Create deployment record with image fields set
         let deployment = db_deployments::create(
             &state.db_pool,
@@ -503,6 +525,28 @@ pub async fn create_deployment(
         );
 
         debug!("Image tag: {}", image_tag);
+
+        // Call before_deployment hooks for all registered extensions
+        for (_, extension) in state.extension_registry.iter() {
+            if let Err(e) = extension
+                .before_deployment(
+                    uuid::Uuid::parse_str(&deployment_id).unwrap(),
+                    project.id,
+                    &payload.group,
+                )
+                .await
+            {
+                error!(
+                    "Extension '{}' before_deployment hook failed: {}",
+                    extension.name(),
+                    e
+                );
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Extension '{}' failed: {}", extension.name(), e),
+                ));
+            }
+        }
 
         // Create deployment record in database (image fields are NULL)
         let deployment = db_deployments::create(
@@ -1315,6 +1359,28 @@ pub async fn rollback_deployment(
             // Source is the original - use it directly
             source_deployment.id
         };
+
+    // Call before_deployment hooks for all registered extensions
+    for (_, extension) in state.extension_registry.iter() {
+        if let Err(e) = extension
+            .before_deployment(
+                uuid::Uuid::parse_str(&new_deployment_id).unwrap(),
+                project.id,
+                &source_deployment.deployment_group,
+            )
+            .await
+        {
+            error!(
+                "Extension '{}' before_deployment hook failed: {}",
+                extension.name(),
+                e
+            );
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Extension '{}' failed: {}", extension.name(), e),
+            ));
+        }
+    }
 
     // Create new deployment with Pushed status
     // Copy image and image_digest from source - the helper function will determine the tag

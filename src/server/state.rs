@@ -20,6 +20,7 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
+use tracing::info;
 
 #[cfg(feature = "k8s")]
 use crate::server::deployment::controller::{
@@ -50,6 +51,7 @@ pub struct AppState {
     pub public_url: String,
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
     pub deployment_backend: Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
+    pub extension_registry: Arc<crate::server::extensions::registry::ExtensionRegistry>,
 }
 
 /// Initialize encryption provider from settings
@@ -436,6 +438,78 @@ impl AppState {
             init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
         };
 
+        // Initialize extension registry
+        let mut extension_registry = crate::server::extensions::registry::ExtensionRegistry::new();
+
+        // Register extensions from configuration
+        if let Some(ref extensions_config) = settings.extensions {
+            for provider_config in &extensions_config.providers {
+                match provider_config {
+                    #[cfg(feature = "aws")]
+                    crate::server::settings::ExtensionProviderConfig::AwsRdsProvisioner {
+                        region,
+                        instance_size,
+                        disk_size,
+                        instance_id_template,
+                        access_key_id,
+                        secret_access_key,
+                    } => {
+                        info!("Initializing AWS RDS extension provider");
+
+                        // Create AWS config
+                        let mut aws_config_builder =
+                            aws_config::defaults(aws_config::BehaviorVersion::latest())
+                                .region(aws_config::Region::new(region.clone()));
+
+                        // Use explicit credentials if provided
+                        if let (Some(key_id), Some(secret_key)) = (access_key_id, secret_access_key)
+                        {
+                            aws_config_builder = aws_config_builder.credentials_provider(
+                                aws_sdk_sts::config::Credentials::new(
+                                    key_id,
+                                    secret_key,
+                                    None,
+                                    None,
+                                    "static-credentials",
+                                ),
+                            );
+                        }
+
+                        let aws_config = aws_config_builder.load().await;
+                        let rds_client = aws_sdk_rds::Client::new(&aws_config);
+
+                        // Get encryption provider (required for RDS)
+                        let encryption_provider = encryption_provider.clone().ok_or_else(|| {
+                            anyhow::anyhow!("Encryption provider required for AWS RDS extension")
+                        })?;
+
+                        // Create and register the extension
+                        let aws_rds_provisioner =
+                            crate::server::extensions::providers::aws_rds::AwsRdsProvisioner::new(
+                                rds_client,
+                                db_pool.clone(),
+                                encryption_provider,
+                                region.clone(),
+                                instance_size.clone(),
+                                *disk_size,
+                                instance_id_template.clone(),
+                            );
+
+                        let aws_rds_arc: Arc<dyn crate::server::extensions::Extension> =
+                            Arc::new(aws_rds_provisioner);
+                        extension_registry.register(aws_rds_arc.clone());
+
+                        // Start the extension's reconciliation loop
+                        aws_rds_arc.start();
+
+                        info!("AWS RDS extension provider initialized and started");
+                    }
+                }
+            }
+        }
+
+        let extension_registry = Arc::new(extension_registry);
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -451,6 +525,7 @@ impl AppState {
             public_url,
             encryption_provider,
             deployment_backend,
+            extension_registry,
         })
     }
 
@@ -605,6 +680,10 @@ impl AppState {
             init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
         };
 
+        // Initialize empty extension registry for controller (not used)
+        let extension_registry =
+            Arc::new(crate::server::extensions::registry::ExtensionRegistry::new());
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -620,6 +699,7 @@ impl AppState {
             public_url,
             encryption_provider,
             deployment_backend,
+            extension_registry,
         })
     }
 }

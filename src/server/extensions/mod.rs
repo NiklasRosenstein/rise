@@ -1,0 +1,71 @@
+use anyhow::Result;
+use async_trait::async_trait;
+use serde_json::Value;
+use uuid::Uuid;
+
+pub mod registry;
+
+#[cfg(feature = "server")]
+pub mod handlers;
+#[cfg(feature = "server")]
+pub mod models;
+#[cfg(feature = "server")]
+pub mod providers;
+#[cfg(feature = "server")]
+pub mod routes;
+
+/// Extension trait for project resource provisioning
+#[async_trait]
+pub trait Extension: Send + Sync {
+    /// Unique identifier for this extension type
+    fn name(&self) -> &str;
+
+    /// Validate extension spec on create/update
+    ///
+    /// Should check that the spec is valid JSONB and contains required fields.
+    async fn validate_spec(&self, spec: &Value) -> Result<()>;
+
+    /// Start the extension's background reconciliation loop(s)
+    ///
+    /// This method should spawn background tasks via `tokio::spawn` that run
+    /// indefinitely until the process exits. The tasks will be automatically
+    /// cleaned up when the process receives SIGTERM/SIGINT.
+    ///
+    /// Example implementation:
+    /// ```ignore
+    /// fn start(&self) {
+    ///     let self_clone = Arc::clone(self);
+    ///     tokio::spawn(async move {
+    ///         let mut interval = tokio::time::interval(Duration::from_secs(30));
+    ///         loop {
+    ///             interval.tick().await;
+    ///             self_clone.reconcile().await;
+    ///         }
+    ///     });
+    /// }
+    /// ```
+    fn start(&self);
+
+    /// Hook called before deployment creation
+    ///
+    /// This is a synchronous hook that must complete before the deployment
+    /// proceeds. Extensions should use this to provision per-deployment resources
+    /// (e.g., create database for deployment group) and inject environment variables.
+    ///
+    /// Extensions write environment variables directly to the deployment_env_vars
+    /// table using the provided deployment_id.
+    ///
+    /// # Arguments
+    /// * `deployment_id` - UUID of the deployment being created
+    /// * `project_id` - Project UUID
+    /// * `deployment_group` - Deployment group name (e.g., "default", "staging")
+    ///
+    /// # Returns
+    /// Ok(()) if successful, Err if the deployment should be failed
+    async fn before_deployment(
+        &self,
+        deployment_id: Uuid,
+        project_id: Uuid,
+        deployment_group: &str,
+    ) -> Result<()>;
+}

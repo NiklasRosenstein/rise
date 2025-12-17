@@ -44,6 +44,7 @@ aws = [
     "dep:aws-config",
     "dep:aws-sdk-ecr",
     "dep:aws-sdk-kms",
+    "dep:aws-sdk-rds",
     "dep:aws-sdk-sts",
 ]
 k8s = [
@@ -116,6 +117,7 @@ tera = { version = "1.20", optional = true }
 aws-config = { version = "1.5", features = ["behavior-version-latest"], optional = true }
 aws-sdk-ecr = { version = "1.80", optional = true }
 aws-sdk-kms = { version = "1.80", optional = true }
+aws-sdk-rds = { version = "1.80", optional = true }
 aws-sdk-sts = { version = "1.80", optional = true }
 
 # Kubernetes feature dependencies

@@ -1,6 +1,7 @@
 pub mod custom_domains;
 pub mod deployments;
 pub mod env_vars;
+pub mod extensions;
 pub mod models;
 pub mod projects;
 pub mod service_accounts;

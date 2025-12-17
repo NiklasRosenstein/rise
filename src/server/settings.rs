@@ -15,6 +15,8 @@ pub struct Settings {
     pub deployment_controller: Option<DeploymentControllerSettings>,
     #[serde(default)]
     pub encryption: Option<EncryptionSettings>,
+    #[serde(default)]
+    pub extensions: Option<ExtensionsSettings>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -596,4 +598,33 @@ mod tests {
         let result = Settings::substitute_env_vars_in_string("plain_value");
         assert_eq!(result, "plain_value");
     }
+}
+
+/// Extensions configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExtensionsSettings {
+    #[serde(default)]
+    pub providers: Vec<ExtensionProviderConfig>,
+}
+
+/// Extension provider configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum ExtensionProviderConfig {
+    #[cfg(feature = "aws")]
+    AwsRdsProvisioner {
+        region: String,
+        instance_size: String,
+        disk_size: i32,
+        #[serde(default = "default_instance_id_template")]
+        instance_id_template: String,
+        #[serde(default)]
+        access_key_id: Option<String>,
+        #[serde(default)]
+        secret_access_key: Option<String>,
+    },
+}
+
+fn default_instance_id_template() -> String {
+    "rise-{project_name}".to_string()
 }

@@ -5,6 +5,7 @@ pub mod deployment;
 pub mod ecr;
 pub mod encryption;
 pub mod env_vars;
+pub mod extensions;
 pub mod frontend;
 pub mod oci;
 pub mod project;
@@ -91,6 +92,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(deployment::routes::deployment_routes())
         .merge(workload_identity::routes::routes())
         .merge(env_vars::routes::routes())
+        .merge(extensions::routes::routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
