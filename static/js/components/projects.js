@@ -374,6 +374,12 @@ function ProjectDetail({ projectName, initialTab }) {
                     >
                         Domains
                     </button>
+                    <button
+                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'extensions' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                        onClick={() => changeTab('extensions')}
+                    >
+                        Extensions
+                    </button>
                 </div>
             </div>
 
@@ -402,6 +408,11 @@ function ProjectDetail({ projectName, initialTab }) {
                 {activeTab === 'domains' && (
                     <div>
                         <DomainsList projectName={projectName} />
+                    </div>
+                )}
+                {activeTab === 'extensions' && (
+                    <div>
+                        <ExtensionsList projectName={projectName} />
                     </div>
                 )}
             </div>
