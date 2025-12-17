@@ -15,8 +15,6 @@ use tokio::time::sleep;
 use tracing::{error, info, warn};
 use uuid::Uuid;
 
-const EXTENSION_NAME: &str = "aws-rds-postgres";
-
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AwsRdsSpec {
     /// Database engine (currently only "postgres" is supported)
@@ -63,7 +61,19 @@ pub enum RdsState {
     Failed,
 }
 
+pub struct AwsRdsProvisionerConfig {
+    pub name: String,
+    pub rds_client: RdsClient,
+    pub db_pool: sqlx::PgPool,
+    pub encryption_provider: Arc<dyn EncryptionProvider>,
+    pub region: String,
+    pub instance_size: String,
+    pub disk_size: i32,
+    pub instance_id_template: String,
+}
+
 pub struct AwsRdsProvisioner {
+    name: String,
     rds_client: RdsClient,
     db_pool: sqlx::PgPool,
     encryption_provider: Arc<dyn EncryptionProvider>,
@@ -74,23 +84,16 @@ pub struct AwsRdsProvisioner {
 }
 
 impl AwsRdsProvisioner {
-    pub fn new(
-        rds_client: RdsClient,
-        db_pool: sqlx::PgPool,
-        encryption_provider: Arc<dyn EncryptionProvider>,
-        region: String,
-        instance_size: String,
-        disk_size: i32,
-        instance_id_template: String,
-    ) -> Self {
+    pub fn new(config: AwsRdsProvisionerConfig) -> Self {
         Self {
-            rds_client,
-            db_pool,
-            encryption_provider,
-            region,
-            instance_size,
-            disk_size,
-            instance_id_template,
+            name: config.name,
+            rds_client: config.rds_client,
+            db_pool: config.db_pool,
+            encryption_provider: config.encryption_provider,
+            region: config.region,
+            instance_size: config.instance_size,
+            disk_size: config.disk_size,
+            instance_id_template: config.instance_id_template,
         }
     }
 
@@ -131,7 +134,7 @@ impl AwsRdsProvisioner {
                 db_extensions::update_status(
                     &self.db_pool,
                     project_extension.project_id,
-                    EXTENSION_NAME,
+                    &self.name,
                     &serde_json::to_value(&status)?,
                 )
                 .await?;
@@ -141,7 +144,7 @@ impl AwsRdsProvisioner {
                     db_extensions::delete_permanently(
                         &self.db_pool,
                         project_extension.project_id,
-                        EXTENSION_NAME,
+                        &self.name,
                     )
                     .await?;
                     info!(
@@ -183,7 +186,7 @@ impl AwsRdsProvisioner {
         db_extensions::update_status(
             &self.db_pool,
             project_extension.project_id,
-            EXTENSION_NAME,
+            &self.name,
             &serde_json::to_value(&status)?,
         )
         .await?;
@@ -611,7 +614,7 @@ fn sanitize_identifier(identifier: &str) -> Result<String> {
 #[async_trait]
 impl Extension for AwsRdsProvisioner {
     fn name(&self) -> &str {
-        EXTENSION_NAME
+        &self.name
     }
 
     async fn validate_spec(&self, spec: &Value) -> Result<()> {
@@ -626,6 +629,7 @@ impl Extension for AwsRdsProvisioner {
     }
 
     fn start(&self) {
+        let name = self.name.clone();
         let db_pool = self.db_pool.clone();
         let rds_client = self.rds_client.clone();
         let encryption_provider = self.encryption_provider.clone();
@@ -635,21 +639,25 @@ impl Extension for AwsRdsProvisioner {
         let instance_id_template = self.instance_id_template.clone();
 
         tokio::spawn(async move {
-            info!("Starting AWS RDS extension reconciliation loop");
+            info!(
+                "Starting AWS RDS extension reconciliation loop for '{}'",
+                name
+            );
             loop {
                 // List ALL project extensions (not filtered by project)
-                match db_extensions::list_by_extension_name(&db_pool, EXTENSION_NAME).await {
+                match db_extensions::list_by_extension_name(&db_pool, &name).await {
                     Ok(extensions) => {
                         for ext in extensions {
-                            let provisioner = AwsRdsProvisioner::new(
-                                rds_client.clone(),
-                                db_pool.clone(),
-                                encryption_provider.clone(),
-                                region.clone(),
-                                instance_size.clone(),
+                            let provisioner = AwsRdsProvisioner::new(AwsRdsProvisionerConfig {
+                                name: name.clone(),
+                                rds_client: rds_client.clone(),
+                                db_pool: db_pool.clone(),
+                                encryption_provider: encryption_provider.clone(),
+                                region: region.clone(),
+                                instance_size: instance_size.clone(),
                                 disk_size,
-                                instance_id_template.clone(),
-                            );
+                                instance_id_template: instance_id_template.clone(),
+                            });
 
                             if let Err(e) = provisioner.reconcile_single(ext).await {
                                 error!("Failed to reconcile AWS RDS extension: {}", e);
@@ -674,10 +682,9 @@ impl Extension for AwsRdsProvisioner {
         deployment_group: &str,
     ) -> Result<()> {
         // Find the extension for this project
-        let ext =
-            db_extensions::find_by_project_and_name(&self.db_pool, project_id, EXTENSION_NAME)
-                .await?
-                .ok_or_else(|| anyhow::anyhow!("AWS RDS extension not found for project"))?;
+        let ext = db_extensions::find_by_project_and_name(&self.db_pool, project_id, &self.name)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("Extension '{}' not found for project", self.name))?;
 
         // Get project info for database naming
         let project = projects::find_by_id(&self.db_pool, project_id)

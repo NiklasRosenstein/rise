@@ -447,6 +447,7 @@ impl AppState {
                 match provider_config {
                     #[cfg(feature = "aws")]
                     crate::server::settings::ExtensionProviderConfig::AwsRdsProvisioner {
+                        name,
                         region,
                         instance_size,
                         disk_size,
@@ -454,7 +455,7 @@ impl AppState {
                         access_key_id,
                         secret_access_key,
                     } => {
-                        info!("Initializing AWS RDS extension provider");
+                        info!("Initializing AWS RDS extension provider '{}'", name);
 
                         // Create AWS config
                         let mut aws_config_builder =
@@ -486,13 +487,16 @@ impl AppState {
                         // Create and register the extension
                         let aws_rds_provisioner =
                             crate::server::extensions::providers::aws_rds::AwsRdsProvisioner::new(
-                                rds_client,
-                                db_pool.clone(),
-                                encryption_provider,
-                                region.clone(),
-                                instance_size.clone(),
-                                *disk_size,
-                                instance_id_template.clone(),
+                                crate::server::extensions::providers::aws_rds::AwsRdsProvisionerConfig {
+                                    name: name.clone(),
+                                    rds_client,
+                                    db_pool: db_pool.clone(),
+                                    encryption_provider,
+                                    region: region.clone(),
+                                    instance_size: instance_size.clone(),
+                                    disk_size: *disk_size,
+                                    instance_id_template: instance_id_template.clone(),
+                                }
                             );
 
                         let aws_rds_arc: Arc<dyn crate::server::extensions::Extension> =
@@ -502,7 +506,10 @@ impl AppState {
                         // Start the extension's reconciliation loop
                         aws_rds_arc.start();
 
-                        info!("AWS RDS extension provider initialized and started");
+                        info!(
+                            "AWS RDS extension provider '{}' initialized and started",
+                            name
+                        );
                     }
                 }
             }

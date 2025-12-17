@@ -109,6 +109,7 @@ registry:
 extensions:
   providers:
     - type: aws_rds_provisioner
+      name: aws-rds-postgres  # Extension identifier (required)
       region: eu-west-1
       instance_size: db.t3.micro
       disk_size: 20
