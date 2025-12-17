@@ -615,7 +615,7 @@ pub enum ExtensionProviderConfig {
     AwsRdsProvisioner {
         region: String,
         instance_size: String,
-        disk_size: i32,
+        disk_size: i32, // in GiB
         #[serde(default = "default_instance_id_template")]
         instance_id_template: String,
         #[serde(default)]

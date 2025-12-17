@@ -76,13 +76,13 @@ output "policy_document" {
 # -----------------------------------------------------------------------------
 
 output "kms_key_arn" {
-  description = "ARN of the KMS key for ECR encryption (null if using AES256)"
-  value       = var.encryption_type == "KMS" ? aws_kms_key.ecr[0].arn : null
+  description = "ARN of the KMS key for ECR encryption (null if KMS not enabled)"
+  value       = var.enable_kms ? aws_kms_key.ecr[0].arn : null
 }
 
 output "kms_key_id" {
-  description = "ID of the KMS key for ECR encryption (null if using AES256)"
-  value       = var.encryption_type == "KMS" ? aws_kms_key.ecr[0].key_id : null
+  description = "ID of the KMS key for ECR encryption (null if KMS not enabled)"
+  value       = var.enable_kms ? aws_kms_key.ecr[0].key_id : null
 }
 
 # -----------------------------------------------------------------------------

@@ -35,9 +35,8 @@ The module creates two separate IAM roles with distinct permissions:
 module "rise_aws" {
   source = "./modules/rise-aws"
 
-  name        = "rise-backend"
-  repo_prefix = "rise/"
-  auto_remove = false  # Tag as orphaned instead of deleting
+  name       = "rise-backend"
+  enable_rds = true  # Enable if using AWS RDS extension
 
   tags = {
     Environment = "production"
@@ -52,7 +51,8 @@ module "rise_aws" {
   source = "./modules/rise-aws"
 
   name                   = "rise-backend"
-  repo_prefix            = "rise/"
+  enable_rds             = true
+  enable_kms             = true  # Enable KMS encryption for ECR
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
   irsa_namespace         = "rise-system"
   irsa_service_account   = "rise-backend"
@@ -66,8 +66,7 @@ module "rise_aws" {
   source = "./modules/rise-aws"
 
   name            = "rise-backend"
-  repo_prefix     = "rise/"
-  create_iam_role = false
+  enable_rds      = true
   create_iam_user = true
 }
 
@@ -89,20 +88,31 @@ resource "aws_secretsmanager_secret_version" "rise_backend_creds" {
 
 After applying this module, configure the Rise backend with the ECR settings:
 
-```toml
-# config/local.toml
-[registry]
-type = "ecr"
-region = "eu-west-1"  # From module.rise_aws.rise_config.region
-account_id = "123456789012"  # From module.rise_aws.rise_config.account_id
-repo_prefix = "rise/"  # From module.rise_aws.rise_config.repo_prefix
-role_arn = "arn:aws:iam::123456789012:role/rise-backend"  # From module.rise_aws.role_arn
-push_role_arn = "arn:aws:iam::123456789012:role/rise-backend-ecr-push"  # From module.rise_aws.push_role_arn
-auto_remove = false  # From module.rise_aws.rise_config.auto_remove
+```yaml
+# config/default.yaml
+registry:
+  type: ecr
+  region: eu-west-1  # From module.rise_aws.rise_config.region
+  account_id: "123456789012"  # From module.rise_aws.rise_config.account_id
+  repo_prefix: rise/  # From module.rise_aws.rise_config.repo_prefix
+  role_arn: arn:aws:iam::123456789012:role/rise-backend  # From module.rise_aws.role_arn
+  push_role_arn: arn:aws:iam::123456789012:role/rise-backend-ecr-push  # From module.rise_aws.push_role_arn
 
 # If using IAM user instead of role:
-# access_key_id = "AKIA..."
-# secret_access_key = "..."
+#   access_key_id: AKIA...
+#   secret_access_key: ...
+
+# If using AWS RDS extension (requires enable_rds = true):
+extensions:
+  providers:
+    - type: aws_rds_provisioner
+      region: eu-west-1
+      instance_size: db.t3.micro
+      disk_size: 20
+      instance_id_template: "rise-{project_name}"
+      # If using IAM user (otherwise uses role):
+      # access_key_id: AKIA...
+      # secret_access_key: ...
 ```
 
 ## Inputs
@@ -110,22 +120,15 @@ auto_remove = false  # From module.rise_aws.rise_config.auto_remove
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | name | Name for the IAM role and policy | `string` | `"rise-backend"` | no |
-| repo_prefix | Prefix for ECR repository names | `string` | `"rise/"` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
-| create_iam_role | Create an IAM role for the controller | `bool` | `true` | no |
 | create_iam_user | Create an IAM user with access keys | `bool` | `false` | no |
-| create_push_role | Create a separate push role | `bool` | `true` | no |
-| push_role_assume_principals | Additional principals for push role | `list(string)` | `null` | no |
-| role_assume_policy | Custom assume role policy JSON | `string` | `null` | no |
 | irsa_oidc_provider_arn | OIDC provider ARN for IRSA | `string` | `null` | no |
 | irsa_namespace | Kubernetes namespace for IRSA | `string` | `"rise-system"` | no |
 | irsa_service_account | Kubernetes service account for IRSA | `string` | `"rise-backend"` | no |
-| auto_remove | Delete repos on project deletion | `bool` | `false` | no |
 | image_tag_mutability | Tag mutability for repositories | `string` | `"MUTABLE"` | no |
 | scan_on_push | Enable image scanning on push | `bool` | `true` | no |
-| encryption_type | Encryption type (AES256 or KMS) | `string` | `"AES256"` | no |
-| kms_key_arn | KMS key ARN for encryption | `string` | `null` | no |
-| lifecycle_policy | Custom ECR lifecycle policy JSON | `string` | `null` | no |
+| enable_kms | Enable KMS encryption for ECR | `bool` | `false` | no |
+| enable_rds | Enable RDS permissions | `bool` | `false` | no |
 | max_image_count | Max images to retain per repository | `number` | `100` | no |
 
 ## Outputs
@@ -165,10 +168,10 @@ auto_remove = false  # From module.rise_aws.rise_config.auto_remove
 - `ec2:AuthorizeSecurityGroupIngress`, `ec2:RevokeSecurityGroupIngress` - For security group rules
 - `ec2:DescribeVpcs`, `ec2:DescribeSubnets` - For VPC discovery
 
-**KMS Permissions:**
-- `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - Only if using KMS encryption
+**KMS Permissions (if `enable_kms = true`):**
+- `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - For KMS-encrypted ECR repositories
 
-All ECR permissions are scoped to `${repo_prefix}*`. RDS permissions are scoped to `rise-*` instance names.
+**Note:** ECR permissions are scoped to `rise/*` repositories. RDS permissions (if enabled) are scoped to `rise-*` instance names.
 
 ### Push Role
 

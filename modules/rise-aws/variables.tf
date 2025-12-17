@@ -55,15 +55,18 @@ variable "scan_on_push" {
   default     = true
 }
 
-variable "encryption_type" {
-  description = "Encryption type for repositories (AES256 or KMS). If KMS, a KMS key will be automatically created."
-  type        = string
-  default     = "AES256"
+variable "enable_kms" {
+  description = "Enable KMS encryption for ECR repositories. If true, a KMS key will be automatically created. If false, AES256 encryption is used."
+  type        = bool
+  default     = false
+}
 
-  validation {
-    condition     = contains(["AES256", "KMS"], var.encryption_type)
-    error_message = "encryption_type must be either AES256 or KMS"
-  }
+# RDS settings
+
+variable "enable_rds" {
+  description = "Enable RDS permissions for the Rise backend. Set to true if using the AWS RDS extension."
+  type        = bool
+  default     = false
 }
 
 # Lifecycle policies

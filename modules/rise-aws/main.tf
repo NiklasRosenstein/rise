@@ -39,7 +39,7 @@ locals {
 # -----------------------------------------------------------------------------
 
 resource "aws_kms_key" "ecr" {
-  count = var.encryption_type == "KMS" ? 1 : 0
+  count = var.enable_kms ? 1 : 0
 
   description             = "KMS key for Rise ECR repository encryption"
   deletion_window_in_days = 30
@@ -48,7 +48,7 @@ resource "aws_kms_key" "ecr" {
 }
 
 resource "aws_kms_alias" "ecr" {
-  count = var.encryption_type == "KMS" ? 1 : 0
+  count = var.enable_kms ? 1 : 0
 
   name          = "alias/${var.name}-ecr"
   target_key_id = aws_kms_key.ecr[0].key_id
@@ -124,7 +124,7 @@ data "aws_iam_policy_document" "backend" {
 
   # KMS permissions if using KMS encryption
   dynamic "statement" {
-    for_each = var.encryption_type == "KMS" ? [1] : []
+    for_each = var.enable_kms ? [1] : []
     content {
       sid    = "KMSEncryption"
       effect = "Allow"
@@ -138,52 +138,61 @@ data "aws_iam_policy_document" "backend" {
     }
   }
 
-  # RDS permissions for managing database instances
-  statement {
-    sid    = "ManageRDS"
-    effect = "Allow"
-    actions = [
-      "rds:CreateDBInstance",
-      "rds:DeleteDBInstance",
-      "rds:DescribeDBInstances",
-      "rds:ModifyDBInstance",
-      "rds:ListTagsForResource",
-      "rds:AddTagsToResource",
-      "rds:RemoveTagsFromResource"
-    ]
-    resources = [
-      "arn:aws:rds:${local.region}:${local.account_id}:db:rise-*"
-    ]
+  # RDS permissions for managing database instances (if enabled)
+  dynamic "statement" {
+    for_each = var.enable_rds ? [1] : []
+    content {
+      sid    = "ManageRDS"
+      effect = "Allow"
+      actions = [
+        "rds:CreateDBInstance",
+        "rds:DeleteDBInstance",
+        "rds:DescribeDBInstances",
+        "rds:ModifyDBInstance",
+        "rds:ListTagsForResource",
+        "rds:AddTagsToResource",
+        "rds:RemoveTagsFromResource"
+      ]
+      resources = [
+        "arn:aws:rds:${local.region}:${local.account_id}:db:rise-*"
+      ]
+    }
   }
 
   # RDS subnet groups (needed for VPC placement)
-  statement {
-    sid    = "ManageRDSSubnetGroups"
-    effect = "Allow"
-    actions = [
-      "rds:CreateDBSubnetGroup",
-      "rds:DeleteDBSubnetGroup",
-      "rds:DescribeDBSubnetGroups"
-    ]
-    resources = [
-      "arn:aws:rds:${local.region}:${local.account_id}:subgrp:rise-*"
-    ]
+  dynamic "statement" {
+    for_each = var.enable_rds ? [1] : []
+    content {
+      sid    = "ManageRDSSubnetGroups"
+      effect = "Allow"
+      actions = [
+        "rds:CreateDBSubnetGroup",
+        "rds:DeleteDBSubnetGroup",
+        "rds:DescribeDBSubnetGroups"
+      ]
+      resources = [
+        "arn:aws:rds:${local.region}:${local.account_id}:subgrp:rise-*"
+      ]
+    }
   }
 
   # RDS security groups (needed for network access control)
-  statement {
-    sid    = "ManageRDSSecurityGroups"
-    effect = "Allow"
-    actions = [
-      "ec2:DescribeSecurityGroups",
-      "ec2:CreateSecurityGroup",
-      "ec2:DeleteSecurityGroup",
-      "ec2:AuthorizeSecurityGroupIngress",
-      "ec2:RevokeSecurityGroupIngress",
-      "ec2:DescribeVpcs",
-      "ec2:DescribeSubnets"
-    ]
-    resources = ["*"]
+  dynamic "statement" {
+    for_each = var.enable_rds ? [1] : []
+    content {
+      sid    = "ManageRDSSecurityGroups"
+      effect = "Allow"
+      actions = [
+        "ec2:DescribeSecurityGroups",
+        "ec2:CreateSecurityGroup",
+        "ec2:DeleteSecurityGroup",
+        "ec2:AuthorizeSecurityGroupIngress",
+        "ec2:RevokeSecurityGroupIngress",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets"
+      ]
+      resources = ["*"]
+    }
   }
 }
 
