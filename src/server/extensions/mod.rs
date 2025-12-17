@@ -87,4 +87,35 @@ pub trait Extension: Send + Sync {
     /// - "Creating..."
     /// - "Failed: Invalid subnet group"
     fn format_status(&self, status: &Value) -> String;
+
+    /// Get a human-readable description of the extension
+    ///
+    /// This should be a concise one-line summary of what the extension does.
+    ///
+    /// # Returns
+    /// A short description string (e.g., "Provisions a PostgreSQL database on AWS RDS")
+    fn description(&self) -> &str;
+
+    /// Get documentation for the extension
+    ///
+    /// This should provide comprehensive documentation about:
+    /// - What the extension does
+    /// - How to configure it
+    /// - What environment variables it injects
+    /// - Example configurations
+    ///
+    /// The documentation can be in markdown format.
+    ///
+    /// # Returns
+    /// Documentation string (markdown supported)
+    fn documentation(&self) -> &str;
+
+    /// Get the JSON schema or example spec structure
+    ///
+    /// This should return a JSON Schema or example JSON structure that shows
+    /// what fields are valid in the extension spec.
+    ///
+    /// # Returns
+    /// JSON value representing the schema or example spec
+    fn spec_schema(&self) -> Value;
 }

@@ -1307,4 +1307,91 @@ impl Extension for AwsRdsProvisioner {
             }
         }
     }
+
+    fn description(&self) -> &str {
+        "Provisions a PostgreSQL database on AWS RDS with automatic per-deployment database creation"
+    }
+
+    fn documentation(&self) -> &str {
+        r#"# AWS RDS PostgreSQL Extension
+
+This extension provisions a dedicated PostgreSQL database instance on AWS RDS for your project.
+
+## Features
+
+- Automatic RDS instance provisioning with configurable instance size and disk
+- Per-deployment database creation (isolated databases for default/staging/etc.)
+- Automatic credential injection as environment variables
+- Database lifecycle management with soft deletion
+- Encrypted password storage
+
+## Configuration
+
+The extension accepts an optional spec with the following fields:
+
+- `engine` (optional, default: "postgres"): Database engine type
+- `engine_version` (optional): Specific PostgreSQL version (e.g., "16.2"). If not specified, uses the configured default version.
+
+## Example Spec
+
+Empty spec (uses all defaults):
+```json
+{}
+```
+
+With custom engine version:
+```json
+{
+  "engine": "postgres",
+  "engine_version": "16.2"
+}
+```
+
+## Environment Variables Injected
+
+The extension automatically injects the following environment variables into each deployment:
+
+- `DATABASE_URL`: Full PostgreSQL connection string (postgres://user:password@host:port/database)
+- `DB_HOST`: Database hostname
+- `DB_PORT`: Database port (usually 5432)
+- `DB_NAME`: Database name for this deployment
+- `DB_USER`: Database username for this deployment
+- `DB_PASSWORD`: Database password (encrypted at rest, injected at deployment time)
+
+## Provisioning Lifecycle
+
+1. **Pending**: Extension has been created, waiting for reconciliation
+2. **Creating**: RDS instance is being created (this can take 5-15 minutes)
+3. **Available**: Instance is ready, databases are created on-demand for each deployment
+4. **Deleting**: Extension has been deleted, instance is being terminated
+5. **Deleted**: Instance has been fully removed
+6. **Failed**: Provisioning failed, check status for error details
+
+## Per-Deployment Databases
+
+When you deploy your application, the extension automatically:
+1. Creates a database named after your project and deployment group (e.g., `myapp_default`, `myapp_staging`)
+2. Creates a dedicated user with access only to that database
+3. Injects the credentials as environment variables
+
+This ensures each deployment has its own isolated database while sharing the same RDS instance.
+"#
+    }
+
+    fn spec_schema(&self) -> Value {
+        serde_json::json!({
+            "type": "object",
+            "properties": {
+                "engine": {
+                    "type": "string",
+                    "default": "postgres",
+                    "description": "Database engine (currently only 'postgres' is supported)"
+                },
+                "engine_version": {
+                    "type": "string",
+                    "description": "PostgreSQL version (e.g., '16.2'). If not specified, uses the configured default version."
+                }
+            }
+        })
+    }
 }

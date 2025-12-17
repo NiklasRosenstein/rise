@@ -42,3 +42,22 @@ pub struct UpdateExtensionResponse {
 pub struct ListExtensionsResponse {
     pub extensions: Vec<Extension>,
 }
+
+/// Metadata about an available extension type
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ExtensionTypeMetadata {
+    /// Extension name/identifier (e.g., "aws-rds-postgres")
+    pub name: String,
+    /// Human-readable description
+    pub description: String,
+    /// Full documentation (markdown)
+    pub documentation: String,
+    /// JSON schema for the spec
+    pub spec_schema: Value,
+}
+
+/// Response listing available extension types
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ListExtensionTypesResponse {
+    pub extension_types: Vec<ExtensionTypeMetadata>,
+}
