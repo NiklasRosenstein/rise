@@ -1,4 +1,6 @@
-use crate::db::{self, env_vars as db_env_vars, extensions as db_extensions, projects};
+use crate::db::{
+    self, env_vars as db_env_vars, extensions as db_extensions, postgres_admin, projects,
+};
 use crate::server::encryption::EncryptionProvider;
 use crate::server::extensions::Extension;
 use anyhow::{Context, Result};
@@ -509,12 +511,7 @@ impl AwsRdsProvisioner {
             .context("Failed to connect to RDS instance")?;
 
         // Check if the database already exists
-        let exists: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
-                .bind(database_name)
-                .fetch_one(&pool)
-                .await
-                .context("Failed to check if database exists")?;
+        let exists = postgres_admin::database_exists(&pool, database_name).await?;
 
         if exists {
             info!(
@@ -527,16 +524,9 @@ impl AwsRdsProvisioner {
 
         // Create the database
         let sanitized_db = sanitize_identifier(database_name)?;
-        let create_sql = format!(
-            "CREATE DATABASE {} OWNER {}",
-            sanitized_db,
-            sanitize_identifier("postgres")? // Use the master user as owner
-        );
+        let sanitized_owner = sanitize_identifier("postgres")?;
 
-        sqlx::query(&create_sql)
-            .execute(&pool)
-            .await
-            .context("Failed to create default database")?;
+        postgres_admin::create_database(&pool, &sanitized_db, &sanitized_owner).await?;
 
         info!("Successfully created default database '{}'", database_name);
 
@@ -557,12 +547,7 @@ impl AwsRdsProvisioner {
             .context("Failed to connect to RDS instance")?;
 
         // Check if the new database already exists
-        let exists: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
-                .bind(new_database)
-                .fetch_one(&pool)
-                .await
-                .context("Failed to check if database exists")?;
+        let exists = postgres_admin::database_exists(&pool, new_database).await?;
 
         if exists {
             info!(
@@ -574,12 +559,7 @@ impl AwsRdsProvisioner {
         }
 
         // Check if the template database exists
-        let template_exists: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
-                .bind(template_database)
-                .fetch_one(&pool)
-                .await
-                .context("Failed to check if template database exists")?;
+        let template_exists = postgres_admin::database_exists(&pool, template_database).await?;
 
         if !template_exists {
             pool.close().await;
@@ -593,18 +573,15 @@ impl AwsRdsProvisioner {
         // Note: We can't use parameterized queries for database names, so we need to sanitize
         let sanitized_new_db = sanitize_identifier(new_database)?;
         let sanitized_template_db = sanitize_identifier(template_database)?;
+        let sanitized_owner = sanitize_identifier("postgres")?;
 
-        let create_sql = format!(
-            "CREATE DATABASE {} WITH TEMPLATE {} OWNER {}",
-            sanitized_new_db,
-            sanitized_template_db,
-            sanitize_identifier("postgres")? // Use the master user as owner
-        );
-
-        sqlx::query(&create_sql)
-            .execute(&pool)
-            .await
-            .context("Failed to create database from template")?;
+        postgres_admin::create_database_from_template(
+            &pool,
+            &sanitized_new_db,
+            &sanitized_template_db,
+            &sanitized_owner,
+        )
+        .await?;
 
         info!(
             "Successfully created database '{}' from template '{}'",
@@ -661,20 +638,7 @@ impl Extension for AwsRdsProvisioner {
             info!("Starting AWS RDS extension reconciliation loop");
             loop {
                 // List ALL project extensions (not filtered by project)
-                match sqlx::query_as::<_, db::models::ProjectExtension>(
-                    r#"
-                    SELECT project_id, extension,
-                           spec as "spec: serde_json::Value",
-                           status as "status: serde_json::Value",
-                           created_at, updated_at, deleted_at
-                    FROM project_extensions
-                    WHERE extension = $1
-                    "#,
-                )
-                .bind(EXTENSION_NAME)
-                .fetch_all(&db_pool)
-                .await
-                {
+                match db_extensions::list_by_extension_name(&db_pool, EXTENSION_NAME).await {
                     Ok(extensions) => {
                         for ext in extensions {
                             let provisioner = AwsRdsProvisioner::new(

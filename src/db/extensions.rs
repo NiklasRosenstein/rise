@@ -55,6 +55,29 @@ pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Proj
     .context("Failed to list project extensions")
 }
 
+/// List all extensions with a specific extension name (across all projects)
+pub async fn list_by_extension_name(
+    pool: &PgPool,
+    extension_name: &str,
+) -> Result<Vec<ProjectExtension>> {
+    sqlx::query_as!(
+        ProjectExtension,
+        r#"
+        SELECT project_id, extension,
+               spec as "spec: Value",
+               status as "status: Value",
+               created_at, updated_at, deleted_at
+        FROM project_extensions
+        WHERE extension = $1
+        ORDER BY created_at ASC
+        "#,
+        extension_name
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to list extensions by name")
+}
+
 /// Get extension by project and name
 pub async fn find_by_project_and_name(
     pool: &PgPool,
