@@ -100,41 +100,6 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                     You can monitor the provisioning status in the Extensions tab.
                 </p>
             </div>
-
-            <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-blue-300 mb-2">📋 Injected Variables</h4>
-                <p className="text-sm text-blue-200 mb-3">
-                    Based on your configuration above, the following variables will be injected:
-                </p>
-                {injectDatabaseUrl && (
-                    <div className="mb-3">
-                        <p className="text-sm text-blue-200 font-semibold mb-1">DATABASE_URL:</p>
-                        <ul className="text-sm text-blue-200 space-y-1 list-disc list-inside ml-4">
-                            <li><code className="bg-blue-900/30 px-1 rounded">DATABASE_URL</code> - Full PostgreSQL connection string</li>
-                        </ul>
-                    </div>
-                )}
-                {injectPgVars && (
-                    <div>
-                        <p className="text-sm text-blue-200 font-semibold mb-1">PG* Variables:</p>
-                        <ul className="text-sm text-blue-200 space-y-1 list-disc list-inside ml-4">
-                            <li><code className="bg-blue-900/30 px-1 rounded">PGHOST</code> - Database hostname</li>
-                            <li><code className="bg-blue-900/30 px-1 rounded">PGPORT</code> - Database port (5432)</li>
-                            <li><code className="bg-blue-900/30 px-1 rounded">PGDATABASE</code> - Database name</li>
-                            <li><code className="bg-blue-900/30 px-1 rounded">PGUSER</code> - Database username</li>
-                            <li><code className="bg-blue-900/30 px-1 rounded">PGPASSWORD</code> - Database password</li>
-                        </ul>
-                        <p className="text-sm text-blue-200 mt-2">
-                            Recognized by <code className="bg-blue-900/30 px-1 rounded">psql</code> and most PostgreSQL client libraries.
-                        </p>
-                    </div>
-                )}
-                {!injectDatabaseUrl && !injectPgVars && (
-                    <p className="text-sm text-yellow-200">
-                        ⚠️ No environment variables will be injected. You must enable at least one option above.
-                    </p>
-                )}
-            </div>
         </div>
     );
 }
