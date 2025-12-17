@@ -682,6 +682,7 @@ function ExtensionsList({ projectName }) {
     const [saving, setSaving] = useState(false);
     const [editMode, setEditMode] = useState(false);
     const [selectedStatus, setSelectedStatus] = useState(null);
+    const [modalTab, setModalTab] = useState('config');
     const { showToast } = useToast();
 
     const loadExtensions = useCallback(async () => {
@@ -714,6 +715,7 @@ function ExtensionsList({ projectName }) {
         setEditMode(false);
         // Default to empty object
         setFormData({ spec: JSON.stringify({}, null, 2) });
+        setModalTab('config');
         setIsEnableModalOpen(true);
     };
 
@@ -723,6 +725,7 @@ function ExtensionsList({ projectName }) {
         setSelectedExtension(extType);
         setEditMode(true);
         setFormData({ spec: JSON.stringify(enabledExt.spec, null, 2) });
+        setModalTab('config');
         setIsEnableModalOpen(true);
     };
 
@@ -896,33 +899,72 @@ function ExtensionsList({ projectName }) {
                 <div className="space-y-4">
                     {selectedExtension && (
                         <>
-                            <div className="bg-gray-800 rounded-lg p-4">
-                                <h4 className="text-sm font-semibold text-gray-300 mb-2">Documentation</h4>
-                                <div className="prose prose-sm prose-invert max-w-none">
-                                    <pre className="text-xs text-gray-300 whitespace-pre-wrap">{selectedExtension.documentation}</pre>
+                            {/* Tab Navigation */}
+                            <div className="border-b border-gray-700">
+                                <div className="flex gap-6">
+                                    <button
+                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                        onClick={() => setModalTab('config')}
+                                    >
+                                        Configuration
+                                    </button>
+                                    <button
+                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                        onClick={() => setModalTab('schema')}
+                                    >
+                                        Schema
+                                    </button>
+                                    <button
+                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'docs' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                        onClick={() => setModalTab('docs')}
+                                    >
+                                        Documentation
+                                    </button>
                                 </div>
                             </div>
 
-                            <div className="bg-gray-800 rounded-lg p-4">
-                                <h4 className="text-sm font-semibold text-gray-300 mb-2">Schema</h4>
-                                <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-3 rounded overflow-x-auto">
-                                    {JSON.stringify(selectedExtension.spec_schema, null, 2)}
-                                </pre>
-                            </div>
+                            {/* Tab Content */}
+                            {modalTab === 'config' && (
+                                <div className="space-y-4">
+                                    <FormField
+                                        label="Configuration Spec (JSON)"
+                                        id="extension-spec"
+                                        type="textarea"
+                                        value={formData.spec}
+                                        onChange={(e) => setFormData({ ...formData, spec: e.target.value })}
+                                        placeholder="{}"
+                                        required
+                                        rows={15}
+                                    />
+                                    <p className="text-sm text-gray-500">
+                                        Enter the extension configuration as a JSON object. See the Schema and Documentation tabs for valid fields and examples.
+                                    </p>
+                                </div>
+                            )}
 
-                            <FormField
-                                label="Configuration Spec (JSON)"
-                                id="extension-spec"
-                                type="textarea"
-                                value={formData.spec}
-                                onChange={(e) => setFormData({ ...formData, spec: e.target.value })}
-                                placeholder="{}"
-                                required
-                                rows={10}
-                            />
-                            <p className="text-sm text-gray-500">
-                                Enter the extension configuration as a JSON object. See the documentation and schema above for valid fields.
-                            </p>
+                            {modalTab === 'schema' && (
+                                <div className="space-y-4">
+                                    <h4 className="text-sm font-semibold text-gray-300">Schema</h4>
+                                    <pre className="text-xs font-mono text-gray-300 bg-gray-800 p-4 rounded overflow-x-auto max-h-96">
+                                        {JSON.stringify(selectedExtension.spec_schema, null, 2)}
+                                    </pre>
+                                    <p className="text-sm text-gray-500">
+                                        This JSON schema defines the valid structure for the extension configuration.
+                                    </p>
+                                </div>
+                            )}
+
+                            {modalTab === 'docs' && (
+                                <div className="space-y-4">
+                                    <h4 className="text-sm font-semibold text-gray-300">Documentation</h4>
+                                    <div
+                                        className="prose prose-sm prose-invert max-w-none bg-gray-800 p-4 rounded max-h-96 overflow-y-auto"
+                                        dangerouslySetInnerHTML={{
+                                            __html: marked.parse(selectedExtension.documentation)
+                                        }}
+                                    />
+                                </div>
+                            )}
 
                             <div className="flex justify-end gap-3 pt-4">
                                 <Button
