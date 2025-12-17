@@ -148,6 +148,7 @@ impl AwsRdsProvisioner {
         &self,
         project_extension: db::models::ProjectExtension,
     ) -> Result<bool> {
+        debug!("Reconciling AWS RDS extension: {:?}", project_extension);
         let project = db_projects::find_by_id(&self.db_pool, project_extension.project_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
@@ -432,7 +433,7 @@ impl AwsRdsProvisioner {
 
                                         // Provision default database with state tracking
                                         let default_db_name = project_name.to_string();
-                                        let db_status = status
+                                        status
                                             .databases
                                             .entry(default_db_name.clone())
                                             .or_insert_with(|| {
@@ -451,240 +452,8 @@ impl AwsRdsProvisioner {
                                                 }
                                             });
 
-                                        // Provision database based on its current state
-                                        match db_status.status {
-                                            DatabaseState::Pending => {
-                                                info!(
-                                                    "Starting provisioning for default database '{}'",
-                                                    default_db_name
-                                                );
-                                                db_status.status = DatabaseState::CreatingDatabase;
-                                                // Will continue in next reconciliation
-                                                return Ok(());
-                                            }
-                                            DatabaseState::CreatingDatabase => {
-                                                // Decrypt master password
-                                                let master_password = match status
-                                                    .master_password_encrypted
-                                                    .as_ref()
-                                                    .ok_or_else(|| {
-                                                        anyhow::anyhow!("Master password not set")
-                                                    })
-                                                    .and_then(|encrypted| {
-                                                        futures::executor::block_on(
-                                                            self.encryption_provider
-                                                                .decrypt(encrypted),
-                                                        )
-                                                    }) {
-                                                    Ok(pwd) => pwd,
-                                                    Err(e) => {
-                                                        error!(
-                                                            "Failed to decrypt master password: {}",
-                                                            e
-                                                        );
-                                                        status.state = RdsState::Failed;
-                                                        status.error = Some(
-                                                            "Failed to decrypt master password"
-                                                                .to_string(),
-                                                        );
-                                                        return Ok(());
-                                                    }
-                                                };
-
-                                                let admin_db_url = format!(
-                                                    "postgres://{}:{}@{}:{}/ postgres",
-                                                    status.master_username.as_ref().unwrap(),
-                                                    master_password,
-                                                    address,
-                                                    port
-                                                );
-
-                                                // Create database
-                                                match self
-                                                    .create_default_database(
-                                                        &admin_db_url,
-                                                        &default_db_name,
-                                                    )
-                                                    .await
-                                                {
-                                                    Ok(_) => {
-                                                        info!(
-                                                            "Created database '{}'",
-                                                            default_db_name
-                                                        );
-                                                        db_status.status =
-                                                            DatabaseState::CreatingUser;
-                                                        // Will continue in next reconciliation
-                                                        return Ok(());
-                                                    }
-                                                    Err(e) => {
-                                                        error!(
-                                                            "Failed to create database '{}': {:?}",
-                                                            default_db_name, e
-                                                        );
-                                                        status.state = RdsState::Creating;
-                                                        status.error = Some(format!(
-                                                            "Failed to create database: {}",
-                                                            e
-                                                        ));
-                                                        return Ok(());
-                                                    }
-                                                }
-                                            }
-                                            DatabaseState::CreatingUser => {
-                                                // Decrypt passwords
-                                                let master_password = match status
-                                                    .master_password_encrypted
-                                                    .as_ref()
-                                                    .ok_or_else(|| {
-                                                        anyhow::anyhow!("Master password not set")
-                                                    })
-                                                    .and_then(|encrypted| {
-                                                        futures::executor::block_on(
-                                                            self.encryption_provider
-                                                                .decrypt(encrypted),
-                                                        )
-                                                    }) {
-                                                    Ok(pwd) => pwd,
-                                                    Err(e) => {
-                                                        error!(
-                                                            "Failed to decrypt master password: {}",
-                                                            e
-                                                        );
-                                                        status.state = RdsState::Failed;
-                                                        return Ok(());
-                                                    }
-                                                };
-
-                                                let user_password =
-                                                    match futures::executor::block_on(
-                                                        self.encryption_provider
-                                                            .decrypt(&db_status.password_encrypted),
-                                                    ) {
-                                                        Ok(pwd) => pwd,
-                                                        Err(e) => {
-                                                            error!(
-                                                            "Failed to decrypt user password: {}",
-                                                            e
-                                                        );
-                                                            db_status.status =
-                                                                DatabaseState::Pending;
-                                                            return Ok(());
-                                                        }
-                                                    };
-
-                                                // Create user and grant privileges
-                                                let admin_db_url = format!(
-                                                    "postgres://{}:{}@{}:{}/postgres",
-                                                    status.master_username.as_ref().unwrap(),
-                                                    master_password,
-                                                    address,
-                                                    port
-                                                );
-
-                                                match PgPool::connect(&admin_db_url).await {
-                                                    Ok(pool) => {
-                                                        let sanitized_username =
-                                                            match sanitize_identifier(
-                                                                &db_status.user,
-                                                            ) {
-                                                                Ok(u) => u,
-                                                                Err(e) => {
-                                                                    error!(
-                                                                        "Invalid username: {}",
-                                                                        e
-                                                                    );
-                                                                    db_status.status =
-                                                                        DatabaseState::Pending;
-                                                                    return Ok(());
-                                                                }
-                                                            };
-
-                                                        let sanitized_database =
-                                                            match sanitize_identifier(
-                                                                &default_db_name,
-                                                            ) {
-                                                                Ok(d) => d,
-                                                                Err(e) => {
-                                                                    error!(
-                                                                        "Invalid database name: {}",
-                                                                        e
-                                                                    );
-                                                                    db_status.status =
-                                                                        DatabaseState::Pending;
-                                                                    return Ok(());
-                                                                }
-                                                            };
-
-                                                        // Create user if doesn't exist
-                                                        match postgres_admin::create_user(
-                                                            &pool,
-                                                            &sanitized_username,
-                                                            &user_password,
-                                                        )
-                                                        .await
-                                                        {
-                                                            Ok(_) => info!(
-                                                                "Created user '{}'",
-                                                                db_status.user
-                                                            ),
-                                                            Err(e) => {
-                                                                error!(
-                                                                    "Failed to create user: {:?}",
-                                                                    e
-                                                                );
-                                                                return Ok(());
-                                                            }
-                                                        }
-
-                                                        // Grant privileges
-                                                        match postgres_admin::grant_database_privileges(
-                                                            &pool,
-                                                            &sanitized_database,
-                                                            &sanitized_username,
-                                                        )
-                                                        .await
-                                                        {
-                                                            Ok(_) => {
-                                                                info!(
-                                                                    "Granted privileges on '{}' to '{}'",
-                                                                    default_db_name, db_status.user
-                                                                );
-                                                                db_status.status =
-                                                                    DatabaseState::Available;
-                                                            }
-                                                            Err(e) => {
-                                                                error!(
-                                                                    "Failed to grant privileges: {:?}",
-                                                                    e
-                                                                );
-                                                                return Ok(());
-                                                            }
-                                                        }
-                                                    }
-                                                    Err(e) => {
-                                                        error!(
-                                                            "Failed to connect to RDS instance: {:?}",
-                                                            e
-                                                        );
-                                                        status.error = Some(format!(
-                                                            "Failed to connect: {}",
-                                                            e
-                                                        ));
-                                                        return Ok(());
-                                                    }
-                                                }
-                                            }
-                                            DatabaseState::Available => {
-                                                // Database fully provisioned, nothing to do
-                                            }
-                                            DatabaseState::Terminating => {
-                                                // Should not happen for default database during creation
-                                                warn!(
-                                                    "Default database is in Terminating state during RDS creation"
-                                                );
-                                            }
-                                        }
+                                        // Process databases (will handle Pending -> CreatingDatabase -> CreatingUser -> Available)
+                                        self.process_databases(status, address, port).await?;
                                     }
                                 }
 
@@ -701,7 +470,10 @@ impl AwsRdsProvisioner {
                                     status.state = RdsState::Creating;
                                 }
                             }
-                            "creating" | "configuring-enhanced-monitoring" | "backing-up" | "modifying" => {
+                            "creating"
+                            | "configuring-enhanced-monitoring"
+                            | "backing-up"
+                            | "modifying" => {
                                 debug!(
                                     "RDS instance {} is still creating (status: {})",
                                     instance_id, instance_status
@@ -759,6 +531,15 @@ impl AwsRdsProvisioner {
                                 instance_id, instance_status
                             );
                             status.state = RdsState::Creating; // Will check again on next reconcile
+                        } else {
+                            // Instance is available, process any pending databases
+                            if let Some(endpoint) = instance.endpoint() {
+                                if let (Some(address), Some(port)) =
+                                    (endpoint.address(), endpoint.port())
+                                {
+                                    self.process_databases(status, address, port).await?;
+                                }
+                            }
                         }
                     }
                 } else {
@@ -770,6 +551,175 @@ impl AwsRdsProvisioner {
             Err(e) => {
                 warn!("Failed to verify RDS instance {}: {:?}", instance_id, e);
                 // Don't fail immediately
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Process all databases in transitional states (Pending, CreatingDatabase, CreatingUser)
+    /// Returns early (Ok(())) if a state transition happened and needs another reconciliation
+    async fn process_databases(
+        &self,
+        status: &mut AwsRdsStatus,
+        address: &str,
+        port: i32,
+    ) -> Result<()> {
+        // Process each database that's not in Available or Terminating state
+        for (db_name, db_status) in status.databases.iter_mut() {
+            match db_status.status {
+                DatabaseState::Pending => {
+                    info!("Starting provisioning for database '{}'", db_name);
+                    db_status.status = DatabaseState::CreatingDatabase;
+                    // Will continue in next reconciliation
+                    return Ok(());
+                }
+                DatabaseState::CreatingDatabase => {
+                    // Decrypt master password
+                    let master_password = match status
+                        .master_password_encrypted
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("Master password not set"))
+                        .and_then(|encrypted| {
+                            futures::executor::block_on(self.encryption_provider.decrypt(encrypted))
+                        }) {
+                        Ok(pwd) => pwd,
+                        Err(e) => {
+                            error!("Failed to decrypt master password: {}", e);
+                            status.state = RdsState::Failed;
+                            status.error = Some("Failed to decrypt master password".to_string());
+                            return Ok(());
+                        }
+                    };
+
+                    let admin_db_url = format!(
+                        "postgres://{}:{}@{}:{}/postgres",
+                        status.master_username.as_ref().unwrap(),
+                        master_password,
+                        address,
+                        port
+                    );
+
+                    // Create database
+                    match self.create_default_database(&admin_db_url, db_name).await {
+                        Ok(_) => {
+                            info!("Created database '{}'", db_name);
+                            db_status.status = DatabaseState::CreatingUser;
+                            // Will continue in next reconciliation
+                            return Ok(());
+                        }
+                        Err(e) => {
+                            error!("Failed to create database '{}': {:?}", db_name, e);
+                            status.state = RdsState::Creating;
+                            status.error = Some(format!("Failed to create database: {}", e));
+                            return Ok(());
+                        }
+                    }
+                }
+                DatabaseState::CreatingUser => {
+                    // Decrypt passwords
+                    let master_password = match status
+                        .master_password_encrypted
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("Master password not set"))
+                        .and_then(|encrypted| {
+                            futures::executor::block_on(self.encryption_provider.decrypt(encrypted))
+                        }) {
+                        Ok(pwd) => pwd,
+                        Err(e) => {
+                            error!("Failed to decrypt master password: {}", e);
+                            status.state = RdsState::Failed;
+                            return Ok(());
+                        }
+                    };
+
+                    let user_password = match futures::executor::block_on(
+                        self.encryption_provider
+                            .decrypt(&db_status.password_encrypted),
+                    ) {
+                        Ok(pwd) => pwd,
+                        Err(e) => {
+                            error!("Failed to decrypt user password: {}", e);
+                            db_status.status = DatabaseState::Pending;
+                            return Ok(());
+                        }
+                    };
+
+                    // Create user and grant privileges
+                    let admin_db_url = format!(
+                        "postgres://{}:{}@{}:{}/postgres",
+                        status.master_username.as_ref().unwrap(),
+                        master_password,
+                        address,
+                        port
+                    );
+
+                    match PgPool::connect(&admin_db_url).await {
+                        Ok(pool) => {
+                            let sanitized_username = match sanitize_identifier(&db_status.user) {
+                                Ok(u) => u,
+                                Err(e) => {
+                                    error!("Invalid username: {}", e);
+                                    db_status.status = DatabaseState::Pending;
+                                    return Ok(());
+                                }
+                            };
+
+                            let sanitized_database = match sanitize_identifier(db_name) {
+                                Ok(d) => d,
+                                Err(e) => {
+                                    error!("Invalid database name: {}", e);
+                                    db_status.status = DatabaseState::Pending;
+                                    return Ok(());
+                                }
+                            };
+
+                            // Create user if doesn't exist
+                            match postgres_admin::create_user(
+                                &pool,
+                                &sanitized_username,
+                                &user_password,
+                            )
+                            .await
+                            {
+                                Ok(_) => info!("Created user '{}'", db_status.user),
+                                Err(e) => {
+                                    error!("Failed to create user: {:?}", e);
+                                    return Ok(());
+                                }
+                            }
+
+                            // Grant privileges
+                            match postgres_admin::grant_database_privileges(
+                                &pool,
+                                &sanitized_database,
+                                &sanitized_username,
+                            )
+                            .await
+                            {
+                                Ok(_) => {
+                                    info!(
+                                        "Granted privileges on '{}' to '{}'",
+                                        db_name, db_status.user
+                                    );
+                                    db_status.status = DatabaseState::Available;
+                                }
+                                Err(e) => {
+                                    error!("Failed to grant privileges: {:?}", e);
+                                    return Ok(());
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to connect to RDS instance: {:?}", e);
+                            status.error = Some(format!("Failed to connect: {}", e));
+                            return Ok(());
+                        }
+                    }
+                }
+                DatabaseState::Available | DatabaseState::Terminating => {
+                    // Nothing to do for these states
+                }
             }
         }
 
