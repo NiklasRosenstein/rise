@@ -682,7 +682,8 @@ function ExtensionsList({ projectName }) {
     const [saving, setSaving] = useState(false);
     const [editMode, setEditMode] = useState(false);
     const [selectedStatus, setSelectedStatus] = useState(null);
-    const [modalTab, setModalTab] = useState('config');
+    const [modalTab, setModalTab] = useState('ui');
+    const [uiSpec, setUiSpec] = useState({});
     const { showToast } = useToast();
 
     const loadExtensions = useCallback(async () => {
@@ -714,8 +715,11 @@ function ExtensionsList({ projectName }) {
         setSelectedExtension(extensionType);
         setEditMode(false);
         // Default to empty object
-        setFormData({ spec: JSON.stringify({}, null, 2) });
-        setModalTab('config');
+        const defaultSpec = {};
+        setFormData({ spec: JSON.stringify(defaultSpec, null, 2) });
+        setUiSpec(defaultSpec);
+        // Start on UI tab if extension has custom UI, otherwise config tab
+        setModalTab(hasExtensionUI(extensionType.name) ? 'ui' : 'config');
         setIsEnableModalOpen(true);
     };
 
@@ -725,7 +729,9 @@ function ExtensionsList({ projectName }) {
         setSelectedExtension(extType);
         setEditMode(true);
         setFormData({ spec: JSON.stringify(enabledExt.spec, null, 2) });
-        setModalTab('config');
+        setUiSpec(enabledExt.spec);
+        // Start on UI tab if extension has custom UI, otherwise config tab
+        setModalTab(hasExtensionUI(enabledExt.extension) ? 'ui' : 'config');
         setIsEnableModalOpen(true);
     };
 
@@ -733,6 +739,39 @@ function ExtensionsList({ projectName }) {
         setSelectedStatus(enabledExt);
         setIsStatusModalOpen(true);
     };
+
+    // Handle UI spec changes - merge with JSON spec (upsert)
+    const handleUiSpecChange = useCallback((newUiSpec) => {
+        setUiSpec(newUiSpec);
+
+        // Parse current JSON spec
+        let currentSpec = {};
+        try {
+            currentSpec = JSON.parse(formData.spec);
+        } catch (err) {
+            // If JSON is invalid, start fresh
+            currentSpec = {};
+        }
+
+        // Merge UI spec into current spec (upsert - UI values override, but preserve unknown fields)
+        const mergedSpec = { ...currentSpec, ...newUiSpec };
+
+        // Update JSON spec
+        setFormData({ spec: JSON.stringify(mergedSpec, null, 2) });
+    }, [formData.spec]);
+
+    // Handle JSON spec changes - update UI spec
+    const handleJsonSpecChange = useCallback((newJsonString) => {
+        setFormData({ spec: newJsonString });
+
+        // Try to parse and update UI spec
+        try {
+            const parsed = JSON.parse(newJsonString);
+            setUiSpec(parsed);
+        } catch (err) {
+            // Invalid JSON, don't update UI spec
+        }
+    }, []);
 
     const handleDeleteClick = (enabledExt) => {
         setExtensionToDelete(enabledExt);
@@ -902,11 +941,19 @@ function ExtensionsList({ projectName }) {
                             {/* Tab Navigation */}
                             <div className="border-b border-gray-700">
                                 <div className="flex gap-6">
+                                    {hasExtensionUI(selectedExtension.name) && (
+                                        <button
+                                            className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'ui' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                            onClick={() => setModalTab('ui')}
+                                        >
+                                            Configure
+                                        </button>
+                                    )}
                                     <button
                                         className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
                                         onClick={() => setModalTab('config')}
                                     >
-                                        Configuration
+                                        {hasExtensionUI(selectedExtension.name) ? 'JSON' : 'Configuration'}
                                     </button>
                                     <button
                                         className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
@@ -924,6 +971,15 @@ function ExtensionsList({ projectName }) {
                             </div>
 
                             {/* Tab Content */}
+                            {modalTab === 'ui' && hasExtensionUI(selectedExtension.name) && (
+                                <div className="space-y-4">
+                                    {React.createElement(getExtensionUI(selectedExtension.name), {
+                                        spec: uiSpec,
+                                        onChange: handleUiSpecChange
+                                    })}
+                                </div>
+                            )}
+
                             {modalTab === 'config' && (
                                 <div className="space-y-4">
                                     <FormField
@@ -931,13 +987,14 @@ function ExtensionsList({ projectName }) {
                                         id="extension-spec"
                                         type="textarea"
                                         value={formData.spec}
-                                        onChange={(e) => setFormData({ ...formData, spec: e.target.value })}
+                                        onChange={(e) => handleJsonSpecChange(e.target.value)}
                                         placeholder="{}"
                                         required
                                         rows={15}
                                     />
                                     <p className="text-sm text-gray-500">
                                         Enter the extension configuration as a JSON object. See the Schema and Documentation tabs for valid fields and examples.
+                                        {hasExtensionUI(selectedExtension.name) && <span> Use the Configure tab for a form-based interface.</span>}
                                     </p>
                                 </div>
                             )}

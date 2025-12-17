@@ -35,6 +35,7 @@
     <script type="text/babel" src="/js/components/toast.js"></script>
 
     <!-- Feature components (JSX) -->
+    <script type="text/babel" src="/js/components/extension-ui.js"></script>
     <script type="text/babel" src="/js/components/projects.js"></script>
     <script type="text/babel" src="/js/components/teams.js"></script>
     <script type="text/babel" src="/js/components/deployments.js"></script>
