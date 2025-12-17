@@ -125,11 +125,8 @@ impl ProjectController {
 
                 // Check if any extensions remain (including soft-deleted ones)
                 // Extensions must be fully cleaned up by their controllers before project deletion
-                let extensions = db_extensions::list_by_project_including_deleted(
-                    &self.state.db_pool,
-                    project.id,
-                )
-                .await?;
+                let extensions =
+                    db_extensions::list_by_project(&self.state.db_pool, project.id).await?;
                 if !extensions.is_empty() {
                     debug!(
                         "Project {} has {} extension(s) remaining, waiting for extension controllers to clean up",

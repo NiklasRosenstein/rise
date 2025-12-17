@@ -1007,7 +1007,7 @@ impl Extension for AwsRdsProvisioner {
                 match db_extensions::list_by_extension_name(&db_pool, &name).await {
                     Ok(extensions) => {
                         if extensions.is_empty() {
-                            info!("No RDS extensions found, waiting for work");
+                            debug!("No RDS extensions found, waiting for work");
                         }
 
                         for ext in extensions {
@@ -1073,6 +1073,15 @@ impl Extension for AwsRdsProvisioner {
         let ext = db_extensions::find_by_project_and_name(&self.db_pool, project_id, &self.name)
             .await?
             .ok_or_else(|| anyhow::anyhow!("Extension '{}' not found for project", self.name))?;
+
+        // Skip if extension is marked for deletion
+        if ext.deleted_at.is_some() {
+            info!(
+                "Extension '{}' is being deleted, skipping before_deployment hook",
+                self.name
+            );
+            return Ok(());
+        }
 
         // Parse spec to get injection preferences
         let spec: AwsRdsSpec =

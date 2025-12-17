@@ -35,31 +35,8 @@ pub async fn upsert(
     .context("Failed to upsert project extension")
 }
 
-/// List all extensions for a project
+/// List all extensions for a project (including soft-deleted ones)
 pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<ProjectExtension>> {
-    sqlx::query_as!(
-        ProjectExtension,
-        r#"
-        SELECT project_id, extension,
-               spec as "spec: Value",
-               status as "status: Value",
-               created_at, updated_at, deleted_at
-        FROM project_extensions
-        WHERE project_id = $1 AND deleted_at IS NULL
-        ORDER BY created_at ASC
-        "#,
-        project_id
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to list project extensions")
-}
-
-/// List all extensions for a project, including soft-deleted ones
-pub async fn list_by_project_including_deleted(
-    pool: &PgPool,
-    project_id: Uuid,
-) -> Result<Vec<ProjectExtension>> {
     sqlx::query_as!(
         ProjectExtension,
         r#"
@@ -75,7 +52,7 @@ pub async fn list_by_project_including_deleted(
     )
     .fetch_all(pool)
     .await
-    .context("Failed to list project extensions (including deleted)")
+    .context("Failed to list project extensions")
 }
 
 /// List all extensions with a specific extension name (across all projects)
@@ -101,7 +78,7 @@ pub async fn list_by_extension_name(
     .context("Failed to list extensions by name")
 }
 
-/// Get extension by project and name
+/// Get extension by project and name (including soft-deleted ones)
 pub async fn find_by_project_and_name(
     pool: &PgPool,
     project_id: Uuid,
@@ -115,7 +92,7 @@ pub async fn find_by_project_and_name(
                status as "status: Value",
                created_at, updated_at, deleted_at
         FROM project_extensions
-        WHERE project_id = $1 AND extension = $2 AND deleted_at IS NULL
+        WHERE project_id = $1 AND extension = $2
         "#,
         project_id,
         extension
@@ -172,31 +149,6 @@ pub async fn update_status(
     .context("Failed to update extension status")?;
 
     Ok(())
-}
-
-/// Find extension by project and name, including soft-deleted ones
-#[allow(dead_code)]
-pub async fn find_by_project_and_name_including_deleted(
-    pool: &PgPool,
-    project_id: Uuid,
-    extension: &str,
-) -> Result<Option<ProjectExtension>> {
-    sqlx::query_as!(
-        ProjectExtension,
-        r#"
-        SELECT project_id, extension,
-               spec as "spec: Value",
-               status as "status: Value",
-               created_at, updated_at, deleted_at
-        FROM project_extensions
-        WHERE project_id = $1 AND extension = $2
-        "#,
-        project_id,
-        extension
-    )
-    .fetch_optional(pool)
-    .await
-    .context("Failed to find project extension (including deleted)")
 }
 
 /// Permanently delete extension record

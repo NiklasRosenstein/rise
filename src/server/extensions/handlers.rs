@@ -161,6 +161,7 @@ pub async fn patch_extension(
         db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .filter(|e| e.deleted_at.is_none()) // Filter out soft-deleted extensions for API response
             .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
 
     // Merge specs (null values in payload remove fields from existing)
@@ -224,6 +225,7 @@ pub async fn list_extensions(
 
     let extensions: Vec<Extension> = extensions
         .into_iter()
+        .filter(|e| e.deleted_at.is_none()) // Filter out soft-deleted extensions for API response
         .map(|e| {
             // Get extension provider to format status and extension type
             let (status_summary, extension_type) = state
@@ -271,6 +273,7 @@ pub async fn get_extension(
     let ext = db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .filter(|e| e.deleted_at.is_none()) // Filter out soft-deleted extensions for API response
         .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
 
     // Get extension provider to format status and extension type
