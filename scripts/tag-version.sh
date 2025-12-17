@@ -20,7 +20,7 @@ fi
 echo "Updating version to ${VERSION}..."
 
 # Update version in Cargo.toml
-sed -i "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml
+sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml && rm Cargo.toml.bak
 
 # Update Cargo.lock
 echo "Updating Cargo.lock..."
