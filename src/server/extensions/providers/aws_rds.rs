@@ -975,7 +975,10 @@ fn sanitize_identifier(identifier: &str) -> Result<String> {
         .chars()
         .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
     {
-        anyhow::bail!("Invalid identifier: contains illegal characters");
+        anyhow::bail!(
+            "Invalid identifier \"{}\": contains illegal characters",
+            identifier
+        );
     }
 
     // Quote the identifier to handle reserved words and special characters
@@ -1223,7 +1226,7 @@ impl Extension for AwsRdsProvisioner {
                 &template_owner_db_url,
                 &database_name,
                 &project.name,
-                &sanitize_identifier(&new_db_username)?,
+                &new_db_username,
             )
             .await
             .context("Failed to create database copy for deployment group")?;
