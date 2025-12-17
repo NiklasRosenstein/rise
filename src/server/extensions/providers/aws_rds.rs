@@ -68,6 +68,17 @@ pub enum DatabaseState {
     Terminating,
 }
 
+/// Parameters for creating a database copy
+struct DatabaseCopyParams<'a> {
+    admin_db_url: &'a str,
+    new_database: &'a str,
+    template_database: &'a str,
+    owner: &'a str,
+    endpoint: &'a str,
+    master_username: &'a str,
+    master_password: &'a str,
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct AwsRdsStatus {
     /// Current state of the RDS instance
@@ -949,16 +960,14 @@ impl AwsRdsProvisioner {
     ///
     /// This approach works reliably even when the template database has active connections,
     /// unlike CREATE DATABASE WITH TEMPLATE which requires zero connections.
-    async fn create_database_copy(
-        &self,
-        admin_db_url: &str,
-        new_database: &str,
-        template_database: &str,
-        owner: &str,
-        endpoint: &str,
-        master_username: &str,
-        master_password: &str,
-    ) -> Result<()> {
+    async fn create_database_copy(&self, params: DatabaseCopyParams<'_>) -> Result<()> {
+        let admin_db_url = params.admin_db_url;
+        let new_database = params.new_database;
+        let template_database = params.template_database;
+        let owner = params.owner;
+        let endpoint = params.endpoint;
+        let master_username = params.master_username;
+        let master_password = params.master_password;
         // Connect to the postgres database using admin credentials
         let pool = PgPool::connect(admin_db_url)
             .await
@@ -1312,15 +1321,15 @@ impl Extension for AwsRdsProvisioner {
             // Create the database copy using admin credentials
             // This approach uses pg_dump/pg_restore which works even when
             // the template database has active connections
-            self.create_database_copy(
-                &admin_db_url,
-                &database_name,
-                &project.name,
-                &new_db_username,
+            self.create_database_copy(DatabaseCopyParams {
+                admin_db_url: &admin_db_url,
+                new_database: &database_name,
+                template_database: &project.name,
+                owner: &new_db_username,
                 endpoint,
                 master_username,
-                &master_password,
-            )
+                master_password: &master_password,
+            })
             .await
             .context("Failed to create database copy for deployment group")?;
 
