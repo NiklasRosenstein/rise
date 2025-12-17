@@ -696,19 +696,36 @@ impl AwsRdsProvisioner {
                                 }
                             };
 
-                            // Create user if doesn't exist
-                            match postgres_admin::create_user(
-                                &pool,
-                                &sanitized_username,
-                                &user_password,
-                            )
-                            .await
-                            {
-                                Ok(_) => info!("Created user '{}'", db_status.user),
-                                Err(e) => {
-                                    error!("Failed to create user: {:?}", e);
-                                    return Ok(());
+                            // Check if user already exists
+                            let user_exists =
+                                match postgres_admin::user_exists(&pool, &db_status.user).await {
+                                    Ok(exists) => exists,
+                                    Err(e) => {
+                                        error!("Failed to check if user exists: {:?}", e);
+                                        return Ok(());
+                                    }
+                                };
+
+                            if !user_exists {
+                                // Create user if doesn't exist
+                                match postgres_admin::create_user(
+                                    &pool,
+                                    &sanitized_username,
+                                    &user_password,
+                                )
+                                .await
+                                {
+                                    Ok(_) => info!("Created user '{}'", db_status.user),
+                                    Err(e) => {
+                                        error!("Failed to create user: {:?}", e);
+                                        return Ok(());
+                                    }
                                 }
+                            } else {
+                                info!(
+                                    "User '{}' already exists, skipping creation",
+                                    db_status.user
+                                );
                             }
 
                             // Change database owner to give full privileges
