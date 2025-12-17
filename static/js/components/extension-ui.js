@@ -45,7 +45,7 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                 id="rds-engine-version"
                 value={engineVersion}
                 onChange={(e) => setEngineVersion(e.target.value)}
-                placeholder={defaultEngineVersion ? `e.g., 16.2 (default: ${defaultEngineVersion})` : "e.g., 16.2"}
+                placeholder={defaultEngineVersion || "e.g., 16.2"}
             />
 
             <div className="bg-gray-800 rounded-lg p-4">
