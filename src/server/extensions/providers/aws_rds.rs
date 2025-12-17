@@ -229,7 +229,7 @@ impl AwsRdsProvisioner {
         // Handle normal lifecycle
         match status.state {
             RdsState::Pending => {
-                self.handle_pending(&spec, &mut status, &project.name)
+                self.handle_pending(&spec, &mut status, &project.name, project.id)
                     .await?;
             }
             RdsState::Creating => {
@@ -288,6 +288,7 @@ impl AwsRdsProvisioner {
         spec: &AwsRdsSpec,
         status: &mut AwsRdsStatus,
         project_name: &str,
+        project_id: Uuid,
     ) -> Result<()> {
         let instance_id = self.instance_id_for_project(project_name);
         info!(
@@ -368,6 +369,21 @@ impl AwsRdsProvisioner {
                 status.master_username = Some(master_username);
                 status.master_password_encrypted = Some(encrypted_password);
                 status.error = None;
+
+                // Add finalizer immediately to ensure cleanup if project is deleted during provisioning
+                if let Err(e) =
+                    db_projects::add_finalizer(&self.db_pool, project_id, &self.name).await
+                {
+                    error!(
+                        "Failed to add finalizer for project {}: {}",
+                        project_name, e
+                    );
+                } else {
+                    info!(
+                        "Added finalizer '{}' to project {}",
+                        self.name, project_name
+                    );
+                }
             }
             Err(e) => {
                 error!("Failed to create RDS instance {}: {:?}", instance_id, e);
@@ -383,7 +399,7 @@ impl AwsRdsProvisioner {
         &self,
         status: &mut AwsRdsStatus,
         project_name: &str,
-        project_id: Uuid,
+        _project_id: Uuid,
     ) -> Result<()> {
         let instance_id = status
             .instance_id
@@ -406,25 +422,6 @@ impl AwsRdsProvisioner {
                             "available" => {
                                 info!("RDS instance {} is now available", instance_id);
                                 status.state = RdsState::Available;
-
-                                // Add finalizer to ensure cleanup before project deletion
-                                if let Err(e) = db_projects::add_finalizer(
-                                    &self.db_pool,
-                                    project_id,
-                                    &self.name,
-                                )
-                                .await
-                                {
-                                    error!(
-                                        "Failed to add finalizer for project {}: {}",
-                                        project_name, e
-                                    );
-                                } else {
-                                    info!(
-                                        "Added finalizer '{}' to project {}",
-                                        self.name, project_name
-                                    );
-                                }
 
                                 // Extract endpoint
                                 if let Some(endpoint) = instance.endpoint() {
@@ -704,7 +701,7 @@ impl AwsRdsProvisioner {
                                     status.state = RdsState::Creating;
                                 }
                             }
-                            "creating" | "backing-up" | "modifying" => {
+                            "creating" | "configuring-enhanced-monitoring" | "backing-up" | "modifying" => {
                                 debug!(
                                     "RDS instance {} is still creating (status: {})",
                                     instance_id, instance_status
@@ -1046,12 +1043,9 @@ impl Extension for AwsRdsProvisioner {
                                 db_subnet_group_name: db_subnet_group_name.clone(),
                             });
 
-                            match provisioner.reconcile_single(ext).await {
-                                Err(e) => {
-                                    error!("Failed to reconcile AWS RDS extension: {:?}", e);
-                                    // On error, retry after normal interval (not immediate)
-                                }
-                                _ => {}
+                            if let Err(e) = provisioner.reconcile_single(ext).await {
+                                error!("Failed to reconcile AWS RDS extension: {:?}", e);
+                                // On error, retry after normal interval (not immediate)
                             }
                         }
                     }
