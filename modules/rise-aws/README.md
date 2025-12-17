@@ -1,25 +1,27 @@
 # Rise AWS Terraform Module
 
-This module creates the AWS IAM resources required for the Rise backend to manage AWS services (primarily ECR for container registries).
+This module creates the AWS IAM resources required for the Rise backend to manage AWS services (ECR for container registries and RDS for database instances).
 
 ## Features
 
-- **Controller role**: Manages ECR repository lifecycle (create, delete, tag)
+- **Controller role**: Manages ECR repository lifecycle (create, delete, tag) and RDS instances
 - **Push role**: Separate role for generating scoped image push credentials
 - Supports IAM role (for AWS deployments with IRSA or instance profiles)
 - Supports IAM user with access keys (for non-AWS deployments)
 - Configurable repository prefix for multi-tenant isolation
 - Optional auto-remove or soft-delete (orphan tagging) modes
 - Default lifecycle policy to limit image retention
+- RDS instance management for project extensions
 
 ## Architecture
 
 The module creates two separate IAM roles with distinct permissions:
 
-1. **Backend Role** (e.g., `rise-backend`): Used by the Rise backend to manage ECR repositories
-   - Create/delete repositories
-   - Tag repositories (managed, orphaned)
-   - List repositories for discovery
+1. **Backend Role** (e.g., `rise-backend`): Used by the Rise backend to manage AWS resources
+   - ECR repositories: Create/delete, tag, list for discovery
+   - RDS instances: Create/delete/modify PostgreSQL instances with `rise-*` prefix
+   - Security groups and subnet groups for RDS networking
+   - KMS encryption (if enabled)
 
 2. **Push Role** (e.g., `rise-backend-ecr-push`): Assumed by the backend to generate scoped credentials
    - Push images to ECR
@@ -148,12 +150,25 @@ auto_remove = false  # From module.rise_aws.rise_config.auto_remove
 
 ### Controller Role
 
+**ECR Permissions:**
 - `ecr:GetAuthorizationToken` - Required for any ECR operation
 - `ecr:DescribeRepositories`, `ecr:ListTagsForResource` - For discovery
 - `ecr:CreateRepository`, `ecr:TagResource`, `ecr:PutImageScanningConfiguration`, `ecr:PutImageTagMutability`, `ecr:PutLifecyclePolicy` - For creating repos
-- `ecr:DeleteRepository`, `ecr:BatchDeleteImage` - Only if `auto_remove = true`
+- `ecr:DeleteRepository`, `ecr:BatchDeleteImage` - For deleting repos
 - `sts:AssumeRole` on push role - To generate scoped credentials
-- KMS permissions - Only if using KMS encryption
+
+**RDS Permissions:**
+- `rds:CreateDBInstance`, `rds:DeleteDBInstance`, `rds:DescribeDBInstances`, `rds:ModifyDBInstance` - For managing database instances
+- `rds:ListTagsForResource`, `rds:AddTagsToResource`, `rds:RemoveTagsFromResource` - For tagging
+- `rds:CreateDBSubnetGroup`, `rds:DeleteDBSubnetGroup`, `rds:DescribeDBSubnetGroups` - For VPC placement
+- `ec2:DescribeSecurityGroups`, `ec2:CreateSecurityGroup`, `ec2:DeleteSecurityGroup` - For network security
+- `ec2:AuthorizeSecurityGroupIngress`, `ec2:RevokeSecurityGroupIngress` - For security group rules
+- `ec2:DescribeVpcs`, `ec2:DescribeSubnets` - For VPC discovery
+
+**KMS Permissions:**
+- `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - Only if using KMS encryption
+
+All ECR permissions are scoped to `${repo_prefix}*`. RDS permissions are scoped to `rise-*` instance names.
 
 ### Push Role
 
@@ -161,4 +176,4 @@ auto_remove = false  # From module.rise_aws.rise_config.auto_remove
 - `ecr:BatchCheckLayerAvailability`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`, `ecr:PutImage` - For pushing images
 - `ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer` - For pulling images
 
-All repository-level permissions are scoped to `${repo_prefix}*`.
+All permissions are scoped to `${repo_prefix}*`.

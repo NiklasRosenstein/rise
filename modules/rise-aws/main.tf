@@ -137,11 +137,59 @@ data "aws_iam_policy_document" "backend" {
       resources = [aws_kms_key.ecr[0].arn]
     }
   }
+
+  # RDS permissions for managing database instances
+  statement {
+    sid    = "ManageRDS"
+    effect = "Allow"
+    actions = [
+      "rds:CreateDBInstance",
+      "rds:DeleteDBInstance",
+      "rds:DescribeDBInstances",
+      "rds:ModifyDBInstance",
+      "rds:ListTagsForResource",
+      "rds:AddTagsToResource",
+      "rds:RemoveTagsFromResource"
+    ]
+    resources = [
+      "arn:aws:rds:${local.region}:${local.account_id}:db:rise-*"
+    ]
+  }
+
+  # RDS subnet groups (needed for VPC placement)
+  statement {
+    sid    = "ManageRDSSubnetGroups"
+    effect = "Allow"
+    actions = [
+      "rds:CreateDBSubnetGroup",
+      "rds:DeleteDBSubnetGroup",
+      "rds:DescribeDBSubnetGroups"
+    ]
+    resources = [
+      "arn:aws:rds:${local.region}:${local.account_id}:subgrp:rise-*"
+    ]
+  }
+
+  # RDS security groups (needed for network access control)
+  statement {
+    sid    = "ManageRDSSecurityGroups"
+    effect = "Allow"
+    actions = [
+      "ec2:DescribeSecurityGroups",
+      "ec2:CreateSecurityGroup",
+      "ec2:DeleteSecurityGroup",
+      "ec2:AuthorizeSecurityGroupIngress",
+      "ec2:RevokeSecurityGroupIngress",
+      "ec2:DescribeVpcs",
+      "ec2:DescribeSubnets"
+    ]
+    resources = ["*"]
+  }
 }
 
 resource "aws_iam_policy" "backend" {
   name        = local.name
-  description = "IAM policy for Rise backend to manage ECR repositories"
+  description = "IAM policy for Rise backend to manage ECR repositories and RDS instances"
   policy      = data.aws_iam_policy_document.backend.json
   tags        = local.tags
 }
