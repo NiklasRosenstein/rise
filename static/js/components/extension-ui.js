@@ -82,6 +82,13 @@ const ExtensionUIRegistry = {
     // Add more extension UIs here as needed
 };
 
+// Extension Icon Registry
+// Maps extension type identifiers to their icon URLs
+const ExtensionIconRegistry = {
+    'aws-rds-postgres': '/assets/aws_rds_aurora.jpg',
+    // Add more extension icons here as needed
+};
+
 // Helper function to check if an extension has custom UI
 function hasExtensionUI(extensionName) {
     return extensionName in ExtensionUIRegistry;
@@ -90,4 +97,9 @@ function hasExtensionUI(extensionName) {
 // Helper function to get the UI component for an extension
 function getExtensionUI(extensionName) {
     return ExtensionUIRegistry[extensionName] || null;
+}
+
+// Helper function to get the icon URL for an extension
+function getExtensionIcon(extensionType) {
+    return ExtensionIconRegistry[extensionType] || null;
 }

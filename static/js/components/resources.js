@@ -844,6 +844,7 @@ function ExtensionsList({ projectName }) {
                 <table className="w-full">
                     <thead className="bg-gray-800">
                         <tr>
+                            <th className="w-12 px-3 py-3"></th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Extension</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Description</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
@@ -853,7 +854,7 @@ function ExtensionsList({ projectName }) {
                     <tbody className="divide-y divide-gray-800">
                         {availableExtensions.length === 0 ? (
                             <tr>
-                                <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                                <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
                                     No extensions available.
                                 </td>
                             </tr>
@@ -864,11 +865,24 @@ function ExtensionsList({ projectName }) {
                                     const enabled = isEnabled(extType.name);
                                     const enabledData = getEnabledExtension(extType.name);
 
+                                    const iconUrl = getExtensionIcon(extType.extension_type);
+
                                     return (
                                         <tr
                                             key={extType.name}
                                             className={`hover:bg-gray-800/50 transition-colors ${!enabled ? 'opacity-60' : ''}`}
                                         >
+                                            <td className="px-3 py-4">
+                                                {iconUrl ? (
+                                                    <img
+                                                        src={iconUrl}
+                                                        alt={extType.name}
+                                                        className="w-8 h-8 rounded object-cover"
+                                                    />
+                                                ) : (
+                                                    <div className="w-8 h-8"></div>
+                                                )}
+                                            </td>
                                             <td className="px-6 py-4 text-sm font-mono text-gray-200">
                                                 {extType.name}
                                                 {!enabled && <span className="ml-2 text-xs text-gray-500">(not enabled)</span>}
