@@ -1265,72 +1265,33 @@ impl Extension for AwsRdsProvisioner {
                 .await
                 .context("Failed to check if database exists")?;
 
+            pool.close().await;
+
             if !db_exists {
                 warn!(
-                    "Database '{}' is marked as Available in status but does not exist in PostgreSQL, recreating it",
+                    "Database '{}' is marked as Available in status but does not exist in PostgreSQL, marking for recreation",
                     database_name
                 );
 
-                // Recreate the database
-                if deployment_group == "default" {
-                    // For default database, create with master user as owner (will be changed later in reconciliation)
-                    let sanitized_db = sanitize_identifier(&database_name)?;
-                    let sanitized_master = sanitize_identifier(master_username)?;
-                    postgres_admin::create_database(&pool, &sanitized_db, &sanitized_master)
-                        .await
-                        .context("Failed to recreate default database")?;
+                // Reset the database state to Pending so the reconciliation loop will recreate it
+                status.databases.get_mut(&database_name).unwrap().status = DatabaseState::Pending;
 
-                    info!("Recreated default database '{}'", database_name);
+                // Update extension status
+                db_extensions::update_status(
+                    &self.db_pool,
+                    project_id,
+                    &self.name,
+                    &serde_json::to_value(&status)?,
+                )
+                .await
+                .context(
+                    "Failed to update extension status after marking database for recreation",
+                )?;
 
-                    // Change owner to the project user
-                    let sanitized_user = sanitize_identifier(&db_status.user)?;
-                    postgres_admin::change_database_owner(&pool, &sanitized_db, &sanitized_user)
-                        .await
-                        .context("Failed to change recreated database owner")?;
-
-                    info!(
-                        "Changed owner of recreated database '{}' to '{}'",
-                        database_name, db_status.user
-                    );
-                } else {
-                    // For non-default databases, recreate as a copy of the default database
-                    // Get the default database's owner credentials
-                    let default_db_status = status
-                        .databases
-                        .get(&project.name)
-                        .ok_or_else(|| anyhow::anyhow!("Default database not found in status"))?;
-
-                    let template_owner_password = self
-                        .encryption_provider
-                        .decrypt(&default_db_status.password_encrypted)
-                        .await
-                        .context("Failed to decrypt template owner password")?;
-
-                    let template_owner_db_url = format!(
-                        "postgres://{}:{}@{}/{}",
-                        default_db_status.user,
-                        template_owner_password,
-                        endpoint,
-                        RDS_ADMIN_DATABASE
-                    );
-
-                    pool.close().await;
-
-                    // Create the database copy with the existing user as owner
-                    let sanitized_user = sanitize_identifier(&db_status.user)?;
-                    self.create_database_copy(
-                        &template_owner_db_url,
-                        &database_name,
-                        &project.name,
-                        &sanitized_user,
-                    )
-                    .await
-                    .context("Failed to recreate database copy")?;
-
-                    info!("Recreated database '{}' from template", database_name);
-                }
-            } else {
-                pool.close().await;
+                anyhow::bail!(
+                    "Database '{}' does not exist and has been marked for recreation, retry deployment",
+                    database_name
+                );
             }
 
             info!(
