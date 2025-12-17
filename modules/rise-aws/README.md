@@ -79,12 +79,9 @@ module "rise_aws" {
   ]
 }
 
-# Use the created resources in your Rise backend config
-output "rise_rds_config" {
-  value = {
-    security_group_id = module.rise_aws.rds_security_group_id
-    subnet_group_name = module.rise_aws.rds_subnet_group_name
-  }
+# Use the rise_config output in your Rise backend config
+output "rise_config" {
+  value = module.rise_aws.rise_config
 }
 ```
 
@@ -116,39 +113,41 @@ resource "aws_secretsmanager_secret_version" "rise_backend_creds" {
 
 ## Rise Backend Configuration
 
-After applying this module, configure the Rise backend with the ECR settings:
+After applying this module, use the `rise_config` output to configure your Rise backend:
 
 ```yaml
 # config/default.yaml
+
+# ECR registry configuration (if enable_ecr = true)
 registry:
   type: ecr
-  region: eu-west-1  # From module.rise_aws.rise_config.region
-  account_id: "123456789012"  # From module.rise_aws.rise_config.account_id
-  repo_prefix: rise/  # From module.rise_aws.rise_config.repo_prefix
-  role_arn: arn:aws:iam::123456789012:role/rise-backend  # From module.rise_aws.role_arn
-  push_role_arn: arn:aws:iam::123456789012:role/rise-backend-ecr-push  # From module.rise_aws.push_role_arn
+  region: eu-west-1                   # From rise_config.ecr.region
+  account_id: "123456789012"          # From rise_config.ecr.account_id
+  repo_prefix: rise/                  # From rise_config.ecr.repo_prefix
+  role_arn: arn:aws:iam::...          # From rise_config.ecr.role_arn
+  push_role_arn: arn:aws:iam::...     # From rise_config.ecr.push_role_arn
 
-# If using IAM user instead of role:
-#   access_key_id: AKIA...
-#   secret_access_key: ...
-
-# If using AWS RDS extension (requires enable_rds = true):
+# RDS extension configuration (if enable_rds = true)
 extensions:
   providers:
     - type: aws-rds-provisioner
-      name: aws-rds-postgres  # Extension identifier (required)
+      name: aws-rds
       region: eu-west-1
       instance_size: db.t3.micro
       disk_size: 20
-      instance_id_template: "rise-{project_name}"
-      # VPC configuration (required for production):
-      vpc_security_group_ids:
-        - sg-0123456789abcdef0  # Use module.rise_aws.rds_security_group_id
-      db_subnet_group_name: my-db-subnet-group  # Use module.rise_aws.rds_subnet_group_name
-      # If using IAM user (otherwise uses role):
-      # access_key_id: AKIA...
-      # secret_access_key: ...
+      # VPC configuration from Terraform outputs:
+      vpc_security_group_ids:         # From rise_config.rds.vpc_security_group_ids
+        - sg-0123456789abcdef0
+      db_subnet_group_name: my-group  # From rise_config.rds.db_subnet_group_name
 ```
+
+**Simplified Configuration with Terraform Outputs:**
+
+The `rise_config` output is structured to match Rise's configuration format:
+- `rise_config.ecr.*` - Maps directly to `registry:` section
+- `rise_config.rds.*` - Maps directly to extension provider settings
+
+This makes it easy to reference in your configuration management tool (e.g., using `templatefile()` in Terraform).
 
 ## Inputs
 
@@ -173,25 +172,30 @@ extensions:
 
 ## Outputs
 
+### Primary Output (Use This!)
+
+| Name | Description |
+|------|-------------|
+| rise_config | **Configuration values for Rise backend** - Contains `ecr.*` and `rds.*` sub-objects with all values needed for Rise configuration |
+
+### Additional Outputs
+
 | Name | Description |
 |------|-------------|
 | role_arn | ARN of the controller IAM role |
 | role_name | Name of the controller IAM role |
-| push_role_arn | ARN of the push IAM role |
-| push_role_name | Name of the push IAM role |
-| user_arn | ARN of the IAM user |
-| user_name | Name of the IAM user |
-| access_key_id | Access key ID (sensitive) |
-| secret_access_key | Secret access key (sensitive) |
+| push_role_arn | ARN of the push IAM role (ECR only) |
+| push_role_name | Name of the push IAM role (ECR only) |
+| user_arn | ARN of the IAM user (if created) |
+| user_name | Name of the IAM user (if created) |
+| access_key_id | Access key ID (sensitive, if IAM user created) |
+| secret_access_key | Secret access key (sensitive, if IAM user created) |
 | controller_policy_arn | ARN of the controller IAM policy |
-| push_policy_arn | ARN of the push IAM policy |
+| push_policy_arn | ARN of the push IAM policy (ECR only) |
 | policy_document | The controller IAM policy document JSON |
-| rise_config | Configuration values for Rise backend |
 | lifecycle_policy | ECR lifecycle policy JSON |
-| rds_security_group_id | ID of the RDS security group (use in `vpc_security_group_ids`) |
-| rds_security_group_name | Name of the RDS security group |
-| rds_subnet_group_name | Name of the RDS DB subnet group (use in `db_subnet_group_name`) |
-| rds_subnet_group_arn | ARN of the RDS DB subnet group |
+| kms_key_arn | ARN of the KMS key (if KMS enabled) |
+| kms_key_id | ID of the KMS key (if KMS enabled) |
 
 ## IAM Permissions
 

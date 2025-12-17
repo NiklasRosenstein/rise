@@ -91,40 +91,28 @@ output "kms_key_id" {
 
 output "rise_config" {
   description = "Configuration values for the Rise backend"
-  value = {
-    region        = local.region
-    account_id    = local.account_id
-    repo_prefix   = local.repo_prefix
-    role_arn      = aws_iam_role.backend.arn
-    push_role_arn = var.enable_ecr ? aws_iam_role.push_role[0].arn : null
-  }
+  value = merge(
+    # ECR configuration (if enabled)
+    var.enable_ecr ? {
+      ecr = {
+        region        = local.region
+        account_id    = local.account_id
+        repo_prefix   = local.repo_prefix
+        role_arn      = aws_iam_role.backend.arn
+        push_role_arn = aws_iam_role.push_role[0].arn
+      }
+    } : {},
+    # RDS configuration (if enabled)
+    var.enable_rds && var.rds_vpc_id != null && length(var.rds_subnet_ids) > 0 ? {
+      rds = {
+        vpc_security_group_ids = [aws_security_group.rds[0].id]
+        db_subnet_group_name   = aws_db_subnet_group.rds[0].name
+      }
+    } : {}
+  )
 }
 
 output "lifecycle_policy" {
   description = "The ECR lifecycle policy JSON that will be applied to repositories"
   value       = local.lifecycle_policy
-}
-
-# -----------------------------------------------------------------------------
-# RDS outputs
-# -----------------------------------------------------------------------------
-
-output "rds_security_group_id" {
-  description = "ID of the RDS security group (null if RDS not enabled or VPC not specified)"
-  value       = var.enable_rds && var.rds_vpc_id != null ? aws_security_group.rds[0].id : null
-}
-
-output "rds_security_group_name" {
-  description = "Name of the RDS security group (null if RDS not enabled or VPC not specified)"
-  value       = var.enable_rds && var.rds_vpc_id != null ? aws_security_group.rds[0].name : null
-}
-
-output "rds_subnet_group_name" {
-  description = "Name of the RDS DB subnet group (null if RDS not enabled or subnets not specified)"
-  value       = var.enable_rds && var.rds_vpc_id != null && length(var.rds_subnet_ids) > 0 ? aws_db_subnet_group.rds[0].name : null
-}
-
-output "rds_subnet_group_arn" {
-  description = "ARN of the RDS DB subnet group (null if RDS not enabled or subnets not specified)"
-  value       = var.enable_rds && var.rds_vpc_id != null && length(var.rds_subnet_ids) > 0 ? aws_db_subnet_group.rds[0].arn : null
 }
