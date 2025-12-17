@@ -73,14 +73,18 @@ module "rise_aws" {
 
   # RDS VPC configuration
   rds_vpc_id                  = module.vpc.vpc_id
+  rds_subnet_ids              = module.vpc.private_subnets  # Subnets for RDS instances
   rds_allowed_security_groups = [
     module.eks.cluster_security_group_id  # Allow access from EKS cluster
   ]
 }
 
-# Use the created security group in your Rise backend config
-output "rise_rds_security_group" {
-  value = module.rise_aws.rds_security_group_id
+# Use the created resources in your Rise backend config
+output "rise_rds_config" {
+  value = {
+    security_group_id = module.rise_aws.rds_security_group_id
+    subnet_group_name = module.rise_aws.rds_subnet_group_name
+  }
 }
 ```
 
@@ -139,8 +143,8 @@ extensions:
       instance_id_template: "rise-{project_name}"
       # VPC configuration (required for production):
       vpc_security_group_ids:
-        - sg-0123456789abcdef0  # Use module.rise_aws.rds_security_group_id from Terraform
-      db_subnet_group_name: my-db-subnet-group  # Create this DB subnet group separately in your VPC
+        - sg-0123456789abcdef0  # Use module.rise_aws.rds_security_group_id
+      db_subnet_group_name: my-db-subnet-group  # Use module.rise_aws.rds_subnet_group_name
       # If using IAM user (otherwise uses role):
       # access_key_id: AKIA...
       # secret_access_key: ...
@@ -155,7 +159,8 @@ extensions:
 | enable_ecr | Enable ECR permissions | `bool` | `true` | no |
 | enable_rds | Enable RDS permissions | `bool` | `false` | no |
 | create_rds_service_linked_role | Create RDS service-linked role (only needed once per AWS account) | `bool` | `true` | no |
-| rds_vpc_id | VPC ID for RDS security group | `string` | `null` | no |
+| rds_vpc_id | VPC ID for RDS resources | `string` | `null` | no |
+| rds_subnet_ids | Subnet IDs for RDS DB subnet group | `list(string)` | `[]` | no |
 | rds_allowed_security_groups | Security groups allowed to access RDS | `list(string)` | `[]` | no |
 | enable_kms | Enable KMS encryption for ECR | `bool` | `false` | no |
 | create_iam_user | Create an IAM user with access keys | `bool` | `false` | no |
@@ -185,6 +190,8 @@ extensions:
 | lifecycle_policy | ECR lifecycle policy JSON |
 | rds_security_group_id | ID of the RDS security group (use in `vpc_security_group_ids`) |
 | rds_security_group_name | Name of the RDS security group |
+| rds_subnet_group_name | Name of the RDS DB subnet group (use in `db_subnet_group_name`) |
+| rds_subnet_group_arn | ARN of the RDS DB subnet group |
 
 ## IAM Permissions
 
@@ -208,18 +215,19 @@ extensions:
 **RDS Service-Linked Role:**
 The module creates the RDS service-linked role (`AWSServiceRoleForRDS`) if `create_rds_service_linked_role = true`. This role is required for RDS to manage resources on your behalf. It only needs to be created once per AWS account. If the role already exists, set `create_rds_service_linked_role = false`.
 
-**RDS Security Group:**
-If both `enable_rds = true` and `rds_vpc_id` are provided, the module creates a security group that:
-- Allows inbound PostgreSQL (port 5432) traffic from the security groups specified in `rds_allowed_security_groups`
-- Allows all outbound traffic
-- Use the output `rds_security_group_id` in your Rise backend configuration's `vpc_security_group_ids`
+**RDS VPC Resources:**
+If `enable_rds = true`, `rds_vpc_id`, and `rds_subnet_ids` are provided, the module creates:
 
-**RDS VPC Networking:**
-RDS instances are placed in VPCs using DB subnet groups:
-- You must create a DB subnet group in your VPC (outside of this module)
-- The DB subnet group defines which subnets RDS can use
-- When you specify `vpc_security_group_ids` in the Rise config, you MUST also specify `db_subnet_group_name`
-- RDS will automatically use the VPC associated with the subnet group (no need to specify VPC ID in the Rise config)
+1. **DB Subnet Group** - Defines which subnets RDS instances can use
+   - Created with the subnet IDs you provide via `rds_subnet_ids`
+   - Use the output `rds_subnet_group_name` in your Rise config's `db_subnet_group_name`
+
+2. **Security Group** - Controls network access to RDS instances
+   - Allows inbound PostgreSQL (port 5432) from security groups in `rds_allowed_security_groups`
+   - Allows all outbound traffic for updates and maintenance
+   - Use the output `rds_security_group_id` in your Rise config's `vpc_security_group_ids`
+
+Both resources are automatically tagged and named consistently with the module's naming convention.
 
 **KMS Permissions (if `enable_kms = true`):**
 - `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - For KMS-encrypted ECR repositories

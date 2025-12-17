@@ -439,6 +439,23 @@ resource "aws_iam_service_linked_role" "rds" {
 }
 
 # -----------------------------------------------------------------------------
+# RDS DB Subnet Group
+# -----------------------------------------------------------------------------
+# Subnet group defines which subnets RDS instances can be placed in
+
+resource "aws_db_subnet_group" "rds" {
+  count = var.enable_rds && var.rds_vpc_id != null && length(var.rds_subnet_ids) > 0 ? 1 : 0
+
+  name_prefix = "${var.name}-rds-"
+  description = "DB subnet group for Rise RDS instances"
+  subnet_ids  = var.rds_subnet_ids
+
+  tags = merge(local.tags, {
+    Name = "${var.name}-rds"
+  })
+}
+
+# -----------------------------------------------------------------------------
 # RDS Security Group
 # -----------------------------------------------------------------------------
 # Security group for RDS instances, allowing access from specified security groups

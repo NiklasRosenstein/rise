@@ -118,3 +118,13 @@ output "rds_security_group_name" {
   description = "Name of the RDS security group (null if RDS not enabled or VPC not specified)"
   value       = var.enable_rds && var.rds_vpc_id != null ? aws_security_group.rds[0].name : null
 }
+
+output "rds_subnet_group_name" {
+  description = "Name of the RDS DB subnet group (null if RDS not enabled or subnets not specified)"
+  value       = var.enable_rds && var.rds_vpc_id != null && length(var.rds_subnet_ids) > 0 ? aws_db_subnet_group.rds[0].name : null
+}
+
+output "rds_subnet_group_arn" {
+  description = "ARN of the RDS DB subnet group (null if RDS not enabled or subnets not specified)"
+  value       = var.enable_rds && var.rds_vpc_id != null && length(var.rds_subnet_ids) > 0 ? aws_db_subnet_group.rds[0].arn : null
+}

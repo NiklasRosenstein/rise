@@ -68,6 +68,12 @@ variable "rds_allowed_security_groups" {
   default     = []
 }
 
+variable "rds_subnet_ids" {
+  description = "List of subnet IDs for the RDS subnet group (must be in the VPC specified by rds_vpc_id)"
+  type        = list(string)
+  default     = []
+}
+
 # ECR settings
 
 variable "image_tag_mutability" {
