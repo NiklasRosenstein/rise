@@ -284,9 +284,9 @@ impl AwsRdsProvisioner {
                 status.error = None;
             }
             Err(e) => {
-                error!("Failed to create RDS instance {}: {}", instance_id, e);
+                error!("Failed to create RDS instance {}: {:?}", instance_id, e);
                 status.state = RdsState::Failed;
-                status.error = Some(format!("Failed to create instance: {}", e));
+                status.error = Some(format!("Failed to create instance: {:?}", e));
             }
         }
 
@@ -410,7 +410,7 @@ impl AwsRdsProvisioner {
                 }
             }
             Err(e) => {
-                error!("Failed to describe RDS instance {}: {}", instance_id, e);
+                error!("Failed to describe RDS instance {}: {:?}", instance_id, e);
                 // Don't fail immediately, will retry on next reconcile
             }
         }
@@ -455,7 +455,7 @@ impl AwsRdsProvisioner {
                 }
             }
             Err(e) => {
-                warn!("Failed to verify RDS instance {}: {}", instance_id, e);
+                warn!("Failed to verify RDS instance {}: {:?}", instance_id, e);
                 // Don't fail immediately
             }
         }
@@ -521,13 +521,13 @@ impl AwsRdsProvisioner {
                             }
                         }
                         Err(e) => {
-                            let error_str = format!("{}", e);
+                            let error_str = format!("{:?}", e);
                             if error_str.contains("DBInstanceNotFound") {
                                 info!("RDS instance {} successfully deleted", instance_id);
                                 status.state = RdsState::Deleted;
                                 return Ok(());
                             }
-                            error!("Error checking RDS instance deletion: {}", e);
+                            error!("Error checking RDS instance deletion: {:?}", e);
                         }
                     }
                     retries += 1;
@@ -541,13 +541,13 @@ impl AwsRdsProvisioner {
                 status.state = RdsState::Deleted;
             }
             Err(e) => {
-                let error_str = format!("{}", e);
+                let error_str = format!("{:?}", e);
                 if error_str.contains("DBInstanceNotFound") {
                     info!("RDS instance {} already deleted", instance_id);
                     status.state = RdsState::Deleted;
                 } else {
-                    error!("Failed to delete RDS instance {}: {}", instance_id, e);
-                    status.error = Some(format!("Failed to delete instance: {}", e));
+                    error!("Failed to delete RDS instance {}: {:?}", instance_id, e);
+                    status.error = Some(format!("Failed to delete instance: {:?}", e));
                 }
             }
         }
@@ -726,12 +726,12 @@ impl Extension for AwsRdsProvisioner {
                             });
 
                             if let Err(e) = provisioner.reconcile_single(ext).await {
-                                error!("Failed to reconcile AWS RDS extension: {}", e);
+                                error!("Failed to reconcile AWS RDS extension: {:?}", e);
                             }
                         }
                     }
                     Err(e) => {
-                        error!("Failed to list extensions: {}", e);
+                        error!("Failed to list extensions: {:?}", e);
                     }
                 }
 
