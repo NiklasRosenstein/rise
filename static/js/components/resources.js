@@ -862,8 +862,8 @@ function ExtensionsList({ projectName }) {
                             availableExtensions
                                 .sort((a, b) => a.name.localeCompare(b.name))
                                 .map(extType => {
-                                    const enabled = isEnabled(extType.name);
-                                    const enabledData = getEnabledExtension(extType.name);
+                                    const enabled = isEnabled(extType.extension_type);
+                                    const enabledData = getEnabledExtension(extType.extension_type);
 
                                     const iconUrl = getExtensionIcon(extType.extension_type);
 
