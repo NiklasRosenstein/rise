@@ -5,9 +5,12 @@
 const { useState, useEffect } = React;
 
 // AWS RDS Extension UI Component
-function AwsRdsExtensionUI({ spec, onChange }) {
+function AwsRdsExtensionUI({ spec, schema, onChange }) {
     const [engine, setEngine] = useState(spec?.engine || 'postgres');
     const [engineVersion, setEngineVersion] = useState(spec?.engine_version || '');
+
+    // Extract default engine version from schema
+    const defaultEngineVersion = schema?.properties?.engine_version?.default || '';
 
     // Update parent when values change
     useEffect(() => {
@@ -42,7 +45,7 @@ function AwsRdsExtensionUI({ spec, onChange }) {
                 id="rds-engine-version"
                 value={engineVersion}
                 onChange={(e) => setEngineVersion(e.target.value)}
-                placeholder="e.g., 16.2 (leave empty for default)"
+                placeholder={defaultEngineVersion ? `e.g., 16.2 (default: ${defaultEngineVersion})` : "e.g., 16.2"}
             />
 
             <div className="bg-gray-800 rounded-lg p-4">

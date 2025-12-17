@@ -1398,7 +1398,8 @@ This ensures each deployment has its own isolated database while sharing the sam
                 },
                 "engine_version": {
                     "type": "string",
-                    "description": "PostgreSQL version (e.g., '16.2'). If not specified, uses the configured default version."
+                    "default": self.default_engine_version,
+                    "description": format!("PostgreSQL version (e.g., '16.2'). If not specified, uses the configured default version: {}", self.default_engine_version)
                 }
             }
         })

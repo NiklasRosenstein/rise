@@ -989,6 +989,7 @@ function ExtensionsList({ projectName }) {
                                 <div className="space-y-4">
                                     {React.createElement(getExtensionUI(selectedExtension.extension_type), {
                                         spec: uiSpec,
+                                        schema: selectedExtension.spec_schema,
                                         onChange: handleUiSpecChange
                                     })}
                                 </div>
