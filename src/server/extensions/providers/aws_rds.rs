@@ -276,6 +276,16 @@ impl AwsRdsProvisioner {
             .clone()
             .unwrap_or_else(|| "16.2".to_string());
 
+        // Build tags for the RDS instance
+        let managed_tag = aws_sdk_rds::types::Tag::builder()
+            .key("rise:managed")
+            .value("true")
+            .build();
+        let project_tag = aws_sdk_rds::types::Tag::builder()
+            .key("rise:project")
+            .value(project_name)
+            .build();
+
         let mut create_request = self
             .rds_client
             .create_db_instance()
@@ -287,7 +297,9 @@ impl AwsRdsProvisioner {
             .master_user_password(&master_password)
             .allocated_storage(self.disk_size)
             .publicly_accessible(false)
-            .storage_encrypted(true);
+            .storage_encrypted(true)
+            .tags(managed_tag)
+            .tags(project_tag);
 
         // Add VPC security groups if configured
         if let Some(ref security_groups) = self.vpc_security_group_ids {

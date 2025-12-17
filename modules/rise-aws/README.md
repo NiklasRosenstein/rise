@@ -233,6 +233,13 @@ If `enable_rds = true`, `rds_vpc_id`, and `rds_subnet_ids` are provided, the mod
 
 Both resources are automatically tagged and named consistently with the module's naming convention.
 
+**RDS Instance Tags:**
+All RDS instances created by Rise are automatically tagged with:
+- `rise:managed = "true"` - Indicates the instance is managed by Rise
+- `rise:project = "{project_name}"` - Links the instance to the Rise project
+
+These tags are useful for cost allocation, resource discovery, and operational management.
+
 **KMS Permissions (if `enable_kms = true`):**
 - `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - For KMS-encrypted ECR repositories
 
