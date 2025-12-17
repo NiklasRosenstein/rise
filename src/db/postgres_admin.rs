@@ -83,23 +83,20 @@ pub async fn create_user(pool: &PgPool, username: &str, password: &str) -> Resul
     Ok(())
 }
 
-/// Grant all privileges on a database to a user
+/// Change the owner of a database
 ///
-/// Note: Database and username must be sanitized before calling this function
-pub async fn grant_database_privileges(
+/// Note: Database and owner must be sanitized before calling this function
+pub async fn change_database_owner(
     pool: &PgPool,
     database_name: &str,
-    username: &str,
+    new_owner: &str,
 ) -> Result<()> {
-    let grant_sql = format!(
-        "GRANT ALL PRIVILEGES ON DATABASE {} TO {}",
-        database_name, username
-    );
+    let alter_sql = format!("ALTER DATABASE {} OWNER TO {}", database_name, new_owner);
 
-    sqlx::query(&grant_sql)
+    sqlx::query(&alter_sql)
         .execute(pool)
         .await
-        .context("Failed to grant database privileges")?;
+        .context("Failed to change database owner")?;
 
     Ok(())
 }

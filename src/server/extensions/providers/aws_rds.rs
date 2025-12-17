@@ -711,8 +711,8 @@ impl AwsRdsProvisioner {
                                 }
                             }
 
-                            // Grant privileges
-                            match postgres_admin::grant_database_privileges(
+                            // Change database owner to give full privileges
+                            match postgres_admin::change_database_owner(
                                 &pool,
                                 &sanitized_database,
                                 &sanitized_username,
@@ -721,13 +721,13 @@ impl AwsRdsProvisioner {
                             {
                                 Ok(_) => {
                                     info!(
-                                        "Granted privileges on '{}' to '{}'",
+                                        "Changed owner of '{}' to '{}'",
                                         db_name, db_status.user
                                     );
                                     db_status.status = DatabaseState::Available;
                                 }
                                 Err(e) => {
-                                    error!("Failed to grant privileges: {:?}", e);
+                                    error!("Failed to change database owner: {:?}", e);
                                     return Ok(());
                                 }
                             }
@@ -1218,20 +1218,20 @@ impl Extension for AwsRdsProvisioner {
                 );
                 }
 
-                // Grant privileges on the database to the user
+                // Change database owner to the user (gives full privileges)
                 let sanitized_username = sanitize_identifier(&username)?;
                 let sanitized_database = sanitize_identifier(&database_name)?;
 
-                postgres_admin::grant_database_privileges(
+                postgres_admin::change_database_owner(
                     &pool,
                     &sanitized_database,
                     &sanitized_username,
                 )
                 .await
-                .context("Failed to grant database privileges")?;
+                .context("Failed to change database owner")?;
 
                 info!(
-                    "Granted privileges on database '{}' to user '{}'",
+                    "Changed owner of database '{}' to user '{}'",
                     database_name, username
                 );
 
