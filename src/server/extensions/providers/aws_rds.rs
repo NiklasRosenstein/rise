@@ -31,15 +31,26 @@ fn default_engine() -> String {
     "postgres".to_string()
 }
 
-/// Credentials for a database user
+/// Status and credentials for a specific database
 #[derive(Debug, Clone, Deserialize, Serialize)]
-pub struct DatabaseUserCredentials {
-    /// Database name
-    pub database_name: String,
+pub struct DatabaseStatus {
     /// Username for this database
-    pub username: String,
+    pub user: String,
     /// Encrypted password for this user
     pub password_encrypted: String,
+    /// Current provisioning status
+    pub status: DatabaseState,
+}
+
+/// Provisioning state for an individual database
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub enum DatabaseState {
+    Pending,
+    CreatingDatabase,
+    CreatingUser,
+    Available,
+    Terminating,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -58,12 +69,10 @@ pub struct AwsRdsStatus {
     /// Encrypted master password
     #[serde(skip_serializing_if = "Option::is_none")]
     pub master_password_encrypted: Option<String>,
-    /// Map of database names to their user credentials (deployment_group -> credentials)
+    /// Map of database names to their status and credentials
+    /// Key is the database name (e.g., project name for default, or "{project}_{deployment_group}" for non-default)
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    pub database_users: HashMap<String, DatabaseUserCredentials>,
-    /// Whether the default database has been created successfully
-    #[serde(default)]
-    pub default_database_created: bool,
+    pub databases: HashMap<String, DatabaseStatus>,
     /// Last error message
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
@@ -150,8 +159,7 @@ impl AwsRdsProvisioner {
                 endpoint: None,
                 master_username: None,
                 master_password_encrypted: None,
-                database_users: HashMap::new(),
-                default_database_created: false,
+                databases: HashMap::new(),
                 error: None,
             });
 
@@ -394,54 +402,53 @@ impl AwsRdsProvisioner {
                                     {
                                         status.endpoint = Some(format!("{}:{}", address, port));
 
-                                        // Create the default database if not already created
-                                        if !status.default_database_created {
-                                            if let (Some(username), Some(encrypted_pass)) = (
-                                                status.master_username.as_ref(),
-                                                status.master_password_encrypted.as_ref(),
-                                            ) {
-                                                match self
-                                                    .encryption_provider
-                                                    .decrypt(encrypted_pass)
-                                                    .await
-                                                {
-                                                    Ok(password) => {
-                                                        let admin_db_url = format!(
-                                                            "postgres://{}:{}@{}:{}/postgres",
-                                                            username, password, address, port
-                                                        );
+                                        // Provision default database with state tracking
+                                        let default_db_name = project_name.to_string();
+                                        let db_status = status
+                                            .databases
+                                            .entry(default_db_name.clone())
+                                            .or_insert_with(|| {
+                                                // Generate credentials for new database
+                                                let username = format!("{}_user", project_name);
+                                                let password = self.generate_password();
+                                                let encrypted = futures::executor::block_on(
+                                                    self.encryption_provider.encrypt(&password),
+                                                )
+                                                .unwrap_or(password.clone()); // Fallback if encryption fails
 
-                                                        match self
-                                                            .create_default_database(
-                                                                &admin_db_url,
-                                                                project_name,
-                                                            )
-                                                            .await
-                                                        {
-                                                            Ok(_) => {
-                                                                info!(
-                                                                    "Created default database for project '{}'",
-                                                                    project_name
-                                                                );
-                                                                status.default_database_created =
-                                                                    true;
-                                                            }
-                                                            Err(e) => {
-                                                                error!(
-                                                                    "Failed to create default database for project '{}': {:?}",
-                                                                    project_name, e
-                                                                );
-                                                                // Don't mark as Available yet, will retry
-                                                                status.state = RdsState::Creating;
-                                                                status.error = Some(format!(
-                                                                    "Failed to create default database: {}",
-                                                                    e
-                                                                ));
-                                                                // Return early to retry on next reconciliation
-                                                                return Ok(());
-                                                            }
-                                                        }
-                                                    }
+                                                DatabaseStatus {
+                                                    user: username,
+                                                    password_encrypted: encrypted,
+                                                    status: DatabaseState::Pending,
+                                                }
+                                            });
+
+                                        // Provision database based on its current state
+                                        match db_status.status {
+                                            DatabaseState::Pending => {
+                                                info!(
+                                                    "Starting provisioning for default database '{}'",
+                                                    default_db_name
+                                                );
+                                                db_status.status = DatabaseState::CreatingDatabase;
+                                                // Will continue in next reconciliation
+                                                return Ok(());
+                                            }
+                                            DatabaseState::CreatingDatabase => {
+                                                // Decrypt master password
+                                                let master_password = match status
+                                                    .master_password_encrypted
+                                                    .as_ref()
+                                                    .ok_or_else(|| {
+                                                        anyhow::anyhow!("Master password not set")
+                                                    })
+                                                    .and_then(|encrypted| {
+                                                        futures::executor::block_on(
+                                                            self.encryption_provider
+                                                                .decrypt(encrypted),
+                                                        )
+                                                    }) {
+                                                    Ok(pwd) => pwd,
                                                     Err(e) => {
                                                         error!(
                                                             "Failed to decrypt master password: {}",
@@ -452,18 +459,218 @@ impl AwsRdsProvisioner {
                                                             "Failed to decrypt master password"
                                                                 .to_string(),
                                                         );
-                                                        // Return early, marked as Failed
+                                                        return Ok(());
+                                                    }
+                                                };
+
+                                                let admin_db_url = format!(
+                                                    "postgres://{}:{}@{}:{}/ postgres",
+                                                    status.master_username.as_ref().unwrap(),
+                                                    master_password,
+                                                    address,
+                                                    port
+                                                );
+
+                                                // Create database
+                                                match self
+                                                    .create_default_database(
+                                                        &admin_db_url,
+                                                        &default_db_name,
+                                                    )
+                                                    .await
+                                                {
+                                                    Ok(_) => {
+                                                        info!(
+                                                            "Created database '{}'",
+                                                            default_db_name
+                                                        );
+                                                        db_status.status =
+                                                            DatabaseState::CreatingUser;
+                                                        // Will continue in next reconciliation
+                                                        return Ok(());
+                                                    }
+                                                    Err(e) => {
+                                                        error!(
+                                                            "Failed to create database '{}': {:?}",
+                                                            default_db_name, e
+                                                        );
+                                                        status.state = RdsState::Creating;
+                                                        status.error = Some(format!(
+                                                            "Failed to create database: {}",
+                                                            e
+                                                        ));
                                                         return Ok(());
                                                     }
                                                 }
+                                            }
+                                            DatabaseState::CreatingUser => {
+                                                // Decrypt passwords
+                                                let master_password = match status
+                                                    .master_password_encrypted
+                                                    .as_ref()
+                                                    .ok_or_else(|| {
+                                                        anyhow::anyhow!("Master password not set")
+                                                    })
+                                                    .and_then(|encrypted| {
+                                                        futures::executor::block_on(
+                                                            self.encryption_provider
+                                                                .decrypt(encrypted),
+                                                        )
+                                                    }) {
+                                                    Ok(pwd) => pwd,
+                                                    Err(e) => {
+                                                        error!(
+                                                            "Failed to decrypt master password: {}",
+                                                            e
+                                                        );
+                                                        status.state = RdsState::Failed;
+                                                        return Ok(());
+                                                    }
+                                                };
+
+                                                let user_password =
+                                                    match futures::executor::block_on(
+                                                        self.encryption_provider
+                                                            .decrypt(&db_status.password_encrypted),
+                                                    ) {
+                                                        Ok(pwd) => pwd,
+                                                        Err(e) => {
+                                                            error!(
+                                                            "Failed to decrypt user password: {}",
+                                                            e
+                                                        );
+                                                            db_status.status =
+                                                                DatabaseState::Pending;
+                                                            return Ok(());
+                                                        }
+                                                    };
+
+                                                // Create user and grant privileges
+                                                let admin_db_url = format!(
+                                                    "postgres://{}:{}@{}:{}/postgres",
+                                                    status.master_username.as_ref().unwrap(),
+                                                    master_password,
+                                                    address,
+                                                    port
+                                                );
+
+                                                match PgPool::connect(&admin_db_url).await {
+                                                    Ok(pool) => {
+                                                        let sanitized_username =
+                                                            match sanitize_identifier(
+                                                                &db_status.user,
+                                                            ) {
+                                                                Ok(u) => u,
+                                                                Err(e) => {
+                                                                    error!(
+                                                                        "Invalid username: {}",
+                                                                        e
+                                                                    );
+                                                                    db_status.status =
+                                                                        DatabaseState::Pending;
+                                                                    return Ok(());
+                                                                }
+                                                            };
+
+                                                        let sanitized_database =
+                                                            match sanitize_identifier(
+                                                                &default_db_name,
+                                                            ) {
+                                                                Ok(d) => d,
+                                                                Err(e) => {
+                                                                    error!(
+                                                                        "Invalid database name: {}",
+                                                                        e
+                                                                    );
+                                                                    db_status.status =
+                                                                        DatabaseState::Pending;
+                                                                    return Ok(());
+                                                                }
+                                                            };
+
+                                                        // Create user if doesn't exist
+                                                        match postgres_admin::create_user(
+                                                            &pool,
+                                                            &sanitized_username,
+                                                            &user_password,
+                                                        )
+                                                        .await
+                                                        {
+                                                            Ok(_) => info!(
+                                                                "Created user '{}'",
+                                                                db_status.user
+                                                            ),
+                                                            Err(e) => {
+                                                                error!(
+                                                                    "Failed to create user: {:?}",
+                                                                    e
+                                                                );
+                                                                return Ok(());
+                                                            }
+                                                        }
+
+                                                        // Grant privileges
+                                                        match postgres_admin::grant_database_privileges(
+                                                            &pool,
+                                                            &sanitized_database,
+                                                            &sanitized_username,
+                                                        )
+                                                        .await
+                                                        {
+                                                            Ok(_) => {
+                                                                info!(
+                                                                    "Granted privileges on '{}' to '{}'",
+                                                                    default_db_name, db_status.user
+                                                                );
+                                                                db_status.status =
+                                                                    DatabaseState::Available;
+                                                            }
+                                                            Err(e) => {
+                                                                error!(
+                                                                    "Failed to grant privileges: {:?}",
+                                                                    e
+                                                                );
+                                                                return Ok(());
+                                                            }
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        error!(
+                                                            "Failed to connect to RDS instance: {:?}",
+                                                            e
+                                                        );
+                                                        status.error = Some(format!(
+                                                            "Failed to connect: {}",
+                                                            e
+                                                        ));
+                                                        return Ok(());
+                                                    }
+                                                }
+                                            }
+                                            DatabaseState::Available => {
+                                                // Database fully provisioned, nothing to do
+                                            }
+                                            DatabaseState::Terminating => {
+                                                // Should not happen for default database during creation
+                                                warn!(
+                                                    "Default database is in Terminating state during RDS creation"
+                                                );
                                             }
                                         }
                                     }
                                 }
 
-                                // Only mark as Available if database creation succeeded
-                                if status.default_database_created {
+                                // Only mark as Available if all databases are Available
+                                let all_databases_ready = status
+                                    .databases
+                                    .values()
+                                    .all(|db| db.status == DatabaseState::Available);
+
+                                if all_databases_ready && !status.databases.is_empty() {
                                     status.error = None;
+                                } else {
+                                    // Keep state as Creating if databases aren't ready yet
+                                    status.state = RdsState::Creating;
                                 }
                             }
                             "creating" | "backing-up" | "modifying" => {
@@ -932,22 +1139,31 @@ impl Extension for AwsRdsProvisioner {
                 .context("Failed to create database copy for deployment group")?;
         }
 
-        // Check if we already have credentials for this deployment group
+        // Check if we already have credentials for this database
         let (db_username, db_password) =
-            if let Some(creds) = status.database_users.get(deployment_group) {
+            if let Some(db_status) = status.databases.get(&database_name) {
                 // Reuse existing credentials
                 info!(
-                    "Reusing existing database user '{}' for deployment group '{}'",
-                    creds.username, deployment_group
+                    "Reusing existing database user '{}' for database '{}'",
+                    db_status.user, database_name
                 );
+
+                // Ensure database is Available before using it
+                if db_status.status != DatabaseState::Available {
+                    anyhow::bail!(
+                        "Database '{}' is not available (current state: {:?})",
+                        database_name,
+                        db_status.status
+                    );
+                }
 
                 let password = self
                     .encryption_provider
-                    .decrypt(&creds.password_encrypted)
+                    .decrypt(&db_status.password_encrypted)
                     .await
                     .context("Failed to decrypt database user password")?;
 
-                (creds.username.clone(), password)
+                (db_status.user.clone(), password)
             } else {
                 // Create new database user credentials
                 let username = if deployment_group == "default" {
@@ -1013,12 +1229,12 @@ impl Extension for AwsRdsProvisioner {
                     .await
                     .context("Failed to encrypt database user password")?;
 
-                status.database_users.insert(
-                    deployment_group.to_string(),
-                    DatabaseUserCredentials {
-                        database_name: database_name.clone(),
-                        username: username.clone(),
+                status.databases.insert(
+                    database_name.clone(),
+                    DatabaseStatus {
+                        user: username.clone(),
                         password_encrypted: encrypted_password,
+                        status: DatabaseState::Available,
                     },
                 );
 
@@ -1033,8 +1249,8 @@ impl Extension for AwsRdsProvisioner {
                 .context("Failed to update extension status with new database user")?;
 
                 info!(
-                    "Stored credentials for deployment group '{}' in extension status",
-                    deployment_group
+                    "Stored credentials for database '{}' in extension status",
+                    database_name
                 );
 
                 (username, password)
