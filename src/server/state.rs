@@ -503,7 +503,8 @@ impl AppState {
                                     vpc_security_group_ids: vpc_security_group_ids.clone(),
                                     db_subnet_group_name: db_subnet_group_name.clone(),
                                 }
-                            );
+                            )
+                            .await?;
 
                         let aws_rds_arc: Arc<dyn crate::server::extensions::Extension> =
                             Arc::new(aws_rds_provisioner);

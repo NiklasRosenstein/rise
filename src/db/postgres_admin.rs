@@ -1,5 +1,9 @@
 use anyhow::{Context, Result};
 use sqlx::PgPool;
+use std::path::{Path, PathBuf};
+use tempfile::NamedTempFile;
+use tokio::process::Command;
+use tracing::{info, warn};
 
 /// Check if a PostgreSQL database exists
 pub async fn database_exists(pool: &PgPool, database_name: &str) -> Result<bool> {
@@ -63,17 +67,15 @@ pub async fn user_exists(pool: &PgPool, username: &str) -> Result<bool> {
     Ok(exists)
 }
 
-/// Create a PostgreSQL user with a password and CREATEDB privilege
+/// Create a PostgreSQL user with a password
 ///
 /// Note: Username must be sanitized before calling this function to prevent SQL injection
 /// Password will be properly escaped for SQL
-///
-/// CREATEDB privilege is required for users to create database copies from databases they own
 pub async fn create_user(pool: &PgPool, username: &str, password: &str) -> Result<()> {
     // Escape single quotes in password by doubling them
     let escaped_password = password.replace('\'', "''");
     let create_sql = format!(
-        "CREATE USER {} WITH PASSWORD '{}' CREATEDB",
+        "CREATE USER {} WITH PASSWORD '{}'",
         username, escaped_password
     );
 
@@ -103,23 +105,143 @@ pub async fn change_database_owner(
     Ok(())
 }
 
-/// Grant a role to another role (role membership)
+/// Dump a PostgreSQL database to a temporary file using pg_dump
 ///
-/// This allows the grantee to SET ROLE to the granted role, which is required
-/// for operations like creating databases owned by the granted role.
+/// This function creates a dump of the specified database in PostgreSQL custom format (-Fc)
+/// which supports parallel restore and selective restore.
 ///
-/// Note: Both role names must be sanitized before calling this function
-pub async fn grant_role(
-    pool: &PgPool,
-    role_to_grant: &str,
-    grantee: &str,
-) -> Result<()> {
-    let grant_sql = format!("GRANT {} TO {}", role_to_grant, grantee);
+/// The dump file is created in a temporary location and must be cleaned up by the caller.
+///
+/// # Arguments
+/// * `host` - Database host (e.g., "localhost" or RDS endpoint)
+/// * `port` - Database port (typically 5432)
+/// * `database` - Name of the database to dump
+/// * `username` - Database username for authentication
+/// * `password` - Database password for authentication
+///
+/// # Returns
+/// Path to the temporary dump file
+///
+/// # Errors
+/// Returns an error if pg_dump is not found in PATH or if the dump operation fails
+pub async fn dump_database(
+    host: &str,
+    port: u16,
+    database: &str,
+    username: &str,
+    password: &str,
+) -> Result<PathBuf> {
+    // Create a temporary file for the dump
+    let temp_file =
+        NamedTempFile::new().context("Failed to create temporary file for database dump")?;
+    let dump_path = temp_file.path().to_path_buf();
 
-    sqlx::query(&grant_sql)
-        .execute(pool)
+    // Keep the temp file from being deleted (we'll clean it up manually)
+    let (_, path) = temp_file
+        .keep()
+        .context("Failed to persist temporary dump file")?;
+
+    info!(
+        "Dumping database '{}' from {}:{} to {:?}",
+        database, host, port, path
+    );
+
+    // Execute pg_dump with custom format
+    let output = Command::new("pg_dump")
+        .arg("-Fc") // Custom format (supports parallel restore)
+        .arg("-h")
+        .arg(host)
+        .arg("-p")
+        .arg(port.to_string())
+        .arg("-U")
+        .arg(username)
+        .arg("-d")
+        .arg(database)
+        .arg("-f")
+        .arg(&path)
+        .env("PGPASSWORD", password)
+        .output()
         .await
-        .context("Failed to grant role")?;
+        .context("Failed to execute pg_dump (is it installed and in PATH?)")?;
 
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "pg_dump failed with exit code {:?}: {}",
+            output.status.code(),
+            stderr
+        );
+    }
+
+    // Log any warnings from pg_dump
+    if !output.stderr.is_empty() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!("pg_dump warnings: {}", stderr);
+    }
+
+    info!("Successfully dumped database '{}' to {:?}", database, path);
+    Ok(path)
+}
+
+/// Restore a PostgreSQL database from a dump file using pg_restore
+///
+/// This function restores a database from a pg_dump custom format file.
+/// The target database must already exist and be empty.
+///
+/// # Arguments
+/// * `host` - Database host (e.g., "localhost" or RDS endpoint)
+/// * `port` - Database port (typically 5432)
+/// * `database` - Name of the target database (must already exist)
+/// * `username` - Database username for authentication
+/// * `password` - Database password for authentication
+/// * `dump_file` - Path to the pg_dump custom format file
+///
+/// # Errors
+/// Returns an error if pg_restore is not found in PATH or if the restore operation fails
+pub async fn restore_database(
+    host: &str,
+    port: u16,
+    database: &str,
+    username: &str,
+    password: &str,
+    dump_file: &Path,
+) -> Result<()> {
+    info!(
+        "Restoring database '{}' from {:?} to {}:{}",
+        database, dump_file, host, port
+    );
+
+    // Execute pg_restore
+    let output = Command::new("pg_restore")
+        .arg("-h")
+        .arg(host)
+        .arg("-p")
+        .arg(port.to_string())
+        .arg("-U")
+        .arg(username)
+        .arg("-d")
+        .arg(database)
+        .arg(dump_file)
+        .env("PGPASSWORD", password)
+        .output()
+        .await
+        .context("Failed to execute pg_restore (is it installed and in PATH?)")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!(
+            "pg_restore failed with exit code {:?}: {}",
+            output.status.code(),
+            stderr
+        );
+    }
+
+    // Log any warnings from pg_restore
+    if !output.stderr.is_empty() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        warn!("pg_restore warnings: {}", stderr);
+    }
+
+    info!("Successfully restored database '{}'", database);
     Ok(())
 }

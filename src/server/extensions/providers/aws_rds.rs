@@ -135,9 +135,56 @@ pub struct AwsRdsProvisioner {
     db_subnet_group_name: Option<String>,
 }
 
+/// Check if PostgreSQL client tools (pg_dump, pg_restore) are available in PATH
+async fn check_postgres_tools() -> Result<()> {
+    use tokio::process::Command;
+
+    // Check pg_dump
+    let pg_dump_output = Command::new("pg_dump")
+        .arg("--version")
+        .output()
+        .await
+        .context("pg_dump not found in PATH")?;
+
+    if !pg_dump_output.status.success() {
+        anyhow::bail!("pg_dump command failed");
+    }
+
+    // Check pg_restore
+    let pg_restore_output = Command::new("pg_restore")
+        .arg("--version")
+        .output()
+        .await
+        .context("pg_restore not found in PATH")?;
+
+    if !pg_restore_output.status.success() {
+        anyhow::bail!("pg_restore command failed");
+    }
+
+    // Log versions for diagnostics
+    let pg_dump_version = String::from_utf8_lossy(&pg_dump_output.stdout)
+        .trim()
+        .to_string();
+    let pg_restore_version = String::from_utf8_lossy(&pg_restore_output.stdout)
+        .trim()
+        .to_string();
+
+    info!("PostgreSQL client tools found:");
+    info!("  {}", pg_dump_version);
+    info!("  {}", pg_restore_version);
+
+    Ok(())
+}
+
 impl AwsRdsProvisioner {
-    pub fn new(config: AwsRdsProvisionerConfig) -> Self {
-        Self {
+    pub async fn new(config: AwsRdsProvisionerConfig) -> Result<Self> {
+        // Validate that PostgreSQL client tools are available
+        check_postgres_tools().await.context(
+            "PostgreSQL client tools (pg_dump, pg_restore) not found in PATH. \
+             Please install postgresql-client package.",
+        )?;
+
+        Ok(Self {
             name: config.name,
             rds_client: config.rds_client,
             db_pool: config.db_pool,
@@ -149,7 +196,7 @@ impl AwsRdsProvisioner {
             default_engine_version: config.default_engine_version,
             vpc_security_group_ids: config.vpc_security_group_ids,
             db_subnet_group_name: config.db_subnet_group_name,
-        }
+        })
     }
 
     fn instance_id_for_project(&self, project_name: &str) -> String {
@@ -897,24 +944,25 @@ impl AwsRdsProvisioner {
         Ok(())
     }
 
-    /// Create a copy of a database using PostgreSQL's CREATE DATABASE ... WITH TEMPLATE
+    /// Create a copy of a database using pg_dump and pg_restore
     /// Falls back to creating an empty database if the template doesn't exist
     ///
-    /// Connects as the template database owner to perform the copy, since only the owner
-    /// or a superuser can copy a database in PostgreSQL
+    /// This approach works reliably even when the template database has active connections,
+    /// unlike CREATE DATABASE WITH TEMPLATE which requires zero connections.
     async fn create_database_copy(
         &self,
-        template_owner_db_url: &str,
+        admin_db_url: &str,
         new_database: &str,
         template_database: &str,
         owner: &str,
+        endpoint: &str,
+        master_username: &str,
+        master_password: &str,
     ) -> Result<()> {
-        // Connect to the postgres database using template owner's credentials
-        // This is necessary because CREATE DATABASE ... WITH TEMPLATE requires
-        // the executing user to own the template database
-        let pool = PgPool::connect(template_owner_db_url)
+        // Connect to the postgres database using admin credentials
+        let pool = PgPool::connect(admin_db_url)
             .await
-            .context("Failed to connect to RDS instance as template owner")?;
+            .context("Failed to connect to RDS instance as admin")?;
 
         // Check if the new database already exists
         let exists = postgres_admin::database_exists(&pool, new_database).await?;
@@ -935,16 +983,50 @@ impl AwsRdsProvisioner {
         let sanitized_owner = sanitize_identifier(owner)?;
 
         if template_exists {
-            // Create from template if it exists
-            let sanitized_template_db = sanitize_identifier(template_database)?;
+            // Create database copy using pg_dump/pg_restore
+            // This approach works even when the template database has active connections
+            info!(
+                "Creating database '{}' from template '{}' using pg_dump/pg_restore",
+                new_database, template_database
+            );
 
-            postgres_admin::create_database_from_template(
-                &pool,
-                &sanitized_new_db,
-                &sanitized_template_db,
-                &sanitized_owner,
+            // First, create an empty database with the correct owner
+            postgres_admin::create_database(&pool, &sanitized_new_db, &sanitized_owner)
+                .await
+                .context("Failed to create empty target database")?;
+
+            // Parse endpoint to get host and port
+            let (host, port) = parse_endpoint(endpoint)?;
+
+            // Dump the template database
+            let dump_file = postgres_admin::dump_database(
+                &host,
+                port,
+                template_database,
+                master_username,
+                master_password,
             )
-            .await?;
+            .await
+            .context("Failed to dump template database")?;
+
+            // Restore into the new database
+            let restore_result = postgres_admin::restore_database(
+                &host,
+                port,
+                new_database,
+                master_username,
+                master_password,
+                &dump_file,
+            )
+            .await;
+
+            // Clean up the dump file regardless of restore result
+            if let Err(e) = std::fs::remove_file(&dump_file) {
+                warn!("Failed to clean up dump file {:?}: {}", dump_file, e);
+            }
+
+            // Return restore result
+            restore_result.context("Failed to restore template database")?;
 
             info!(
                 "Successfully created database '{}' from template '{}'",
@@ -983,6 +1065,22 @@ fn sanitize_identifier(identifier: &str) -> Result<String> {
 
     // Quote the identifier to handle reserved words and special characters
     Ok(format!("\"{}\"", identifier))
+}
+
+/// Parse an RDS endpoint into host and port
+///
+/// RDS endpoints are typically in the format: "hostname:port" or just "hostname"
+/// Default port is 5432 if not specified
+fn parse_endpoint(endpoint: &str) -> Result<(String, u16)> {
+    if let Some((host, port_str)) = endpoint.split_once(':') {
+        let port = port_str
+            .parse::<u16>()
+            .context("Invalid port number in endpoint")?;
+        Ok((host.to_string(), port))
+    } else {
+        // No port specified, use default PostgreSQL port
+        Ok((endpoint.to_string(), 5432))
+    }
 }
 
 #[async_trait]
@@ -1036,19 +1134,28 @@ impl Extension for AwsRdsProvisioner {
                         }
 
                         for ext in extensions {
-                            let provisioner = AwsRdsProvisioner::new(AwsRdsProvisionerConfig {
-                                name: name.clone(),
-                                rds_client: rds_client.clone(),
-                                db_pool: db_pool.clone(),
-                                encryption_provider: encryption_provider.clone(),
-                                region: region.clone(),
-                                instance_size: instance_size.clone(),
-                                disk_size,
-                                instance_id_template: instance_id_template.clone(),
-                                default_engine_version: default_engine_version.clone(),
-                                vpc_security_group_ids: vpc_security_group_ids.clone(),
-                                db_subnet_group_name: db_subnet_group_name.clone(),
-                            });
+                            let provisioner =
+                                match AwsRdsProvisioner::new(AwsRdsProvisionerConfig {
+                                    name: name.clone(),
+                                    rds_client: rds_client.clone(),
+                                    db_pool: db_pool.clone(),
+                                    encryption_provider: encryption_provider.clone(),
+                                    region: region.clone(),
+                                    instance_size: instance_size.clone(),
+                                    disk_size,
+                                    instance_id_template: instance_id_template.clone(),
+                                    default_engine_version: default_engine_version.clone(),
+                                    vpc_security_group_ids: vpc_security_group_ids.clone(),
+                                    db_subnet_group_name: db_subnet_group_name.clone(),
+                                })
+                                .await
+                                {
+                                    Ok(p) => p,
+                                    Err(e) => {
+                                        error!("Failed to create AWS RDS provisioner: {:?}", e);
+                                        continue;
+                                    }
+                                };
 
                             if let Err(e) = provisioner.reconcile_single(ext).await {
                                 error!("Failed to reconcile AWS RDS extension: {:?}", e);
@@ -1195,28 +1302,6 @@ impl Extension for AwsRdsProvisioner {
                 );
             }
 
-            // Grant the new user role to the default database owner
-            // This allows the default database owner to SET ROLE to the new user,
-            // which is required for creating databases owned by the new user
-            // We do this even if the user already exists to handle the case where
-            // a previous attempt failed before granting the role
-            let default_db_status = status
-                .databases
-                .get(&project.name)
-                .ok_or_else(|| anyhow::anyhow!("Default database not found in status"))?;
-
-            let template_owner_username = &default_db_status.user;
-            let sanitized_template_owner = sanitize_identifier(template_owner_username)?;
-
-            postgres_admin::grant_role(&pool, &sanitized_username, &sanitized_template_owner)
-                .await
-                .context("Failed to grant new user role to template owner")?;
-
-            info!(
-                "Granted role '{}' to template owner '{}' for database copy operations",
-                new_db_username, template_owner_username
-            );
-
             pool.close().await;
 
             info!(
@@ -1224,34 +1309,17 @@ impl Extension for AwsRdsProvisioner {
                 database_name, project.name
             );
 
-            // Get the default database's owner credentials to create the copy
-            // The template owner must execute CREATE DATABASE ... WITH TEMPLATE
-            // because only the database owner (or superuser) can copy a database
-            let default_db_status = status
-                .databases
-                .get(&project.name)
-                .ok_or_else(|| anyhow::anyhow!("Default database not found in status"))?;
-
-            let template_owner_username = &default_db_status.user;
-            let template_owner_password = self
-                .encryption_provider
-                .decrypt(&default_db_status.password_encrypted)
-                .await
-                .context("Failed to decrypt template owner password")?;
-
-            // Create connection URL using template owner's credentials
-            // The template owner has CREATEDB privilege, allowing them to create database copies
-            let template_owner_db_url = format!(
-                "postgres://{}:{}@{}/{}",
-                template_owner_username, template_owner_password, endpoint, RDS_ADMIN_DATABASE
-            );
-
-            // Create the database copy with the new user as owner
+            // Create the database copy using admin credentials
+            // This approach uses pg_dump/pg_restore which works even when
+            // the template database has active connections
             self.create_database_copy(
-                &template_owner_db_url,
+                &admin_db_url,
                 &database_name,
                 &project.name,
                 &new_db_username,
+                endpoint,
+                master_username,
+                &master_password,
             )
             .await
             .context("Failed to create database copy for deployment group")?;
