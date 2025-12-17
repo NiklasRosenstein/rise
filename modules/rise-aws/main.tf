@@ -153,7 +153,7 @@ data "aws_iam_policy_document" "backend" {
   dynamic "statement" {
     for_each = var.enable_rds ? [1] : []
     content {
-      sid    = "ManageRDS"
+      sid    = "ManageRDSInstances"
       effect = "Allow"
       actions = [
         "rds:CreateDBInstance",
@@ -165,7 +165,8 @@ data "aws_iam_policy_document" "backend" {
         "rds:RemoveTagsFromResource"
       ]
       resources = [
-        "arn:aws:rds:${local.region}:${local.account_id}:db:rise-*"
+        "arn:aws:rds:${local.region}:${local.account_id}:db:rise-*",
+        "arn:aws:rds:${local.region}:${local.account_id}:subgrp:rise-*"
       ]
     }
   }
