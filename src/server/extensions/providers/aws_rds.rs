@@ -65,6 +65,9 @@ pub struct AwsRdsStatus {
     /// RDS instance identifier
     #[serde(skip_serializing_if = "Option::is_none")]
     pub instance_id: Option<String>,
+    /// RDS instance size (e.g., "db.t4g.micro")
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub instance_size: Option<String>,
     /// Database endpoint (host:port)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub endpoint: Option<String>,
@@ -167,6 +170,7 @@ impl AwsRdsProvisioner {
             .unwrap_or(AwsRdsStatus {
                 state: RdsState::Pending,
                 instance_id: None,
+                instance_size: None,
                 endpoint: None,
                 master_username: None,
                 master_password_encrypted: None,
@@ -372,6 +376,7 @@ impl AwsRdsProvisioner {
                 info!("RDS create request sent for instance {}", instance_id);
                 status.state = RdsState::Creating;
                 status.instance_id = Some(instance_id);
+                status.instance_size = Some(self.instance_size.clone());
                 status.master_username = Some(master_username);
                 status.master_password_encrypted = Some(encrypted_password);
                 status.error = None;
