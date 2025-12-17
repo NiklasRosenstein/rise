@@ -8,6 +8,8 @@ const { useState, useEffect } = React;
 function AwsRdsExtensionUI({ spec, schema, onChange }) {
     const [engine, setEngine] = useState(spec?.engine || 'postgres');
     const [engineVersion, setEngineVersion] = useState(spec?.engine_version || '');
+    const [injectDatabaseUrl, setInjectDatabaseUrl] = useState(spec?.inject_database_url !== false);
+    const [injectPgVars, setInjectPgVars] = useState(spec?.inject_pg_vars !== false);
 
     // Extract default engine version from schema
     const defaultEngineVersion = schema?.properties?.engine_version?.default || '';
@@ -17,6 +19,8 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
         // Build the spec object, omitting empty values
         const newSpec = {
             engine,
+            inject_database_url: injectDatabaseUrl,
+            inject_pg_vars: injectPgVars,
         };
 
         // Only include engine_version if it's not empty
@@ -25,7 +29,7 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
         }
 
         onChange(newSpec);
-    }, [engine, engineVersion, onChange]);
+    }, [engine, engineVersion, injectDatabaseUrl, injectPgVars, onChange]);
 
     return (
         <div className="space-y-4">
@@ -48,6 +52,34 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                 placeholder={defaultEngineVersion || "e.g., 16.2"}
             />
 
+            <div className="space-y-3">
+                <h4 className="text-sm font-semibold text-gray-300">Environment Variables</h4>
+                <label className="flex items-center space-x-3">
+                    <input
+                        type="checkbox"
+                        checked={injectDatabaseUrl}
+                        onChange={(e) => setInjectDatabaseUrl(e.target.checked)}
+                        className="w-4 h-4 text-indigo-600 bg-gray-700 border-gray-600 rounded focus:ring-indigo-500 focus:ring-2"
+                    />
+                    <span className="text-sm text-gray-300">
+                        Inject <code className="bg-gray-700 px-1 rounded">DATABASE_URL</code>
+                        <span className="text-gray-500 ml-2">(full connection string)</span>
+                    </span>
+                </label>
+                <label className="flex items-center space-x-3">
+                    <input
+                        type="checkbox"
+                        checked={injectPgVars}
+                        onChange={(e) => setInjectPgVars(e.target.checked)}
+                        className="w-4 h-4 text-indigo-600 bg-gray-700 border-gray-600 rounded focus:ring-indigo-500 focus:ring-2"
+                    />
+                    <span className="text-sm text-gray-300">
+                        Inject <code className="bg-gray-700 px-1 rounded">PG*</code> variables
+                        <span className="text-gray-500 ml-2">(PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)</span>
+                    </span>
+                </label>
+            </div>
+
             <div className="bg-gray-800 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-gray-300 mb-2">About This Extension</h4>
                 <p className="text-sm text-gray-400">
@@ -60,21 +92,48 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                 </p>
             </div>
 
+            <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
+                <p className="text-sm text-yellow-200">
+                    Creating a new RDS instance typically takes <strong>5-15 minutes</strong>.
+                    No new deployments can be created until the RDS instance is available.
+                    You can monitor the provisioning status in the Extensions tab.
+                </p>
+            </div>
+
             <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-blue-300 mb-2">Environment Variables</h4>
-                <p className="text-sm text-blue-200 mb-2">
-                    The following standard PostgreSQL environment variables will be automatically injected into your deployments:
+                <h4 className="text-sm font-semibold text-blue-300 mb-2">📋 Injected Variables</h4>
+                <p className="text-sm text-blue-200 mb-3">
+                    Based on your configuration above, the following variables will be injected:
                 </p>
-                <ul className="text-sm text-blue-200 space-y-1 list-disc list-inside">
-                    <li><code className="bg-blue-900/30 px-1 rounded">PGHOST</code> - Database hostname</li>
-                    <li><code className="bg-blue-900/30 px-1 rounded">PGPORT</code> - Database port (5432)</li>
-                    <li><code className="bg-blue-900/30 px-1 rounded">PGDATABASE</code> - Database name</li>
-                    <li><code className="bg-blue-900/30 px-1 rounded">PGUSER</code> - Database username</li>
-                    <li><code className="bg-blue-900/30 px-1 rounded">PGPASSWORD</code> - Database password</li>
-                </ul>
-                <p className="text-sm text-blue-200 mt-2">
-                    These are recognized by <code className="bg-blue-900/30 px-1 rounded">psql</code> and most PostgreSQL client libraries.
-                </p>
+                {injectDatabaseUrl && (
+                    <div className="mb-3">
+                        <p className="text-sm text-blue-200 font-semibold mb-1">DATABASE_URL:</p>
+                        <ul className="text-sm text-blue-200 space-y-1 list-disc list-inside ml-4">
+                            <li><code className="bg-blue-900/30 px-1 rounded">DATABASE_URL</code> - Full PostgreSQL connection string</li>
+                        </ul>
+                    </div>
+                )}
+                {injectPgVars && (
+                    <div>
+                        <p className="text-sm text-blue-200 font-semibold mb-1">PG* Variables:</p>
+                        <ul className="text-sm text-blue-200 space-y-1 list-disc list-inside ml-4">
+                            <li><code className="bg-blue-900/30 px-1 rounded">PGHOST</code> - Database hostname</li>
+                            <li><code className="bg-blue-900/30 px-1 rounded">PGPORT</code> - Database port (5432)</li>
+                            <li><code className="bg-blue-900/30 px-1 rounded">PGDATABASE</code> - Database name</li>
+                            <li><code className="bg-blue-900/30 px-1 rounded">PGUSER</code> - Database username</li>
+                            <li><code className="bg-blue-900/30 px-1 rounded">PGPASSWORD</code> - Database password</li>
+                        </ul>
+                        <p className="text-sm text-blue-200 mt-2">
+                            Recognized by <code className="bg-blue-900/30 px-1 rounded">psql</code> and most PostgreSQL client libraries.
+                        </p>
+                    </div>
+                )}
+                {!injectDatabaseUrl && !injectPgVars && (
+                    <p className="text-sm text-yellow-200">
+                        ⚠️ No environment variables will be injected. You must enable at least one option above.
+                    </p>
+                )}
             </div>
         </div>
     );

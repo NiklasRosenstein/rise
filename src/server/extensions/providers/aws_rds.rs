@@ -30,10 +30,20 @@ pub struct AwsRdsSpec {
     /// Engine version (e.g., "16.2")
     #[serde(default)]
     pub engine_version: Option<String>,
+    /// Whether to inject DATABASE_URL environment variable
+    #[serde(default = "default_true")]
+    pub inject_database_url: bool,
+    /// Whether to inject PG* environment variables (PGHOST, PGPORT, etc.)
+    #[serde(default = "default_true")]
+    pub inject_pg_vars: bool,
 }
 
 fn default_engine() -> String {
     RDS_ENGINE_POSTGRES.to_string()
+}
+
+fn default_true() -> bool {
+    true
 }
 
 /// Status and credentials for a specific database
@@ -1067,6 +1077,10 @@ impl Extension for AwsRdsProvisioner {
             .await?
             .ok_or_else(|| anyhow::anyhow!("Extension '{}' not found for project", self.name))?;
 
+        // Parse spec to get injection preferences
+        let spec: AwsRdsSpec =
+            serde_json::from_value(ext.spec.clone()).context("Failed to parse AWS RDS spec")?;
+
         // Get project info for database naming
         let project = db_projects::find_by_id(&self.db_pool, project_id)
             .await
@@ -1274,31 +1288,63 @@ impl Extension for AwsRdsProvisioner {
             .await
             .context("Failed to encrypt password")?;
 
-        // Inject PostgreSQL standard environment variables
-        // These are recognized by psql and most PostgreSQL client libraries
-        let env_vars = vec![
-            ("PGHOST", host.as_str(), false),
-            ("PGPORT", port.as_str(), false),
-            ("PGDATABASE", database_name.as_str(), false),
-            ("PGUSER", db_username.as_str(), false),
-            ("PGPASSWORD", encrypted_password.as_str(), true),
-        ];
+        let mut injected_vars = Vec::new();
 
-        for (key, value, is_secret) in env_vars {
+        // Inject DATABASE_URL if requested
+        if spec.inject_database_url {
+            let database_url = format!(
+                "postgres://{}:{}@{}/{}",
+                db_username, db_password, endpoint, database_name
+            );
+
+            let encrypted_database_url = self
+                .encryption_provider
+                .encrypt(&database_url)
+                .await
+                .context("Failed to encrypt DATABASE_URL")?;
+
             db_env_vars::upsert_deployment_env_var(
                 &self.db_pool,
                 deployment_id,
-                key,
-                value,
-                is_secret,
+                "DATABASE_URL",
+                &encrypted_database_url,
+                true, // is_secret
             )
             .await
-            .with_context(|| format!("Failed to write {} to deployment_env_vars", key))?;
+            .context("Failed to write DATABASE_URL to deployment_env_vars")?;
+
+            injected_vars.push("DATABASE_URL");
+        }
+
+        // Inject PG* environment variables if requested
+        // These are recognized by psql and most PostgreSQL client libraries
+        if spec.inject_pg_vars {
+            let env_vars = vec![
+                ("PGHOST", host.as_str(), false),
+                ("PGPORT", port.as_str(), false),
+                ("PGDATABASE", database_name.as_str(), false),
+                ("PGUSER", db_username.as_str(), false),
+                ("PGPASSWORD", encrypted_password.as_str(), true),
+            ];
+
+            for (key, value, is_secret) in env_vars {
+                db_env_vars::upsert_deployment_env_var(
+                    &self.db_pool,
+                    deployment_id,
+                    key,
+                    value,
+                    is_secret,
+                )
+                .await
+                .with_context(|| format!("Failed to write {} to deployment_env_vars", key))?;
+
+                injected_vars.push(key);
+            }
         }
 
         info!(
-            "Set PostgreSQL env vars for deployment {} (group: {}, database: {})",
-            deployment_id, deployment_group, database_name
+            "Injected env vars for deployment {} (group: {}, database: {}): {:?}",
+            deployment_id, deployment_group, database_name, injected_vars
         );
 
         Ok(())
@@ -1373,16 +1419,22 @@ With custom engine version:
 
 ## Environment Variables Injected
 
-The extension automatically injects the following standard PostgreSQL environment variables into each deployment:
+You can configure which environment variables to inject using the extension spec:
 
+**DATABASE_URL** (enabled by default via `inject_database_url: true`):
+- `DATABASE_URL`: Full PostgreSQL connection string (postgres://user:password@host:port/database)
+
+**PG* Variables** (enabled by default via `inject_pg_vars: true`):
 - `PGHOST`: Database hostname
 - `PGPORT`: Database port (5432)
 - `PGDATABASE`: Database name for this deployment
 - `PGUSER`: Database username for this deployment
 - `PGPASSWORD`: Database password (encrypted at rest, injected at deployment time)
 
-These variables are recognized by `psql` and most PostgreSQL client libraries, allowing you to connect
+The PG* variables are recognized by `psql` and most PostgreSQL client libraries, allowing you to connect
 with just `psql` without any connection string arguments.
+
+You can enable/disable either or both sets of variables in your extension configuration.
 
 ## Provisioning Lifecycle
 
@@ -1417,6 +1469,16 @@ This ensures each deployment has its own isolated database while sharing the sam
                     "type": "string",
                     "default": self.default_engine_version,
                     "description": format!("PostgreSQL version (e.g., '16.2'). If not specified, uses the configured default version: {}", self.default_engine_version)
+                },
+                "inject_database_url": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Inject DATABASE_URL environment variable (full connection string)"
+                },
+                "inject_pg_vars": {
+                    "type": "boolean",
+                    "default": true,
+                    "description": "Inject PG* environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)"
                 }
             }
         })
