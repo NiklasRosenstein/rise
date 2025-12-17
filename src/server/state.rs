@@ -452,6 +452,7 @@ impl AppState {
                         instance_size,
                         disk_size,
                         instance_id_template,
+                        default_engine_version,
                         vpc_security_group_ids,
                         db_subnet_group_name,
                         access_key_id,
@@ -498,6 +499,7 @@ impl AppState {
                                     instance_size: instance_size.clone(),
                                     disk_size: *disk_size,
                                     instance_id_template: instance_id_template.clone(),
+                                    default_engine_version: default_engine_version.clone(),
                                     vpc_security_group_ids: vpc_security_group_ids.clone(),
                                     db_subnet_group_name: db_subnet_group_name.clone(),
                                 }

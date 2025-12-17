@@ -621,6 +621,10 @@ pub enum ExtensionProviderConfig {
         disk_size: i32, // in GiB
         #[serde(default = "default_instance_id_template")]
         instance_id_template: String,
+        /// Default engine version to use if not specified in project extension spec
+        /// Use AWS CLI to find versions: aws rds describe-db-engine-versions --engine postgres --query "DBEngineVersions[*].EngineVersion"
+        #[serde(default = "default_engine_version")]
+        default_engine_version: String,
         /// VPC security group IDs for the RDS instance
         #[serde(default)]
         vpc_security_group_ids: Option<Vec<String>>,
@@ -636,4 +640,8 @@ pub enum ExtensionProviderConfig {
 
 fn default_instance_id_template() -> String {
     "rise-{project_name}".to_string()
+}
+
+fn default_engine_version() -> String {
+    "16.4".to_string() // PostgreSQL 16.4 (widely available as of late 2024)
 }

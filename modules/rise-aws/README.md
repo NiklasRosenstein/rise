@@ -135,10 +135,21 @@ extensions:
       region: eu-west-1
       instance_size: db.t3.micro
       disk_size: 20
+      default_engine_version: "16.4"  # Default PostgreSQL version
       # VPC configuration from Terraform outputs:
       vpc_security_group_ids:         # From rise_config.rds.vpc_security_group_ids
         - sg-0123456789abcdef0
       db_subnet_group_name: my-group  # From rise_config.rds.db_subnet_group_name
+```
+
+**Finding Available PostgreSQL Versions:**
+```bash
+# List all available PostgreSQL versions in your region
+aws rds describe-db-engine-versions \
+  --engine postgres \
+  --region eu-west-1 \
+  --query "DBEngineVersions[*].EngineVersion" \
+  --output table
 ```
 
 **Simplified Configuration with Terraform Outputs:**

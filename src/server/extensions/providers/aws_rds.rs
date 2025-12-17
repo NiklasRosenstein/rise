@@ -86,6 +86,7 @@ pub struct AwsRdsProvisionerConfig {
     pub instance_size: String,
     pub disk_size: i32,
     pub instance_id_template: String,
+    pub default_engine_version: String,
     pub vpc_security_group_ids: Option<Vec<String>>,
     pub db_subnet_group_name: Option<String>,
 }
@@ -99,6 +100,7 @@ pub struct AwsRdsProvisioner {
     instance_size: String,
     disk_size: i32,
     instance_id_template: String,
+    default_engine_version: String,
     vpc_security_group_ids: Option<Vec<String>>,
     db_subnet_group_name: Option<String>,
 }
@@ -114,6 +116,7 @@ impl AwsRdsProvisioner {
             instance_size: config.instance_size,
             disk_size: config.disk_size,
             instance_id_template: config.instance_id_template,
+            default_engine_version: config.default_engine_version,
             vpc_security_group_ids: config.vpc_security_group_ids,
             db_subnet_group_name: config.db_subnet_group_name,
         }
@@ -271,10 +274,11 @@ impl AwsRdsProvisioner {
         }
 
         // Create RDS instance
+        // Use spec engine_version if provided, otherwise use the provisioner's default
         let engine_version = spec
             .engine_version
             .clone()
-            .unwrap_or_else(|| "16.2".to_string());
+            .unwrap_or_else(|| self.default_engine_version.clone());
 
         // Build tags for the RDS instance
         let managed_tag = aws_sdk_rds::types::Tag::builder()
@@ -742,6 +746,7 @@ impl Extension for AwsRdsProvisioner {
         let instance_size = self.instance_size.clone();
         let disk_size = self.disk_size;
         let instance_id_template = self.instance_id_template.clone();
+        let default_engine_version = self.default_engine_version.clone();
         let vpc_security_group_ids = self.vpc_security_group_ids.clone();
         let db_subnet_group_name = self.db_subnet_group_name.clone();
 
@@ -766,6 +771,7 @@ impl Extension for AwsRdsProvisioner {
                                 instance_size: instance_size.clone(),
                                 disk_size,
                                 instance_id_template: instance_id_template.clone(),
+                                default_engine_version: default_engine_version.clone(),
                                 vpc_security_group_ids: vpc_security_group_ids.clone(),
                                 db_subnet_group_name: db_subnet_group_name.clone(),
                             });
