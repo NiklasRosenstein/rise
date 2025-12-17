@@ -194,3 +194,77 @@ rise build myapp:latest --backend railpack
 **Precedence order:** CLI flag > Environment variable > Config file > Default (false)
 
 **Warning:** If `SSL_CERT_FILE` is set but `--railpack-embed-ssl-cert` is not specified, a warning will be logged to alert you that build-time SSL errors may occur.
+
+## Proxy Support
+
+Rise CLI automatically detects and injects HTTP/HTTPS proxy environment variables into all build backends. This is useful when your build environment requires going through a corporate proxy to access external resources.
+
+### Supported Proxy Variables
+
+Rise automatically detects these standard proxy environment variables:
+
+- `HTTP_PROXY` / `http_proxy`
+- `HTTPS_PROXY` / `https_proxy`
+- `NO_PROXY` / `no_proxy`
+
+All variants (uppercase and lowercase) are automatically detected from your environment and passed to the appropriate build backend.
+
+### Localhost to host.docker.internal Transformation
+
+Since builds execute in containers, `localhost` and `127.0.0.1` addresses are automatically transformed to `host.docker.internal` to allow container builds to reach a proxy server running on your host machine.
+
+**Example transformations:**
+- `http://localhost:3128` → `http://host.docker.internal:3128`
+- `https://127.0.0.1:8080/path` → `https://host.docker.internal:8080/path`
+- `http://user:pass@localhost:3128` → `http://user:pass@host.docker.internal:3128`
+- `http://proxy.example.com:8080` → unchanged (not localhost)
+
+**Note:** `NO_PROXY` and `no_proxy` values are passed through unchanged since they contain comma-separated lists, not URLs.
+
+### Usage Examples
+
+Set proxy variables in your environment before running rise:
+
+```bash
+export HTTP_PROXY=http://proxy.example.com:3128
+export HTTPS_PROXY=http://proxy.example.com:3128
+export NO_PROXY=localhost,127.0.0.1,.example.com
+
+# Proxy settings automatically applied to all builds
+rise build myapp:latest ./path
+rise deployment create myproject --path ./app
+```
+
+**With localhost proxy:**
+```bash
+# Proxy running on your host machine
+export HTTP_PROXY=http://localhost:3128
+export HTTPS_PROXY=http://localhost:3128
+
+# Automatically transformed to host.docker.internal for container builds
+rise build myapp:latest --backend pack
+rise build myapp:latest --backend railpack
+rise build myapp:latest --backend docker
+```
+
+### Backend-Specific Behavior
+
+**Pack Backend:**
+- Proxy variables are passed via `--env` arguments to the pack CLI
+- Pack forwards these to the buildpack lifecycle containers
+- Works with pack's `--network host` networking mode
+
+**Railpack Backend:**
+- Proxy variables are embedded into `plan.json` using the [secrets mechanism](https://schema.railpack.com/)
+- Top-level secrets array contains `KEY=VALUE` entries
+- Each build step references the proxy secrets by name
+- Railpack frontend makes these available as environment variables
+
+**Docker Backend:**
+- Proxy variables are passed via `--build-arg` arguments
+- Docker automatically respects `HTTP_PROXY`, `HTTPS_PROXY`, and `NO_PROXY` as build args
+- Available during Dockerfile `RUN` commands
+
+### No Configuration Required
+
+Proxy support is completely automatic - no CLI flags or configuration needed. Rise CLI respects the standard proxy environment variables already set in your shell or CI/CD environment.
