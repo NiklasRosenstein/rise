@@ -418,29 +418,7 @@ pub async fn create_deployment(
 
         info!("Successfully resolved image to digest: {}", image_digest);
 
-        // Call before_deployment hooks for all registered extensions
-        for (_, extension) in state.extension_registry.iter() {
-            if let Err(e) = extension
-                .before_deployment(
-                    uuid::Uuid::parse_str(&deployment_id).unwrap(),
-                    project.id,
-                    &payload.group,
-                )
-                .await
-            {
-                error!(
-                    "Extension '{}' before_deployment hook failed: {}",
-                    extension.name(),
-                    e
-                );
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Extension '{}' failed: {}", extension.name(), e),
-                ));
-            }
-        }
-
-        // Create deployment record with image fields set
+        // Create deployment record with image fields set (needed for extension hooks)
         let deployment = db_deployments::create(
             &state.db_pool,
             db_deployments::CreateDeploymentParams {
@@ -469,6 +447,28 @@ pub async fn create_deployment(
             "Created pre-built image deployment {} for project {}",
             deployment_id, payload.project
         );
+
+        // Call before_deployment hooks for all registered extensions
+        for (_, extension) in state.extension_registry.iter() {
+            if let Err(e) = extension
+                .before_deployment(
+                    deployment.id, // Use the UUID from the database record
+                    project.id,
+                    &payload.group,
+                )
+                .await
+            {
+                error!(
+                    "Extension '{}' before_deployment hook failed: {}",
+                    extension.name(),
+                    e
+                );
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Extension '{}' failed: {}", extension.name(), e),
+                ));
+            }
+        }
 
         // Copy project environment variables to deployment
         crate::db::env_vars::copy_project_env_vars_to_deployment(
@@ -526,29 +526,7 @@ pub async fn create_deployment(
 
         debug!("Image tag: {}", image_tag);
 
-        // Call before_deployment hooks for all registered extensions
-        for (_, extension) in state.extension_registry.iter() {
-            if let Err(e) = extension
-                .before_deployment(
-                    uuid::Uuid::parse_str(&deployment_id).unwrap(),
-                    project.id,
-                    &payload.group,
-                )
-                .await
-            {
-                error!(
-                    "Extension '{}' before_deployment hook failed: {}",
-                    extension.name(),
-                    e
-                );
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Extension '{}' failed: {}", extension.name(), e),
-                ));
-            }
-        }
-
-        // Create deployment record in database (image fields are NULL)
+        // Create deployment record in database (image fields are NULL, needed for extension hooks)
         let deployment = db_deployments::create(
             &state.db_pool,
             db_deployments::CreateDeploymentParams {
@@ -572,6 +550,28 @@ pub async fn create_deployment(
                 format!("Failed to create deployment: {}", e),
             )
         })?;
+
+        // Call before_deployment hooks for all registered extensions
+        for (_, extension) in state.extension_registry.iter() {
+            if let Err(e) = extension
+                .before_deployment(
+                    deployment.id, // Use the UUID from the database record
+                    project.id,
+                    &payload.group,
+                )
+                .await
+            {
+                error!(
+                    "Extension '{}' before_deployment hook failed: {}",
+                    extension.name(),
+                    e
+                );
+                return Err((
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Extension '{}' failed: {}", extension.name(), e),
+                ));
+            }
+        }
 
         info!(
             "Created build-from-source deployment {} for project {}",
