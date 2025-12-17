@@ -199,6 +199,58 @@ class RiseAPI {
             method: 'DELETE'
         });
     }
+
+    // Extension endpoints
+
+    /**
+     * Get all available extension types (globally registered providers)
+     */
+    async getExtensionTypes() {
+        return this.request('/extensions/types');
+    }
+
+    /**
+     * Get enabled extensions for a project
+     */
+    async getProjectExtensions(projectName) {
+        return this.request(`/projects/${projectName}/extensions`);
+    }
+
+    /**
+     * Get specific extension details
+     */
+    async getProjectExtension(projectName, extensionName) {
+        return this.request(`/projects/${projectName}/extensions/${extensionName}`);
+    }
+
+    /**
+     * Enable/create an extension for a project
+     */
+    async createExtension(projectName, extensionName, spec) {
+        return this.request(`/projects/${projectName}/extensions/${extensionName}`, {
+            method: 'POST',
+            body: JSON.stringify({ spec })
+        });
+    }
+
+    /**
+     * Update an extension's spec (full replace)
+     */
+    async updateExtension(projectName, extensionName, spec) {
+        return this.request(`/projects/${projectName}/extensions/${extensionName}`, {
+            method: 'PUT',
+            body: JSON.stringify({ spec })
+        });
+    }
+
+    /**
+     * Delete an extension
+     */
+    async deleteExtension(projectName, extensionName) {
+        return this.request(`/projects/${projectName}/extensions/${extensionName}`, {
+            method: 'DELETE'
+        });
+    }
 }
 
 const api = new RiseAPI();
