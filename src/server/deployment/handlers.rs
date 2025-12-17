@@ -463,10 +463,19 @@ pub async fn create_deployment(
                     extension.name(),
                     e
                 );
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Extension '{}' failed: {}", extension.name(), e),
-                ));
+
+                // Mark deployment as failed
+                let error_msg = format!("Extension '{}' failed: {}", extension.name(), e);
+                if let Err(mark_err) =
+                    db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
+                {
+                    error!(
+                        "Failed to mark deployment {} as failed: {}",
+                        deployment_id, mark_err
+                    );
+                }
+
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
             }
         }
 
@@ -566,10 +575,19 @@ pub async fn create_deployment(
                     extension.name(),
                     e
                 );
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Extension '{}' failed: {}", extension.name(), e),
-                ));
+
+                // Mark deployment as failed
+                let error_msg = format!("Extension '{}' failed: {}", extension.name(), e);
+                if let Err(mark_err) =
+                    db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
+                {
+                    error!(
+                        "Failed to mark deployment {} as failed: {}",
+                        deployment_id, mark_err
+                    );
+                }
+
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
             }
         }
 
