@@ -720,10 +720,7 @@ impl AwsRdsProvisioner {
                             .await
                             {
                                 Ok(_) => {
-                                    info!(
-                                        "Changed owner of '{}' to '{}'",
-                                        db_name, db_status.user
-                                    );
+                                    info!("Changed owner of '{}' to '{}'", db_name, db_status.user);
                                     db_status.status = DatabaseState::Available;
                                 }
                                 Err(e) => {
@@ -1155,121 +1152,118 @@ impl Extension for AwsRdsProvisioner {
         }
 
         // Check if we already have credentials for this database
-        let (db_username, db_password) =
-            if let Some(db_status) = status.databases.get(&database_name) {
-                // Reuse existing credentials
-                info!(
-                    "Reusing existing database user '{}' for database '{}'",
-                    db_status.user, database_name
+        let (db_username, db_password) = if let Some(db_status) =
+            status.databases.get(&database_name)
+        {
+            // Reuse existing credentials
+            info!(
+                "Reusing existing database user '{}' for database '{}'",
+                db_status.user, database_name
+            );
+
+            // Ensure database is Available before using it
+            if db_status.status != DatabaseState::Available {
+                anyhow::bail!(
+                    "Database '{}' is not available (current state: {:?})",
+                    database_name,
+                    db_status.status
                 );
+            }
 
-                // Ensure database is Available before using it
-                if db_status.status != DatabaseState::Available {
-                    anyhow::bail!(
-                        "Database '{}' is not available (current state: {:?})",
-                        database_name,
-                        db_status.status
-                    );
-                }
+            let password = self
+                .encryption_provider
+                .decrypt(&db_status.password_encrypted)
+                .await
+                .context("Failed to decrypt database user password")?;
 
-                let password = self
-                    .encryption_provider
-                    .decrypt(&db_status.password_encrypted)
-                    .await
-                    .context("Failed to decrypt database user password")?;
-
-                (db_status.user.clone(), password)
+            (db_status.user.clone(), password)
+        } else {
+            // Create new database user credentials
+            let username = if deployment_group == "default" {
+                format!("{}_user", project.name)
             } else {
-                // Create new database user credentials
-                let username = if deployment_group == "default" {
-                    format!("{}_user", project.name)
-                } else {
-                    format!("{}_{}_user", project.name, safe_deployment_group)
-                };
-                let password = self.generate_password();
+                format!("{}_{}_user", project.name, safe_deployment_group)
+            };
+            let password = self.generate_password();
 
-                info!(
-                    "Creating new database user '{}' for deployment group '{}'",
-                    username, deployment_group
-                );
+            info!(
+                "Creating new database user '{}' for deployment group '{}'",
+                username, deployment_group
+            );
 
-                let pool = PgPool::connect(&admin_db_url)
+            let pool = PgPool::connect(&admin_db_url)
+                .await
+                .context("Failed to connect to RDS instance for user creation")?;
+
+            // Check if user already exists (shouldn't happen, but handle it)
+            let user_exists = postgres_admin::user_exists(&pool, &username)
+                .await
+                .context("Failed to check if user exists")?;
+
+            if !user_exists {
+                // Sanitize username for CREATE USER
+                let sanitized_username = sanitize_identifier(&username)?;
+
+                postgres_admin::create_user(&pool, &sanitized_username, &password)
                     .await
-                    .context("Failed to connect to RDS instance for user creation")?;
+                    .context("Failed to create database user")?;
 
-                // Check if user already exists (shouldn't happen, but handle it)
-                let user_exists = postgres_admin::user_exists(&pool, &username)
-                    .await
-                    .context("Failed to check if user exists")?;
-
-                if !user_exists {
-                    // Sanitize username for CREATE USER
-                    let sanitized_username = sanitize_identifier(&username)?;
-
-                    postgres_admin::create_user(&pool, &sanitized_username, &password)
-                        .await
-                        .context("Failed to create database user")?;
-
-                    info!("Created database user '{}'", username);
-                } else {
-                    warn!(
+                info!("Created database user '{}'", username);
+            } else {
+                warn!(
                     "Database user '{}' already exists in PostgreSQL but not in status, reusing it",
                     username
                 );
-                }
+            }
 
-                // Change database owner to the user (gives full privileges)
-                let sanitized_username = sanitize_identifier(&username)?;
-                let sanitized_database = sanitize_identifier(&database_name)?;
+            // Change database owner to the user (gives full privileges)
+            let sanitized_username = sanitize_identifier(&username)?;
+            let sanitized_database = sanitize_identifier(&database_name)?;
 
-                postgres_admin::change_database_owner(
-                    &pool,
-                    &sanitized_database,
-                    &sanitized_username,
-                )
+            postgres_admin::change_database_owner(&pool, &sanitized_database, &sanitized_username)
                 .await
                 .context("Failed to change database owner")?;
 
-                info!(
-                    "Changed owner of database '{}' to user '{}'",
-                    database_name, username
-                );
+            info!(
+                "Changed owner of database '{}' to user '{}'",
+                database_name, username
+            );
 
-                pool.close().await;
+            pool.close().await;
 
-                // Store credentials in status
-                let encrypted_password = self
-                    .encryption_provider
-                    .encrypt(&password)
-                    .await
-                    .context("Failed to encrypt database user password")?;
-
-                status.databases.insert(
-                    database_name.clone(),
-                    DatabaseStatus {
-                        user: username.clone(),
-                        password_encrypted: encrypted_password,
-                        status: DatabaseState::Available,
-                    },
-                );
-
-                // Update extension status in database
-                db_extensions::update_status(
-                    &self.db_pool,
-                    project_id,
-                    &self.name,
-                    &serde_json::to_value(&status)?,
-                )
+            // Store credentials in status
+            let encrypted_password = self
+                .encryption_provider
+                .encrypt(&password)
                 .await
-                .context("Failed to update extension status with new database user")?;
+                .context("Failed to encrypt database user password")?;
 
-                info!(
-                    "Stored credentials for database '{}' in extension status",
-                    database_name
-                );
+            status.databases.insert(
+                database_name.clone(),
+                DatabaseStatus {
+                    user: username.clone(),
+                    password_encrypted: encrypted_password,
+                    status: DatabaseState::Available,
+                },
+            );
 
-                (username, password)
-            };
+            // Update extension status in database
+            db_extensions::update_status(
+                &self.db_pool,
+                project_id,
+                &self.name,
+                &serde_json::to_value(&status)?,
+            )
+            .await
+            .context("Failed to update extension status with new database user")?;
+
+            info!(
+                "Stored credentials for database '{}' in extension status",
+                database_name
+            );
+
+            (username, password)
+        };
 
         // Parse endpoint to extract host and port
         // RDS endpoints are in format: instance-id.region.rds.amazonaws.com:5432
