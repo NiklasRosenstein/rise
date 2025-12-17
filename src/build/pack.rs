@@ -59,6 +59,15 @@ pub(crate) fn build_image_with_buildpacks(
         }
     }
 
+    // Add proxy environment variables
+    let proxy_vars = super::proxy::read_and_transform_proxy_vars();
+    if !proxy_vars.is_empty() {
+        info!("Injecting proxy variables for pack build");
+        for arg in super::proxy::format_for_pack(&proxy_vars) {
+            cmd.arg("--env").arg(arg);
+        }
+    }
+
     // Never use --publish - always build locally and push separately
     // This avoids code bifurcation and allows CA certificate injection
 
