@@ -74,19 +74,19 @@ pub(crate) fn format_for_pack(vars: &HashMap<String, String>) -> Vec<String> {
         .collect()
 }
 
-/// Embed proxy variables into railpack plan.json using the secrets mechanism
+/// Add secret references to railpack plan.json
 ///
-/// Railpack secrets are defined at the top level as "KEY=VALUE" and referenced
-/// in each step by KEY name. The railpack frontend makes these available as
-/// environment variables in the build context.
-pub(crate) fn embed_as_secrets_in_plan(
+/// BuildKit secrets must be passed via CLI flags (--secret id=KEY,env=KEY),
+/// not embedded in the plan JSON. This function only adds references to the
+/// secrets in each step so the railpack frontend knows to expose them.
+pub(crate) fn add_secret_refs_to_plan(
     plan_file: &Path,
     vars: &HashMap<String, String>,
 ) -> Result<()> {
     use serde_json::Value;
 
     debug!(
-        "Embedding {} proxy variables as secrets into {}",
+        "Adding {} secret references to {}",
         vars.len(),
         plan_file.display()
     );
@@ -105,25 +105,7 @@ pub(crate) fn embed_as_secrets_in_plan(
 
     let plan_obj = plan.as_object_mut().unwrap();
 
-    // Add top-level "secrets" array with "KEY=VALUE" format
-    let secrets_array = if let Some(existing_secrets) = plan_obj.get_mut("secrets") {
-        // Merge with existing secrets
-        existing_secrets
-            .as_array_mut()
-            .context("'secrets' field is not an array")?
-    } else {
-        // Create new secrets array
-        plan_obj.insert("secrets".to_string(), Value::Array(vec![]));
-        plan_obj.get_mut("secrets").unwrap().as_array_mut().unwrap()
-    };
-
-    // Add proxy secrets in "KEY=VALUE" format
-    for (key, value) in vars {
-        let secret_value = format!("{}={}", key, value);
-        secrets_array.push(Value::String(secret_value));
-    }
-
-    // Add proxy variable names to each step's "secrets" array
+    // Get the steps array
     let steps = plan_obj
         .get_mut("steps")
         .and_then(|s| s.as_array_mut())
@@ -168,7 +150,7 @@ pub(crate) fn embed_as_secrets_in_plan(
         )
     })?;
 
-    debug!("✓ Embedded proxy variables as secrets into railpack plan");
+    debug!("✓ Added secret references to railpack plan");
 
     Ok(())
 }
@@ -245,7 +227,7 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_json_secrets_embedding() {
+    fn test_plan_json_secret_refs() {
         use std::fs;
         use tempfile::TempDir;
 
@@ -263,29 +245,27 @@ mod tests {
 
         fs::write(&plan_file, serde_json::to_string_pretty(&plan).unwrap()).unwrap();
 
-        // Embed proxy vars
+        // Add secret refs
         let mut vars = HashMap::new();
         vars.insert("HTTP_PROXY".to_string(), "http://proxy:3128".to_string());
 
-        embed_as_secrets_in_plan(&plan_file, &vars).unwrap();
+        add_secret_refs_to_plan(&plan_file, &vars).unwrap();
 
         // Read back and verify
         let modified = fs::read_to_string(&plan_file).unwrap();
         let plan: serde_json::Value = serde_json::from_str(&modified).unwrap();
 
-        // Check top-level secrets
-        let secrets = plan["secrets"].as_array().unwrap();
-        assert_eq!(secrets.len(), 1);
-        assert_eq!(secrets[0], "HTTP_PROXY=http://proxy:3128");
-
-        // Check step secrets
+        // Check step secrets (should have references)
         let step_secrets = plan["steps"][0]["secrets"].as_array().unwrap();
         assert_eq!(step_secrets.len(), 1);
         assert_eq!(step_secrets[0], "HTTP_PROXY");
+
+        // Top-level secrets should NOT be present
+        assert!(plan.get("secrets").is_none());
     }
 
     #[test]
-    fn test_plan_json_secrets_all_steps() {
+    fn test_plan_json_secret_refs_all_steps() {
         use std::fs;
         use tempfile::TempDir;
 
@@ -303,11 +283,11 @@ mod tests {
 
         fs::write(&plan_file, serde_json::to_string_pretty(&plan).unwrap()).unwrap();
 
-        // Embed proxy vars
+        // Add secret refs
         let mut vars = HashMap::new();
         vars.insert("HTTP_PROXY".to_string(), "http://proxy:3128".to_string());
 
-        embed_as_secrets_in_plan(&plan_file, &vars).unwrap();
+        add_secret_refs_to_plan(&plan_file, &vars).unwrap();
 
         // Read back and verify all steps have the secret reference
         let modified = fs::read_to_string(&plan_file).unwrap();

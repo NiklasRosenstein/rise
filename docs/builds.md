@@ -255,10 +255,10 @@ rise build myapp:latest --backend docker
 - Works with pack's `--network host` networking mode
 
 **Railpack Backend:**
-- Proxy variables are embedded into `plan.json` using the [secrets mechanism](https://schema.railpack.com/)
-- Top-level secrets array contains `KEY=VALUE` entries
-- Each build step references the proxy secrets by name
-- Railpack frontend makes these available as environment variables
+- Proxy variables are passed via `--secret` flags to buildx/buildctl
+- Secret references are added to build steps in `plan.json`
+- BuildKit provides the secret values from environment variables
+- Railpack frontend makes these available as environment variables in build steps
 
 **Docker Backend:**
 - Proxy variables are passed via `--build-arg` arguments

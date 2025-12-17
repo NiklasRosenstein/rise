@@ -1,6 +1,7 @@
 // Railpack builds (buildx & buildctl variants)
 
 use anyhow::{bail, Context, Result};
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -142,11 +143,10 @@ pub(crate) fn build_image_with_railpacks(
         );
     }
 
-    // Embed proxy environment variables as secrets
     let proxy_vars = super::proxy::read_and_transform_proxy_vars();
     if !proxy_vars.is_empty() {
-        info!("Embedding proxy variables into railpack plan as secrets");
-        super::proxy::embed_as_secrets_in_plan(&plan_file, &proxy_vars)?;
+        info!("Adding proxy variable references to railpack plan");
+        super::proxy::add_secret_refs_to_plan(&plan_file, &proxy_vars)?;
     }
 
     // Debug log plan contents
@@ -156,7 +156,14 @@ pub(crate) fn build_image_with_railpacks(
 
     // Build with buildx or buildctl
     if use_buildctl {
-        build_with_buildctl(app_path, &plan_file, image_tag, push, buildkit_host)?;
+        build_with_buildctl(
+            app_path,
+            &plan_file,
+            image_tag,
+            push,
+            buildkit_host,
+            &proxy_vars,
+        )?;
     } else {
         build_with_buildx(
             app_path,
@@ -165,6 +172,7 @@ pub(crate) fn build_image_with_railpacks(
             container_cli,
             push,
             buildkit_host,
+            &proxy_vars,
         )?;
     }
 
@@ -179,6 +187,7 @@ fn build_with_buildx(
     container_cli: &str,
     push: bool,
     buildkit_host: Option<&str>,
+    secrets: &HashMap<String, String>,
 ) -> Result<()> {
     // Check buildx availability
     let buildx_check = Command::new(container_cli)
@@ -227,6 +236,11 @@ fn build_with_buildx(
         cmd.arg("--load");
     }
 
+    // Add secrets
+    for key in secrets.keys() {
+        cmd.arg("--secret").arg(format!("id={},env={}", key, key));
+    }
+
     cmd.arg(app_path);
 
     debug!("Executing command: {:?}", cmd);
@@ -253,6 +267,7 @@ fn build_with_buildctl(
     image_tag: &str,
     push: bool,
     buildkit_host: Option<&str>,
+    secrets: &HashMap<String, String>,
 ) -> Result<()> {
     // Check buildctl availability
     let buildctl_check = Command::new("buildctl").arg("--version").output();
@@ -276,6 +291,11 @@ fn build_with_buildctl(
     // Set BUILDKIT_HOST if provided
     if let Some(host) = buildkit_host {
         cmd.env("BUILDKIT_HOST", host);
+    }
+
+    // Add secrets
+    for key in secrets.keys() {
+        cmd.arg("--secret").arg(format!("id={},env={}", key, key));
     }
 
     if push {
