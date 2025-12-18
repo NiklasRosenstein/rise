@@ -1073,16 +1073,21 @@ impl KubernetesController {
 
         if matches!(project.visibility, ProjectVisibility::Private) {
             // Add Nginx auth annotations for private projects
+            // Note: All API routes are nested under /api/v1 prefix
             let auth_url = format!(
-                "{}/auth/ingress?project={}",
+                "{}/api/v1/auth/ingress?project={}",
                 self.auth_backend_url, project.name
             );
             let signin_url = format!(
-                "{}/auth/signin?project={}&redirect=$escaped_request_uri",
+                "{}/api/v1/auth/signin?project={}&redirect=$escaped_request_uri",
                 self.auth_signin_url,
                 urlencoding::encode(&project.name)
             );
 
+            // Nginx auth subrequest - returns 2xx for allowed, 401/403 for denied
+            // If auth-url is unreachable or returns 5xx, nginx defaults to DENY (fail-closed)
+            // IMPORTANT: Ensure auth-url points to the correct endpoint (/api/v1/auth/ingress)
+            // If misconfigured to hit the frontend catch-all route, it may return 200 OK and grant access
             annotations.insert("nginx.ingress.kubernetes.io/auth-url".to_string(), auth_url);
             annotations.insert(
                 "nginx.ingress.kubernetes.io/auth-signin".to_string(),

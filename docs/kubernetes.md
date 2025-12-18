@@ -294,6 +294,9 @@ annotations:
 
 **How it works**:
 - `auth-url`: Nginx calls this endpoint for every request to validate authentication
+  - Returns 2xx (200): Access granted
+  - Returns 401/403: Access denied, redirect to auth-signin
+  - Returns 5xx or unreachable: **Access denied (fail-closed)** - ensures security even if auth service is misconfigured or down
 - `auth-signin`: Where to redirect unauthenticated users
 - `auth-response-headers`: Headers to pass from auth response to the application
 
@@ -324,6 +327,13 @@ The application receives authenticated requests with these additional headers:
 - Cookie domain mismatch
 - Browser blocking third-party cookies
 - Check `cookie_domain` configuration
+
+**Private projects accessible without authentication**:
+- Check ingress controller logs for auth subrequest errors: `kubectl logs -n ingress-nginx <ingress-controller-pod>`
+- Verify `auth_backend_url` in config includes the correct service URL and port
+- Ensure the auth service is reachable from the ingress controller (test with `curl` from ingress pod)
+- Check that ingress annotations are correctly set: `kubectl get ingress -n rise-<project> -o yaml`
+- All auth endpoints are under `/api/v1` prefix (e.g., `/api/v1/auth/ingress`)
 
 **Authentication succeeds but access denied**:
 - User is authenticated but not authorized for this project
