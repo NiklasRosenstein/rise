@@ -72,7 +72,7 @@
                 </p>
                 {% endif %}
 
-                <a href="/auth/signin?project={{ project_name }}{% if redirect_url %}&redirect={{ redirect_url | urlencode }}{% endif %}"
+                <a href="/api/v1/auth/signin?project={{ project_name }}{% if redirect_url %}&redirect={{ redirect_url | urlencode }}{% endif %}"
                    class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors">
                     Try Again
                 </a>

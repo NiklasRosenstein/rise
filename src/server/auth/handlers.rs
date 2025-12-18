@@ -514,7 +514,7 @@ pub async fn signin_page(
         continue_params.push(format!("redirect={}", urlencoding::encode(&redirect_url)));
     }
     let continue_url = format!(
-        "{}/auth/signin/start?{}",
+        "{}/api/v1/auth/signin/start?{}",
         state.public_url.trim_end_matches('/'),
         continue_params.join("&")
     );
@@ -570,7 +570,10 @@ pub async fn oauth_signin_start(
     state.token_store.save(state_token.clone(), oauth_state);
 
     // Build OAuth2 authorization URL
-    let callback_url = format!("{}/auth/callback", state.public_url.trim_end_matches('/'));
+    let callback_url = format!(
+        "{}/api/v1/auth/callback",
+        state.public_url.trim_end_matches('/')
+    );
 
     let params = crate::server::auth::oauth::AuthorizeParams {
         client_id: &state.auth_settings.client_id,
@@ -615,7 +618,10 @@ pub async fn oauth_callback(
     })?;
 
     // Build callback URL (must match the one used in signin)
-    let callback_url = format!("{}/auth/callback", state.public_url.trim_end_matches('/'));
+    let callback_url = format!(
+        "{}/api/v1/auth/callback",
+        state.public_url.trim_end_matches('/')
+    );
 
     // Exchange authorization code for tokens
     let token_info = state

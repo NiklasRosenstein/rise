@@ -247,7 +247,7 @@ dex:
           # Frontend JavaScript OAuth flow (update based on your actual public_url)
           - "http://rise.example.com/"
           # Backend OAuth2 Proxy flow for ingress auth
-          - "http://rise.example.com/auth/callback"
+          - "http://rise.example.com/api/v1/auth/callback"
           # CLI callback URLs
           - "http://localhost:8765/callback"
           - "http://localhost:8766/callback"

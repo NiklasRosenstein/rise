@@ -100,7 +100,7 @@ dex:
     staticClients:
     - id: rise-backend
       redirectURIs:
-      - 'https://rise.example.com/auth/callback'
+      - 'https://rise.example.com/api/v1/auth/callback'
       name: 'Rise Backend'
       secret: your-client-secret-here
 
@@ -324,7 +324,7 @@ dex:
     staticClients:
     - id: rise-backend
       redirectURIs:
-      - 'https://rise.example.com/auth/callback'
+      - 'https://rise.example.com/api/v1/auth/callback'
       name: 'Rise Backend'
       secret: your-client-secret-here
 
