@@ -8,6 +8,7 @@ const { useState, useEffect } = React;
 function AwsRdsExtensionUI({ spec, schema, onChange }) {
     const [engine, setEngine] = useState(spec?.engine || 'postgres');
     const [engineVersion, setEngineVersion] = useState(spec?.engine_version || '');
+    const [databaseIsolation, setDatabaseIsolation] = useState(spec?.database_isolation || 'shared');
     const [injectDatabaseUrl, setInjectDatabaseUrl] = useState(spec?.inject_database_url !== false);
     const [injectPgVars, setInjectPgVars] = useState(spec?.inject_pg_vars !== false);
 
@@ -19,6 +20,7 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
         // Build the spec object, omitting empty values
         const newSpec = {
             engine,
+            database_isolation: databaseIsolation,
             inject_database_url: injectDatabaseUrl,
             inject_pg_vars: injectPgVars,
         };
@@ -29,7 +31,7 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
         }
 
         onChange(newSpec);
-    }, [engine, engineVersion, injectDatabaseUrl, injectPgVars, onChange]);
+    }, [engine, engineVersion, databaseIsolation, injectDatabaseUrl, injectPgVars, onChange]);
 
     return (
         <div className="space-y-4">
@@ -51,6 +53,18 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                 onChange={(e) => setEngineVersion(e.target.value)}
                 placeholder={defaultEngineVersion || "e.g., 16.2"}
             />
+
+            <FormField
+                label="Database Isolation"
+                id="rds-database-isolation"
+                type="select"
+                value={databaseIsolation}
+                onChange={(e) => setDatabaseIsolation(e.target.value)}
+                required
+            >
+                <option value="shared">Shared (All deployment groups use same database)</option>
+                <option value="isolated">Isolated (Each deployment group gets own database)</option>
+            </FormField>
 
             <div className="space-y-3">
                 <h4 className="text-sm font-semibold text-gray-300">Environment Variables</h4>
@@ -87,8 +101,12 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                     and other infrastructure settings are configured at the server level.
                 </p>
                 <p className="text-sm text-gray-400 mt-2">
-                    The extension automatically creates a separate database for each deployment group
-                    (default, staging, etc.) and injects the connection credentials as environment variables.
+                    <strong>Shared mode:</strong> All deployment groups (default, staging, etc.) use the same database.
+                    This is simpler and suitable for most applications where deployment groups represent different environments.
+                </p>
+                <p className="text-sm text-gray-400 mt-2">
+                    <strong>Isolated mode:</strong> Each deployment group gets its own empty database.
+                    This provides true data isolation and is useful for multi-tenant applications or testing with separate datasets.
                 </p>
             </div>
 
