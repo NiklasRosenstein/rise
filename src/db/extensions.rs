@@ -20,7 +20,8 @@ pub async fn upsert(
         ON CONFLICT (project_id, extension)
         DO UPDATE SET
             spec = EXCLUDED.spec,
-            updated_at = NOW()
+            updated_at = NOW(),
+            deleted_at = NULL
         RETURNING project_id, extension,
                   spec as "spec: Value",
                   status as "status: Value",

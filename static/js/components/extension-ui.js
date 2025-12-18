@@ -142,7 +142,7 @@ const AwsRdsExtensionAPI = {
         const status = extension.status || {};
         if (!status.state) return null;
 
-        let badgeColor = 'bg-gray-600';
+        let badgeColor;
         const state = status.state.toLowerCase();
 
         switch (state) {
@@ -197,7 +197,7 @@ function AwsRdsDetailView({ extension }) {
     const getInstanceStateBadge = () => {
         if (!status.state) return null;
 
-        let badgeColor = 'bg-gray-600';
+        let badgeColor;
         const state = status.state.toLowerCase();
 
         switch (state) {
@@ -329,7 +329,7 @@ function AwsRdsDetailView({ extension }) {
 // Database Card Component
 function DatabaseCard({ name, status }) {
     // Determine status badge color
-    let badgeColor = 'bg-gray-600';
+    let badgeColor;
     let statusText = status.status || 'Unknown';
     const state = (status.status || '').toLowerCase();
 

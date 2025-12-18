@@ -1,6 +1,27 @@
 use anyhow::{Context, Result};
 use sqlx::PgPool;
 
+/// Sanitize a PostgreSQL identifier (database name, username, etc.) to prevent SQL injection.
+/// This function validates that the identifier contains only allowed characters and properly
+/// escapes double quotes for safe use in SQL statements.
+fn sanitize_identifier(identifier: &str) -> Result<String> {
+    // Only allow alphanumeric, underscores, hyphens, and periods
+    if !identifier
+        .chars()
+        .all(|c| c.is_alphanumeric() || c == '_' || c == '-' || c == '.')
+    {
+        anyhow::bail!(
+            "Invalid identifier \"{}\": contains illegal characters",
+            identifier
+        );
+    }
+
+    // Escape internal double quotes and quote the identifier to handle
+    // reserved words and special characters in a PostgreSQL-safe way.
+    let escaped = identifier.replace('"', "\"\"");
+    Ok(format!("\"{}\"", escaped))
+}
+
 /// Check if a PostgreSQL database exists
 pub async fn database_exists(pool: &PgPool, database_name: &str) -> Result<bool> {
     let exists: bool =
@@ -15,10 +36,11 @@ pub async fn database_exists(pool: &PgPool, database_name: &str) -> Result<bool>
 
 /// Create a PostgreSQL database with a specific owner
 ///
-/// Note: Database and owner names must be sanitized before calling this function
-/// to prevent SQL injection
+/// This function sanitizes the database and owner names internally to prevent SQL injection.
 pub async fn create_database(pool: &PgPool, database_name: &str, owner: &str) -> Result<()> {
-    let create_sql = format!("CREATE DATABASE {} OWNER {}", database_name, owner);
+    let sanitized_db = sanitize_identifier(database_name)?;
+    let sanitized_owner = sanitize_identifier(owner)?;
+    let create_sql = format!("CREATE DATABASE {} OWNER {}", sanitized_db, sanitized_owner);
 
     sqlx::query(&create_sql)
         .execute(pool)
@@ -42,14 +64,14 @@ pub async fn user_exists(pool: &PgPool, username: &str) -> Result<bool> {
 
 /// Create a PostgreSQL user with a password
 ///
-/// Note: Username must be sanitized before calling this function to prevent SQL injection
-/// Password will be properly escaped for SQL
+/// This function sanitizes the username and escapes the password internally to prevent SQL injection.
 pub async fn create_user(pool: &PgPool, username: &str, password: &str) -> Result<()> {
-    // Escape single quotes in password by doubling them
+    let sanitized_username = sanitize_identifier(username)?;
+    // Escape single quotes in password by doubling them (PostgreSQL standard)
     let escaped_password = password.replace('\'', "''");
     let create_sql = format!(
         "CREATE USER {} WITH PASSWORD '{}'",
-        username, escaped_password
+        sanitized_username, escaped_password
     );
 
     sqlx::query(&create_sql)
@@ -62,14 +84,14 @@ pub async fn create_user(pool: &PgPool, username: &str, password: &str) -> Resul
 
 /// Update a PostgreSQL user's password
 ///
-/// Note: Username must be sanitized before calling this function to prevent SQL injection
-/// Password will be properly escaped for SQL
+/// This function sanitizes the username and escapes the password internally to prevent SQL injection.
 pub async fn update_user_password(pool: &PgPool, username: &str, password: &str) -> Result<()> {
-    // Escape single quotes in password by doubling them
+    let sanitized_username = sanitize_identifier(username)?;
+    // Escape single quotes in password by doubling them (PostgreSQL standard)
     let escaped_password = password.replace('\'', "''");
     let alter_sql = format!(
         "ALTER USER {} WITH PASSWORD '{}'",
-        username, escaped_password
+        sanitized_username, escaped_password
     );
 
     sqlx::query(&alter_sql)
@@ -82,13 +104,18 @@ pub async fn update_user_password(pool: &PgPool, username: &str, password: &str)
 
 /// Change the owner of a database
 ///
-/// Note: Database and owner must be sanitized before calling this function
+/// This function sanitizes the database and owner names internally to prevent SQL injection.
 pub async fn change_database_owner(
     pool: &PgPool,
     database_name: &str,
     new_owner: &str,
 ) -> Result<()> {
-    let alter_sql = format!("ALTER DATABASE {} OWNER TO {}", database_name, new_owner);
+    let sanitized_db = sanitize_identifier(database_name)?;
+    let sanitized_owner = sanitize_identifier(new_owner)?;
+    let alter_sql = format!(
+        "ALTER DATABASE {} OWNER TO {}",
+        sanitized_db, sanitized_owner
+    );
 
     sqlx::query(&alter_sql)
         .execute(pool)
@@ -100,9 +127,10 @@ pub async fn change_database_owner(
 
 /// Drop a PostgreSQL database
 ///
-/// Note: Database name must be sanitized before calling this function
+/// This function sanitizes the database name internally to prevent SQL injection.
 pub async fn drop_database(pool: &PgPool, database_name: &str) -> Result<()> {
-    let drop_sql = format!("DROP DATABASE {}", database_name);
+    let sanitized_db = sanitize_identifier(database_name)?;
+    let drop_sql = format!("DROP DATABASE {}", sanitized_db);
 
     sqlx::query(&drop_sql)
         .execute(pool)
@@ -114,9 +142,10 @@ pub async fn drop_database(pool: &PgPool, database_name: &str) -> Result<()> {
 
 /// Drop a PostgreSQL user/role
 ///
-/// Note: Username must be sanitized before calling this function
+/// This function sanitizes the username internally to prevent SQL injection.
 pub async fn drop_user(pool: &PgPool, username: &str) -> Result<()> {
-    let drop_sql = format!("DROP USER {}", username);
+    let sanitized_username = sanitize_identifier(username)?;
+    let drop_sql = format!("DROP USER {}", sanitized_username);
 
     sqlx::query(&drop_sql)
         .execute(pool)

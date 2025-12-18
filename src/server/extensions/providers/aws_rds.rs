@@ -474,26 +474,29 @@ impl AwsRdsProvisioner {
                                         // Provision default database with state tracking
                                         let default_db_name =
                                             format!("{}_db_default", project_name);
-                                        status
-                                            .databases
-                                            .entry(default_db_name.clone())
-                                            .or_insert_with(|| {
-                                                // Generate credentials for new database
-                                                let username =
-                                                    format!("{}_db_default_user", project_name);
-                                                let password = self.generate_password();
-                                                let encrypted = futures::executor::block_on(
-                                                    self.encryption_provider.encrypt(&password),
-                                                )
+
+                                        // Check if we need to create a new database entry
+                                        if !status.databases.contains_key(&default_db_name) {
+                                            // Generate credentials for new database
+                                            let username =
+                                                format!("{}_db_default_user", project_name);
+                                            let password = self.generate_password();
+                                            let encrypted = self
+                                                .encryption_provider
+                                                .encrypt(&password)
+                                                .await
                                                 .unwrap_or(password.clone()); // Fallback if encryption fails
 
+                                            status.databases.insert(
+                                                default_db_name.clone(),
                                                 DatabaseStatus {
                                                     user: username,
                                                     password_encrypted: encrypted,
                                                     status: DatabaseState::Pending,
                                                     cleanup_scheduled_at: None,
-                                                }
-                                            });
+                                                },
+                                            );
+                                        }
 
                                         // Process databases (will handle Pending -> CreatingDatabase -> CreatingUser -> Available)
                                         self.process_databases(status, address, port).await?;
@@ -633,13 +636,21 @@ impl AwsRdsProvisioner {
                 }
                 DatabaseState::CreatingDatabase => {
                     // Decrypt master password
-                    let master_password = match status
+                    let encrypted = match status
                         .master_password_encrypted
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("Master password not set"))
-                        .and_then(|encrypted| {
-                            futures::executor::block_on(self.encryption_provider.decrypt(encrypted))
-                        }) {
+                    {
+                        Ok(encrypted) => encrypted,
+                        Err(e) => {
+                            error!("Failed to decrypt master password: {}", e);
+                            status.state = RdsState::Failed;
+                            status.error = Some("Failed to decrypt master password".to_string());
+                            return Ok(());
+                        }
+                    };
+
+                    let master_password = match self.encryption_provider.decrypt(encrypted).await {
                         Ok(pwd) => pwd,
                         Err(e) => {
                             error!("Failed to decrypt master password: {}", e);
@@ -676,13 +687,20 @@ impl AwsRdsProvisioner {
                 }
                 DatabaseState::CreatingUser => {
                     // Decrypt passwords
-                    let master_password = match status
+                    let encrypted = match status
                         .master_password_encrypted
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("Master password not set"))
-                        .and_then(|encrypted| {
-                            futures::executor::block_on(self.encryption_provider.decrypt(encrypted))
-                        }) {
+                    {
+                        Ok(encrypted) => encrypted,
+                        Err(e) => {
+                            error!("Failed to decrypt master password: {}", e);
+                            status.state = RdsState::Failed;
+                            return Ok(());
+                        }
+                    };
+
+                    let master_password = match self.encryption_provider.decrypt(encrypted).await {
                         Ok(pwd) => pwd,
                         Err(e) => {
                             error!("Failed to decrypt master password: {}", e);
@@ -691,10 +709,11 @@ impl AwsRdsProvisioner {
                         }
                     };
 
-                    let user_password = match futures::executor::block_on(
-                        self.encryption_provider
-                            .decrypt(&db_status.password_encrypted),
-                    ) {
+                    let user_password = match self
+                        .encryption_provider
+                        .decrypt(&db_status.password_encrypted)
+                        .await
+                    {
                         Ok(pwd) => pwd,
                         Err(e) => {
                             error!("Failed to decrypt user password: {}", e);
@@ -1133,8 +1152,10 @@ fn sanitize_identifier(identifier: &str) -> Result<String> {
         );
     }
 
-    // Quote the identifier to handle reserved words and special characters
-    Ok(format!("\"{}\"", identifier))
+    // Escape internal double quotes and quote the identifier to handle
+    // reserved words and special characters in a PostgreSQL-safe way.
+    let escaped = identifier.replace('"', "\"\"");
+    Ok(format!("\"{}\"", escaped))
 }
 
 #[async_trait]
@@ -1181,6 +1202,10 @@ impl Extension for AwsRdsProvisioner {
                 "Starting AWS RDS extension reconciliation loop for '{}'",
                 provisioner.name
             );
+
+            // Track error counts and last error times for exponential backoff
+            let mut error_state: HashMap<Uuid, (usize, DateTime<Utc>)> = HashMap::new();
+
             loop {
                 // List ALL project extensions (not filtered by project)
                 match db_extensions::list_by_extension_name(&provisioner.db_pool, &provisioner.name)
@@ -1192,9 +1217,39 @@ impl Extension for AwsRdsProvisioner {
                         }
 
                         for ext in extensions {
-                            if let Err(e) = provisioner.reconcile_single(ext).await {
-                                error!("Failed to reconcile AWS RDS extension: {:?}", e);
-                                // On error, retry after normal interval (not immediate)
+                            // Check if we should skip this extension due to backoff
+                            if let Some((error_count, last_error)) =
+                                error_state.get(&ext.project_id)
+                            {
+                                // Exponential backoff: 2^error_count seconds (capped at 5 minutes)
+                                let backoff_seconds = 2_i64.pow(*error_count as u32).min(300);
+                                let backoff_until =
+                                    *last_error + Duration::seconds(backoff_seconds);
+
+                                if Utc::now() < backoff_until {
+                                    debug!(
+                                        "Skipping extension for project {} due to backoff ({}s remaining)",
+                                        ext.project_id,
+                                        (backoff_until - Utc::now()).num_seconds()
+                                    );
+                                    continue;
+                                }
+                            }
+
+                            match provisioner.reconcile_single(ext.clone()).await {
+                                Ok(_) => {
+                                    // Success - reset error state
+                                    error_state.remove(&ext.project_id);
+                                }
+                                Err(e) => {
+                                    error!("Failed to reconcile AWS RDS extension: {:?}", e);
+                                    // Increment error count and update last error time
+                                    let entry = error_state
+                                        .entry(ext.project_id)
+                                        .or_insert((0, Utc::now()));
+                                    entry.0 += 1;
+                                    entry.1 = Utc::now();
+                                }
                             }
                         }
                     }

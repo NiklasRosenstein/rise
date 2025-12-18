@@ -188,22 +188,70 @@ data "aws_iam_policy_document" "backend" {
     }
   }
 
-  # RDS security groups (needed for network access control)
+  # RDS security groups - Describe operations (must use "*" resources per AWS IAM)
+  dynamic "statement" {
+    for_each = var.enable_rds ? [1] : []
+    content {
+      sid    = "DescribeEC2Resources"
+      effect = "Allow"
+      actions = [
+        "ec2:DescribeSecurityGroups",
+        "ec2:DescribeVpcs",
+        "ec2:DescribeSubnets"
+      ]
+      resources = ["*"]
+    }
+  }
+
+  # RDS security groups - Create operations (limited to tagged resources)
+  dynamic "statement" {
+    for_each = var.enable_rds ? [1] : []
+    content {
+      sid    = "CreateRDSSecurityGroups"
+      effect = "Allow"
+      actions = [
+        "ec2:CreateSecurityGroup"
+      ]
+      resources = ["*"]
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/rise:managed-by"
+        values   = [local.default_tags["rise:managed-by"]]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "aws:RequestTag/rise:component"
+        values   = [local.default_tags["rise:component"]]
+      }
+    }
+  }
+
+  # RDS security groups - Manage existing tagged security groups
   dynamic "statement" {
     for_each = var.enable_rds ? [1] : []
     content {
       sid    = "ManageRDSSecurityGroups"
       effect = "Allow"
       actions = [
-        "ec2:DescribeSecurityGroups",
-        "ec2:CreateSecurityGroup",
         "ec2:DeleteSecurityGroup",
         "ec2:AuthorizeSecurityGroupIngress",
-        "ec2:RevokeSecurityGroupIngress",
-        "ec2:DescribeVpcs",
-        "ec2:DescribeSubnets"
+        "ec2:RevokeSecurityGroupIngress"
       ]
       resources = ["*"]
+
+      condition {
+        test     = "StringEquals"
+        variable = "ec2:ResourceTag/rise:managed-by"
+        values   = [local.default_tags["rise:managed-by"]]
+      }
+
+      condition {
+        test     = "StringEquals"
+        variable = "ec2:ResourceTag/rise:component"
+        values   = [local.default_tags["rise:component"]]
+      }
     }
   }
 }

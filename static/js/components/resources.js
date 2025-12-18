@@ -732,30 +732,6 @@ function ExtensionsList({ projectName }) {
         return () => clearInterval(interval);
     }, [loadExtensions]);
 
-    const handleRowClick = (extType, enabledData = null) => {
-        setSelectedExtension(extType);
-        setSelectedExtensionData(enabledData);
-        setEditMode(!!enabledData);
-        setDeleteConfirmName('');
-
-        if (enabledData) {
-            // Editing existing extension
-            setFormData({ spec: JSON.stringify(enabledData.spec, null, 2) });
-            setUiSpec(enabledData.spec);
-            // Start on UI tab if extension has custom UI, otherwise config tab
-            setModalTab(hasExtensionUI(enabledData.extension_type) ? 'ui' : 'config');
-        } else {
-            // Enabling new extension
-            const defaultSpec = {};
-            setFormData({ spec: JSON.stringify(defaultSpec, null, 2) });
-            setUiSpec(defaultSpec);
-            // Start on UI tab if extension has custom UI, otherwise config tab
-            setModalTab(hasExtensionUI(extType.extension_type) ? 'ui' : 'config');
-        }
-
-        setIsConfigModalOpen(true);
-    };
-
     // Handle UI spec changes - merge with JSON spec (upsert)
     const handleUiSpecChange = useCallback((newUiSpec) => {
         setUiSpec(newUiSpec);
@@ -1339,10 +1315,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                 showToast(`Extension ${extensionName} enabled successfully`, 'success');
             }
             // Refresh data
-            const [typesResponse, enabledResponse] = await Promise.all([
-                api.getExtensionTypes(),
-                api.getProjectExtensions(projectName)
-            ]);
+            const enabledResponse = await api.getProjectExtensions(projectName);
             const enabled = enabledResponse.extensions.find(e => e.extension === extensionName);
             setEnabledExtension(enabled || null);
             if (enabled) {
