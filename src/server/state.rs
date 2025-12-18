@@ -20,7 +20,6 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
-use tracing::info;
 
 #[cfg(feature = "k8s")]
 use crate::server::deployment::controller::{
@@ -439,10 +438,12 @@ impl AppState {
         };
 
         // Initialize extension registry
+        #[allow(unused_mut)]
         let mut extension_registry = crate::server::extensions::registry::ExtensionRegistry::new();
 
         // Register extensions from configuration
         if let Some(ref extensions_config) = settings.extensions {
+            #[allow(clippy::never_loop)]
             for provider_config in &extensions_config.providers {
                 match provider_config {
                     #[cfg(feature = "aws")]
@@ -461,7 +462,7 @@ impl AppState {
                         access_key_id,
                         secret_access_key,
                     } => {
-                        info!("Initializing AWS RDS extension provider '{}'", name);
+                        tracing::info!("Initializing AWS RDS extension provider '{}'", name);
 
                         // Create AWS config
                         let mut aws_config_builder =
@@ -519,10 +520,16 @@ impl AppState {
                         // Start the extension's reconciliation loop
                         aws_rds_arc.start();
 
-                        info!(
+                        tracing::info!(
                             "AWS RDS extension provider '{}' initialized and started",
                             name
                         );
+                    }
+                    // When no extension provider features are enabled, this ensures the match is exhaustive
+                    #[allow(unreachable_patterns)]
+                    _ => {
+                        // This pattern is only reachable when no extension features are enabled
+                        // In that case, we skip unknown provider types silently
                     }
                 }
             }

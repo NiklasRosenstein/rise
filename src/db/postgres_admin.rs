@@ -4,6 +4,7 @@ use sqlx::PgPool;
 /// Sanitize a PostgreSQL identifier (database name, username, etc.) to prevent SQL injection.
 /// This function validates that the identifier contains only allowed characters and properly
 /// escapes double quotes for safe use in SQL statements.
+#[allow(dead_code)]
 fn sanitize_identifier(identifier: &str) -> Result<String> {
     // Only allow alphanumeric, underscores, hyphens, and periods
     if !identifier
@@ -23,6 +24,7 @@ fn sanitize_identifier(identifier: &str) -> Result<String> {
 }
 
 /// Check if a PostgreSQL database exists
+#[allow(dead_code)]
 pub async fn database_exists(pool: &PgPool, database_name: &str) -> Result<bool> {
     let exists: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname = $1)")
@@ -37,6 +39,7 @@ pub async fn database_exists(pool: &PgPool, database_name: &str) -> Result<bool>
 /// Create a PostgreSQL database with a specific owner
 ///
 /// This function sanitizes the database and owner names internally to prevent SQL injection.
+#[allow(dead_code)]
 pub async fn create_database(pool: &PgPool, database_name: &str, owner: &str) -> Result<()> {
     let sanitized_db = sanitize_identifier(database_name)?;
     let sanitized_owner = sanitize_identifier(owner)?;
@@ -51,6 +54,7 @@ pub async fn create_database(pool: &PgPool, database_name: &str, owner: &str) ->
 }
 
 /// Check if a PostgreSQL role/user exists
+#[allow(dead_code)]
 pub async fn user_exists(pool: &PgPool, username: &str) -> Result<bool> {
     let exists: bool =
         sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pg_roles WHERE rolname = $1)")
@@ -65,6 +69,7 @@ pub async fn user_exists(pool: &PgPool, username: &str) -> Result<bool> {
 /// Create a PostgreSQL user with a password
 ///
 /// This function sanitizes the username and escapes the password internally to prevent SQL injection.
+#[allow(dead_code)]
 pub async fn create_user(pool: &PgPool, username: &str, password: &str) -> Result<()> {
     let sanitized_username = sanitize_identifier(username)?;
     // Escape single quotes in password by doubling them (PostgreSQL standard)
@@ -85,6 +90,7 @@ pub async fn create_user(pool: &PgPool, username: &str, password: &str) -> Resul
 /// Update a PostgreSQL user's password
 ///
 /// This function sanitizes the username and escapes the password internally to prevent SQL injection.
+#[allow(dead_code)]
 pub async fn update_user_password(pool: &PgPool, username: &str, password: &str) -> Result<()> {
     let sanitized_username = sanitize_identifier(username)?;
     // Escape single quotes in password by doubling them (PostgreSQL standard)
@@ -105,6 +111,7 @@ pub async fn update_user_password(pool: &PgPool, username: &str, password: &str)
 /// Change the owner of a database
 ///
 /// This function sanitizes the database and owner names internally to prevent SQL injection.
+#[allow(dead_code)]
 pub async fn change_database_owner(
     pool: &PgPool,
     database_name: &str,
@@ -128,6 +135,7 @@ pub async fn change_database_owner(
 /// Drop a PostgreSQL database
 ///
 /// This function sanitizes the database name internally to prevent SQL injection.
+#[allow(dead_code)]
 pub async fn drop_database(pool: &PgPool, database_name: &str) -> Result<()> {
     let sanitized_db = sanitize_identifier(database_name)?;
     let drop_sql = format!("DROP DATABASE {}", sanitized_db);
@@ -143,6 +151,7 @@ pub async fn drop_database(pool: &PgPool, database_name: &str) -> Result<()> {
 /// Drop a PostgreSQL user/role
 ///
 /// This function sanitizes the username internally to prevent SQL injection.
+#[allow(dead_code)]
 pub async fn drop_user(pool: &PgPool, username: &str) -> Result<()> {
     let sanitized_username = sanitize_identifier(username)?;
     let drop_sql = format!("DROP USER {}", sanitized_username);

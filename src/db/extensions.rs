@@ -57,6 +57,7 @@ pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Proj
 }
 
 /// List all extensions with a specific extension name (across all projects)
+#[allow(dead_code)]
 pub async fn list_by_extension_name(
     pool: &PgPool,
     extension_name: &str,
@@ -129,6 +130,7 @@ pub async fn mark_deleted(
 }
 
 /// Update extension status
+#[allow(dead_code)]
 pub async fn update_status(
     pool: &PgPool,
     project_id: Uuid,
@@ -153,6 +155,7 @@ pub async fn update_status(
 }
 
 /// Permanently delete extension record
+#[allow(dead_code)]
 pub async fn delete_permanently(pool: &PgPool, project_id: Uuid, extension: &str) -> Result<()> {
     sqlx::query!(
         r#"

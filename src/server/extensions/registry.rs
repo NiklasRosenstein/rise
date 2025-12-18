@@ -15,6 +15,7 @@ impl ExtensionRegistry {
     }
 
     /// Register an extension implementation
+    #[allow(dead_code)]
     pub fn register(&mut self, extension: Arc<dyn Extension>) {
         let name = extension.name().to_string();
         self.extensions.insert(name, extension);

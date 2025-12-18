@@ -49,6 +49,7 @@ pub trait Extension: Send + Sync {
     ///     });
     /// }
     /// ```
+    #[allow(dead_code)]
     fn start(&self);
 
     /// Hook called before deployment creation

@@ -647,14 +647,17 @@ pub enum ExtensionProviderConfig {
     },
 }
 
+#[allow(dead_code)]
 fn default_instance_id_template() -> String {
     "rise-{project_name}".to_string()
 }
 
+#[allow(dead_code)]
 fn default_engine_version() -> String {
     "16.4".to_string() // PostgreSQL 16.4 (widely available as of late 2024)
 }
 
+#[allow(dead_code)]
 fn default_backup_retention_days() -> i32 {
     7 // 7 days of backup retention (reasonable default for production)
 }
