@@ -1,18 +1,18 @@
 use crate::db::{
-    self, env_vars as db_env_vars, extensions as db_extensions, postgres_admin,
-    projects as db_projects,
+    self, deployments as db_deployments, env_vars as db_env_vars, extensions as db_extensions,
+    postgres_admin, projects as db_projects,
 };
 use crate::server::encryption::EncryptionProvider;
 use crate::server::extensions::Extension;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use aws_sdk_rds::Client as RdsClient;
+use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Duration;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
@@ -72,6 +72,9 @@ pub struct DatabaseStatus {
     pub password_encrypted: String,
     /// Current provisioning status
     pub status: DatabaseState,
+    /// Timestamp when cleanup was scheduled (for inactive deployment groups)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cleanup_scheduled_at: Option<DateTime<Utc>>,
 }
 
 /// Provisioning state for an individual database
@@ -274,8 +277,8 @@ impl AwsRdsProvisioner {
                     .await?;
             }
             RdsState::Available => {
-                // Check if instance still exists
-                self.verify_instance_available(&mut status, &project.name)
+                // Check if instance still exists and perform cleanup
+                self.verify_instance_available(&mut status, &project.name, project.id, &spec)
                     .await?;
             }
             RdsState::Failed => {
@@ -488,6 +491,7 @@ impl AwsRdsProvisioner {
                                                     user: username,
                                                     password_encrypted: encrypted,
                                                     status: DatabaseState::Pending,
+                                                    cleanup_scheduled_at: None,
                                                 }
                                             });
 
@@ -545,7 +549,9 @@ impl AwsRdsProvisioner {
     async fn verify_instance_available(
         &self,
         status: &mut AwsRdsStatus,
-        _project_name: &str,
+        project_name: &str,
+        project_id: Uuid,
+        spec: &AwsRdsSpec,
     ) -> Result<()> {
         let instance_id = status
             .instance_id
@@ -577,6 +583,18 @@ impl AwsRdsProvisioner {
                                     (endpoint.address(), endpoint.port())
                                 {
                                     self.process_databases(status, address, port).await?;
+
+                                    // Cleanup: Mark orphaned databases for deletion (isolated mode only)
+                                    if spec.database_isolation == DatabaseIsolation::Isolated {
+                                        self.cleanup_orphaned_databases(
+                                            status,
+                                            project_id,
+                                            project_name,
+                                            spec,
+                                            &format!("{}:{}", address, port),
+                                        )
+                                        .await?;
+                                    }
                                 }
                             }
                         }
@@ -781,6 +799,149 @@ impl AwsRdsProvisioner {
         Ok(())
     }
 
+    /// Cleanup databases for inactive deployment groups (isolated mode only)
+    async fn cleanup_orphaned_databases(
+        &self,
+        status: &mut AwsRdsStatus,
+        project_id: Uuid,
+        project_name: &str,
+        spec: &AwsRdsSpec,
+        endpoint: &str,
+    ) -> Result<()> {
+        use std::collections::HashSet;
+
+        // Get list of active deployment groups for this project
+        let active_groups = db_deployments::get_active_deployment_groups(&self.db_pool, project_id)
+            .await
+            .context("Failed to get active deployment groups")?;
+
+        let now = Utc::now();
+        let grace_period = Duration::hours(1);
+
+        // Build set of expected database names from active deployment groups
+        let expected_databases: HashSet<String> = active_groups
+            .iter()
+            .map(|group| Self::compute_database_name(project_name, group, &spec.database_isolation))
+            .collect();
+
+        let mut databases_to_remove = Vec::new();
+
+        for (db_name, db_status) in status.databases.iter_mut() {
+            // Skip shared database (always keep)
+            if db_name.ends_with("_db_default") {
+                continue;
+            }
+
+            // Check if this database corresponds to an active deployment group
+            let is_active = expected_databases.contains(db_name);
+
+            if !is_active {
+                // Database doesn't match any active deployment group
+                if let Some(scheduled_at) = db_status.cleanup_scheduled_at {
+                    // Already scheduled, check if grace period expired
+                    if now >= scheduled_at + grace_period {
+                        info!(
+                            "Grace period expired for database '{}', cleaning up",
+                            db_name
+                        );
+                        databases_to_remove.push(db_name.clone());
+                    } else {
+                        debug!(
+                            "Database '{}' scheduled for cleanup at {} (grace period not expired)",
+                            db_name,
+                            scheduled_at + grace_period
+                        );
+                    }
+                } else {
+                    // First time inactive, schedule for cleanup
+                    db_status.cleanup_scheduled_at = Some(now);
+                    info!(
+                        "Database '{}' has no active deployment group, scheduling for cleanup in 1 hour",
+                        db_name
+                    );
+                }
+            } else {
+                // Database has active deployment group, cancel cleanup if scheduled
+                if db_status.cleanup_scheduled_at.is_some() {
+                    info!(
+                        "Database '{}' has active deployments again, cancelling cleanup",
+                        db_name
+                    );
+                    db_status.cleanup_scheduled_at = None;
+                }
+            }
+        }
+
+        // Execute cleanup for databases past grace period
+        if !databases_to_remove.is_empty() {
+            let master_username = status
+                .master_username
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("Master username not set"))?;
+
+            let master_password = self
+                .encryption_provider
+                .decrypt(
+                    status
+                        .master_password_encrypted
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("Master password not set"))?,
+                )
+                .await
+                .context("Failed to decrypt master password")?;
+
+            let admin_db_url = format!(
+                "postgres://{}:{}@{}/{}",
+                master_username, master_password, endpoint, RDS_ADMIN_DATABASE
+            );
+
+            let pool = PgPool::connect(&admin_db_url)
+                .await
+                .context("Failed to connect to RDS for cleanup")?;
+
+            for db_name in databases_to_remove {
+                if let Some(db_status) = status.databases.get(&db_name) {
+                    let username = db_status.user.clone(); // Clone to avoid borrow issue
+
+                    // Drop database
+                    let sanitized_db = sanitize_identifier(&db_name)?;
+                    match postgres_admin::drop_database(&pool, &sanitized_db).await {
+                        Ok(_) => {
+                            info!("Dropped database '{}'", db_name);
+                        }
+                        Err(e) => {
+                            warn!("Failed to drop database '{}': {:?}", db_name, e);
+                            continue; // Don't drop user if database drop failed
+                        }
+                    }
+
+                    // Drop user
+                    let sanitized_user = sanitize_identifier(&username)?;
+                    match postgres_admin::drop_user(&pool, &sanitized_user).await {
+                        Ok(_) => {
+                            info!("Dropped user '{}'", username);
+                        }
+                        Err(e) => {
+                            warn!("Failed to drop user '{}': {:?}", username, e);
+                            // Continue anyway - database is already dropped
+                        }
+                    }
+
+                    // Remove from status
+                    status.databases.remove(&db_name);
+                    info!(
+                        "Cleaned up database '{}' and user '{}' for inactive deployment group",
+                        db_name, username
+                    );
+                }
+            }
+
+            pool.close().await;
+        }
+
+        Ok(())
+    }
+
     async fn handle_deletion(&self, status: &mut AwsRdsStatus, project_name: &str) -> Result<()> {
         let instance_id = match &status.instance_id {
             Some(id) => id.clone(),
@@ -878,6 +1039,27 @@ impl AwsRdsProvisioner {
                 CHARSET[idx] as char
             })
             .collect()
+    }
+
+    /// Compute expected database name for a deployment group
+    ///
+    /// This uses the same logic as before_deployment() to determine database names,
+    /// ensuring consistency across the codebase.
+    fn compute_database_name(
+        project_name: &str,
+        deployment_group: &str,
+        isolation_mode: &DatabaseIsolation,
+    ) -> String {
+        let safe_deployment_group = deployment_group.replace(['/', '-'], "_");
+
+        match isolation_mode {
+            DatabaseIsolation::Shared => {
+                format!("{}_db_default", project_name)
+            }
+            DatabaseIsolation::Isolated => {
+                format!("{}_db_{}", project_name, safe_deployment_group)
+            }
+        }
     }
 
     /// Create the default database for a project
@@ -1027,7 +1209,7 @@ impl Extension for AwsRdsProvisioner {
                 };
 
                 let wait_time = if needs_active_polling { 2 } else { 5 };
-                sleep(Duration::from_secs(wait_time)).await;
+                sleep(std::time::Duration::from_secs(wait_time)).await;
             }
         });
     }
@@ -1280,6 +1462,7 @@ impl Extension for AwsRdsProvisioner {
                     user: username.clone(),
                     password_encrypted: encrypted_password,
                     status: DatabaseState::Available,
+                    cleanup_scheduled_at: None,
                 },
             );
 

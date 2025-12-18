@@ -97,3 +97,31 @@ pub async fn change_database_owner(
 
     Ok(())
 }
+
+/// Drop a PostgreSQL database
+///
+/// Note: Database name must be sanitized before calling this function
+pub async fn drop_database(pool: &PgPool, database_name: &str) -> Result<()> {
+    let drop_sql = format!("DROP DATABASE {}", database_name);
+
+    sqlx::query(&drop_sql)
+        .execute(pool)
+        .await
+        .context("Failed to drop database")?;
+
+    Ok(())
+}
+
+/// Drop a PostgreSQL user/role
+///
+/// Note: Username must be sanitized before calling this function
+pub async fn drop_user(pool: &PgPool, username: &str) -> Result<()> {
+    let drop_sql = format!("DROP USER {}", username);
+
+    sqlx::query(&drop_sql)
+        .execute(pool)
+        .await
+        .context("Failed to drop user")?;
+
+    Ok(())
+}
