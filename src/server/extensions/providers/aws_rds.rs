@@ -903,8 +903,28 @@ impl AwsRdsProvisioner {
                 if let Some(db_status) = status.databases.get(&db_name) {
                     let username = db_status.user.clone(); // Clone to avoid borrow issue
 
-                    // Drop database
                     let sanitized_db = sanitize_identifier(&db_name)?;
+                    let sanitized_master = sanitize_identifier(master_username)?;
+
+                    // Change database owner to master user before dropping
+                    // (required because only the owner can drop a database)
+                    match postgres_admin::change_database_owner(
+                        &pool,
+                        &sanitized_db,
+                        &sanitized_master,
+                    )
+                    .await
+                    {
+                        Ok(_) => {
+                            debug!("Changed owner of database '{}' to master user", db_name);
+                        }
+                        Err(e) => {
+                            warn!("Failed to change owner of database '{}': {:?}", db_name, e);
+                            continue; // Skip this database if we can't change owner
+                        }
+                    }
+
+                    // Drop database
                     match postgres_admin::drop_database(&pool, &sanitized_db).await {
                         Ok(_) => {
                             info!("Dropped database '{}'", db_name);
