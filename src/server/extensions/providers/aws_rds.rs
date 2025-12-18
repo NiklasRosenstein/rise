@@ -469,13 +469,15 @@ impl AwsRdsProvisioner {
                                         status.endpoint = Some(format!("{}:{}", address, port));
 
                                         // Provision default database with state tracking
-                                        let default_db_name = project_name.to_string();
+                                        let default_db_name =
+                                            format!("{}_db_default", project_name);
                                         status
                                             .databases
                                             .entry(default_db_name.clone())
                                             .or_insert_with(|| {
                                                 // Generate credentials for new database
-                                                let username = format!("{}_user", project_name);
+                                                let username =
+                                                    format!("{}_db_default_user", project_name);
                                                 let password = self.generate_password();
                                                 let encrypted = futures::executor::block_on(
                                                     self.encryption_provider.encrypt(&password),
@@ -1100,16 +1102,12 @@ impl Extension for AwsRdsProvisioner {
         // Determine database name based on isolation mode and deployment group
         let database_name = match spec.database_isolation {
             DatabaseIsolation::Shared => {
-                // All deployment groups share the same database (project name)
-                project.name.clone()
+                // All deployment groups share the same database
+                format!("{}_db_default", project.name)
             }
             DatabaseIsolation::Isolated => {
                 // Each deployment group gets its own database
-                if deployment_group == "default" {
-                    project.name.clone()
-                } else {
-                    format!("{}_{}", project.name, safe_deployment_group)
-                }
+                format!("{}_db_{}", project.name, safe_deployment_group)
             }
         };
 
@@ -1214,12 +1212,8 @@ impl Extension for AwsRdsProvisioner {
 
             (db_status.user.clone(), password)
         } else {
-            // Create new database user credentials
-            let username = if deployment_group == "default" {
-                format!("{}_user", project.name)
-            } else {
-                format!("{}_{}_user", project.name, safe_deployment_group)
-            };
+            // Create new database user credentials (matches database name pattern)
+            let username = format!("{}_db_{}_user", project.name, safe_deployment_group);
             let password = self.generate_password();
 
             info!(
