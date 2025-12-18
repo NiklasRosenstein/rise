@@ -1117,55 +1117,36 @@ impl Extension for AwsRdsProvisioner {
     }
 
     fn start(&self) {
-        let name = self.name.clone();
-        let db_pool = self.db_pool.clone();
-        let rds_client = self.rds_client.clone();
-        let encryption_provider = self.encryption_provider.clone();
-        let region = self.region.clone();
-        let instance_size = self.instance_size.clone();
-        let disk_size = self.disk_size;
-        let instance_id_template = self.instance_id_template.clone();
-        let default_engine_version = self.default_engine_version.clone();
-        let vpc_security_group_ids = self.vpc_security_group_ids.clone();
-        let db_subnet_group_name = self.db_subnet_group_name.clone();
+        let provisioner = Self {
+            name: self.name.clone(),
+            rds_client: self.rds_client.clone(),
+            db_pool: self.db_pool.clone(),
+            encryption_provider: self.encryption_provider.clone(),
+            region: self.region.clone(),
+            instance_size: self.instance_size.clone(),
+            disk_size: self.disk_size,
+            instance_id_template: self.instance_id_template.clone(),
+            default_engine_version: self.default_engine_version.clone(),
+            vpc_security_group_ids: self.vpc_security_group_ids.clone(),
+            db_subnet_group_name: self.db_subnet_group_name.clone(),
+        };
 
         tokio::spawn(async move {
             info!(
                 "Starting AWS RDS extension reconciliation loop for '{}'",
-                name
+                provisioner.name
             );
             loop {
                 // List ALL project extensions (not filtered by project)
-                match db_extensions::list_by_extension_name(&db_pool, &name).await {
+                match db_extensions::list_by_extension_name(&provisioner.db_pool, &provisioner.name)
+                    .await
+                {
                     Ok(extensions) => {
                         if extensions.is_empty() {
                             debug!("No RDS extensions found, waiting for work");
                         }
 
                         for ext in extensions {
-                            let provisioner =
-                                match AwsRdsProvisioner::new(AwsRdsProvisionerConfig {
-                                    name: name.clone(),
-                                    rds_client: rds_client.clone(),
-                                    db_pool: db_pool.clone(),
-                                    encryption_provider: encryption_provider.clone(),
-                                    region: region.clone(),
-                                    instance_size: instance_size.clone(),
-                                    disk_size,
-                                    instance_id_template: instance_id_template.clone(),
-                                    default_engine_version: default_engine_version.clone(),
-                                    vpc_security_group_ids: vpc_security_group_ids.clone(),
-                                    db_subnet_group_name: db_subnet_group_name.clone(),
-                                })
-                                .await
-                                {
-                                    Ok(p) => p,
-                                    Err(e) => {
-                                        error!("Failed to create AWS RDS provisioner: {:?}", e);
-                                        continue;
-                                    }
-                                };
-
                             if let Err(e) = provisioner.reconcile_single(ext).await {
                                 error!("Failed to reconcile AWS RDS extension: {:?}", e);
                                 // On error, retry after normal interval (not immediate)
@@ -1178,25 +1159,29 @@ impl Extension for AwsRdsProvisioner {
                 }
 
                 // Check if any extension is in a transitional state
-                let needs_active_polling =
-                    match db_extensions::list_by_extension_name(&db_pool, &name).await {
-                        Ok(extensions) => extensions.iter().any(|ext| {
-                            if let Ok(status) =
-                                serde_json::from_value::<AwsRdsStatus>(ext.status.clone())
-                            {
-                                matches!(
-                                    status.state,
-                                    RdsState::Pending
-                                        | RdsState::Creating
-                                        | RdsState::Deleting
-                                        | RdsState::Failed
-                                ) || ext.deleted_at.is_some()
-                            } else {
-                                false
-                            }
-                        }),
-                        Err(_) => false,
-                    };
+                let needs_active_polling = match db_extensions::list_by_extension_name(
+                    &provisioner.db_pool,
+                    &provisioner.name,
+                )
+                .await
+                {
+                    Ok(extensions) => extensions.iter().any(|ext| {
+                        if let Ok(status) =
+                            serde_json::from_value::<AwsRdsStatus>(ext.status.clone())
+                        {
+                            matches!(
+                                status.state,
+                                RdsState::Pending
+                                    | RdsState::Creating
+                                    | RdsState::Deleting
+                                    | RdsState::Failed
+                            ) || ext.deleted_at.is_some()
+                        } else {
+                            false
+                        }
+                    }),
+                    Err(_) => false,
+                };
 
                 let wait_time = if needs_active_polling { 2 } else { 5 };
                 sleep(Duration::from_secs(wait_time)).await;
