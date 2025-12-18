@@ -734,24 +734,6 @@ impl AwsRdsProvisioner {
 
                     match PgPool::connect(&admin_db_url).await {
                         Ok(pool) => {
-                            let sanitized_username = match sanitize_identifier(&db_status.user) {
-                                Ok(u) => u,
-                                Err(e) => {
-                                    error!("Invalid username: {}", e);
-                                    db_status.status = DatabaseState::Pending;
-                                    return Ok(());
-                                }
-                            };
-
-                            let sanitized_database = match sanitize_identifier(db_name) {
-                                Ok(d) => d,
-                                Err(e) => {
-                                    error!("Invalid database name: {}", e);
-                                    db_status.status = DatabaseState::Pending;
-                                    return Ok(());
-                                }
-                            };
-
                             // Check if user already exists
                             let user_exists =
                                 match postgres_admin::user_exists(&pool, &db_status.user).await {
@@ -766,7 +748,7 @@ impl AwsRdsProvisioner {
                                 // Create user if doesn't exist
                                 match postgres_admin::create_user(
                                     &pool,
-                                    &sanitized_username,
+                                    &db_status.user,
                                     &user_password,
                                 )
                                 .await
@@ -787,8 +769,8 @@ impl AwsRdsProvisioner {
                             // Change database owner to give full privileges
                             match postgres_admin::change_database_owner(
                                 &pool,
-                                &sanitized_database,
-                                &sanitized_username,
+                                db_name,
+                                &db_status.user,
                             )
                             .await
                             {
@@ -922,17 +904,10 @@ impl AwsRdsProvisioner {
                 if let Some(db_status) = status.databases.get(&db_name) {
                     let username = db_status.user.clone(); // Clone to avoid borrow issue
 
-                    let sanitized_db = sanitize_identifier(&db_name)?;
-                    let sanitized_master = sanitize_identifier(master_username)?;
-
                     // Change database owner to master user before dropping
                     // (required because only the owner can drop a database)
-                    match postgres_admin::change_database_owner(
-                        &pool,
-                        &sanitized_db,
-                        &sanitized_master,
-                    )
-                    .await
+                    match postgres_admin::change_database_owner(&pool, &db_name, master_username)
+                        .await
                     {
                         Ok(_) => {
                             debug!("Changed owner of database '{}' to master user", db_name);
@@ -944,7 +919,7 @@ impl AwsRdsProvisioner {
                     }
 
                     // Drop database
-                    match postgres_admin::drop_database(&pool, &sanitized_db).await {
+                    match postgres_admin::drop_database(&pool, &db_name).await {
                         Ok(_) => {
                             info!("Dropped database '{}'", db_name);
                         }
@@ -955,8 +930,7 @@ impl AwsRdsProvisioner {
                     }
 
                     // Drop user
-                    let sanitized_user = sanitize_identifier(&username)?;
-                    match postgres_admin::drop_user(&pool, &sanitized_user).await {
+                    match postgres_admin::drop_user(&pool, &username).await {
                         Ok(_) => {
                             info!("Dropped user '{}'", username);
                         }
@@ -1126,36 +1100,13 @@ impl AwsRdsProvisioner {
         }
 
         // Create the database
-        let sanitized_db = sanitize_identifier(database_name)?;
-        let sanitized_owner = sanitize_identifier(owner)?;
-
-        postgres_admin::create_database(&pool, &sanitized_db, &sanitized_owner).await?;
+        postgres_admin::create_database(&pool, database_name, owner).await?;
 
         info!("Successfully created default database '{}'", database_name);
 
         pool.close().await;
         Ok(())
     }
-}
-
-/// Sanitize a PostgreSQL identifier (database name, user name, etc.)
-/// to prevent SQL injection
-fn sanitize_identifier(identifier: &str) -> Result<String> {
-    // Only allow alphanumeric characters, underscores, and hyphens
-    if !identifier
-        .chars()
-        .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
-    {
-        anyhow::bail!(
-            "Invalid identifier \"{}\": contains illegal characters",
-            identifier
-        );
-    }
-
-    // Escape internal double quotes and quote the identifier to handle
-    // reserved words and special characters in a PostgreSQL-safe way.
-    let escaped = identifier.replace('"', "\"\"");
-    Ok(format!("\"{}\"", escaped))
 }
 
 #[async_trait]
@@ -1392,10 +1343,7 @@ impl Extension for AwsRdsProvisioner {
                 );
 
                 // Create empty database (owned by master user initially)
-                let sanitized_db_name = sanitize_identifier(&database_name)?;
-                let create_sql = format!("CREATE DATABASE {}", sanitized_db_name);
-                sqlx::query(&create_sql)
-                    .execute(&pool)
+                postgres_admin::create_database(&pool, &database_name, master_username)
                     .await
                     .context("Failed to create isolated database")?;
 
@@ -1487,11 +1435,8 @@ impl Extension for AwsRdsProvisioner {
                 .await
                 .context("Failed to check if user exists")?;
 
-            // Sanitize username for CREATE USER or ALTER USER
-            let sanitized_username = sanitize_identifier(&username)?;
-
             if !user_exists {
-                postgres_admin::create_user(&pool, &sanitized_username, &password)
+                postgres_admin::create_user(&pool, &username, &password)
                     .await
                     .context("Failed to create database user")?;
 
@@ -1503,7 +1448,7 @@ impl Extension for AwsRdsProvisioner {
                 );
 
                 // Update the password to match the new one we generated
-                postgres_admin::update_user_password(&pool, &sanitized_username, &password)
+                postgres_admin::update_user_password(&pool, &username, &password)
                     .await
                     .context("Failed to update existing user password")?;
 
@@ -1511,9 +1456,7 @@ impl Extension for AwsRdsProvisioner {
             }
 
             // Change database owner to the user (gives full privileges)
-            let sanitized_database = sanitize_identifier(&database_name)?;
-
-            postgres_admin::change_database_owner(&pool, &sanitized_database, &sanitized_username)
+            postgres_admin::change_database_owner(&pool, &database_name, &username)
                 .await
                 .context("Failed to change database owner")?;
 
