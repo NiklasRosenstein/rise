@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
 use tracing::info;
@@ -69,6 +69,10 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "dom")]
     Domain(DomainCommands),
+    /// Extension management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "ext")]
+    Extension(ExtensionCommands),
     /// Build a container image locally without deploying
     Build {
         /// Tag for the built image (e.g., myapp:latest, registry.io/org/app:v1.0)
@@ -415,6 +419,68 @@ enum DomainCommands {
         project: String,
         /// Domain name
         domain: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum ExtensionCommands {
+    /// Create or update an extension for a project
+    #[command(visible_alias = "c")]
+    #[command(visible_alias = "new")]
+    Create {
+        /// Project name
+        project: String,
+        /// Extension name
+        extension: String,
+        /// Extension spec as JSON string
+        #[arg(long)]
+        spec: String,
+    },
+    /// Update an extension (full replace)
+    #[command(visible_alias = "u")]
+    Update {
+        /// Project name
+        project: String,
+        /// Extension name
+        extension: String,
+        /// Extension spec as JSON string
+        #[arg(long)]
+        spec: String,
+    },
+    /// Patch an extension (partial update, null values unset fields)
+    #[command(visible_alias = "p")]
+    Patch {
+        /// Project name
+        project: String,
+        /// Extension name
+        extension: String,
+        /// Extension spec patch as JSON string
+        #[arg(long)]
+        spec: String,
+    },
+    /// List all extensions for a project
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
+    List {
+        /// Project name
+        project: String,
+    },
+    /// Show extension details
+    #[command(visible_alias = "s")]
+    Show {
+        /// Project name
+        project: String,
+        /// Extension name
+        extension: String,
+    },
+    /// Delete an extension from a project
+    #[command(visible_alias = "rm")]
+    #[command(visible_alias = "del")]
+    Delete {
+        /// Project name
+        project: String,
+        /// Extension name
+        extension: String,
     },
 }
 
@@ -911,6 +977,44 @@ async fn main() -> Result<()> {
                 }
             }
         }
+        Commands::Extension(extension_cmd) => match extension_cmd {
+            ExtensionCommands::Create {
+                project,
+                extension,
+                spec,
+            } => {
+                let spec: serde_json::Value =
+                    serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
+                extension::create_extension(project, extension, spec).await?;
+            }
+            ExtensionCommands::Update {
+                project,
+                extension,
+                spec,
+            } => {
+                let spec: serde_json::Value =
+                    serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
+                extension::update_extension(project, extension, spec).await?;
+            }
+            ExtensionCommands::Patch {
+                project,
+                extension,
+                spec,
+            } => {
+                let spec: serde_json::Value =
+                    serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
+                extension::patch_extension(project, extension, spec).await?;
+            }
+            ExtensionCommands::List { project } => {
+                extension::list_extensions(project).await?;
+            }
+            ExtensionCommands::Show { project, extension } => {
+                extension::show_extension(project, extension).await?;
+            }
+            ExtensionCommands::Delete { project, extension } => {
+                extension::delete_extension(project, extension).await?;
+            }
+        },
         Commands::Build {
             tag,
             path,

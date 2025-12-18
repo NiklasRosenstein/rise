@@ -43,13 +43,13 @@ output "secret_access_key" {
 # -----------------------------------------------------------------------------
 
 output "push_role_arn" {
-  description = "ARN of the IAM role for push operations"
-  value       = aws_iam_role.push_role.arn
+  description = "ARN of the IAM role for push operations (null if ECR not enabled)"
+  value       = var.enable_ecr ? aws_iam_role.push_role[0].arn : null
 }
 
 output "push_role_name" {
-  description = "Name of the IAM role for push operations"
-  value       = aws_iam_role.push_role.name
+  description = "Name of the IAM role for push operations (null if ECR not enabled)"
+  value       = var.enable_ecr ? aws_iam_role.push_role[0].name : null
 }
 
 # -----------------------------------------------------------------------------
@@ -62,8 +62,8 @@ output "controller_policy_arn" {
 }
 
 output "push_policy_arn" {
-  description = "ARN of the IAM policy for push operations"
-  value       = aws_iam_policy.push_role.arn
+  description = "ARN of the IAM policy for push operations (null if ECR not enabled)"
+  value       = var.enable_ecr ? aws_iam_policy.push_role[0].arn : null
 }
 
 output "policy_document" {
@@ -76,13 +76,13 @@ output "policy_document" {
 # -----------------------------------------------------------------------------
 
 output "kms_key_arn" {
-  description = "ARN of the KMS key for ECR encryption (null if using AES256)"
-  value       = var.encryption_type == "KMS" ? aws_kms_key.ecr[0].arn : null
+  description = "ARN of the KMS key for ECR encryption (null if KMS not enabled)"
+  value       = var.enable_kms ? aws_kms_key.ecr[0].arn : null
 }
 
 output "kms_key_id" {
-  description = "ID of the KMS key for ECR encryption (null if using AES256)"
-  value       = var.encryption_type == "KMS" ? aws_kms_key.ecr[0].key_id : null
+  description = "ID of the KMS key for ECR encryption (null if KMS not enabled)"
+  value       = var.enable_kms ? aws_kms_key.ecr[0].key_id : null
 }
 
 # -----------------------------------------------------------------------------
@@ -90,14 +90,26 @@ output "kms_key_id" {
 # -----------------------------------------------------------------------------
 
 output "rise_config" {
-  description = "Configuration values for the Rise backend ECR settings"
-  value = {
-    region        = local.region
-    account_id    = local.account_id
-    repo_prefix   = local.repo_prefix
-    role_arn      = aws_iam_role.backend.arn
-    push_role_arn = aws_iam_role.push_role.arn
-  }
+  description = "Configuration values for the Rise backend"
+  value = merge(
+    # ECR configuration (if enabled)
+    var.enable_ecr ? {
+      ecr = {
+        region        = local.region
+        account_id    = local.account_id
+        repo_prefix   = local.repo_prefix
+        role_arn      = aws_iam_role.backend.arn
+        push_role_arn = aws_iam_role.push_role[0].arn
+      }
+    } : {},
+    # RDS configuration (if enabled)
+    var.enable_rds && var.rds_vpc_id != null && length(var.rds_subnet_ids) > 0 ? {
+      rds = {
+        vpc_security_group_ids = [aws_security_group.rds[0].id]
+        db_subnet_group_name   = aws_db_subnet_group.rds[0].name
+      }
+    } : {}
+  )
 }
 
 output "lifecycle_policy" {

@@ -15,6 +15,8 @@ pub struct Settings {
     pub deployment_controller: Option<DeploymentControllerSettings>,
     #[serde(default)]
     pub encryption: Option<EncryptionSettings>,
+    #[serde(default)]
+    pub extensions: Option<ExtensionsSettings>,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -596,4 +598,66 @@ mod tests {
         let result = Settings::substitute_env_vars_in_string("plain_value");
         assert_eq!(result, "plain_value");
     }
+}
+
+/// Extensions configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct ExtensionsSettings {
+    #[serde(default)]
+    pub providers: Vec<ExtensionProviderConfig>,
+}
+
+/// Extension provider configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub enum ExtensionProviderConfig {
+    #[cfg(feature = "aws")]
+    AwsRdsProvisioner {
+        /// Name of this extension (e.g., "aws-rds-postgres")
+        /// This is used as the extension identifier in the database
+        name: String,
+        region: String,
+        instance_size: String,
+        disk_size: i32, // in GiB
+        #[serde(default = "default_instance_id_template")]
+        instance_id_template: String,
+        /// Default engine version to use if not specified in project extension spec
+        /// Use AWS CLI to find versions: aws rds describe-db-engine-versions --engine postgres --query "DBEngineVersions[*].EngineVersion"
+        #[serde(default = "default_engine_version")]
+        default_engine_version: String,
+        /// VPC security group IDs for the RDS instance
+        #[serde(default)]
+        vpc_security_group_ids: Option<Vec<String>>,
+        /// DB subnet group name for VPC placement
+        #[serde(default)]
+        db_subnet_group_name: Option<String>,
+        /// Backup retention period in days (1-35, default: 7)
+        #[serde(default = "default_backup_retention_days")]
+        backup_retention_days: i32,
+        /// Preferred backup window in UTC (e.g., "03:00-04:00")
+        #[serde(default)]
+        backup_window: Option<String>,
+        /// Preferred maintenance window (e.g., "sun:04:00-sun:05:00")
+        #[serde(default)]
+        maintenance_window: Option<String>,
+        #[serde(default)]
+        access_key_id: Option<String>,
+        #[serde(default)]
+        secret_access_key: Option<String>,
+    },
+}
+
+#[allow(dead_code)]
+fn default_instance_id_template() -> String {
+    "rise-{project_name}".to_string()
+}
+
+#[allow(dead_code)]
+fn default_engine_version() -> String {
+    "16.4".to_string() // PostgreSQL 16.4 (widely available as of late 2024)
+}
+
+#[allow(dead_code)]
+fn default_backup_retention_days() -> i32 {
+    7 // 7 days of backup retention (reasonable default for production)
 }

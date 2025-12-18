@@ -24,3 +24,4 @@ todo.txt
 
 # Buildpack samples (example repo)
 buildpack-samples/
+tmp/

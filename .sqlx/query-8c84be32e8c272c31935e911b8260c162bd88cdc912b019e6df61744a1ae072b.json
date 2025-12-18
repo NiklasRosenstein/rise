@@ -1,0 +1,60 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO project_extensions (project_id, extension, spec)\n        VALUES ($1, $2, $3)\n        ON CONFLICT (project_id, extension)\n        DO UPDATE SET\n            spec = EXCLUDED.spec,\n            updated_at = NOW(),\n            deleted_at = NULL\n        RETURNING project_id, extension,\n                  spec as \"spec: Value\",\n                  status as \"status: Value\",\n                  created_at, updated_at, deleted_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "extension",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 2,
+        "name": "spec: Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 3,
+        "name": "status: Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 4,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 5,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 6,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Varchar",
+        "Jsonb"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "8c84be32e8c272c31935e911b8260c162bd88cdc912b019e6df61744a1ae072b"
+}

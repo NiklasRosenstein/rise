@@ -20,6 +20,10 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <!-- Babel Standalone for JSX transformation -->
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Marked.js for markdown rendering (pinned version with SRI) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked@9.1.6/marked.min.js"
+            integrity="sha384-odPBjvtXVM/5hOYIr3A1dB+flh0c3wAT3bSesIOqEGmyUA4JoKf/YTWy0XKOYAY7"
+            crossorigin="anonymous"></script>
 
     <!-- API and Auth utilities (plain JS) -->
     <script src="/js/auth.js"></script>
@@ -33,6 +37,7 @@
     <script type="text/babel" src="/js/components/toast.js"></script>
 
     <!-- Feature components (JSX) -->
+    <script type="text/babel" src="/js/components/extension-ui.js"></script>
     <script type="text/babel" src="/js/components/projects.js"></script>
     <script type="text/babel" src="/js/components/teams.js"></script>
     <script type="text/babel" src="/js/components/deployments.js"></script>

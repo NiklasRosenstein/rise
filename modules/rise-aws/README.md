@@ -1,25 +1,27 @@
 # Rise AWS Terraform Module
 
-This module creates the AWS IAM resources required for the Rise backend to manage AWS services (primarily ECR for container registries).
+This module creates the AWS IAM resources required for the Rise backend to manage AWS services (ECR for container registries and RDS for database instances).
 
 ## Features
 
-- **Controller role**: Manages ECR repository lifecycle (create, delete, tag)
+- **Controller role**: Manages ECR repository lifecycle (create, delete, tag) and RDS instances
 - **Push role**: Separate role for generating scoped image push credentials
 - Supports IAM role (for AWS deployments with IRSA or instance profiles)
 - Supports IAM user with access keys (for non-AWS deployments)
 - Configurable repository prefix for multi-tenant isolation
 - Optional auto-remove or soft-delete (orphan tagging) modes
 - Default lifecycle policy to limit image retention
+- RDS instance management for project extensions
 
 ## Architecture
 
 The module creates two separate IAM roles with distinct permissions:
 
-1. **Backend Role** (e.g., `rise-backend`): Used by the Rise backend to manage ECR repositories
-   - Create/delete repositories
-   - Tag repositories (managed, orphaned)
-   - List repositories for discovery
+1. **Backend Role** (e.g., `rise-backend`): Used by the Rise backend to manage AWS resources
+   - ECR repositories: Create/delete, tag, list for discovery
+   - RDS instances: Create/delete/modify PostgreSQL instances with `rise-*` prefix
+   - Security groups and subnet groups for RDS networking
+   - KMS encryption (if enabled)
 
 2. **Push Role** (e.g., `rise-backend-ecr-push`): Assumed by the backend to generate scoped credentials
    - Push images to ECR
@@ -33,9 +35,9 @@ The module creates two separate IAM roles with distinct permissions:
 module "rise_aws" {
   source = "./modules/rise-aws"
 
-  name        = "rise-backend"
-  repo_prefix = "rise/"
-  auto_remove = false  # Tag as orphaned instead of deleting
+  name       = "rise-backend"
+  enable_ecr = true  # Enable for ECR container registry
+  enable_rds = true  # Enable for AWS RDS extension
 
   tags = {
     Environment = "production"
@@ -50,10 +52,39 @@ module "rise_aws" {
   source = "./modules/rise-aws"
 
   name                   = "rise-backend"
-  repo_prefix            = "rise/"
+  enable_ecr             = true
+  enable_rds             = true
+  enable_kms             = true  # Enable KMS encryption for ECR
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
   irsa_namespace         = "rise-system"
   irsa_service_account   = "rise-backend"
+}
+```
+
+### With RDS and VPC Configuration
+
+```hcl
+module "rise_aws" {
+  source = "./modules/rise-aws"
+
+  name       = "rise-backend"
+  enable_ecr = true
+  enable_rds = true
+
+  # RDS VPC configuration
+  rds_vpc_id                  = module.vpc.vpc_id
+  rds_subnet_ids              = module.vpc.private_subnets  # Subnets for RDS instances
+  rds_allowed_security_groups = [
+    module.eks.cluster_security_group_id  # Allow access from EKS cluster
+  ]
+  rds_allowed_cidr_blocks = [
+    "10.0.0.0/16"  # Optional: Allow access from specific CIDR blocks
+  ]
+}
+
+# Use the rise_config output in your Rise backend config
+output "rise_config" {
+  value = module.rise_aws.rise_config
 }
 ```
 
@@ -64,8 +95,8 @@ module "rise_aws" {
   source = "./modules/rise-aws"
 
   name            = "rise-backend"
-  repo_prefix     = "rise/"
-  create_iam_role = false
+  enable_ecr      = true
+  enable_rds      = true
   create_iam_user = true
 }
 
@@ -85,75 +116,149 @@ resource "aws_secretsmanager_secret_version" "rise_backend_creds" {
 
 ## Rise Backend Configuration
 
-After applying this module, configure the Rise backend with the ECR settings:
+After applying this module, use the `rise_config` output to configure your Rise backend:
 
-```toml
-# config/local.toml
-[registry]
-type = "ecr"
-region = "eu-west-1"  # From module.rise_aws.rise_config.region
-account_id = "123456789012"  # From module.rise_aws.rise_config.account_id
-repo_prefix = "rise/"  # From module.rise_aws.rise_config.repo_prefix
-role_arn = "arn:aws:iam::123456789012:role/rise-backend"  # From module.rise_aws.role_arn
-push_role_arn = "arn:aws:iam::123456789012:role/rise-backend-ecr-push"  # From module.rise_aws.push_role_arn
-auto_remove = false  # From module.rise_aws.rise_config.auto_remove
+```yaml
+# config/default.yaml
 
-# If using IAM user instead of role:
-# access_key_id = "AKIA..."
-# secret_access_key = "..."
+# ECR registry configuration (if enable_ecr = true)
+registry:
+  type: ecr
+  region: eu-west-1                   # From rise_config.ecr.region
+  account_id: "123456789012"          # From rise_config.ecr.account_id
+  repo_prefix: rise/                  # From rise_config.ecr.repo_prefix
+  role_arn: arn:aws:iam::...          # From rise_config.ecr.role_arn
+  push_role_arn: arn:aws:iam::...     # From rise_config.ecr.push_role_arn
+
+# RDS extension configuration (if enable_rds = true)
+extensions:
+  providers:
+    - type: aws-rds-provisioner
+      name: aws-rds
+      region: eu-west-1
+      instance_size: db.t3.micro
+      disk_size: 20
+      default_engine_version: "16.4"  # Default PostgreSQL version
+      # VPC configuration from Terraform outputs:
+      vpc_security_group_ids:         # From rise_config.rds.vpc_security_group_ids
+        - sg-0123456789abcdef0
+      db_subnet_group_name: my-group  # From rise_config.rds.db_subnet_group_name
 ```
+
+**Finding Available PostgreSQL Versions:**
+```bash
+# List all available PostgreSQL versions in your region
+aws rds describe-db-engine-versions \
+  --engine postgres \
+  --region eu-west-1 \
+  --query "DBEngineVersions[*].EngineVersion" \
+  --output table
+```
+
+**Simplified Configuration with Terraform Outputs:**
+
+The `rise_config` output is structured to match Rise's configuration format:
+- `rise_config.ecr.*` - Maps directly to `registry:` section
+- `rise_config.rds.*` - Maps directly to extension provider settings
+
+This makes it easy to reference in your configuration management tool (e.g., using `templatefile()` in Terraform).
 
 ## Inputs
 
 | Name | Description | Type | Default | Required |
 |------|-------------|------|---------|:--------:|
 | name | Name for the IAM role and policy | `string` | `"rise-backend"` | no |
-| repo_prefix | Prefix for ECR repository names | `string` | `"rise/"` | no |
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
-| create_iam_role | Create an IAM role for the controller | `bool` | `true` | no |
+| enable_ecr | Enable ECR permissions | `bool` | `true` | no |
+| enable_rds | Enable RDS permissions | `bool` | `false` | no |
+| create_rds_service_linked_role | Create RDS service-linked role (only needed once per AWS account) | `bool` | `true` | no |
+| rds_vpc_id | VPC ID for RDS resources | `string` | `null` | no |
+| rds_subnet_ids | Subnet IDs for RDS DB subnet group | `list(string)` | `[]` | no |
+| rds_allowed_security_groups | Security groups allowed to access RDS | `list(string)` | `[]` | no |
+| rds_allowed_cidr_blocks | CIDR blocks allowed to access RDS on port 5432 | `list(string)` | `[]` | no |
+| enable_kms | Enable KMS encryption for ECR | `bool` | `false` | no |
 | create_iam_user | Create an IAM user with access keys | `bool` | `false` | no |
-| create_push_role | Create a separate push role | `bool` | `true` | no |
-| push_role_assume_principals | Additional principals for push role | `list(string)` | `null` | no |
-| role_assume_policy | Custom assume role policy JSON | `string` | `null` | no |
 | irsa_oidc_provider_arn | OIDC provider ARN for IRSA | `string` | `null` | no |
 | irsa_namespace | Kubernetes namespace for IRSA | `string` | `"rise-system"` | no |
 | irsa_service_account | Kubernetes service account for IRSA | `string` | `"rise-backend"` | no |
-| auto_remove | Delete repos on project deletion | `bool` | `false` | no |
 | image_tag_mutability | Tag mutability for repositories | `string` | `"MUTABLE"` | no |
 | scan_on_push | Enable image scanning on push | `bool` | `true` | no |
-| encryption_type | Encryption type (AES256 or KMS) | `string` | `"AES256"` | no |
-| kms_key_arn | KMS key ARN for encryption | `string` | `null` | no |
-| lifecycle_policy | Custom ECR lifecycle policy JSON | `string` | `null` | no |
 | max_image_count | Max images to retain per repository | `number` | `100` | no |
 
 ## Outputs
+
+### Primary Output (Use This!)
+
+| Name | Description |
+|------|-------------|
+| rise_config | **Configuration values for Rise backend** - Contains `ecr.*` and `rds.*` sub-objects with all values needed for Rise configuration |
+
+### Additional Outputs
 
 | Name | Description |
 |------|-------------|
 | role_arn | ARN of the controller IAM role |
 | role_name | Name of the controller IAM role |
-| push_role_arn | ARN of the push IAM role |
-| push_role_name | Name of the push IAM role |
-| user_arn | ARN of the IAM user |
-| user_name | Name of the IAM user |
-| access_key_id | Access key ID (sensitive) |
-| secret_access_key | Secret access key (sensitive) |
+| push_role_arn | ARN of the push IAM role (ECR only) |
+| push_role_name | Name of the push IAM role (ECR only) |
+| user_arn | ARN of the IAM user (if created) |
+| user_name | Name of the IAM user (if created) |
+| access_key_id | Access key ID (sensitive, if IAM user created) |
+| secret_access_key | Secret access key (sensitive, if IAM user created) |
 | controller_policy_arn | ARN of the controller IAM policy |
-| push_policy_arn | ARN of the push IAM policy |
+| push_policy_arn | ARN of the push IAM policy (ECR only) |
 | policy_document | The controller IAM policy document JSON |
-| rise_config | Configuration values for Rise backend |
 | lifecycle_policy | ECR lifecycle policy JSON |
+| kms_key_arn | ARN of the KMS key (if KMS enabled) |
+| kms_key_id | ID of the KMS key (if KMS enabled) |
 
 ## IAM Permissions
 
 ### Controller Role
 
+**ECR Permissions:**
 - `ecr:GetAuthorizationToken` - Required for any ECR operation
 - `ecr:DescribeRepositories`, `ecr:ListTagsForResource` - For discovery
 - `ecr:CreateRepository`, `ecr:TagResource`, `ecr:PutImageScanningConfiguration`, `ecr:PutImageTagMutability`, `ecr:PutLifecyclePolicy` - For creating repos
-- `ecr:DeleteRepository`, `ecr:BatchDeleteImage` - Only if `auto_remove = true`
+- `ecr:DeleteRepository`, `ecr:BatchDeleteImage` - For deleting repos
 - `sts:AssumeRole` on push role - To generate scoped credentials
-- KMS permissions - Only if using KMS encryption
+
+**RDS Permissions (if `enable_rds = true`):**
+- `rds:CreateDBInstance`, `rds:DeleteDBInstance`, `rds:DescribeDBInstances`, `rds:ModifyDBInstance` - For managing database instances
+- `rds:ListTagsForResource`, `rds:AddTagsToResource`, `rds:RemoveTagsFromResource` - For tagging
+- `rds:CreateDBSubnetGroup`, `rds:DeleteDBSubnetGroup`, `rds:DescribeDBSubnetGroups` - For VPC placement
+- `ec2:DescribeSecurityGroups`, `ec2:CreateSecurityGroup`, `ec2:DeleteSecurityGroup` - For network security
+- `ec2:AuthorizeSecurityGroupIngress`, `ec2:RevokeSecurityGroupIngress` - For security group rules
+- `ec2:DescribeVpcs`, `ec2:DescribeSubnets` - For VPC discovery
+
+**RDS Service-Linked Role:**
+The module creates the RDS service-linked role (`AWSServiceRoleForRDS`) if `create_rds_service_linked_role = true`. This role is required for RDS to manage resources on your behalf. It only needs to be created once per AWS account. If the role already exists, set `create_rds_service_linked_role = false`.
+
+**RDS VPC Resources:**
+If `enable_rds = true`, `rds_vpc_id`, and `rds_subnet_ids` are provided, the module creates:
+
+1. **DB Subnet Group** - Defines which subnets RDS instances can use
+   - Created with the subnet IDs you provide via `rds_subnet_ids`
+   - Use the output `rds_subnet_group_name` in your Rise config's `db_subnet_group_name`
+
+2. **Security Group** - Controls network access to RDS instances
+   - Allows inbound PostgreSQL (port 5432) from security groups in `rds_allowed_security_groups`
+   - Allows all outbound traffic for updates and maintenance
+   - Use the output `rds_security_group_id` in your Rise config's `vpc_security_group_ids`
+
+Both resources are automatically tagged and named consistently with the module's naming convention.
+
+**RDS Instance Tags:**
+All RDS instances created by Rise are automatically tagged with:
+- `rise:managed = "true"` - Indicates the instance is managed by Rise
+- `rise:project = "{project_name}"` - Links the instance to the Rise project
+
+These tags are useful for cost allocation, resource discovery, and operational management.
+
+**KMS Permissions (if `enable_kms = true`):**
+- `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - For KMS-encrypted ECR repositories
+
+**Note:** ECR permissions are scoped to `rise/*` repositories. RDS permissions (if enabled) are scoped to `rise-*` instance names.
 
 ### Push Role
 
@@ -161,4 +266,4 @@ auto_remove = false  # From module.rise_aws.rise_config.auto_remove
 - `ecr:BatchCheckLayerAvailability`, `ecr:InitiateLayerUpload`, `ecr:UploadLayerPart`, `ecr:CompleteLayerUpload`, `ecr:PutImage` - For pushing images
 - `ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer` - For pulling images
 
-All repository-level permissions are scoped to `${repo_prefix}*`.
+All permissions are scoped to `${repo_prefix}*`.

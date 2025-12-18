@@ -4,7 +4,9 @@ use tokio::time::interval;
 use tracing::{debug, error, info};
 
 use crate::db::models::DeploymentStatus;
-use crate::db::{deployments as db_deployments, projects as db_projects};
+use crate::db::{
+    deployments as db_deployments, extensions as db_extensions, projects as db_projects,
+};
 use crate::server::deployment::state_machine;
 use crate::server::state::ControllerState;
 
@@ -110,7 +112,7 @@ impl ProjectController {
                 }
             }
 
-            // If all deployments are terminal, check finalizers before deleting
+            // If all deployments are terminal, check finalizers and extensions before deleting
             if !has_non_terminal {
                 // Check if any finalizers remain (e.g., ECR cleanup pending)
                 if db_projects::has_finalizers(&self.state.db_pool, project.id).await? {
@@ -121,8 +123,21 @@ impl ProjectController {
                     continue;
                 }
 
+                // Check if any extensions remain (including soft-deleted ones)
+                // Extensions must be fully cleaned up by their controllers before project deletion
+                let extensions =
+                    db_extensions::list_by_project(&self.state.db_pool, project.id).await?;
+                if !extensions.is_empty() {
+                    debug!(
+                        "Project {} has {} extension(s) remaining, waiting for extension controllers to clean up",
+                        project.name,
+                        extensions.len()
+                    );
+                    continue;
+                }
+
                 info!(
-                    "All deployments for project {} are terminated and no finalizers remain, marking as Terminated",
+                    "All deployments for project {} are terminated and no finalizers or extensions remain, marking as Terminated",
                     project.name
                 );
 

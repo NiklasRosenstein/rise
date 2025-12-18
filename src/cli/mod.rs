@@ -4,6 +4,7 @@ pub mod deployment;
 pub mod dev_oidc_issuer;
 pub mod domain;
 pub mod env;
+pub mod extension;
 pub mod login;
 pub mod project;
 pub mod service_account;

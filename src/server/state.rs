@@ -50,6 +50,7 @@ pub struct AppState {
     pub public_url: String,
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
     pub deployment_backend: Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
+    pub extension_registry: Arc<crate::server::extensions::registry::ExtensionRegistry>,
 }
 
 /// Initialize encryption provider from settings
@@ -436,6 +437,106 @@ impl AppState {
             init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
         };
 
+        // Initialize extension registry
+        #[allow(unused_mut)]
+        let mut extension_registry = crate::server::extensions::registry::ExtensionRegistry::new();
+
+        // Register extensions from configuration
+        if let Some(ref extensions_config) = settings.extensions {
+            #[allow(clippy::never_loop)]
+            for provider_config in &extensions_config.providers {
+                match provider_config {
+                    #[cfg(feature = "aws")]
+                    crate::server::settings::ExtensionProviderConfig::AwsRdsProvisioner {
+                        name,
+                        region,
+                        instance_size,
+                        disk_size,
+                        instance_id_template,
+                        default_engine_version,
+                        vpc_security_group_ids,
+                        db_subnet_group_name,
+                        backup_retention_days,
+                        backup_window,
+                        maintenance_window,
+                        access_key_id,
+                        secret_access_key,
+                    } => {
+                        tracing::info!("Initializing AWS RDS extension provider '{}'", name);
+
+                        // Create AWS config
+                        let mut aws_config_builder =
+                            aws_config::defaults(aws_config::BehaviorVersion::latest())
+                                .region(aws_config::Region::new(region.clone()));
+
+                        // Use explicit credentials if provided
+                        if let (Some(key_id), Some(secret_key)) = (access_key_id, secret_access_key)
+                        {
+                            aws_config_builder = aws_config_builder.credentials_provider(
+                                aws_sdk_sts::config::Credentials::new(
+                                    key_id,
+                                    secret_key,
+                                    None,
+                                    None,
+                                    "static-credentials",
+                                ),
+                            );
+                        }
+
+                        let aws_config = aws_config_builder.load().await;
+                        let rds_client = aws_sdk_rds::Client::new(&aws_config);
+
+                        // Get encryption provider (required for RDS)
+                        let encryption_provider = encryption_provider.clone().ok_or_else(|| {
+                            anyhow::anyhow!("Encryption provider required for AWS RDS extension")
+                        })?;
+
+                        // Create and register the extension
+                        let aws_rds_provisioner =
+                            crate::server::extensions::providers::aws_rds::AwsRdsProvisioner::new(
+                                crate::server::extensions::providers::aws_rds::AwsRdsProvisionerConfig {
+                                    name: name.clone(),
+                                    rds_client,
+                                    db_pool: db_pool.clone(),
+                                    encryption_provider,
+                                    region: region.clone(),
+                                    instance_size: instance_size.clone(),
+                                    disk_size: *disk_size,
+                                    instance_id_template: instance_id_template.clone(),
+                                    default_engine_version: default_engine_version.clone(),
+                                    vpc_security_group_ids: vpc_security_group_ids.clone(),
+                                    db_subnet_group_name: db_subnet_group_name.clone(),
+                                    backup_retention_days: *backup_retention_days,
+                                    backup_window: backup_window.clone(),
+                                    maintenance_window: maintenance_window.clone(),
+                                }
+                            )
+                            .await?;
+
+                        let aws_rds_arc: Arc<dyn crate::server::extensions::Extension> =
+                            Arc::new(aws_rds_provisioner);
+                        extension_registry.register(aws_rds_arc.clone());
+
+                        // Start the extension's reconciliation loop
+                        aws_rds_arc.start();
+
+                        tracing::info!(
+                            "AWS RDS extension provider '{}' initialized and started",
+                            name
+                        );
+                    }
+                    // When no extension provider features are enabled, this ensures the match is exhaustive
+                    #[allow(unreachable_patterns)]
+                    _ => {
+                        // This pattern is only reachable when no extension features are enabled
+                        // In that case, we skip unknown provider types silently
+                    }
+                }
+            }
+        }
+
+        let extension_registry = Arc::new(extension_registry);
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -451,6 +552,7 @@ impl AppState {
             public_url,
             encryption_provider,
             deployment_backend,
+            extension_registry,
         })
     }
 
@@ -605,6 +707,10 @@ impl AppState {
             init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
         };
 
+        // Initialize empty extension registry for controller (not used)
+        let extension_registry =
+            Arc::new(crate::server::extensions::registry::ExtensionRegistry::new());
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -620,6 +726,7 @@ impl AppState {
             public_url,
             encryption_provider,
             deployment_backend,
+            extension_registry,
         })
     }
 }

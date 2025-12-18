@@ -39,7 +39,7 @@ locals {
 # -----------------------------------------------------------------------------
 
 resource "aws_kms_key" "ecr" {
-  count = var.encryption_type == "KMS" ? 1 : 0
+  count = var.enable_ecr && var.enable_kms ? 1 : 0
 
   description             = "KMS key for Rise ECR repository encryption"
   deletion_window_in_days = 30
@@ -48,7 +48,7 @@ resource "aws_kms_key" "ecr" {
 }
 
 resource "aws_kms_alias" "ecr" {
-  count = var.encryption_type == "KMS" ? 1 : 0
+  count = var.enable_ecr && var.enable_kms ? 1 : 0
 
   name          = "alias/${var.name}-ecr"
   target_key_id = aws_kms_key.ecr[0].key_id
@@ -59,72 +59,83 @@ resource "aws_kms_alias" "ecr" {
 # -----------------------------------------------------------------------------
 
 data "aws_iam_policy_document" "backend" {
-  # Allow getting authorization tokens (required for any ECR operation)
-  statement {
-    sid    = "GetAuthorizationToken"
-    effect = "Allow"
-    actions = [
-      "ecr:GetAuthorizationToken"
-    ]
-    resources = ["*"]
+  # ECR permissions (if enabled)
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "GetAuthorizationToken"
+      effect = "Allow"
+      actions = [
+        "ecr:GetAuthorizationToken"
+      ]
+      resources = ["*"]
+    }
   }
 
-  # Allow listing and describing repositories (for discovery)
-  statement {
-    sid    = "DescribeRepositories"
-    effect = "Allow"
-    actions = [
-      "ecr:DescribeRepositories",
-      "ecr:ListTagsForResource"
-    ]
-    resources = ["*"]
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "DescribeRepositories"
+      effect = "Allow"
+      actions = [
+        "ecr:DescribeRepositories",
+        "ecr:ListTagsForResource"
+      ]
+      resources = ["*"]
+    }
   }
 
-  # Allow creating repositories with the configured prefix
-  statement {
-    sid    = "CreateRepository"
-    effect = "Allow"
-    actions = [
-      "ecr:CreateRepository",
-      "ecr:TagResource",
-      "ecr:PutImageScanningConfiguration",
-      "ecr:PutImageTagMutability",
-      "ecr:PutLifecyclePolicy"
-    ]
-    resources = [
-      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
-    ]
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "CreateRepository"
+      effect = "Allow"
+      actions = [
+        "ecr:CreateRepository",
+        "ecr:TagResource",
+        "ecr:PutImageScanningConfiguration",
+        "ecr:PutImageTagMutability",
+        "ecr:PutLifecyclePolicy"
+      ]
+      resources = [
+        "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
+      ]
+    }
   }
 
-  # Allow deleting repositories
-  statement {
-    sid    = "DeleteRepository"
-    effect = "Allow"
-    actions = [
-      "ecr:DeleteRepository",
-      "ecr:BatchDeleteImage"
-    ]
-    resources = [
-      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
-    ]
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "DeleteRepository"
+      effect = "Allow"
+      actions = [
+        "ecr:DeleteRepository",
+        "ecr:BatchDeleteImage"
+      ]
+      resources = [
+        "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
+      ]
+    }
   }
 
-  # Allow tagging repositories
-  statement {
-    sid    = "TagRepository"
-    effect = "Allow"
-    actions = [
-      "ecr:TagResource",
-      "ecr:UntagResource"
-    ]
-    resources = [
-      "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
-    ]
+  dynamic "statement" {
+    for_each = var.enable_ecr ? [1] : []
+    content {
+      sid    = "TagRepository"
+      effect = "Allow"
+      actions = [
+        "ecr:TagResource",
+        "ecr:UntagResource"
+      ]
+      resources = [
+        "arn:aws:ecr:${local.region}:${local.account_id}:repository/${local.repo_prefix}*"
+      ]
+    }
   }
 
   # KMS permissions if using KMS encryption
   dynamic "statement" {
-    for_each = var.encryption_type == "KMS" ? [1] : []
+    for_each = var.enable_ecr && var.enable_kms ? [1] : []
     content {
       sid    = "KMSEncryption"
       effect = "Allow"
@@ -137,11 +148,50 @@ data "aws_iam_policy_document" "backend" {
       resources = [aws_kms_key.ecr[0].arn]
     }
   }
+
+  # RDS permissions for managing database instances (if enabled)
+  dynamic "statement" {
+    for_each = var.enable_rds ? [1] : []
+    content {
+      sid    = "ManageRDSInstances"
+      effect = "Allow"
+      actions = [
+        "rds:CreateDBInstance",
+        "rds:DeleteDBInstance",
+        "rds:DescribeDBInstances",
+        "rds:ModifyDBInstance",
+        "rds:ListTagsForResource",
+        "rds:AddTagsToResource",
+        "rds:RemoveTagsFromResource"
+      ]
+      resources = [
+        "arn:aws:rds:${local.region}:${local.account_id}:db:rise-*",
+        "arn:aws:rds:${local.region}:${local.account_id}:subgrp:rise-*"
+      ]
+    }
+  }
+
+  # RDS subnet groups (needed for VPC placement)
+  dynamic "statement" {
+    for_each = var.enable_rds ? [1] : []
+    content {
+      sid    = "ManageRDSSubnetGroups"
+      effect = "Allow"
+      actions = [
+        "rds:CreateDBSubnetGroup",
+        "rds:DeleteDBSubnetGroup",
+        "rds:DescribeDBSubnetGroups"
+      ]
+      resources = [
+        "arn:aws:rds:${local.region}:${local.account_id}:subgrp:rise-*"
+      ]
+    }
+  }
 }
 
 resource "aws_iam_policy" "backend" {
   name        = local.name
-  description = "IAM policy for Rise backend to manage ECR repositories"
+  description = "IAM policy for Rise backend to manage ECR repositories and RDS instances"
   policy      = data.aws_iam_policy_document.backend.json
   tags        = local.tags
 }
@@ -228,13 +278,15 @@ resource "aws_iam_access_key" "backend" {
 }
 
 # -----------------------------------------------------------------------------
-# Push Role - for scoped image push credentials
+# Push Role - for scoped image push credentials (if ECR enabled)
 # -----------------------------------------------------------------------------
 # This role is assumed by the Rise backend to generate temporary credentials
 # for clients to push images. The credentials are scoped per-repository using
 # an inline session policy during AssumeRole.
 
 data "aws_iam_policy_document" "push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   # Allow getting authorization tokens (required for docker login)
   statement {
     sid    = "GetAuthorizationToken"
@@ -266,14 +318,18 @@ data "aws_iam_policy_document" "push_role" {
 }
 
 resource "aws_iam_policy" "push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   name        = "${var.name}-ecr-push"
   description = "IAM policy for Rise ECR push operations"
-  policy      = data.aws_iam_policy_document.push_role.json
+  policy      = data.aws_iam_policy_document.push_role[0].json
   tags        = local.tags
 }
 
 # The push role can be assumed by the controller role or user
 data "aws_iam_policy_document" "push_role_assume" {
+  count = var.enable_ecr ? 1 : 0
+
   # Allow the controller role to assume the push role
   statement {
     effect = "Allow"
@@ -299,44 +355,135 @@ data "aws_iam_policy_document" "push_role_assume" {
 }
 
 resource "aws_iam_role" "push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   name               = "${var.name}-ecr-push"
   description        = "IAM role for Rise ECR push operations (assumed to generate scoped credentials)"
-  assume_role_policy = data.aws_iam_policy_document.push_role_assume.json
+  assume_role_policy = data.aws_iam_policy_document.push_role_assume[0].json
   tags               = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "push_role" {
-  role       = aws_iam_role.push_role.name
-  policy_arn = aws_iam_policy.push_role.arn
+  count = var.enable_ecr ? 1 : 0
+
+  role       = aws_iam_role.push_role[0].name
+  policy_arn = aws_iam_policy.push_role[0].arn
 }
 
 # The controller also needs permission to assume the push role
 data "aws_iam_policy_document" "assume_push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   statement {
     sid    = "AssumePushRole"
     effect = "Allow"
     actions = [
       "sts:AssumeRole"
     ]
-    resources = [aws_iam_role.push_role.arn]
+    resources = [aws_iam_role.push_role[0].arn]
   }
 }
 
 resource "aws_iam_policy" "assume_push_role" {
+  count = var.enable_ecr ? 1 : 0
+
   name        = "${var.name}-ecr-assume-push"
   description = "Allow assuming the ECR push role"
-  policy      = data.aws_iam_policy_document.assume_push_role.json
+  policy      = data.aws_iam_policy_document.assume_push_role[0].json
   tags        = local.tags
 }
 
 resource "aws_iam_role_policy_attachment" "controller_assume_push" {
+  count = var.enable_ecr ? 1 : 0
+
   role       = aws_iam_role.backend.name
-  policy_arn = aws_iam_policy.assume_push_role.arn
+  policy_arn = aws_iam_policy.assume_push_role[0].arn
 }
 
 resource "aws_iam_user_policy_attachment" "controller_assume_push" {
-  count = var.create_iam_user ? 1 : 0
+  count = var.create_iam_user && var.enable_ecr ? 1 : 0
 
   user       = aws_iam_user.backend[0].name
-  policy_arn = aws_iam_policy.assume_push_role.arn
+  policy_arn = aws_iam_policy.assume_push_role[0].arn
+}
+
+# -----------------------------------------------------------------------------
+# RDS Service-Linked Role
+# -----------------------------------------------------------------------------
+# This role is required for RDS to manage resources on your behalf.
+# It only needs to be created once per AWS account.
+
+resource "aws_iam_service_linked_role" "rds" {
+  count = var.enable_rds && var.create_rds_service_linked_role ? 1 : 0
+
+  aws_service_name = "rds.amazonaws.com"
+  description      = "Service-linked role for Amazon RDS"
+}
+
+# -----------------------------------------------------------------------------
+# RDS DB Subnet Group
+# -----------------------------------------------------------------------------
+# Subnet group defines which subnets RDS instances can be placed in
+
+resource "aws_db_subnet_group" "rds" {
+  count = var.enable_rds && var.rds_vpc_id != null && length(var.rds_subnet_ids) > 0 ? 1 : 0
+
+  name_prefix = "${var.name}-rds-"
+  description = "DB subnet group for Rise RDS instances"
+  subnet_ids  = var.rds_subnet_ids
+
+  tags = merge(local.tags, {
+    Name = "${var.name}-rds"
+  })
+}
+
+# -----------------------------------------------------------------------------
+# RDS Security Group
+# -----------------------------------------------------------------------------
+# Security group for RDS instances, allowing access from specified security groups
+
+resource "aws_security_group" "rds" {
+  count = var.enable_rds && var.rds_vpc_id != null ? 1 : 0
+
+  name_prefix = "${var.name}-rds-"
+  description = "Security group for Rise RDS instances"
+  vpc_id      = var.rds_vpc_id
+
+  tags = merge(local.tags, {
+    Name = "${var.name}-rds"
+  })
+}
+
+# Allow ingress from specified security groups on PostgreSQL port
+resource "aws_vpc_security_group_ingress_rule" "rds_from_allowed_sgs" {
+  count = var.enable_rds && var.rds_vpc_id != null ? length(var.rds_allowed_security_groups) : 0
+
+  security_group_id            = aws_security_group.rds[0].id
+  referenced_security_group_id = var.rds_allowed_security_groups[count.index]
+  from_port                    = 5432
+  to_port                      = 5432
+  ip_protocol                  = "tcp"
+  description                  = "PostgreSQL access from allowed security group"
+}
+
+# Allow ingress from specified CIDR blocks on PostgreSQL port
+resource "aws_vpc_security_group_ingress_rule" "rds_from_allowed_cidrs" {
+  count = var.enable_rds && var.rds_vpc_id != null ? length(var.rds_allowed_cidr_blocks) : 0
+
+  security_group_id = aws_security_group.rds[0].id
+  cidr_ipv4         = var.rds_allowed_cidr_blocks[count.index]
+  from_port         = 5432
+  to_port           = 5432
+  ip_protocol       = "tcp"
+  description       = "PostgreSQL access from allowed CIDR block"
+}
+
+# Allow all egress (RDS instances need to reach out for updates, etc.)
+resource "aws_vpc_security_group_egress_rule" "rds_egress" {
+  count = var.enable_rds && var.rds_vpc_id != null ? 1 : 0
+
+  security_group_id = aws_security_group.rds[0].id
+  cidr_ipv4         = "0.0.0.0/0"
+  ip_protocol       = "-1"
+  description       = "Allow all outbound traffic"
 }

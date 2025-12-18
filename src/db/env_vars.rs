@@ -119,6 +119,39 @@ pub async fn list_deployment_env_vars(
     Ok(env_vars)
 }
 
+/// Create or update a deployment environment variable (upsert)
+#[allow(dead_code)]
+pub async fn upsert_deployment_env_var(
+    pool: &PgPool,
+    deployment_id: Uuid,
+    key: &str,
+    value: &str,
+    is_secret: bool,
+) -> Result<DeploymentEnvVar> {
+    let env_var = sqlx::query_as!(
+        DeploymentEnvVar,
+        r#"
+        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (deployment_id, key)
+        DO UPDATE SET
+            value = EXCLUDED.value,
+            is_secret = EXCLUDED.is_secret,
+            updated_at = NOW()
+        RETURNING id, deployment_id, key, value, is_secret, created_at, updated_at
+        "#,
+        deployment_id,
+        key,
+        value,
+        is_secret
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to upsert deployment environment variable")?;
+
+    Ok(env_var)
+}
+
 /// Load deployment environment variables with decryption
 ///
 /// This is a shared helper for controllers to load environment variables

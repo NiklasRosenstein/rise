@@ -173,3 +173,182 @@
     overflow-y: auto;
     flex: 1;
 }
+
+/* Markdown/Prose Styling */
+.prose {
+    color: #d1d5db;
+    line-height: 1.75;
+}
+
+.prose h1 {
+    color: #f9fafb;
+    font-weight: 800;
+    font-size: 2.25rem;
+    margin-top: 0;
+    margin-bottom: 1.25rem;
+    line-height: 1.1111111;
+}
+
+.prose h2 {
+    color: #f3f4f6;
+    font-weight: 700;
+    font-size: 1.875rem;
+    margin-top: 2.5rem;
+    margin-bottom: 1.25rem;
+    line-height: 1.3333333;
+}
+
+.prose h3 {
+    color: #f3f4f6;
+    font-weight: 600;
+    font-size: 1.5rem;
+    margin-top: 2rem;
+    margin-bottom: 1rem;
+    line-height: 1.6;
+}
+
+.prose h4 {
+    color: #f3f4f6;
+    font-weight: 600;
+    font-size: 1.25rem;
+    margin-top: 1.75rem;
+    margin-bottom: 0.75rem;
+    line-height: 1.5;
+}
+
+.prose p {
+    margin-top: 1.25rem;
+    margin-bottom: 1.25rem;
+}
+
+.prose ul,
+.prose ol {
+    margin-top: 1.25rem;
+    margin-bottom: 1.25rem;
+    padding-left: 1.75rem;
+}
+
+.prose li {
+    margin-top: 0.5rem;
+    margin-bottom: 0.5rem;
+}
+
+.prose ul > li {
+    padding-left: 0.375rem;
+    list-style-type: disc;
+}
+
+.prose ol > li {
+    padding-left: 0.375rem;
+    list-style-type: decimal;
+}
+
+.prose code {
+    color: #f3f4f6;
+    background-color: #374151;
+    padding: 0.25rem 0.375rem;
+    border-radius: 0.25rem;
+    font-size: 0.875em;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+.prose pre {
+    color: #f3f4f6;
+    background-color: #1f2937;
+    overflow-x: auto;
+    font-size: 0.875em;
+    line-height: 1.7142857;
+    margin-top: 1.75rem;
+    margin-bottom: 1.75rem;
+    border-radius: 0.375rem;
+    padding: 1rem 1.25rem;
+}
+
+.prose pre code {
+    background-color: transparent;
+    border-width: 0;
+    border-radius: 0;
+    padding: 0;
+    font-weight: inherit;
+    color: inherit;
+    font-size: inherit;
+    font-family: inherit;
+    line-height: inherit;
+}
+
+.prose strong {
+    color: #f3f4f6;
+    font-weight: 600;
+}
+
+.prose em {
+    color: #f3f4f6;
+    font-style: italic;
+}
+
+.prose a {
+    color: #60a5fa;
+    text-decoration: underline;
+    font-weight: 500;
+}
+
+.prose a:hover {
+    color: #93c5fd;
+}
+
+.prose blockquote {
+    font-weight: 500;
+    font-style: italic;
+    color: #f3f4f6;
+    border-left-width: 0.25rem;
+    border-left-color: #4b5563;
+    quotes: "\201C""\201D""\2018""\2019";
+    margin-top: 1.75rem;
+    margin-bottom: 1.75rem;
+    padding-left: 1rem;
+}
+
+.prose hr {
+    border-color: #4b5563;
+    border-top-width: 1px;
+    margin-top: 3rem;
+    margin-bottom: 3rem;
+}
+
+.prose table {
+    width: 100%;
+    table-layout: auto;
+    text-align: left;
+    margin-top: 2rem;
+    margin-bottom: 2rem;
+    font-size: 0.875em;
+    line-height: 1.7142857;
+}
+
+.prose thead {
+    color: #f3f4f6;
+    font-weight: 600;
+    border-bottom-width: 1px;
+    border-bottom-color: #4b5563;
+}
+
+.prose thead th {
+    vertical-align: bottom;
+    padding-right: 0.75rem;
+    padding-bottom: 0.75rem;
+    padding-left: 0.75rem;
+}
+
+.prose tbody tr {
+    border-bottom-width: 1px;
+    border-bottom-color: #374151;
+}
+
+.prose tbody tr:last-child {
+    border-bottom-width: 0;
+}
+
+.prose tbody td {
+    vertical-align: baseline;
+    padding: 0.75rem;
+}

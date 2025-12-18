@@ -36,6 +36,50 @@ variable "irsa_service_account" {
   default     = "rise-backend"
 }
 
+# Feature flags
+
+variable "enable_ecr" {
+  description = "Enable ECR permissions for the Rise backend. Set to true if using ECR for container registry."
+  type        = bool
+  default     = true
+}
+
+variable "enable_rds" {
+  description = "Enable RDS permissions for the Rise backend. Set to true if using the AWS RDS extension."
+  type        = bool
+  default     = false
+}
+
+variable "create_rds_service_linked_role" {
+  description = "Create the RDS service-linked role. Only needed once per AWS account. Set to false if the role already exists."
+  type        = bool
+  default     = true
+}
+
+variable "rds_vpc_id" {
+  description = "VPC ID where RDS instances will be created. Required if enable_rds = true."
+  type        = string
+  default     = null
+}
+
+variable "rds_allowed_security_groups" {
+  description = "List of security group IDs allowed to access RDS instances (e.g., your EKS cluster security group)"
+  type        = list(string)
+  default     = []
+}
+
+variable "rds_allowed_cidr_blocks" {
+  description = "List of CIDR blocks allowed to access RDS instances on PostgreSQL port (5432)"
+  type        = list(string)
+  default     = []
+}
+
+variable "rds_subnet_ids" {
+  description = "List of subnet IDs for the RDS subnet group (must be in the VPC specified by rds_vpc_id)"
+  type        = list(string)
+  default     = []
+}
+
 # ECR settings
 
 variable "image_tag_mutability" {
@@ -55,15 +99,10 @@ variable "scan_on_push" {
   default     = true
 }
 
-variable "encryption_type" {
-  description = "Encryption type for repositories (AES256 or KMS). If KMS, a KMS key will be automatically created."
-  type        = string
-  default     = "AES256"
-
-  validation {
-    condition     = contains(["AES256", "KMS"], var.encryption_type)
-    error_message = "encryption_type must be either AES256 or KMS"
-  }
+variable "enable_kms" {
+  description = "Enable KMS encryption for ECR repositories. If true, a KMS key will be automatically created. If false, AES256 encryption is used."
+  type        = bool
+  default     = false
 }
 
 # Lifecycle policies
