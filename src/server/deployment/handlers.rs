@@ -12,7 +12,7 @@ use tracing::{debug, error, info};
 
 use super::models::{self, *};
 use super::state_machine;
-use super::utils::generate_deployment_id;
+use super::utils::{create_deployment_with_hooks, generate_deployment_id};
 use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
 use crate::db::{
     deployments as db_deployments, projects, service_accounts, teams as db_teams, users,
@@ -418,9 +418,9 @@ pub async fn create_deployment(
 
         info!("Successfully resolved image to digest: {}", image_digest);
 
-        // Create deployment record with image fields set (needed for extension hooks)
-        let deployment = db_deployments::create(
-            &state.db_pool,
+        // Create deployment record with image fields set and invoke extension hooks
+        let deployment = create_deployment_with_hooks(
+            &state,
             db_deployments::CreateDeploymentParams {
                 deployment_id: &deployment_id,
                 project_id: project.id,
@@ -434,50 +434,14 @@ pub async fn create_deployment(
                 http_port: payload.http_port as i32, // http_port
                 is_active: false,                   // Deployments start as inactive
             },
+            &project,
         )
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create deployment: {}", e),
-            )
-        })?;
+        .await?;
 
         info!(
             "Created pre-built image deployment {} for project {}",
             deployment_id, payload.project
         );
-
-        // Call before_deployment hooks for all registered extensions
-        for (_, extension) in state.extension_registry.iter() {
-            if let Err(e) = extension
-                .before_deployment(
-                    deployment.id, // Use the UUID from the database record
-                    project.id,
-                    &payload.group,
-                )
-                .await
-            {
-                error!(
-                    "Extension '{}' before_deployment hook failed: {:?}",
-                    extension.name(),
-                    e
-                );
-
-                // Mark deployment as failed
-                let error_msg = format!("Extension '{}' failed: {}", extension.name(), e);
-                if let Err(mark_err) =
-                    db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
-                {
-                    error!(
-                        "Failed to mark deployment {} as failed: {}",
-                        deployment_id, mark_err
-                    );
-                }
-
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
-            }
-        }
 
         // Copy project environment variables to deployment
         crate::db::env_vars::copy_project_env_vars_to_deployment(
@@ -535,9 +499,9 @@ pub async fn create_deployment(
 
         debug!("Image tag: {}", image_tag);
 
-        // Create deployment record in database (image fields are NULL, needed for extension hooks)
-        let deployment = db_deployments::create(
-            &state.db_pool,
+        // Create deployment record in database and invoke extension hooks
+        let deployment = create_deployment_with_hooks(
+            &state,
             db_deployments::CreateDeploymentParams {
                 deployment_id: &deployment_id,
                 project_id: project.id,
@@ -551,45 +515,9 @@ pub async fn create_deployment(
                 http_port: payload.http_port as i32, // http_port
                 is_active: false,   // Deployments start as inactive
             },
+            &project,
         )
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create deployment: {}", e),
-            )
-        })?;
-
-        // Call before_deployment hooks for all registered extensions
-        for (_, extension) in state.extension_registry.iter() {
-            if let Err(e) = extension
-                .before_deployment(
-                    deployment.id, // Use the UUID from the database record
-                    project.id,
-                    &payload.group,
-                )
-                .await
-            {
-                error!(
-                    "Extension '{}' before_deployment hook failed: {:?}",
-                    extension.name(),
-                    e
-                );
-
-                // Mark deployment as failed
-                let error_msg = format!("Extension '{}' failed: {}", extension.name(), e);
-                if let Err(mark_err) =
-                    db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
-                {
-                    error!(
-                        "Failed to mark deployment {} as failed: {}",
-                        deployment_id, mark_err
-                    );
-                }
-
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
-            }
-        }
+        .await?;
 
         info!(
             "Created build-from-source deployment {} for project {}",
@@ -1378,34 +1306,12 @@ pub async fn rollback_deployment(
             source_deployment.id
         };
 
-    // Call before_deployment hooks for all registered extensions
-    for (_, extension) in state.extension_registry.iter() {
-        if let Err(e) = extension
-            .before_deployment(
-                uuid::Uuid::parse_str(&new_deployment_id).unwrap(),
-                project.id,
-                &source_deployment.deployment_group,
-            )
-            .await
-        {
-            error!(
-                "Extension '{}' before_deployment hook failed: {:?}",
-                extension.name(),
-                e
-            );
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Extension '{}' failed: {}", extension.name(), e),
-            ));
-        }
-    }
-
-    // Create new deployment with Pushed status
+    // Create new deployment with Pushed status and invoke extension hooks
     // Copy image and image_digest from source - the helper function will determine the tag
     // For pre-built images: image_digest is copied, helper returns it
     // For build-from-source: rolled_back_from_deployment_id is used to find the original source deployment's image
-    let new_deployment = db_deployments::create(
-        &state.db_pool,
+    let new_deployment = create_deployment_with_hooks(
+        &state,
         db_deployments::CreateDeploymentParams {
             deployment_id: &new_deployment_id,
             project_id: project.id,
@@ -1419,14 +1325,9 @@ pub async fn rollback_deployment(
             http_port: source_deployment.http_port, // Copy http_port from source
             is_active: false, // Rollback deployments also start as inactive
         },
+        &project,
     )
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to create rollback deployment: {}", e),
-        )
-    })?;
+    .await?;
 
     // Use helper to determine image tag (for logging/response only)
     let image_tag = crate::server::deployment::utils::get_deployment_image_tag(

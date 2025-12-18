@@ -1277,9 +1277,20 @@ impl Extension for AwsRdsProvisioner {
         deployment_group: &str,
     ) -> Result<()> {
         // Find the extension for this project
-        let ext = db_extensions::find_by_project_and_name(&self.db_pool, project_id, &self.name)
-            .await?
-            .ok_or_else(|| anyhow::anyhow!("Extension '{}' not found for project", self.name))?;
+        let ext =
+            match db_extensions::find_by_project_and_name(&self.db_pool, project_id, &self.name)
+                .await?
+            {
+                Some(ext) => ext,
+                None => {
+                    // Extension not enabled for this project - skip hook
+                    debug!(
+                    "Extension '{}' not enabled for project {}, skipping before_deployment hook",
+                    self.name, project_id
+                );
+                    return Ok(());
+                }
+            };
 
         // Skip if extension is marked for deletion
         if ext.deleted_at.is_some() {

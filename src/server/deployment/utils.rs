@@ -1,4 +1,6 @@
+use axum::http::StatusCode;
 use chrono::Utc;
+use tracing::error;
 
 use crate::db::deployments as db_deployments;
 use crate::db::models::{Deployment, Project};
@@ -80,4 +82,70 @@ pub async fn get_deployment_image_tag(
         // Fallback if no registry configured (shouldn't happen in practice)
         format!("{}:{}", project.name, deployment_id_for_tag)
     }
+}
+
+/// Create a deployment and invoke extension hooks
+///
+/// This is the single code path for creating deployments. It:
+/// 1. Creates the deployment record in the database
+/// 2. Invokes before_deployment hooks for all registered extensions
+/// 3. Marks the deployment as failed if any extension hook fails
+///
+/// # Arguments
+/// * `state` - AppState containing database pool and extension registry
+/// * `params` - Parameters for creating the deployment
+/// * `project` - The project this deployment belongs to
+///
+/// # Returns
+/// The created deployment on success, or an error tuple (StatusCode, String)
+pub async fn create_deployment_with_hooks(
+    state: &AppState,
+    params: db_deployments::CreateDeploymentParams<'_>,
+    project: &Project,
+) -> Result<Deployment, (StatusCode, String)> {
+    // Extract deployment_group before moving params (needed for extension hooks)
+    let deployment_group = params.deployment_group.to_string();
+
+    // Create the deployment record
+    let deployment = db_deployments::create(&state.db_pool, params)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to create deployment: {}", e),
+            )
+        })?;
+
+    // Call before_deployment hooks for all registered extensions
+    for (_, extension) in state.extension_registry.iter() {
+        if let Err(e) = extension
+            .before_deployment(
+                deployment.id, // Use the UUID from the database record
+                project.id,
+                &deployment_group,
+            )
+            .await
+        {
+            error!(
+                "Extension '{}' before_deployment hook failed: {:?}",
+                extension.name(),
+                e
+            );
+
+            // Mark deployment as failed
+            let error_msg = format!("Extension '{}' failed: {}", extension.name(), e);
+            if let Err(mark_err) =
+                db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
+            {
+                error!(
+                    "Failed to mark deployment as failed after extension error: {:?}",
+                    mark_err
+                );
+            }
+
+            return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
+        }
+    }
+
+    Ok(deployment)
 }
