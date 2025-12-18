@@ -1043,7 +1043,7 @@ impl AwsRdsProvisioner {
                             status.state = RdsState::Deleted;
                         } else if let Some(instance) = instances.first() {
                             if let Some(instance_status) = instance.db_instance_status() {
-                                info!(
+                                debug!(
                                     "RDS instance {} deletion in progress (status: {})",
                                     instance_id, instance_status
                                 );
