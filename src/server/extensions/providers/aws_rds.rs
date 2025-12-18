@@ -999,15 +999,17 @@ impl AwsRdsProvisioner {
                 new_database, template_database
             );
 
-            // First, create an empty database with the correct owner
-            postgres_admin::create_database(&pool, &sanitized_new_db, &sanitized_owner)
-                .await
-                .context("Failed to create empty target database")?;
-
             // Parse endpoint to get host and port
             let (host, port) = parse_endpoint(endpoint)?;
 
-            // Dump the template database
+            // Step 1: Create an empty database (owned by master user initially)
+            let create_sql = format!("CREATE DATABASE {}", sanitized_new_db);
+            sqlx::query(&create_sql)
+                .execute(&pool)
+                .await
+                .context("Failed to create empty target database")?;
+
+            // Step 2: Dump the template database
             let dump_file = postgres_admin::dump_database(
                 &host,
                 port,
@@ -1018,7 +1020,7 @@ impl AwsRdsProvisioner {
             .await
             .context("Failed to dump template database")?;
 
-            // Restore into the new database
+            // Step 3: Restore into the new database
             let restore_result = postgres_admin::restore_database(
                 &host,
                 port,
@@ -1034,8 +1036,13 @@ impl AwsRdsProvisioner {
                 warn!("Failed to clean up dump file {:?}: {}", dump_file, e);
             }
 
-            // Return restore result
+            // Return restore result before changing owner
             restore_result.context("Failed to restore template database")?;
+
+            // Step 4: Change the database owner to the deployment group user
+            postgres_admin::change_database_owner(&pool, &sanitized_new_db, &sanitized_owner)
+                .await
+                .context("Failed to change database owner")?;
 
             info!(
                 "Successfully created database '{}' from template '{}'",
@@ -1048,7 +1055,17 @@ impl AwsRdsProvisioner {
                 template_database, new_database
             );
 
-            postgres_admin::create_database(&pool, &sanitized_new_db, &sanitized_owner).await?;
+            // Create database without owner (owned by master user initially)
+            let create_sql = format!("CREATE DATABASE {}", sanitized_new_db);
+            sqlx::query(&create_sql)
+                .execute(&pool)
+                .await
+                .context("Failed to create empty database")?;
+
+            // Change owner to the deployment group user
+            postgres_admin::change_database_owner(&pool, &sanitized_new_db, &sanitized_owner)
+                .await
+                .context("Failed to change database owner")?;
 
             info!("Successfully created empty database '{}'", new_database);
         }
