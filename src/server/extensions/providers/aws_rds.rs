@@ -1603,9 +1603,9 @@ This extension provisions a dedicated PostgreSQL database instance on AWS RDS fo
 ## Features
 
 - Automatic RDS instance provisioning with configurable instance size and disk
-- Per-deployment database creation (isolated databases for default/staging/etc.)
+- Configurable database isolation (shared or isolated per deployment group)
 - Automatic credential injection as environment variables
-- Database lifecycle management with soft deletion
+- Database lifecycle management with automatic cleanup
 - Encrypted password storage
 
 ## Configuration
@@ -1614,23 +1614,58 @@ The extension accepts an optional spec with the following fields:
 
 - `engine` (optional, default: "postgres"): Database engine type
 - `engine_version` (optional): Specific PostgreSQL version (e.g., "16.2"). If not specified, uses the configured default version.
+- `database_isolation` (optional, default: "shared"): Controls how databases are provisioned:
+  - `"shared"`: All deployment groups use the same database (simplest setup)
+  - `"isolated"`: Each deployment group gets its own empty database (true data isolation)
+- `inject_database_url` (optional, default: true): Whether to inject the `DATABASE_URL` environment variable
+- `inject_pg_vars` (optional, default: true): Whether to inject PostgreSQL environment variables (`PGHOST`, `PGPORT`, etc.)
 
 ## Example Spec
 
-Empty spec (uses all defaults):
+Minimal configuration (uses all defaults):
 ```json
 {}
 ```
 
-With custom engine version:
+With custom engine version and isolated databases:
 ```json
 {
   "engine": "postgres",
-  "engine_version": "16.2"
+  "engine_version": "16.2",
+  "database_isolation": "isolated"
 }
 ```
 
-## Environment Variables Injected
+Custom environment variable injection:
+```json
+{
+  "inject_database_url": true,
+  "inject_pg_vars": false
+}
+```
+
+## Database Isolation Modes
+
+### Shared Mode (default)
+
+All deployment groups (default, staging, etc.) use the same database. This is simpler and suitable for most applications where deployment groups represent different environments rather than isolated tenants.
+
+- Database name: `{project}_db_default`
+- All deployments share the same data
+- Simplest configuration
+
+### Isolated Mode
+
+Each deployment group gets its own empty database. This provides true data isolation and is useful for:
+- Multi-tenant applications where each deployment group represents a tenant
+- Testing with separate datasets
+- Scenarios requiring complete data separation between deployment groups
+
+- Database naming: `{project}_db_{deployment_group}`
+- Each deployment group has its own isolated database
+- Inactive databases are automatically cleaned up after 1 hour grace period
+
+## Environment Variables
 
 You can configure which environment variables to inject using the extension spec:
 
@@ -1647,25 +1682,9 @@ You can configure which environment variables to inject using the extension spec
 The PG* variables are recognized by `psql` and most PostgreSQL client libraries, allowing you to connect
 with just `psql` without any connection string arguments.
 
-You can enable/disable either or both sets of variables in your extension configuration.
+## Initial Provisioning
 
-## Provisioning Lifecycle
-
-1. **Pending**: Extension has been created, waiting for reconciliation
-2. **Creating**: RDS instance is being created (this can take 5-15 minutes)
-3. **Available**: Instance is ready, databases are created on-demand for each deployment
-4. **Deleting**: Extension has been deleted, instance is being terminated
-5. **Deleted**: Instance has been fully removed
-6. **Failed**: Provisioning failed, check status for error details
-
-## Per-Deployment Databases
-
-When you deploy your application, the extension automatically:
-1. Creates a database named after your project and deployment group (e.g., `myapp_default`, `myapp_staging`)
-2. Creates a dedicated user with access only to that database
-3. Injects the credentials as environment variables
-
-This ensures each deployment has its own isolated database while sharing the same RDS instance.
+Creating a new RDS instance typically takes **5-15 minutes**. No new deployments can be created until the RDS instance is available. You can monitor the provisioning status in the Extensions tab.
 "#
     }
 
