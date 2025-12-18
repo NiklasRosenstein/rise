@@ -50,7 +50,6 @@ FROM debian:trixie-slim AS rise
 RUN apt-get update && apt-get install -y \
     ca-certificates \
     libssl3 \
-    postgresql-client \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the compiled binary from the builder stage

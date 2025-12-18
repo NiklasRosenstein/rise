@@ -30,6 +30,9 @@ pub struct AwsRdsSpec {
     /// Engine version (e.g., "16.2")
     #[serde(default)]
     pub engine_version: Option<String>,
+    /// Database isolation mode for deployment groups
+    #[serde(default = "default_database_isolation")]
+    pub database_isolation: DatabaseIsolation,
     /// Whether to inject DATABASE_URL environment variable
     #[serde(default = "default_true")]
     pub inject_database_url: bool,
@@ -38,8 +41,22 @@ pub struct AwsRdsSpec {
     pub inject_pg_vars: bool,
 }
 
+/// Database isolation mode for deployment groups
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum DatabaseIsolation {
+    /// All deployment groups share the same database
+    Shared,
+    /// Each deployment group gets its own empty database
+    Isolated,
+}
+
 fn default_engine() -> String {
     RDS_ENGINE_POSTGRES.to_string()
+}
+
+fn default_database_isolation() -> DatabaseIsolation {
+    DatabaseIsolation::Shared
 }
 
 fn default_true() -> bool {
@@ -66,17 +83,6 @@ pub enum DatabaseState {
     CreatingUser,
     Available,
     Terminating,
-}
-
-/// Parameters for creating a database copy
-struct DatabaseCopyParams<'a> {
-    admin_db_url: &'a str,
-    new_database: &'a str,
-    template_database: &'a str,
-    owner: &'a str,
-    endpoint: &'a str,
-    master_username: &'a str,
-    master_password: &'a str,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -146,55 +152,8 @@ pub struct AwsRdsProvisioner {
     db_subnet_group_name: Option<String>,
 }
 
-/// Check if PostgreSQL client tools (pg_dump, pg_restore) are available in PATH
-async fn check_postgres_tools() -> Result<()> {
-    use tokio::process::Command;
-
-    // Check pg_dump
-    let pg_dump_output = Command::new("pg_dump")
-        .arg("--version")
-        .output()
-        .await
-        .context("pg_dump not found in PATH")?;
-
-    if !pg_dump_output.status.success() {
-        anyhow::bail!("pg_dump command failed");
-    }
-
-    // Check pg_restore
-    let pg_restore_output = Command::new("pg_restore")
-        .arg("--version")
-        .output()
-        .await
-        .context("pg_restore not found in PATH")?;
-
-    if !pg_restore_output.status.success() {
-        anyhow::bail!("pg_restore command failed");
-    }
-
-    // Log versions for diagnostics
-    let pg_dump_version = String::from_utf8_lossy(&pg_dump_output.stdout)
-        .trim()
-        .to_string();
-    let pg_restore_version = String::from_utf8_lossy(&pg_restore_output.stdout)
-        .trim()
-        .to_string();
-
-    info!("PostgreSQL client tools found:");
-    info!("  {}", pg_dump_version);
-    info!("  {}", pg_restore_version);
-
-    Ok(())
-}
-
 impl AwsRdsProvisioner {
     pub async fn new(config: AwsRdsProvisionerConfig) -> Result<Self> {
-        // Validate that PostgreSQL client tools are available
-        check_postgres_tools().await.context(
-            "PostgreSQL client tools (pg_dump, pg_restore) not found in PATH. \
-             Please install postgresql-client package.",
-        )?;
-
         Ok(Self {
             name: config.name,
             rds_client: config.rds_client,
@@ -954,125 +913,6 @@ impl AwsRdsProvisioner {
         pool.close().await;
         Ok(())
     }
-
-    /// Create a copy of a database using pg_dump and pg_restore
-    /// Falls back to creating an empty database if the template doesn't exist
-    ///
-    /// This approach works reliably even when the template database has active connections,
-    /// unlike CREATE DATABASE WITH TEMPLATE which requires zero connections.
-    async fn create_database_copy(&self, params: DatabaseCopyParams<'_>) -> Result<()> {
-        let admin_db_url = params.admin_db_url;
-        let new_database = params.new_database;
-        let template_database = params.template_database;
-        let owner = params.owner;
-        let endpoint = params.endpoint;
-        let master_username = params.master_username;
-        let master_password = params.master_password;
-        // Connect to the postgres database using admin credentials
-        let pool = PgPool::connect(admin_db_url)
-            .await
-            .context("Failed to connect to RDS instance as admin")?;
-
-        // Check if the new database already exists
-        let exists = postgres_admin::database_exists(&pool, new_database).await?;
-
-        if exists {
-            info!(
-                "Database '{}' already exists, skipping creation",
-                new_database
-            );
-            pool.close().await;
-            return Ok(());
-        }
-
-        // Check if the template database exists
-        let template_exists = postgres_admin::database_exists(&pool, template_database).await?;
-
-        let sanitized_new_db = sanitize_identifier(new_database)?;
-        let sanitized_owner = sanitize_identifier(owner)?;
-
-        if template_exists {
-            // Create database copy using pg_dump/pg_restore
-            // This approach works even when the template database has active connections
-            info!(
-                "Creating database '{}' from template '{}' using pg_dump/pg_restore",
-                new_database, template_database
-            );
-
-            // Parse endpoint to get host and port
-            let (host, port) = parse_endpoint(endpoint)?;
-
-            // Step 1: Create an empty database (owned by master user initially)
-            let create_sql = format!("CREATE DATABASE {}", sanitized_new_db);
-            sqlx::query(&create_sql)
-                .execute(&pool)
-                .await
-                .context("Failed to create empty target database")?;
-
-            // Step 2: Dump the template database
-            let dump_file = postgres_admin::dump_database(
-                &host,
-                port,
-                template_database,
-                master_username,
-                master_password,
-            )
-            .await
-            .context("Failed to dump template database")?;
-
-            // Step 3: Restore into the new database
-            let restore_result = postgres_admin::restore_database(
-                &host,
-                port,
-                new_database,
-                master_username,
-                master_password,
-                &dump_file,
-            )
-            .await;
-
-            // Clean up the dump file regardless of restore result
-            if let Err(e) = std::fs::remove_file(&dump_file) {
-                warn!("Failed to clean up dump file {:?}: {}", dump_file, e);
-            }
-
-            // Return restore result before changing owner
-            restore_result.context("Failed to restore template database")?;
-
-            // Step 4: Change the database owner to the deployment group user
-            postgres_admin::change_database_owner(&pool, &sanitized_new_db, &sanitized_owner)
-                .await
-                .context("Failed to change database owner")?;
-
-            info!(
-                "Successfully created database '{}' from template '{}'",
-                new_database, template_database
-            );
-        } else {
-            // Fall back to creating an empty database
-            warn!(
-                "Template database '{}' does not exist, creating empty database '{}' instead",
-                template_database, new_database
-            );
-
-            // Create database without owner (owned by master user initially)
-            let create_sql = format!("CREATE DATABASE {}", sanitized_new_db);
-            sqlx::query(&create_sql)
-                .execute(&pool)
-                .await
-                .context("Failed to create empty database")?;
-
-            // Change owner to the deployment group user
-            postgres_admin::change_database_owner(&pool, &sanitized_new_db, &sanitized_owner)
-                .await
-                .context("Failed to change database owner")?;
-
-            info!("Successfully created empty database '{}'", new_database);
-        }
-
-        pool.close().await;
-        Ok(())
-    }
 }
 
 /// Sanitize a PostgreSQL identifier (database name, user name, etc.)
@@ -1091,22 +931,6 @@ fn sanitize_identifier(identifier: &str) -> Result<String> {
 
     // Quote the identifier to handle reserved words and special characters
     Ok(format!("\"{}\"", identifier))
-}
-
-/// Parse an RDS endpoint into host and port
-///
-/// RDS endpoints are typically in the format: "hostname:port" or just "hostname"
-/// Default port is 5432 if not specified
-fn parse_endpoint(endpoint: &str) -> Result<(String, u16)> {
-    if let Some((host, port_str)) = endpoint.split_once(':') {
-        let port = port_str
-            .parse::<u16>()
-            .context("Invalid port number in endpoint")?;
-        Ok((host.to_string(), port))
-    } else {
-        // No port specified, use default PostgreSQL port
-        Ok((endpoint.to_string(), 5432))
-    }
 }
 
 #[async_trait]
@@ -1270,14 +1094,23 @@ impl Extension for AwsRdsProvisioner {
             .await
             .context("Failed to decrypt master password")?;
 
-        // Determine database name based on deployment group
         // Sanitize deployment_group for use in database/user names (replace slashes and special chars)
         let safe_deployment_group = deployment_group.replace(['/', '-'], "_");
 
-        let database_name = if deployment_group == "default" {
-            project.name.clone()
-        } else {
-            format!("{}_{}", project.name, safe_deployment_group)
+        // Determine database name based on isolation mode and deployment group
+        let database_name = match spec.database_isolation {
+            DatabaseIsolation::Shared => {
+                // All deployment groups share the same database (project name)
+                project.name.clone()
+            }
+            DatabaseIsolation::Isolated => {
+                // Each deployment group gets its own database
+                if deployment_group == "default" {
+                    project.name.clone()
+                } else {
+                    format!("{}_{}", project.name, safe_deployment_group)
+                }
+            }
         };
 
         // Connect to the RDS instance to manage databases and users
@@ -1286,85 +1119,35 @@ impl Extension for AwsRdsProvisioner {
             master_username, master_password, endpoint, RDS_ADMIN_DATABASE
         );
 
-        // If deployment_group is not "default", create a copy of the default database
-        if deployment_group != "default" {
-            // First, create the user for the new database if it doesn't exist
-            let new_db_username = format!("{}_{}_user", project.name, safe_deployment_group);
-            let new_db_password = self.generate_password();
-
+        // For isolated mode with non-default deployment groups, create isolated database
+        if spec.database_isolation == DatabaseIsolation::Isolated && deployment_group != "default" {
             let pool = PgPool::connect(&admin_db_url)
                 .await
-                .context("Failed to connect to RDS instance for user creation")?;
+                .context("Failed to connect to RDS instance")?;
 
-            let user_exists = postgres_admin::user_exists(&pool, &new_db_username)
+            // Check if database already exists
+            let db_exists = postgres_admin::database_exists(&pool, &database_name)
                 .await
-                .context("Failed to check if user exists")?;
+                .context("Failed to check if database exists")?;
 
-            let sanitized_username = sanitize_identifier(&new_db_username)?;
-
-            if !user_exists {
-                postgres_admin::create_user(&pool, &sanitized_username, &new_db_password)
-                    .await
-                    .context("Failed to create database user for new deployment group")?;
-
+            if !db_exists {
                 info!(
-                    "Created database user '{}' for deployment group '{}'",
-                    new_db_username, deployment_group
+                    "Creating isolated database '{}' for deployment group '{}'",
+                    database_name, deployment_group
                 );
+
+                // Create empty database (owned by master user initially)
+                let sanitized_db_name = sanitize_identifier(&database_name)?;
+                let create_sql = format!("CREATE DATABASE {}", sanitized_db_name);
+                sqlx::query(&create_sql)
+                    .execute(&pool)
+                    .await
+                    .context("Failed to create isolated database")?;
+
+                info!("Successfully created isolated database '{}'", database_name);
             }
 
             pool.close().await;
-
-            info!(
-                "Creating database copy '{}' from template '{}'",
-                database_name, project.name
-            );
-
-            // Create the database copy using admin credentials
-            // This approach uses pg_dump/pg_restore which works even when
-            // the template database has active connections
-            self.create_database_copy(DatabaseCopyParams {
-                admin_db_url: &admin_db_url,
-                new_database: &database_name,
-                template_database: &project.name,
-                owner: &new_db_username,
-                endpoint,
-                master_username,
-                master_password: &master_password,
-            })
-            .await
-            .context("Failed to create database copy for deployment group")?;
-
-            // Store the credentials for this database in the extension status
-            let encrypted_password = self
-                .encryption_provider
-                .encrypt(&new_db_password)
-                .await
-                .context("Failed to encrypt new database user password")?;
-
-            status.databases.insert(
-                database_name.clone(),
-                DatabaseStatus {
-                    user: new_db_username.clone(),
-                    password_encrypted: encrypted_password,
-                    status: DatabaseState::Available,
-                },
-            );
-
-            // Update extension status
-            db_extensions::update_status(
-                &self.db_pool,
-                project_id,
-                &self.name,
-                &serde_json::to_value(&status)?,
-            )
-            .await
-            .context("Failed to update extension status with new database")?;
-
-            info!(
-                "Stored credentials for database '{}' in extension status",
-                database_name
-            );
         }
 
         // Check if we already have credentials for this database
