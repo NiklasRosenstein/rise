@@ -1667,7 +1667,7 @@ impl Extension for AwsRdsProvisioner {
     }
 
     fn description(&self) -> &str {
-        "Provisions a PostgreSQL database on AWS RDS with automatic per-deployment database creation"
+        "Provides a PostgreSQL database on AWS RDS"
     }
 
     fn documentation(&self) -> &str {

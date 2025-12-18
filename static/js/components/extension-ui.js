@@ -108,11 +108,11 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                 </p>
                 <p className="text-sm text-gray-400 mt-2">
                     <strong>Shared mode:</strong> All deployment groups (default, staging, etc.) use the same database.
-                    This is simpler and suitable for most applications where deployment groups represent different environments.
+                    This means staging deployments use the same database as production.
                 </p>
                 <p className="text-sm text-gray-400 mt-2">
                     <strong>Isolated mode:</strong> Each deployment group gets its own empty database.
-                    This provides true data isolation and is useful for multi-tenant applications or testing with separate datasets.
+                    This is useful for staging environments to have their own clean database instead of working with the production database.
                 </p>
             </div>
 
