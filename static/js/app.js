@@ -10,7 +10,7 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
     const { showToast } = useToast();
 
     // Determine which section is active (projects or teams)
-    const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail';
+    const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail' || currentView === 'extension-detail';
     const isTeamsActive = currentView === 'teams' || currentView === 'team-detail';
 
     // Close dropdown when clicking outside
@@ -304,10 +304,17 @@ function App() {
     let params = {};
 
     if (hash.startsWith('project/')) {
-        view = 'project-detail';
         const parts = hash.split('/');
-        params.projectName = parts[1];
-        params.tab = parts[2] || 'overview'; // Default to overview if no tab specified
+        // Check if this is an extension detail page (project/{name}/extensions/{ext})
+        if (parts.length === 4 && parts[2] === 'extensions') {
+            view = 'extension-detail';
+            params.projectName = parts[1];
+            params.extensionName = parts[3];
+        } else {
+            view = 'project-detail';
+            params.projectName = parts[1];
+            params.tab = parts[2] || 'overview'; // Default to overview if no tab specified
+        }
     } else if (hash.startsWith('team/')) {
         view = 'team-detail';
         params.teamName = hash.split('/')[1];
@@ -336,6 +343,7 @@ function App() {
                 {view === 'project-detail' && <ProjectDetail projectName={params.projectName} initialTab={params.tab} />}
                 {view === 'team-detail' && <TeamDetail teamName={params.teamName} currentUser={user} />}
                 {view === 'deployment-detail' && <DeploymentDetail projectName={params.projectName} deploymentId={params.deploymentId} />}
+                {view === 'extension-detail' && <ExtensionDetailPage projectName={params.projectName} extensionName={params.extensionName} />}
             </main>
             <Footer version={version} />
             <GettingStartedModal

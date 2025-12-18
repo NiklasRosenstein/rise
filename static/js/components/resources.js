@@ -3,6 +3,29 @@
 
 const { useState, useEffect, useCallback } = React;
 
+// Helper function to normalize JSON for comparison (sorts keys recursively)
+function normalizeJSON(jsonString) {
+    try {
+        const obj = JSON.parse(jsonString);
+        return JSON.stringify(sortObjectKeys(obj), null, 2);
+    } catch (e) {
+        return jsonString;
+    }
+}
+
+// Recursively sort object keys for consistent comparison
+function sortObjectKeys(obj) {
+    if (obj === null || typeof obj !== 'object' || Array.isArray(obj)) {
+        return obj;
+    }
+    return Object.keys(obj)
+        .sort()
+        .reduce((sorted, key) => {
+            sorted[key] = sortObjectKeys(obj[key]);
+            return sorted;
+        }, {});
+}
+
 // Service Accounts Component
 function ServiceAccountsList({ projectName }) {
     const [serviceAccounts, setServiceAccounts] = useState([]);
@@ -860,7 +883,10 @@ function ExtensionsList({ projectName }) {
                                         <tr
                                             key={extType.name}
                                             className="hover:bg-gray-800/50 transition-colors cursor-pointer"
-                                            onClick={() => handleRowClick(extType, enabledData)}
+                                            onClick={() => {
+                                                // Always navigate to detail page
+                                                window.location.hash = `#project/${projectName}/extensions/${extType.name}`;
+                                            }}
                                         >
                                             <td className="px-3 py-4">
                                                 {iconUrl ? (
@@ -888,7 +914,7 @@ function ExtensionsList({ projectName }) {
                                             </td>
                                             <td className="px-6 py-4 text-sm">
                                                 {enabled && enabledData ? (
-                                                    <span className="text-gray-300">{enabledData.status_summary}</span>
+                                                    renderExtensionStatusBadge(enabledData)
                                                 ) : (
                                                     <span className="text-gray-500">-</span>
                                                 )}
@@ -1104,6 +1130,539 @@ function ExtensionsList({ projectName }) {
                 </div>
             </Modal>
 
+        </div>
+    );
+}
+
+// Helper function to render status badges with color coding
+function renderExtensionStatusBadge(extension) {
+    // Check if extension has custom status badge renderer
+    const customRenderer = getExtensionStatusBadge(extension.extension_type);
+    if (customRenderer) {
+        const customBadge = customRenderer(extension);
+        if (customBadge) return customBadge;
+    }
+
+    // Fallback to generic status badge using status_summary
+    let badgeColor = 'bg-gray-600';  // Default
+    let statusText = extension.status_summary || 'Unknown';
+
+    // Parse status JSON to determine color and text
+    if (extension.status && extension.status.state) {
+        const state = extension.status.state.toLowerCase();
+        statusText = extension.status.state; // Use the original state value as the text
+
+        switch (state) {
+            case 'available':
+                badgeColor = 'bg-green-600';
+                break;
+            case 'creating':
+            case 'pending':
+                badgeColor = 'bg-yellow-600';
+                break;
+            case 'failed':
+                badgeColor = 'bg-red-600';
+                break;
+            case 'deleting':
+            case 'deleted':
+                badgeColor = 'bg-gray-600';
+                break;
+            default:
+                badgeColor = 'bg-gray-600';
+        }
+    }
+
+    return (
+        <span className={`${badgeColor} text-white text-xs font-semibold px-3 py-1 rounded-full uppercase`}>
+            {statusText}
+        </span>
+    );
+}
+
+// Generic Extension Detail View (fallback for extensions without custom UI)
+function GenericExtensionDetailView({ extension }) {
+    return (
+        <div className="space-y-6">
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">Status</h2>
+                <div className="bg-gray-900 rounded p-4">
+                    <p className="text-gray-300">{extension.status_summary}</p>
+
+                    {extension.status && extension.status.error && (
+                        <div className="mt-3 p-3 bg-red-900/20 border border-red-700 rounded">
+                            <p className="text-sm text-red-300">
+                                <strong>Error:</strong> {extension.status.error}
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">Configuration</h2>
+                <pre className="bg-gray-900 rounded p-4 overflow-x-auto">
+                    <code className="text-sm text-gray-300">
+                        {JSON.stringify(extension.spec, null, 2)}
+                    </code>
+                </pre>
+            </section>
+
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">Full Status</h2>
+                <pre className="bg-gray-900 rounded p-4 overflow-x-auto">
+                    <code className="text-sm text-gray-300">
+                        {JSON.stringify(extension.status, null, 2)}
+                    </code>
+                </pre>
+            </section>
+
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">Metadata</h2>
+                <div className="bg-gray-900 rounded p-4 space-y-2">
+                    <p className="text-sm text-gray-300">
+                        <span className="text-gray-500">Created:</span> {formatDate(extension.created)}
+                    </p>
+                    <p className="text-sm text-gray-300">
+                        <span className="text-gray-500">Updated:</span> {formatDate(extension.updated)}
+                    </p>
+                </div>
+            </section>
+        </div>
+    );
+}
+
+// Extension Detail Page Component
+function ExtensionDetailPage({ projectName, extensionName }) {
+    const [extensionType, setExtensionType] = useState(null);
+    const [enabledExtension, setEnabledExtension] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [activeTab, setActiveTab] = useState('overview');
+    const [formData, setFormData] = useState({ spec: '{}' });
+    const [uiSpec, setUiSpec] = useState({});
+    const [saving, setSaving] = useState(false);
+    const [deleting, setDeleting] = useState(false);
+    const [deleteConfirmName, setDeleteConfirmName] = useState('');
+    const [originalSpec, setOriginalSpec] = useState('{}');
+    const { showToast } = useToast();
+
+    const isEnabled = enabledExtension !== null;
+
+    // Check if there are unsaved changes (normalize JSON to ignore key order)
+    const hasUnsavedChanges = normalizeJSON(formData.spec) !== normalizeJSON(originalSpec);
+
+    // Memoize the extension UI API
+    const extensionAPI = React.useMemo(() => {
+        return extensionType ? getExtensionUIAPI(extensionType.extension_type) : null;
+    }, [extensionType]);
+
+    useEffect(() => {
+        async function fetchData() {
+            try {
+                // Fetch both extension type info and enabled extension data
+                const [typesResponse, enabledResponse] = await Promise.all([
+                    api.getExtensionTypes(),
+                    api.getProjectExtensions(projectName)
+                ]);
+
+                const extType = typesResponse.extension_types.find(t => t.name === extensionName);
+                if (!extType) {
+                    setError('Extension type not found');
+                    setLoading(false);
+                    return;
+                }
+                setExtensionType(extType);
+
+                const enabled = enabledResponse.extensions.find(e => e.extension === extensionName);
+                setEnabledExtension(enabled || null);
+
+                // Set form data only on initial load
+                if (loading) {
+                    if (enabled) {
+                        const specJson = JSON.stringify(enabled.spec, null, 2);
+                        setFormData({ spec: specJson });
+                        setOriginalSpec(specJson);
+                        setUiSpec(enabled.spec);
+                        setActiveTab('overview');
+                    } else {
+                        const defaultSpec = {};
+                        const specJson = JSON.stringify(defaultSpec, null, 2);
+                        setFormData({ spec: specJson });
+                        setOriginalSpec(specJson);
+                        setUiSpec(defaultSpec);
+                        setActiveTab(hasExtensionUI(extType.extension_type) ? 'configure' : 'config');
+                    }
+                }
+            } catch (err) {
+                setError(err.message);
+            } finally {
+                setLoading(false);
+            }
+        }
+        fetchData();
+    }, [projectName, extensionName]);
+
+    // Handle UI spec changes
+    const handleUiSpecChange = useCallback((newUiSpec) => {
+        setUiSpec(newUiSpec);
+        setFormData({ spec: JSON.stringify(newUiSpec, null, 2) });
+    }, []);
+
+    // Handle JSON spec changes
+    const handleJsonSpecChange = useCallback((newJsonString) => {
+        setFormData({ spec: newJsonString });
+        try {
+            const parsed = JSON.parse(newJsonString);
+            setUiSpec(parsed);
+        } catch (err) {
+            // Invalid JSON, don't update UI spec
+        }
+    }, []);
+
+    const handleSave = async () => {
+        let spec;
+        try {
+            spec = JSON.parse(formData.spec);
+        } catch (err) {
+            showToast('Invalid JSON in spec: ' + err.message, 'error');
+            return;
+        }
+
+        const wasEnabled = isEnabled;
+        setSaving(true);
+        try {
+            if (isEnabled) {
+                await api.updateExtension(projectName, extensionName, spec);
+                showToast(`Extension ${extensionName} updated successfully`, 'success');
+            } else {
+                await api.createExtension(projectName, extensionName, spec);
+                showToast(`Extension ${extensionName} enabled successfully`, 'success');
+            }
+            // Refresh data
+            const [typesResponse, enabledResponse] = await Promise.all([
+                api.getExtensionTypes(),
+                api.getProjectExtensions(projectName)
+            ]);
+            const enabled = enabledResponse.extensions.find(e => e.extension === extensionName);
+            setEnabledExtension(enabled || null);
+            if (enabled) {
+                const specJson = JSON.stringify(enabled.spec, null, 2);
+                setFormData({ spec: specJson });
+                setOriginalSpec(specJson);
+                setUiSpec(enabled.spec);
+                // Only switch to overview tab when first enabling, not when updating
+                if (!wasEnabled) {
+                    setActiveTab('overview');
+                }
+            }
+        } catch (err) {
+            showToast(`Failed to ${isEnabled ? 'update' : 'enable'} extension: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDelete = async () => {
+        if (!enabledExtension || deleteConfirmName !== enabledExtension.extension) {
+            showToast('Please enter the extension name to confirm deletion', 'error');
+            return;
+        }
+
+        setDeleting(true);
+        try {
+            await api.deleteExtension(projectName, enabledExtension.extension);
+            showToast(`Extension ${enabledExtension.extension} deleted successfully`, 'success');
+            window.location.hash = `#project/${projectName}/extensions`;
+        } catch (err) {
+            showToast(`Failed to delete extension: ${err.message}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    if (loading) {
+        return (
+            <div className="flex items-center justify-center min-h-[400px]">
+                <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            </div>
+        );
+    }
+
+    if (error || !extensionType) {
+        return (
+            <div className="max-w-7xl mx-auto">
+                <div className="mb-6">
+                    <button
+                        onClick={() => window.location.hash = `#project/${projectName}/extensions`}
+                        className="text-indigo-400 hover:text-indigo-300 flex items-center gap-2"
+                    >
+                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                        </svg>
+                        Back to Extensions
+                    </button>
+                </div>
+                <div className="bg-red-900/20 border border-red-700 rounded-lg p-6">
+                    <h2 className="text-lg font-semibold text-red-300 mb-2">Error</h2>
+                    <p className="text-red-200">{error || 'Extension type not found'}</p>
+                </div>
+            </div>
+        );
+    }
+
+    const CustomDetailView = getExtensionDetailView(extensionType.extension_type);
+
+    return (
+        <div className="max-w-7xl mx-auto">
+            <div className="mb-6 flex items-center justify-between">
+                <button
+                    onClick={() => window.location.hash = `#project/${projectName}/extensions`}
+                    className="text-indigo-400 hover:text-indigo-300 flex items-center gap-2"
+                >
+                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    Back to Extensions
+                </button>
+                <div className="flex items-center gap-2 text-sm text-gray-400">
+                    <a href={`#project/${projectName}`} className="hover:text-indigo-400 transition-colors">
+                        {projectName}
+                    </a>
+                    <span>/</span>
+                    <span>Extensions</span>
+                </div>
+            </div>
+
+            <div className="bg-gray-800 rounded-lg shadow-xl p-6">
+                <div className="flex items-center justify-between mb-6">
+                    <div className="flex items-center space-x-4">
+                        {getExtensionIcon(extensionType.extension_type) && (
+                            <img
+                                src={getExtensionIcon(extensionType.extension_type)}
+                                alt={extensionType.name}
+                                className="w-12 h-12 rounded object-contain"
+                            />
+                        )}
+                        <div>
+                            <h1 className="text-2xl font-bold text-white">
+                                {extensionType.name}
+                            </h1>
+                            <p className="text-gray-400">{extensionType.description}</p>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        {isEnabled ? (
+                            renderExtensionStatusBadge(enabledExtension)
+                        ) : (
+                            <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
+                                Not Enabled
+                            </span>
+                        )}
+                    </div>
+                </div>
+
+                {/* Tab Navigation */}
+                <div className="border-b border-gray-700 mb-6">
+                    <div className="flex gap-6">
+                        {/* Left-aligned: Extension-specific tabs */}
+                        {isEnabled && (
+                            <button
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'overview' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                onClick={() => setActiveTab('overview')}
+                            >
+                                Overview
+                            </button>
+                        )}
+                        {hasExtensionUI(extensionType.extension_type) && (
+                            <button
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'configure' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                onClick={() => setActiveTab('configure')}
+                            >
+                                Configure{hasUnsavedChanges && ' *'}
+                            </button>
+                        )}
+
+                        {/* Spacer to push common tabs to the right */}
+                        <div className="flex-1"></div>
+
+                        {/* Right-aligned: Common tabs */}
+                        <button
+                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                            onClick={() => setActiveTab('config')}
+                        >
+                            Spec{hasUnsavedChanges && ' *'}
+                        </button>
+                        {isEnabled && (
+                            <button
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'status' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                onClick={() => setActiveTab('status')}
+                            >
+                                Status
+                            </button>
+                        )}
+                        <button
+                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                            onClick={() => setActiveTab('schema')}
+                        >
+                            Schema
+                        </button>
+                        <button
+                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'docs' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                            onClick={() => setActiveTab('docs')}
+                        >
+                            Documentation
+                        </button>
+                        {isEnabled && (
+                            <button
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'delete' ? 'border-red-500 text-red-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                onClick={() => setActiveTab('delete')}
+                            >
+                                Delete
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                {/* Tab Content */}
+                {activeTab === 'overview' && isEnabled && CustomDetailView && (
+                    <CustomDetailView extension={enabledExtension} />
+                )}
+
+                {activeTab === 'overview' && isEnabled && !CustomDetailView && (
+                    <GenericExtensionDetailView extension={enabledExtension} />
+                )}
+
+                {activeTab === 'configure' && extensionAPI?.renderConfigureTab && (
+                    <div className="space-y-4">
+                        {extensionAPI.renderConfigureTab(uiSpec, extensionType.spec_schema, handleUiSpecChange)}
+                        <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+                            <Button
+                                variant="primary"
+                                onClick={handleSave}
+                                loading={saving}
+                            >
+                                {isEnabled ? 'Update' : 'Enable'}
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'config' && (
+                    <div className="space-y-4">
+                        <FormField
+                            label="Configuration Spec (JSON)"
+                            id="extension-spec"
+                            type="textarea"
+                            value={formData.spec}
+                            onChange={(e) => handleJsonSpecChange(e.target.value)}
+                            placeholder="{}"
+                            required
+                            rows={15}
+                        />
+                        <p className="text-sm text-gray-500">
+                            Enter the extension configuration as a JSON object. See the Schema and Documentation tabs for valid fields and examples.
+                            {hasExtensionUI(extensionType.extension_type) && <span> Use the Configure tab for a form-based interface.</span>}
+                        </p>
+                        <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+                            <Button
+                                variant="primary"
+                                onClick={handleSave}
+                                loading={saving}
+                            >
+                                {isEnabled ? 'Update' : 'Enable'}
+                            </Button>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'status' && isEnabled && (
+                    <div className="space-y-4">
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-300 mb-2">Status Summary</h4>
+                            <p className="text-gray-200">{enabledExtension.status_summary}</p>
+                        </div>
+
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-300 mb-2">Current Spec</h4>
+                            <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-3 rounded overflow-x-auto">
+                                {JSON.stringify(enabledExtension.spec, null, 2)}
+                            </pre>
+                        </div>
+
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-300 mb-2">Full Status</h4>
+                            <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-3 rounded overflow-x-auto max-h-96">
+                                {JSON.stringify(enabledExtension.status, null, 2)}
+                            </pre>
+                        </div>
+
+                        <div className="text-xs text-gray-500">
+                            <p>Created: {formatDate(enabledExtension.created)}</p>
+                            <p>Updated: {formatDate(enabledExtension.updated)}</p>
+                        </div>
+                    </div>
+                )}
+
+                {activeTab === 'schema' && (
+                    <div className="space-y-4">
+                        <h4 className="text-sm font-semibold text-gray-300">Schema</h4>
+                        <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-4 rounded overflow-x-auto max-h-96">
+                            {JSON.stringify(extensionType.spec_schema, null, 2)}
+                        </pre>
+                        <p className="text-sm text-gray-500">
+                            This JSON schema defines the valid structure for the extension configuration.
+                        </p>
+                    </div>
+                )}
+
+                {activeTab === 'docs' && (
+                    <div
+                        className="prose prose-invert max-w-none"
+                        dangerouslySetInnerHTML={{
+                            __html: marked.parse(extensionType.documentation)
+                        }}
+                    />
+                )}
+
+                {activeTab === 'delete' && isEnabled && (
+                    <div className="space-y-4">
+                        <div className="bg-red-900/20 border border-red-700 rounded-lg p-4">
+                            <h4 className="text-sm font-semibold text-red-300 mb-2">Warning: Permanent Deletion</h4>
+                            <p className="text-sm text-red-200">
+                                Deleting this extension will deprovision all resources created by this extension.
+                                This action cannot be undone.
+                            </p>
+                        </div>
+
+                        <FormField
+                            label={`Type "${enabledExtension.extension}" to confirm deletion`}
+                            id="delete-confirm-name"
+                            value={deleteConfirmName}
+                            onChange={(e) => setDeleteConfirmName(e.target.value)}
+                            placeholder={enabledExtension.extension}
+                            required
+                        />
+
+                        <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+                            <Button
+                                variant="secondary"
+                                onClick={() => setActiveTab('overview')}
+                                disabled={deleting}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                variant="danger"
+                                onClick={handleDelete}
+                                loading={deleting}
+                                disabled={deleteConfirmName !== enabledExtension.extension}
+                            >
+                                Delete Extension
+                            </Button>
+                        </div>
+                    </div>
+                )}
+            </div>
         </div>
     );
 }
