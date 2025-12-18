@@ -986,11 +986,11 @@ impl AwsRdsProvisioner {
         };
 
         match status.state {
-            RdsState::Available | RdsState::Failed => {
-                // First time seeing deletion request, initiate delete
+            RdsState::Pending | RdsState::Creating | RdsState::Available | RdsState::Failed => {
+                // Initiate deletion (works even if instance is still creating)
                 info!(
-                    "Initiating deletion of RDS instance {} for project {}",
-                    instance_id, project_name
+                    "Initiating deletion of RDS instance {} for project {} (current state: {:?})",
+                    instance_id, project_name, status.state
                 );
 
                 match self
@@ -1008,11 +1008,18 @@ impl AwsRdsProvisioner {
                     Err(e) => {
                         let error_str = format!("{:?}", e);
                         if error_str.contains("DBInstanceNotFound") {
-                            info!("RDS instance {} already deleted", instance_id);
+                            info!(
+                                "RDS instance {} not found (may not have been created yet)",
+                                instance_id
+                            );
                             status.state = RdsState::Deleted;
                         } else if error_str.contains("InvalidDBInstanceState") {
-                            info!("RDS instance {} already being deleted", instance_id);
-                            status.state = RdsState::Deleting;
+                            // Instance might still be initializing, will retry on next reconciliation
+                            warn!(
+                                "RDS instance {} not in a deletable state yet, will retry",
+                                instance_id
+                            );
+                            // Keep current state, will retry on next loop
                         } else {
                             error!("Failed to delete RDS instance {}: {:?}", instance_id, e);
                             status.error = Some(format!("Failed to delete instance: {:?}", e));
