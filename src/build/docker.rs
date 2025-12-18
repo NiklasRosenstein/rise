@@ -14,6 +14,7 @@ pub(crate) fn build_image_with_dockerfile(
     use_buildx: bool,
     push: bool,
     buildkit_host: Option<&str>,
+    docker_build_args: &[String],
 ) -> Result<()> {
     // Check if container CLI is available
     let cli_check = Command::new(container_cli).arg("--version").output();
@@ -63,6 +64,11 @@ pub(crate) fn build_image_with_dockerfile(
         for (key, value) in &proxy_vars {
             cmd.arg("--build-arg").arg(format!("{}={}", key, value));
         }
+    }
+
+    // Add user-specified build arguments
+    for build_arg in docker_build_args {
+        cmd.arg("--build-arg").arg(build_arg);
     }
 
     cmd.arg(app_path);

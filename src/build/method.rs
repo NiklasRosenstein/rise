@@ -45,6 +45,11 @@ pub struct BuildArgs {
     /// Embed SSL certificate into Railpack build plan for build-time RUN command support
     #[arg(long)]
     pub railpack_embed_ssl_cert: bool,
+
+    /// Build arguments to pass to Docker build (only for docker backend). Can be specified multiple times.
+    /// Format: KEY=VALUE or KEY (to pass from environment)
+    #[arg(long = "build-arg")]
+    pub docker_build_args: Vec<String>,
 }
 
 /// Options for building container images
@@ -59,6 +64,7 @@ pub(crate) struct BuildOptions {
     pub container_cli: Option<String>,
     pub managed_buildkit: bool,
     pub railpack_embed_ssl_cert: bool,
+    pub docker_build_args: Vec<String>,
     pub push: bool,
 }
 
@@ -80,6 +86,7 @@ impl BuildOptions {
             container_cli: build_args.container_cli.clone(),
             managed_buildkit: build_args.managed_buildkit,
             railpack_embed_ssl_cert: build_args.railpack_embed_ssl_cert,
+            docker_build_args: build_args.docker_build_args.clone(),
             push: false,
         }
     }

@@ -91,6 +91,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 false, // use_buildx: always false for docker backend (use railpack:buildx for buildx)
                 options.push,
                 buildkit_host.as_deref(),
+                &options.docker_build_args,
             )?;
         }
         BuildMethod::Pack => {
