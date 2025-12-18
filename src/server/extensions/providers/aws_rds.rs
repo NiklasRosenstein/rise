@@ -139,6 +139,9 @@ pub struct AwsRdsProvisionerConfig {
     pub default_engine_version: String,
     pub vpc_security_group_ids: Option<Vec<String>>,
     pub db_subnet_group_name: Option<String>,
+    pub backup_retention_days: i32,
+    pub backup_window: Option<String>,
+    pub maintenance_window: Option<String>,
 }
 
 pub struct AwsRdsProvisioner {
@@ -153,6 +156,9 @@ pub struct AwsRdsProvisioner {
     default_engine_version: String,
     vpc_security_group_ids: Option<Vec<String>>,
     db_subnet_group_name: Option<String>,
+    backup_retention_days: i32,
+    backup_window: Option<String>,
+    maintenance_window: Option<String>,
 }
 
 impl AwsRdsProvisioner {
@@ -169,6 +175,9 @@ impl AwsRdsProvisioner {
             default_engine_version: config.default_engine_version,
             vpc_security_group_ids: config.vpc_security_group_ids,
             db_subnet_group_name: config.db_subnet_group_name,
+            backup_retention_days: config.backup_retention_days,
+            backup_window: config.backup_window,
+            maintenance_window: config.maintenance_window,
         })
     }
 
@@ -386,6 +395,7 @@ impl AwsRdsProvisioner {
             .allocated_storage(self.disk_size)
             .publicly_accessible(false)
             .storage_encrypted(true)
+            .backup_retention_period(self.backup_retention_days)
             .tags(managed_tag)
             .tags(project_tag);
 
@@ -399,6 +409,16 @@ impl AwsRdsProvisioner {
         // Add DB subnet group if configured
         if let Some(ref subnet_group) = self.db_subnet_group_name {
             create_request = create_request.db_subnet_group_name(subnet_group);
+        }
+
+        // Add backup window if configured
+        if let Some(ref backup_window) = self.backup_window {
+            create_request = create_request.preferred_backup_window(backup_window);
+        }
+
+        // Add maintenance window if configured
+        if let Some(ref maintenance_window) = self.maintenance_window {
+            create_request = create_request.preferred_maintenance_window(maintenance_window);
         }
 
         match create_request.send().await {
@@ -1146,6 +1166,9 @@ impl Extension for AwsRdsProvisioner {
             default_engine_version: self.default_engine_version.clone(),
             vpc_security_group_ids: self.vpc_security_group_ids.clone(),
             db_subnet_group_name: self.db_subnet_group_name.clone(),
+            backup_retention_days: self.backup_retention_days,
+            backup_window: self.backup_window.clone(),
+            maintenance_window: self.maintenance_window.clone(),
         };
 
         tokio::spawn(async move {

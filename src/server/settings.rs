@@ -631,6 +631,15 @@ pub enum ExtensionProviderConfig {
         /// DB subnet group name for VPC placement
         #[serde(default)]
         db_subnet_group_name: Option<String>,
+        /// Backup retention period in days (1-35, default: 7)
+        #[serde(default = "default_backup_retention_days")]
+        backup_retention_days: i32,
+        /// Preferred backup window in UTC (e.g., "03:00-04:00")
+        #[serde(default)]
+        backup_window: Option<String>,
+        /// Preferred maintenance window (e.g., "sun:04:00-sun:05:00")
+        #[serde(default)]
+        maintenance_window: Option<String>,
         #[serde(default)]
         access_key_id: Option<String>,
         #[serde(default)]
@@ -644,4 +653,8 @@ fn default_instance_id_template() -> String {
 
 fn default_engine_version() -> String {
     "16.4".to_string() // PostgreSQL 16.4 (widely available as of late 2024)
+}
+
+fn default_backup_retention_days() -> i32 {
+    7 // 7 days of backup retention (reasonable default for production)
 }

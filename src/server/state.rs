@@ -455,6 +455,9 @@ impl AppState {
                         default_engine_version,
                         vpc_security_group_ids,
                         db_subnet_group_name,
+                        backup_retention_days,
+                        backup_window,
+                        maintenance_window,
                         access_key_id,
                         secret_access_key,
                     } => {
@@ -502,6 +505,9 @@ impl AppState {
                                     default_engine_version: default_engine_version.clone(),
                                     vpc_security_group_ids: vpc_security_group_ids.clone(),
                                     db_subnet_group_name: db_subnet_group_name.clone(),
+                                    backup_retention_days: *backup_retention_days,
+                                    backup_window: backup_window.clone(),
+                                    maintenance_window: maintenance_window.clone(),
                                 }
                             )
                             .await?;
