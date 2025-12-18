@@ -1236,10 +1236,10 @@ impl Extension for AwsRdsProvisioner {
                 .await
                 .context("Failed to check if user exists")?;
 
-            if !user_exists {
-                // Sanitize username for CREATE USER
-                let sanitized_username = sanitize_identifier(&username)?;
+            // Sanitize username for CREATE USER or ALTER USER
+            let sanitized_username = sanitize_identifier(&username)?;
 
+            if !user_exists {
                 postgres_admin::create_user(&pool, &sanitized_username, &password)
                     .await
                     .context("Failed to create database user")?;
@@ -1247,13 +1247,19 @@ impl Extension for AwsRdsProvisioner {
                 info!("Created database user '{}'", username);
             } else {
                 warn!(
-                    "Database user '{}' already exists in PostgreSQL but not in status, reusing it",
+                    "Database user '{}' already exists in PostgreSQL but not in status, updating password",
                     username
                 );
+
+                // Update the password to match the new one we generated
+                postgres_admin::update_user_password(&pool, &sanitized_username, &password)
+                    .await
+                    .context("Failed to update existing user password")?;
+
+                info!("Updated password for existing database user '{}'", username);
             }
 
             // Change database owner to the user (gives full privileges)
-            let sanitized_username = sanitize_identifier(&username)?;
             let sanitized_database = sanitize_identifier(&database_name)?;
 
             postgres_admin::change_database_owner(&pool, &sanitized_database, &sanitized_username)

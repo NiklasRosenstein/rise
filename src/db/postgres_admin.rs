@@ -60,6 +60,26 @@ pub async fn create_user(pool: &PgPool, username: &str, password: &str) -> Resul
     Ok(())
 }
 
+/// Update a PostgreSQL user's password
+///
+/// Note: Username must be sanitized before calling this function to prevent SQL injection
+/// Password will be properly escaped for SQL
+pub async fn update_user_password(pool: &PgPool, username: &str, password: &str) -> Result<()> {
+    // Escape single quotes in password by doubling them
+    let escaped_password = password.replace('\'', "''");
+    let alter_sql = format!(
+        "ALTER USER {} WITH PASSWORD '{}'",
+        username, escaped_password
+    );
+
+    sqlx::query(&alter_sql)
+        .execute(pool)
+        .await
+        .context("Failed to update user password")?;
+
+    Ok(())
+}
+
 /// Change the owner of a database
 ///
 /// Note: Database and owner must be sanitized before calling this function
