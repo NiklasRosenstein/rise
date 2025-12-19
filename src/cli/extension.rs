@@ -255,7 +255,7 @@ pub async fn list_extensions(project: &str) -> Result<()> {
         .load_preset(UTF8_FULL)
         .apply_modifier(UTF8_ROUND_CORNERS)
         .set_header(vec![
-            Cell::new("EXTENSION").add_attribute(Attribute::Bold),
+            Cell::new("NAME").add_attribute(Attribute::Bold),
             Cell::new("TYPE").add_attribute(Attribute::Bold),
             Cell::new("STATUS").add_attribute(Attribute::Bold),
             Cell::new("CREATED").add_attribute(Attribute::Bold),
