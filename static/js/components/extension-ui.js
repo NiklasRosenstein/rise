@@ -261,11 +261,40 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
             setAuthorizationEndpoint(template.authEndpoint);
             setTokenEndpoint(template.tokenEndpoint);
             setScopes(template.scopes);
+            showToast(`Applied ${template.name} template`, 'success');
         }
     };
 
     return (
         <div className="space-y-4">
+            {/* Top bar with Quick Start Templates */}
+            <div className="flex justify-end gap-2">
+                <button
+                    type="button"
+                    onClick={() => applyTemplate('snowflake')}
+                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors"
+                    title="Apply Snowflake template"
+                >
+                    📋 Snowflake Template
+                </button>
+                <button
+                    type="button"
+                    onClick={() => applyTemplate('google')}
+                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors"
+                    title="Apply Google template"
+                >
+                    📋 Google Template
+                </button>
+                <button
+                    type="button"
+                    onClick={() => applyTemplate('github')}
+                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors"
+                    title="Apply GitHub template"
+                >
+                    📋 GitHub Template
+                </button>
+            </div>
+
             {/* Redirect URI Configuration - Must be set in provider FIRST */}
             <div className="bg-blue-900/20 border-2 border-blue-600 rounded-lg p-4">
                 <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 Configure This Redirect URI in Your OAuth Provider First!</h3>
@@ -295,37 +324,6 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                             <strong>Note:</strong> This URL uses the extension name "{instanceName}" you entered above. Update it in your provider if you change the name.
                         </span>
                     )}
-                </p>
-            </div>
-
-            {/* Provider Templates */}
-            <div className="bg-gray-800 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-gray-300 mb-2">Quick Start Templates</h4>
-                <div className="flex gap-2 flex-wrap">
-                    <button
-                        type="button"
-                        onClick={() => applyTemplate('snowflake')}
-                        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200"
-                    >
-                        Snowflake
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => applyTemplate('google')}
-                        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200"
-                    >
-                        Google
-                    </button>
-                    <button
-                        type="button"
-                        onClick={() => applyTemplate('github')}
-                        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200"
-                    >
-                        GitHub
-                    </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-2">
-                    Click a template to auto-fill common provider endpoints. Don't forget to update account-specific values!
                 </p>
             </div>
 
@@ -467,223 +465,152 @@ const OAuthExtensionAPI = {
     }
 };
 
-// OAuth Detail View Component
-function OAuthDetailView({ extension, projectName }) {
-    const status = extension.status || {};
-    const spec = extension.spec || {};
+// Integration Guide Modal Component
+function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) {
+    const [activeTab, setActiveTab] = useState('fragment');
 
-    const scopesArray = spec.scopes || [];
-    const extensionName = extension.extension;
-    const { showToast } = useToast();
+    if (!isOpen) return null;
 
-    // Build URLs using actual backend URL
-    const backendUrl = CONFIG.backendUrl.replace(/\/$/, ''); // Remove trailing slash
-    const callbackUrl = `${backendUrl}/api/v1/oauth/callback/${projectName}/${extensionName}`;
+    const backendUrl = CONFIG.backendUrl.replace(/\/$/, '');
     const authorizeUrl = `${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`;
+    const callbackUrl = `${backendUrl}/api/v1/oauth/callback/${projectName}/${extensionName}`;
     const exchangeUrl = `${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/exchange`;
 
     return (
-        <div className="space-y-6">
-            {/* Redirect URI Configuration */}
-            <section>
-                <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
-                    <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 OAuth Provider Configuration</h3>
-                    <p className="text-sm text-blue-200 mb-3">
-                        This callback URL must be configured in your OAuth provider's application settings:
-                    </p>
-                    <div className="flex items-center gap-2 mb-2">
-                        <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
-                            {callbackUrl}
-                        </code>
-                        <button
-                            onClick={() => {
-                                navigator.clipboard.writeText(callbackUrl);
-                                showToast('Redirect URI copied to clipboard', 'success');
-                            }}
-                            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap"
-                            title="Copy redirect URI"
-                        >
-                            Copy
-                        </button>
-                    </div>
-                    <p className="text-xs text-blue-300">
-                        Also called "Redirect URI", "Callback URL", or "Authorized redirect URIs" depending on your provider.
-                    </p>
-                </div>
-            </section>
-
-            {/* Configuration Status */}
-            <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">Configuration Status</h2>
-                <div className="bg-gray-900 rounded p-4">
-                    {status.error ? (
-                        <div className="p-3 bg-red-900/20 border border-red-700 rounded">
-                            <p className="text-sm text-red-300">
-                                <strong>Error:</strong> {status.error}
-                            </p>
-                        </div>
-                    ) : status.configured_at ? (
-                        <div className="p-3 bg-green-900/20 border border-green-700 rounded">
-                            <p className="text-sm text-green-300">
-                                ✓ OAuth provider configured at {formatDate(status.configured_at)}
-                            </p>
-                        </div>
-                    ) : (
-                        <div className="p-3 bg-gray-800 rounded">
-                            <p className="text-sm text-gray-400">
-                                Configuration pending...
-                            </p>
-                        </div>
-                    )}
-                </div>
-            </section>
-
-            {/* Provider Configuration */}
-            <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">OAuth Provider</h2>
-                <div className="bg-gray-900 rounded p-4 space-y-3">
-                    <div>
-                        <p className="text-sm text-gray-500">Provider Name</p>
-                        <p className="text-gray-300 font-semibold">{spec.provider_name || 'N/A'}</p>
-                    </div>
-                    {spec.description && (
-                        <div>
-                            <p className="text-sm text-gray-500">Description</p>
-                            <p className="text-gray-300">{spec.description}</p>
-                        </div>
-                    )}
-                    <div>
-                        <p className="text-sm text-gray-500">Client ID</p>
-                        <p className="text-gray-300 font-mono text-sm">{spec.client_id || 'N/A'}</p>
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500">Client Secret Reference</p>
-                        <p className="text-gray-300 font-mono text-sm">{spec.client_secret_ref || 'N/A'}</p>
-                    </div>
-                </div>
-            </section>
-
-            {/* Endpoints */}
-            <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">OAuth Endpoints</h2>
-                <div className="bg-gray-900 rounded p-4 space-y-3">
-                    <div>
-                        <p className="text-sm text-gray-500">Authorization Endpoint</p>
-                        <p className="text-gray-300 font-mono text-xs break-all">{spec.authorization_endpoint || 'N/A'}</p>
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-500">Token Endpoint</p>
-                        <p className="text-gray-300 font-mono text-xs break-all">{spec.token_endpoint || 'N/A'}</p>
-                    </div>
-                </div>
-            </section>
-
-            {/* Scopes */}
-            <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">
-                    OAuth Scopes ({scopesArray.length})
-                </h2>
-                <div className="bg-gray-900 rounded p-4">
-                    {scopesArray.length === 0 ? (
-                        <p className="text-gray-400 text-sm">No scopes configured</p>
-                    ) : (
-                        <div className="flex flex-wrap gap-2">
-                            {scopesArray.map((scope, idx) => (
-                                <span
-                                    key={idx}
-                                    className="bg-indigo-600 text-white text-xs font-semibold px-3 py-1 rounded-full"
-                                >
-                                    {scope}
-                                </span>
-                            ))}
-                        </div>
-                    )}
-                </div>
-            </section>
-
-            {/* Test OAuth Flow */}
-            <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">Test OAuth Flow</h2>
-                <div className="bg-gray-900 rounded p-4 space-y-3">
-                    <p className="text-sm text-gray-400">
-                        Click the button below to test the OAuth flow. You'll be redirected to the OAuth provider for authentication,
-                        then returned to this page with a success notification.
-                    </p>
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={onClose}>
+            <div className="bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+                {/* Modal Header */}
+                <div className="flex items-center justify-between p-6 border-b border-gray-700">
+                    <h2 className="text-xl font-bold text-white">Integration Guide</h2>
                     <button
-                        onClick={() => {
-                            // Store the current hash location to return to after OAuth
-                            const currentHash = window.location.hash.substring(1); // Remove leading #
-                            sessionStorage.setItem('oauth_return_path', currentHash);
-
-                            // Use the origin as redirect URI (hash router doesn't work with fragments)
-                            const redirectUri = window.location.origin + '/';
-                            const authUrl = `/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
-                            window.location.href = authUrl;
-                        }}
-                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors"
+                        onClick={onClose}
+                        className="text-gray-400 hover:text-white transition-colors"
+                        title="Close"
                     >
-                        Test OAuth Flow
+                        <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                        </svg>
                     </button>
-                    <p className="text-xs text-gray-500">
-                        After authentication, you'll be redirected back to this page and see a success notification.
-                    </p>
                 </div>
-            </section>
 
-            {/* Integration Guide */}
-            <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">Integration Guide</h2>
-                <div className="bg-gray-900 rounded p-4 space-y-4">
-                    <div>
-                        <p className="text-sm text-gray-400 mb-2">
-                            <strong>OAuth Authorization URL:</strong>
-                        </p>
-                        <code className="block bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
-                            {authorizeUrl}
-                        </code>
-                    </div>
-                    <div>
-                        <p className="text-sm text-gray-400 mb-2">
-                            <strong>OAuth Callback URL (configured in provider):</strong>
-                        </p>
-                        <code className="block bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
-                            {callbackUrl}
-                        </code>
-                    </div>
+                {/* Tabs */}
+                <div className="flex border-b border-gray-700 bg-gray-900 px-6">
+                    <button
+                        onClick={() => setActiveTab('fragment')}
+                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+                            activeTab === 'fragment'
+                                ? 'border-indigo-500 text-indigo-400'
+                                : 'border-transparent text-gray-400 hover:text-gray-300'
+                        }`}
+                    >
+                        Fragment Flow (SPAs)
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('exchange')}
+                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+                            activeTab === 'exchange'
+                                ? 'border-indigo-500 text-indigo-400'
+                                : 'border-transparent text-gray-400 hover:text-gray-300'
+                        }`}
+                    >
+                        Exchange Flow (Backend)
+                    </button>
+                    <button
+                        onClick={() => setActiveTab('local')}
+                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+                            activeTab === 'local'
+                                ? 'border-indigo-500 text-indigo-400'
+                                : 'border-transparent text-gray-400 hover:text-gray-300'
+                        }`}
+                    >
+                        Local Development
+                    </button>
+                </div>
 
-                    <div className="pt-2 border-t border-gray-700">
-                        <p className="text-sm font-semibold text-gray-300 mb-3">Fragment Flow (Default - For SPAs)</p>
-                        <p className="text-xs text-gray-400 mb-2">
-                            Tokens are returned in the URL fragment. Best for single-page applications.
-                        </p>
-                        <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+                {/* Modal Content */}
+                <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
+                    {activeTab === 'fragment' && (
+                        <div className="space-y-4">
+                            <p className="text-sm text-gray-300">
+                                <strong>Fragment Flow</strong> is the default and recommended approach for single-page applications (SPAs).
+                                Tokens are returned in the URL fragment (<code className="bg-gray-900 px-1 rounded">#access_token=...</code>),
+                                which never reaches the server.
+                            </p>
+
+                            <div>
+                                <p className="text-sm font-semibold text-gray-300 mb-2">Authorization URL:</p>
+                                <code className="block bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                                    {authorizeUrl}
+                                </code>
+                            </div>
+
+                            <div>
+                                <p className="text-sm font-semibold text-gray-300 mb-2">Example Code:</p>
+                                <pre className="bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
 {`// Initiate OAuth login (fragment flow is default)
 function login() {
-  const authUrl = 'https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize';
+  const authUrl = '${authorizeUrl}';
   window.location.href = authUrl;
 }
 
 // Extract tokens from URL fragment after redirect
-const fragment = window.location.hash.substring(1);
-const params = new URLSearchParams(fragment);
-const accessToken = params.get('access_token');
-const idToken = params.get('id_token');
-const expiresAt = params.get('expires_at');
+function handleCallback() {
+  const fragment = window.location.hash.substring(1);
+  const params = new URLSearchParams(fragment);
 
-// Store securely
-sessionStorage.setItem('access_token', accessToken);`}
-                        </pre>
-                    </div>
+  const accessToken = params.get('access_token');
+  const idToken = params.get('id_token');
+  const expiresAt = params.get('expires_at');
 
-                    <div className="pt-2 border-t border-gray-700">
-                        <p className="text-sm font-semibold text-gray-300 mb-3">Exchange Token Flow (For Backend Apps)</p>
-                        <p className="text-xs text-gray-400 mb-2">
-                            Your backend receives a temporary exchange token and exchanges it for OAuth tokens.
-                        </p>
-                        <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+  if (accessToken) {
+    // Store securely (session storage for security)
+    sessionStorage.setItem('access_token', accessToken);
+    if (idToken) {
+      sessionStorage.setItem('id_token', idToken);
+    }
+
+    // Clear the fragment from URL
+    window.location.hash = '';
+
+    // Redirect to your app
+    window.location.href = '/dashboard';
+  }
+}
+
+// Call on page load
+handleCallback();`}
+                                </pre>
+                            </div>
+                        </div>
+                    )}
+
+                    {activeTab === 'exchange' && (
+                        <div className="space-y-4">
+                            <p className="text-sm text-gray-300">
+                                <strong>Exchange Flow</strong> is designed for server-rendered applications. Your backend receives a
+                                temporary exchange token as a query parameter, which it exchanges for the actual OAuth tokens via a server-side API call.
+                            </p>
+
+                            <div>
+                                <p className="text-sm font-semibold text-gray-300 mb-2">Authorization URL:</p>
+                                <code className="block bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                                    {authorizeUrl}?flow=exchange
+                                </code>
+                            </div>
+
+                            <div>
+                                <p className="text-sm font-semibold text-gray-300 mb-2">Exchange Endpoint:</p>
+                                <code className="block bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                                    {exchangeUrl}?exchange_token=...
+                                </code>
+                            </div>
+
+                            <div>
+                                <p className="text-sm font-semibold text-gray-300 mb-2">Example Code (Node.js/Express):</p>
+                                <pre className="bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
 {`// Initiate OAuth login with exchange flow
 app.get('/login', (req, res) => {
-  const authUrl = 'https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?flow=exchange';
+  const authUrl = '${authorizeUrl}?flow=exchange';
   res.redirect(authUrl);
 });
 
@@ -691,49 +618,280 @@ app.get('/login', (req, res) => {
 app.get('/oauth/callback', async (req, res) => {
   const exchangeToken = req.query.exchange_token;
 
-  // Exchange for actual OAuth tokens
-  const response = await fetch(
-    \`https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/exchange?exchange_token=\${exchangeToken}\`
-  );
+  if (!exchangeToken) {
+    return res.status(400).send('Missing exchange token');
+  }
 
-  const tokens = await response.json();
+  try {
+    // Exchange the temporary token for actual OAuth tokens
+    const response = await fetch(
+      \`${exchangeUrl}?exchange_token=\${exchangeToken}\`
+    );
 
-  // Store in HttpOnly session cookie
-  req.session.accessToken = tokens.access_token;
-  req.session.idToken = tokens.id_token;
+    if (!response.ok) {
+      throw new Error('Token exchange failed');
+    }
 
-  res.redirect('/dashboard');
+    const tokens = await response.json();
+    // { access_token, id_token, expires_at, ... }
+
+    // Store in HttpOnly session cookie (recommended)
+    req.session.accessToken = tokens.access_token;
+    req.session.idToken = tokens.id_token;
+    req.session.expiresAt = tokens.expires_at;
+
+    // Redirect to app
+    res.redirect('/dashboard');
+  } catch (error) {
+    console.error('OAuth exchange error:', error);
+    res.status(500).send('Authentication failed');
+  }
 });`}
-                        </pre>
-                    </div>
+                                </pre>
+                            </div>
+                        </div>
+                    )}
 
-                    <div className="pt-2 border-t border-gray-700">
-                        <p className="text-sm font-semibold text-gray-300 mb-2">Local Development</p>
-                        <p className="text-xs text-gray-400 mb-2">
-                            Override the redirect URI for local testing:
-                        </p>
-                        <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
-{`// Fragment flow
-const authUrl = 'https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?redirect_uri=http://localhost:3000/callback';
+                    {activeTab === 'local' && (
+                        <div className="space-y-4">
+                            <p className="text-sm text-gray-300">
+                                For local development, you can override the redirect URI to point to your local development server.
+                                Make sure to also register this localhost URL in your OAuth provider's settings.
+                            </p>
 
-// Exchange flow
-const authUrl = 'https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?flow=exchange&redirect_uri=http://localhost:3000/oauth/callback';`}
-                        </pre>
-                    </div>
+                            <div>
+                                <p className="text-sm font-semibold text-gray-300 mb-2">Fragment Flow (localhost):</p>
+                                <pre className="bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+{`// Override redirect URI for local development
+const authUrl = '${authorizeUrl}?redirect_uri=' +
+  encodeURIComponent('http://localhost:3000/callback');
+
+window.location.href = authUrl;`}
+                                </pre>
+                            </div>
+
+                            <div>
+                                <p className="text-sm font-semibold text-gray-300 mb-2">Exchange Flow (localhost):</p>
+                                <pre className="bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+{`// Override redirect URI for local development
+app.get('/login', (req, res) => {
+  const authUrl = '${authorizeUrl}?flow=exchange&redirect_uri=' +
+    encodeURIComponent('http://localhost:3000/oauth/callback');
+  res.redirect(authUrl);
+});
+
+// Your local callback handler
+app.get('/oauth/callback', async (req, res) => {
+  // ... same exchange logic as production
+});`}
+                                </pre>
+                            </div>
+
+                            <div className="bg-yellow-900/20 border border-yellow-700 rounded p-4">
+                                <p className="text-sm font-semibold text-yellow-300 mb-2">⚠️ Important</p>
+                                <p className="text-xs text-yellow-200">
+                                    Remember to add <code className="bg-gray-800 px-1 rounded">http://localhost:3000/callback</code> (or your local URL)
+                                    to your OAuth provider's allowed redirect URIs list.
+                                </p>
+                            </div>
+                        </div>
+                    )}
                 </div>
-            </section>
-
-            {/* Documentation Link */}
-            <section>
-                <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-blue-300 mb-2">📚 Documentation</h4>
-                    <p className="text-sm text-blue-200">
-                        For detailed documentation on OAuth flows, security, and advanced configuration,
-                        see the <a href="/docs/oauth.md" className="underline">OAuth Extension Documentation</a>.
-                    </p>
-                </div>
-            </section>
+            </div>
         </div>
+    );
+}
+
+// OAuth Detail View Component
+function OAuthDetailView({ extension, projectName }) {
+    const status = extension.status || {};
+    const spec = extension.spec || {};
+    const scopesArray = spec.scopes || [];
+    const extensionName = extension.extension;
+    const { showToast } = useToast();
+    const [showGuideModal, setShowGuideModal] = useState(false);
+
+    // Build URLs using actual backend URL
+    const backendUrl = CONFIG.backendUrl.replace(/\/$/, ''); // Remove trailing slash
+    const callbackUrl = `${backendUrl}/api/v1/oauth/callback/${projectName}/${extensionName}`;
+
+    const handleTestOAuth = () => {
+        // Store the current hash location to return to after OAuth
+        const currentHash = window.location.hash.substring(1);
+        sessionStorage.setItem('oauth_return_path', currentHash);
+
+        // Use the origin as redirect URI (hash router doesn't work with fragments)
+        const redirectUri = window.location.origin + '/';
+        const authUrl = `/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
+        window.location.href = authUrl;
+    };
+
+    return (
+        <>
+            <IntegrationGuideModal
+                isOpen={showGuideModal}
+                onClose={() => setShowGuideModal(false)}
+                projectName={projectName}
+                extensionName={extensionName}
+            />
+
+            {/* Two-column layout */}
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Left column - Main content */}
+                <div className="lg:col-span-2 space-y-6">
+                    {/* Redirect URI Configuration */}
+                    <section>
+                        <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
+                            <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 OAuth Provider Configuration</h3>
+                            <p className="text-sm text-blue-200 mb-3">
+                                This callback URL must be configured in your OAuth provider's application settings:
+                            </p>
+                            <div className="flex items-center gap-2 mb-2">
+                                <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                                    {callbackUrl}
+                                </code>
+                                <button
+                                    onClick={() => {
+                                        navigator.clipboard.writeText(callbackUrl);
+                                        showToast('Redirect URI copied to clipboard', 'success');
+                                    }}
+                                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap"
+                                    title="Copy redirect URI"
+                                >
+                                    Copy
+                                </button>
+                            </div>
+                            <p className="text-xs text-blue-300">
+                                Also called "Redirect URI", "Callback URL", or "Authorized redirect URIs" depending on your provider.
+                            </p>
+                        </div>
+                    </section>
+
+                    {/* Provider Configuration */}
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-200 mb-3">OAuth Provider</h2>
+                        <div className="bg-gray-900 rounded p-4 space-y-3">
+                            <div>
+                                <p className="text-sm text-gray-500">Provider Name</p>
+                                <p className="text-gray-300 font-semibold">{spec.provider_name || 'N/A'}</p>
+                            </div>
+                            {spec.description && (
+                                <div>
+                                    <p className="text-sm text-gray-500">Description</p>
+                                    <p className="text-gray-300">{spec.description}</p>
+                                </div>
+                            )}
+                            <div>
+                                <p className="text-sm text-gray-500">Client ID</p>
+                                <p className="text-gray-300 font-mono text-sm">{spec.client_id || 'N/A'}</p>
+                            </div>
+                            <div>
+                                <p className="text-sm text-gray-500">Client Secret Reference</p>
+                                <p className="text-gray-300 font-mono text-sm">{spec.client_secret_ref || 'N/A'}</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Endpoints */}
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-200 mb-3">OAuth Endpoints</h2>
+                        <div className="bg-gray-900 rounded p-4 space-y-3">
+                            <div>
+                                <p className="text-sm text-gray-500">Authorization Endpoint</p>
+                                <p className="text-gray-300 font-mono text-xs break-all">{spec.authorization_endpoint || 'N/A'}</p>
+                            </div>
+                            <div>
+                                <p className="text-sm text-gray-500">Token Endpoint</p>
+                                <p className="text-gray-300 font-mono text-xs break-all">{spec.token_endpoint || 'N/A'}</p>
+                            </div>
+                        </div>
+                    </section>
+
+                    {/* Scopes */}
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-200 mb-3">
+                            OAuth Scopes ({scopesArray.length})
+                        </h2>
+                        <div className="bg-gray-900 rounded p-4">
+                            {scopesArray.length === 0 ? (
+                                <p className="text-gray-400 text-sm">No scopes configured</p>
+                            ) : (
+                                <div className="flex flex-wrap gap-2">
+                                    {scopesArray.map((scope, idx) => (
+                                        <span
+                                            key={idx}
+                                            className="bg-indigo-600 text-white text-xs font-semibold px-3 py-1 rounded-full"
+                                        >
+                                            {scope}
+                                        </span>
+                                    ))}
+                                </div>
+                            )}
+                        </div>
+                    </section>
+                </div>
+
+                {/* Right column - Actions */}
+                <div className="lg:col-span-1 space-y-6">
+                    {/* Configuration Status */}
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-200 mb-3">Status</h2>
+                        <div className="bg-gray-900 rounded p-4">
+                            {status.error ? (
+                                <div className="p-3 bg-red-900/20 border border-red-700 rounded">
+                                    <p className="text-sm text-red-300">
+                                        <strong>Error:</strong> {status.error}
+                                    </p>
+                                </div>
+                            ) : status.configured_at ? (
+                                <div className="p-3 bg-green-900/20 border border-green-700 rounded">
+                                    <p className="text-sm text-green-300">
+                                        ✓ Configured
+                                    </p>
+                                    <p className="text-xs text-green-400 mt-1">
+                                        {formatDate(status.configured_at)}
+                                    </p>
+                                </div>
+                            ) : (
+                                <div className="p-3 bg-gray-800 rounded">
+                                    <p className="text-sm text-gray-400">
+                                        Configuration pending...
+                                    </p>
+                                </div>
+                            )}
+                        </div>
+                    </section>
+
+                    {/* Test OAuth Flow */}
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-200 mb-3">Test</h2>
+                        <button
+                            onClick={handleTestOAuth}
+                            className="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors"
+                        >
+                            🔐 Test OAuth Flow
+                        </button>
+                        <p className="text-xs text-gray-500 mt-2">
+                            Test the OAuth flow and return to this page with a notification.
+                        </p>
+                    </section>
+
+                    {/* Integration Guide Button */}
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-200 mb-3">Integration</h2>
+                        <button
+                            onClick={() => setShowGuideModal(true)}
+                            className="w-full px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-colors"
+                        >
+                            📚 Integration Guide
+                        </button>
+                        <p className="text-xs text-gray-500 mt-2">
+                            View code examples for Fragment Flow, Exchange Flow, and local development.
+                        </p>
+                    </section>
+                </div>
+            </div>
+        </>
     );
 }
 
