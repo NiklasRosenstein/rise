@@ -9,7 +9,7 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
     const [engine, setEngine] = useState(spec?.engine || 'postgres');
     const [engineVersion, setEngineVersion] = useState(spec?.engine_version || '');
     const [databaseIsolation, setDatabaseIsolation] = useState(spec?.database_isolation || 'shared');
-    const [injectDatabaseUrl, setInjectDatabaseUrl] = useState(spec?.inject_database_url !== false);
+    const [databaseUrlEnvVar, setDatabaseUrlEnvVar] = useState(spec?.database_url_env_var || 'DATABASE_URL');
     const [injectPgVars, setInjectPgVars] = useState(spec?.inject_pg_vars !== false);
 
     // Extract default engine version from schema
@@ -27,7 +27,6 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
         const newSpec = {
             engine,
             database_isolation: databaseIsolation,
-            inject_database_url: injectDatabaseUrl,
             inject_pg_vars: injectPgVars,
         };
 
@@ -36,8 +35,13 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
             newSpec.engine_version = engineVersion;
         }
 
+        // Only include database_url_env_var if it's not empty
+        if (databaseUrlEnvVar && databaseUrlEnvVar.trim() !== '') {
+            newSpec.database_url_env_var = databaseUrlEnvVar;
+        }
+
         onChangeRef.current(newSpec);
-    }, [engine, engineVersion, databaseIsolation, injectDatabaseUrl, injectPgVars]);
+    }, [engine, engineVersion, databaseIsolation, databaseUrlEnvVar, injectPgVars]);
 
     return (
         <div className="space-y-4">
@@ -74,18 +78,14 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
 
             <div className="space-y-3">
                 <h4 className="text-sm font-semibold text-gray-300">Environment Variables</h4>
-                <label className="flex items-center space-x-3">
-                    <input
-                        type="checkbox"
-                        checked={injectDatabaseUrl}
-                        onChange={(e) => setInjectDatabaseUrl(e.target.checked)}
-                        className="w-4 h-4 text-indigo-600 bg-gray-700 border-gray-600 rounded focus:ring-indigo-500 focus:ring-2"
-                    />
-                    <span className="text-sm text-gray-300">
-                        Inject <code className="bg-gray-700 px-1 rounded">DATABASE_URL</code>
-                        <span className="text-gray-500 ml-2">(full connection string)</span>
-                    </span>
-                </label>
+                <FormField
+                    label="Database URL Environment Variable"
+                    id="rds-database-url-env-var"
+                    value={databaseUrlEnvVar}
+                    onChange={(e) => setDatabaseUrlEnvVar(e.target.value)}
+                    placeholder="DATABASE_URL"
+                    helperText="Environment variable name for the database connection string (e.g., DATABASE_URL, POSTGRES_URL). Leave empty to disable. This allows multiple RDS instances to use different variable names."
+                />
                 <label className="flex items-center space-x-3">
                     <input
                         type="checkbox"
@@ -98,6 +98,9 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                         <span className="text-gray-500 ml-2">(PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)</span>
                     </span>
                 </label>
+                <p className="text-xs text-gray-500">
+                    Note: Only one RDS extension should have PG* variables enabled per project, as they will override each other.
+                </p>
             </div>
 
             <div className="bg-gray-800 rounded-lg p-4">
@@ -297,18 +300,13 @@ function AwsRdsDetailView({ extension }) {
             {/* Configuration */}
             <section>
                 <h2 className="text-lg font-semibold text-gray-200 mb-3">Environment Variables</h2>
-                <div className="bg-gray-900 rounded p-4 space-y-2">
-                    <label className="flex items-center space-x-2">
-                        <input
-                            type="checkbox"
-                            checked={spec.inject_database_url !== false}
-                            disabled
-                            className="rounded"
-                        />
-                        <span className="text-gray-300 text-sm">
-                            Inject <code className="bg-gray-800 px-1 rounded">DATABASE_URL</code>
-                        </span>
-                    </label>
+                <div className="bg-gray-900 rounded p-4 space-y-3">
+                    <div>
+                        <span className="text-gray-400 text-sm">Database URL Variable:</span>
+                        <code className="ml-2 bg-gray-800 px-2 py-1 rounded text-gray-200 text-sm">
+                            {spec.database_url_env_var || 'DATABASE_URL'}
+                        </code>
+                    </div>
                     <label className="flex items-center space-x-2">
                         <input
                             type="checkbox"

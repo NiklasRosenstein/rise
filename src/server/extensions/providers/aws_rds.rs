@@ -33,9 +33,10 @@ pub struct AwsRdsSpec {
     /// Database isolation mode for deployment groups
     #[serde(default = "default_database_isolation")]
     pub database_isolation: DatabaseIsolation,
-    /// Whether to inject DATABASE_URL environment variable
-    #[serde(default = "default_true")]
-    pub inject_database_url: bool,
+    /// Environment variable name for the database URL (e.g., "DATABASE_URL", "POSTGRES_URL")
+    /// If set to None or empty string, no DATABASE_URL-style variable will be injected
+    #[serde(default = "default_database_url_env_var")]
+    pub database_url_env_var: Option<String>,
     /// Whether to inject PG* environment variables (PGHOST, PGPORT, etc.)
     #[serde(default = "default_true")]
     pub inject_pg_vars: bool,
@@ -61,6 +62,10 @@ fn default_database_isolation() -> DatabaseIsolation {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_database_url_env_var() -> Option<String> {
+    Some("DATABASE_URL".to_string())
 }
 
 /// Status and credentials for a specific database
@@ -1637,30 +1642,35 @@ impl Extension for AwsRdsProvisioner {
 
         let mut injected_vars = Vec::new();
 
-        // Inject DATABASE_URL if requested
-        if spec.inject_database_url {
-            let database_url = format!(
-                "postgres://{}:{}@{}/{}",
-                db_username, db_password, endpoint, database_name
-            );
+        // Inject database URL environment variable if requested
+        if let Some(ref env_var_name) = spec.database_url_env_var {
+            if !env_var_name.is_empty() {
+                let database_url = format!(
+                    "postgres://{}:{}@{}/{}",
+                    db_username, db_password, endpoint, database_name
+                );
 
-            let encrypted_database_url = self
-                .encryption_provider
-                .encrypt(&database_url)
+                let encrypted_database_url = self
+                    .encryption_provider
+                    .encrypt(&database_url)
+                    .await
+                    .context(format!("Failed to encrypt {}", env_var_name))?;
+
+                db_env_vars::upsert_deployment_env_var(
+                    &self.db_pool,
+                    deployment_id,
+                    env_var_name,
+                    &encrypted_database_url,
+                    true, // is_secret
+                )
                 .await
-                .context("Failed to encrypt DATABASE_URL")?;
+                .context(format!(
+                    "Failed to write {} to deployment_env_vars",
+                    env_var_name
+                ))?;
 
-            db_env_vars::upsert_deployment_env_var(
-                &self.db_pool,
-                deployment_id,
-                "DATABASE_URL",
-                &encrypted_database_url,
-                true, // is_secret
-            )
-            .await
-            .context("Failed to write DATABASE_URL to deployment_env_vars")?;
-
-            injected_vars.push("DATABASE_URL");
+                injected_vars.push(env_var_name.as_str());
+            }
         }
 
         // Inject PG* environment variables if requested
@@ -1751,7 +1761,7 @@ The extension accepts an optional spec with the following fields:
 - `database_isolation` (optional, default: "shared"): Controls how databases are provisioned:
   - `"shared"`: All deployment groups use the same database (simplest setup)
   - `"isolated"`: Each deployment group gets its own empty database (true data isolation)
-- `inject_database_url` (optional, default: true): Whether to inject the `DATABASE_URL` environment variable
+- `database_url_env_var` (optional, default: "DATABASE_URL"): Name of the environment variable for the database URL (e.g., "DATABASE_URL", "POSTGRES_URL"). Set to null or empty string to disable injection.
 - `inject_pg_vars` (optional, default: true): Whether to inject PostgreSQL environment variables (`PGHOST`, `PGPORT`, etc.)
 
 ## Example Spec
@@ -1773,7 +1783,7 @@ With custom engine version and isolated databases:
 Custom environment variable injection:
 ```json
 {
-  "inject_database_url": true,
+  "database_url_env_var": "POSTGRES_URL",
   "inject_pg_vars": false
 }
 ```
@@ -1803,8 +1813,11 @@ Each deployment group gets its own empty database. This provides true data isola
 
 You can configure which environment variables to inject using the extension spec:
 
-**DATABASE_URL** (enabled by default via `inject_database_url: true`):
-- `DATABASE_URL`: Full PostgreSQL connection string (postgres://user:password@host:port/database)
+**Database URL Variable** (default: `DATABASE_URL`):
+- Configurable via `database_url_env_var` (e.g., "DATABASE_URL", "POSTGRES_URL")
+- Full PostgreSQL connection string (postgres://user:password@host:port/database)
+- Set to null or empty string to disable injection
+- This allows multiple RDS instances to inject different environment variables (e.g., one as `DATABASE_URL`, another as `SECONDARY_DB_URL`)
 
 **PG* Variables** (enabled by default via `inject_pg_vars: true`):
 - `PGHOST`: Database hostname
@@ -1814,7 +1827,8 @@ You can configure which environment variables to inject using the extension spec
 - `PGPASSWORD`: Database password (encrypted at rest, injected at deployment time)
 
 The PG* variables are recognized by `psql` and most PostgreSQL client libraries, allowing you to connect
-with just `psql` without any connection string arguments.
+with just `psql` without any connection string arguments. **Note:** Only one RDS extension should have
+`inject_pg_vars: true` enabled per project, as multiple instances would override each other.
 
 ## Initial Provisioning
 
@@ -1836,15 +1850,15 @@ Creating a new RDS instance typically takes **5-15 minutes**. No new deployments
                     "default": self.default_engine_version,
                     "description": format!("PostgreSQL version (e.g., '16.2'). If not specified, uses the configured default version: {}", self.default_engine_version)
                 },
-                "inject_database_url": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Inject DATABASE_URL environment variable (full connection string)"
+                "database_url_env_var": {
+                    "type": "string",
+                    "default": "DATABASE_URL",
+                    "description": "Environment variable name for the database URL (e.g., 'DATABASE_URL', 'POSTGRES_URL'). Set to empty string to disable injection. This allows multiple RDS instances to use different environment variable names."
                 },
                 "inject_pg_vars": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Inject PG* environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)"
+                    "description": "Inject PG* environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD). Note: Only one RDS extension should have this enabled per project."
                 }
             }
         })
