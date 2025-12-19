@@ -14,25 +14,31 @@ impl ExtensionRegistry {
         }
     }
 
-    /// Register an extension implementation
+    /// Register an extension type implementation
+    ///
+    /// This method now registers extensions by their type identifier rather than instance name,
+    /// allowing multiple instances of the same extension type to be created.
     #[allow(dead_code)]
-    pub fn register(&mut self, extension: Arc<dyn Extension>) {
-        let name = extension.name().to_string();
-        self.extensions.insert(name, extension);
+    pub fn register_type(&mut self, extension: Arc<dyn Extension>) {
+        let extension_type = extension.extension_type().to_string();
+        self.extensions.insert(extension_type, extension);
     }
 
-    /// Get extension by name
-    pub fn get(&self, name: &str) -> Option<Arc<dyn Extension>> {
-        self.extensions.get(name).cloned()
+    /// Get extension handler by type
+    ///
+    /// This returns the extension handler for a given extension type (e.g., "aws-rds-provisioner").
+    /// The returned handler can be used to manage multiple instances of this extension type.
+    pub fn get(&self, extension_type: &str) -> Option<Arc<dyn Extension>> {
+        self.extensions.get(extension_type).cloned()
     }
 
-    /// List all registered extension names
+    /// List all registered extension types
     #[allow(dead_code)]
     pub fn list(&self) -> Vec<String> {
         self.extensions.keys().cloned().collect()
     }
 
-    /// Iterate over all registered extensions
+    /// Iterate over all registered extension types
     pub fn iter(&self) -> impl Iterator<Item = (&String, &Arc<dyn Extension>)> {
         self.extensions.iter()
     }

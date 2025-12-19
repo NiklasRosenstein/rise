@@ -8,6 +8,7 @@ use serde_json::Value;
 #[derive(Debug, Deserialize)]
 struct Extension {
     extension: String,
+    extension_type: String,
     spec: Value,
     status: Value,
     status_summary: String,
@@ -17,6 +18,7 @@ struct Extension {
 
 #[derive(Debug, Serialize)]
 struct CreateExtensionRequest {
+    extension_type: String,
     spec: Value,
 }
 
@@ -41,7 +43,12 @@ struct ListExtensionsResponse {
 }
 
 /// Create or update extension for a project
-pub async fn create_extension(project: &str, extension: &str, spec: Value) -> Result<()> {
+pub async fn create_extension(
+    project: &str,
+    extension: &str,
+    extension_type: &str,
+    spec: Value,
+) -> Result<()> {
     let config = Config::load()?;
     let backend_url = config.get_backend_url();
     let token = config
@@ -57,7 +64,10 @@ pub async fn create_extension(project: &str, extension: &str, spec: Value) -> Re
     let response = http_client
         .post(&url)
         .header("Authorization", format!("Bearer {}", token))
-        .json(&CreateExtensionRequest { spec })
+        .json(&CreateExtensionRequest {
+            extension_type: extension_type.to_string(),
+            spec,
+        })
         .send()
         .await
         .context("Failed to create extension")?;
@@ -245,7 +255,8 @@ pub async fn list_extensions(project: &str) -> Result<()> {
         .load_preset(UTF8_FULL)
         .apply_modifier(UTF8_ROUND_CORNERS)
         .set_header(vec![
-            Cell::new("EXTENSION").add_attribute(Attribute::Bold),
+            Cell::new("NAME").add_attribute(Attribute::Bold),
+            Cell::new("TYPE").add_attribute(Attribute::Bold),
             Cell::new("STATUS").add_attribute(Attribute::Bold),
             Cell::new("CREATED").add_attribute(Attribute::Bold),
             Cell::new("UPDATED").add_attribute(Attribute::Bold),
@@ -254,6 +265,7 @@ pub async fn list_extensions(project: &str) -> Result<()> {
     for ext in list_response.extensions {
         table.add_row(vec![
             Cell::new(&ext.extension),
+            Cell::new(&ext.extension_type),
             Cell::new(&ext.status_summary),
             Cell::new(&ext.created),
             Cell::new(&ext.updated),
@@ -304,6 +316,7 @@ pub async fn show_extension(project: &str, extension: &str) -> Result<()> {
         .context("Failed to parse extension response")?;
 
     println!("Extension: {}", ext.extension);
+    println!("Type: {}", ext.extension_type);
     println!("Created: {}", ext.created);
     println!("Updated: {}", ext.updated);
     println!("\nSpec:");

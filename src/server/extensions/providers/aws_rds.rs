@@ -33,9 +33,10 @@ pub struct AwsRdsSpec {
     /// Database isolation mode for deployment groups
     #[serde(default = "default_database_isolation")]
     pub database_isolation: DatabaseIsolation,
-    /// Whether to inject DATABASE_URL environment variable
-    #[serde(default = "default_true")]
-    pub inject_database_url: bool,
+    /// Environment variable name for the database URL (e.g., "DATABASE_URL", "POSTGRES_URL")
+    /// If set to None or empty string, no DATABASE_URL-style variable will be injected
+    #[serde(default = "default_database_url_env_var")]
+    pub database_url_env_var: Option<String>,
     /// Whether to inject PG* environment variables (PGHOST, PGPORT, etc.)
     #[serde(default = "default_true")]
     pub inject_pg_vars: bool,
@@ -61,6 +62,10 @@ fn default_database_isolation() -> DatabaseIsolation {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_database_url_env_var() -> Option<String> {
+    Some("DATABASE_URL".to_string())
 }
 
 /// Status and credentials for a specific database
@@ -128,7 +133,6 @@ pub enum RdsState {
 }
 
 pub struct AwsRdsProvisionerConfig {
-    pub name: String,
     pub rds_client: RdsClient,
     pub db_pool: sqlx::PgPool,
     pub encryption_provider: Arc<dyn EncryptionProvider>,
@@ -136,6 +140,7 @@ pub struct AwsRdsProvisionerConfig {
     pub instance_size: String,
     pub disk_size: i32,
     pub instance_id_template: String,
+    pub instance_id_prefix: String,
     pub default_engine_version: String,
     pub vpc_security_group_ids: Option<Vec<String>>,
     pub db_subnet_group_name: Option<String>,
@@ -145,7 +150,6 @@ pub struct AwsRdsProvisionerConfig {
 }
 
 pub struct AwsRdsProvisioner {
-    name: String,
     rds_client: RdsClient,
     db_pool: sqlx::PgPool,
     encryption_provider: Arc<dyn EncryptionProvider>,
@@ -153,6 +157,7 @@ pub struct AwsRdsProvisioner {
     instance_size: String,
     disk_size: i32,
     instance_id_template: String,
+    instance_id_prefix: String,
     default_engine_version: String,
     vpc_security_group_ids: Option<Vec<String>>,
     db_subnet_group_name: Option<String>,
@@ -164,7 +169,6 @@ pub struct AwsRdsProvisioner {
 impl AwsRdsProvisioner {
     pub async fn new(config: AwsRdsProvisionerConfig) -> Result<Self> {
         Ok(Self {
-            name: config.name,
             rds_client: config.rds_client,
             db_pool: config.db_pool,
             encryption_provider: config.encryption_provider,
@@ -172,6 +176,7 @@ impl AwsRdsProvisioner {
             instance_size: config.instance_size,
             disk_size: config.disk_size,
             instance_id_template: config.instance_id_template,
+            instance_id_prefix: config.instance_id_prefix,
             default_engine_version: config.default_engine_version,
             vpc_security_group_ids: config.vpc_security_group_ids,
             db_subnet_group_name: config.db_subnet_group_name,
@@ -181,9 +186,26 @@ impl AwsRdsProvisioner {
         })
     }
 
-    fn instance_id_for_project(&self, project_name: &str) -> String {
+    fn instance_id_for_project(&self, project_name: &str, extension_name: &str) -> String {
         self.instance_id_template
+            .replace("{prefix}", &self.instance_id_prefix)
             .replace("{project_name}", project_name)
+            .replace("{extension_name}", extension_name)
+    }
+
+    /// Get the finalizer name for this extension instance (new format)
+    fn finalizer_name(&self, extension_name: &str) -> String {
+        format!(
+            "rise.dev/extension/{}/{}",
+            self.extension_type(),
+            extension_name
+        )
+    }
+
+    /// Get the old finalizer name format (for migration)
+    /// TODO: Remove this in a future version after migration period
+    fn old_finalizer_name(&self, extension_name: &str) -> String {
+        extension_name.to_string()
     }
 
     /// Reconcile a single RDS extension
@@ -217,6 +239,46 @@ impl AwsRdsProvisioner {
                 error: None,
             });
 
+        // Migrate old finalizer format to new format
+        // TODO: Remove this migration logic in a future version
+        let old_finalizer = self.old_finalizer_name(&project_extension.extension);
+        let new_finalizer = self.finalizer_name(&project_extension.extension);
+
+        // Check if project has the old-style finalizer
+        if project.finalizers.contains(&old_finalizer)
+            && !project.finalizers.contains(&new_finalizer)
+        {
+            info!(
+                "Migrating finalizer for extension '{}' from old format '{}' to new format '{}'",
+                project_extension.extension, old_finalizer, new_finalizer
+            );
+
+            // Remove old finalizer
+            if let Err(e) =
+                db_projects::remove_finalizer(&self.db_pool, project.id, &old_finalizer).await
+            {
+                error!(
+                    "Failed to remove old finalizer '{}' from project {}: {}",
+                    old_finalizer, project.name, e
+                );
+            }
+
+            // Add new finalizer
+            if let Err(e) =
+                db_projects::add_finalizer(&self.db_pool, project.id, &new_finalizer).await
+            {
+                error!(
+                    "Failed to add new finalizer '{}' to project {}: {}",
+                    new_finalizer, project.name, e
+                );
+            } else {
+                info!(
+                    "Successfully migrated finalizer for extension '{}' in project {}",
+                    project_extension.extension, project.name
+                );
+            }
+        }
+
         // Check if marked for deletion
         if project_extension.deleted_at.is_some() {
             // Handle deletion
@@ -226,36 +288,38 @@ impl AwsRdsProvisioner {
                 db_extensions::update_status(
                     &self.db_pool,
                     project_extension.project_id,
-                    &self.name,
+                    &project_extension.extension,
                     &serde_json::to_value(&status)?,
                 )
                 .await?;
 
                 // If deletion is complete, hard delete the record and remove finalizer
                 if status.state == RdsState::Deleted {
+                    let finalizer = self.finalizer_name(&project_extension.extension);
+
                     // Remove finalizer so project can be deleted
                     if let Err(e) = db_projects::remove_finalizer(
                         &self.db_pool,
                         project_extension.project_id,
-                        &self.name,
+                        &finalizer,
                     )
                     .await
                     {
                         error!(
-                            "Failed to remove finalizer from project {}: {}",
-                            project.name, e
+                            "Failed to remove finalizer '{}' from project {}: {}",
+                            finalizer, project.name, e
                         );
                     } else {
                         info!(
                             "Removed finalizer '{}' from project {}",
-                            self.name, project.name
+                            finalizer, project.name
                         );
                     }
 
                     db_extensions::delete_permanently(
                         &self.db_pool,
                         project_extension.project_id,
-                        &self.name,
+                        &project_extension.extension,
                     )
                     .await?;
                     info!(
@@ -278,8 +342,14 @@ impl AwsRdsProvisioner {
         // Handle normal lifecycle
         match status.state {
             RdsState::Pending => {
-                self.handle_pending(&spec, &mut status, &project.name, project.id)
-                    .await?;
+                self.handle_pending(
+                    &spec,
+                    &mut status,
+                    &project.name,
+                    project.id,
+                    &project_extension.extension,
+                )
+                .await?;
             }
             RdsState::Creating => {
                 self.handle_creating(&mut status, &project.name, project.id)
@@ -306,7 +376,7 @@ impl AwsRdsProvisioner {
         db_extensions::update_status(
             &self.db_pool,
             project_extension.project_id,
-            &self.name,
+            &project_extension.extension,
             &serde_json::to_value(&status)?,
         )
         .await?;
@@ -338,11 +408,18 @@ impl AwsRdsProvisioner {
         status: &mut AwsRdsStatus,
         project_name: &str,
         project_id: Uuid,
+        extension_name: &str,
     ) -> Result<()> {
-        let instance_id = self.instance_id_for_project(project_name);
+        // Use stored instance_id if already set, otherwise generate a new unique one
+        let instance_id = if let Some(ref existing_id) = status.instance_id {
+            existing_id.clone()
+        } else {
+            self.instance_id_for_project(project_name, extension_name)
+        };
+
         info!(
-            "Creating RDS instance {} for project {}",
-            instance_id, project_name
+            "Creating RDS instance {} for project {} (extension: {})",
+            instance_id, project_name, extension_name
         );
 
         // Generate master credentials
@@ -432,17 +509,18 @@ impl AwsRdsProvisioner {
                 status.error = None;
 
                 // Add finalizer immediately to ensure cleanup if project is deleted during provisioning
+                let finalizer = self.finalizer_name(extension_name);
                 if let Err(e) =
-                    db_projects::add_finalizer(&self.db_pool, project_id, &self.name).await
+                    db_projects::add_finalizer(&self.db_pool, project_id, &finalizer).await
                 {
                     error!(
-                        "Failed to add finalizer for project {}: {}",
-                        project_name, e
+                        "Failed to add finalizer '{}' for project {}: {}",
+                        finalizer, project_name, e
                     );
                 } else {
                     info!(
                         "Added finalizer '{}' to project {}",
-                        self.name, project_name
+                        finalizer, project_name
                     );
                 }
             }
@@ -1138,12 +1216,12 @@ impl AwsRdsProvisioner {
 
 #[async_trait]
 impl Extension for AwsRdsProvisioner {
-    fn name(&self) -> &str {
-        &self.name
-    }
-
     fn extension_type(&self) -> &str {
         "aws-rds-provisioner"
+    }
+
+    fn display_name(&self) -> &str {
+        "AWS RDS Database"
     }
 
     async fn validate_spec(&self, spec: &Value) -> Result<()> {
@@ -1162,7 +1240,6 @@ impl Extension for AwsRdsProvisioner {
 
     fn start(&self) {
         let provisioner = Self {
-            name: self.name.clone(),
             rds_client: self.rds_client.clone(),
             db_pool: self.db_pool.clone(),
             encryption_provider: self.encryption_provider.clone(),
@@ -1170,6 +1247,7 @@ impl Extension for AwsRdsProvisioner {
             instance_size: self.instance_size.clone(),
             disk_size: self.disk_size,
             instance_id_template: self.instance_id_template.clone(),
+            instance_id_prefix: self.instance_id_prefix.clone(),
             default_engine_version: self.default_engine_version.clone(),
             vpc_security_group_ids: self.vpc_security_group_ids.clone(),
             db_subnet_group_name: self.db_subnet_group_name.clone(),
@@ -1180,17 +1258,20 @@ impl Extension for AwsRdsProvisioner {
 
         tokio::spawn(async move {
             info!(
-                "Starting AWS RDS extension reconciliation loop for '{}'",
-                provisioner.name
+                "Starting AWS RDS extension reconciliation loop for type '{}'",
+                provisioner.extension_type()
             );
 
             // Track error counts and last error times for exponential backoff
             let mut error_state: HashMap<Uuid, (usize, DateTime<Utc>)> = HashMap::new();
 
             loop {
-                // List ALL project extensions (not filtered by project)
-                match db_extensions::list_by_extension_name(&provisioner.db_pool, &provisioner.name)
-                    .await
+                // List ALL project extensions of this type (across all projects)
+                match db_extensions::list_by_extension_type(
+                    &provisioner.db_pool,
+                    provisioner.extension_type(),
+                )
+                .await
                 {
                     Ok(extensions) => {
                         if extensions.is_empty() {
@@ -1240,9 +1321,9 @@ impl Extension for AwsRdsProvisioner {
                 }
 
                 // Check if any extension is in a transitional state
-                let needs_active_polling = match db_extensions::list_by_extension_name(
+                let needs_active_polling = match db_extensions::list_by_extension_type(
                     &provisioner.db_pool,
-                    &provisioner.name,
+                    provisioner.extension_type(),
                 )
                 .await
                 {
@@ -1276,29 +1357,32 @@ impl Extension for AwsRdsProvisioner {
         project_id: Uuid,
         deployment_group: &str,
     ) -> Result<()> {
-        // Find the extension for this project
-        let ext =
-            match db_extensions::find_by_project_and_name(&self.db_pool, project_id, &self.name)
+        // Find all extensions of this type for this project
+        let extensions =
+            db_extensions::list_by_extension_type(&self.db_pool, self.extension_type())
                 .await?
-            {
-                Some(ext) => ext,
-                None => {
-                    // Extension not enabled for this project - skip hook
-                    debug!(
-                    "Extension '{}' not enabled for project {}, skipping before_deployment hook",
-                    self.name, project_id
-                );
-                    return Ok(());
-                }
-            };
+                .into_iter()
+                .filter(|e| e.project_id == project_id && e.deleted_at.is_none())
+                .collect::<Vec<_>>();
 
-        // Skip if extension is marked for deletion
-        if ext.deleted_at.is_some() {
-            info!(
-                "Extension '{}' is being deleted, skipping before_deployment hook",
-                self.name
+        if extensions.is_empty() {
+            // Extension not enabled for this project - skip hook
+            debug!(
+                "Extension type '{}' not enabled for project {}, skipping before_deployment hook",
+                self.extension_type(),
+                project_id
             );
             return Ok(());
+        }
+
+        // For RDS, we expect at most one instance per project
+        // If there are multiple, use the first one and log a warning
+        let ext = &extensions[0];
+        if extensions.len() > 1 {
+            warn!(
+                "Multiple RDS extensions found for project {}, using first instance: {}",
+                project_id, ext.extension
+            );
         }
 
         // Parse spec to get injection preferences
@@ -1318,7 +1402,8 @@ impl Extension for AwsRdsProvisioner {
         // Check if instance is available
         if status.state != RdsState::Available {
             anyhow::bail!(
-                "RDS instance is not available (current state: {:?})",
+                "RDS extension '{}' is not available (current state: {:?})",
+                ext.extension,
                 status.state
             );
         }
@@ -1401,7 +1486,8 @@ impl Extension for AwsRdsProvisioner {
             // Ensure database is Available before using it
             if db_status.status != DatabaseState::Available {
                 anyhow::bail!(
-                    "Database '{}' is not available (current state: {:?})",
+                    "RDS extension '{}': Database '{}' is not available (current state: {:?})",
+                    ext.extension,
                     database_name,
                     db_status.status
                 );
@@ -1431,7 +1517,7 @@ impl Extension for AwsRdsProvisioner {
                 db_extensions::update_status(
                     &self.db_pool,
                     project_id,
-                    &self.name,
+                    &ext.extension,
                     &serde_json::to_value(&status)?,
                 )
                 .await
@@ -1440,7 +1526,8 @@ impl Extension for AwsRdsProvisioner {
                 )?;
 
                 anyhow::bail!(
-                    "Database '{}' does not exist and has been marked for recreation, retry deployment",
+                    "RDS extension '{}': Database '{}' does not exist and has been marked for recreation, retry deployment",
+                    ext.extension,
                     database_name
                 );
             }
@@ -1529,7 +1616,7 @@ impl Extension for AwsRdsProvisioner {
             db_extensions::update_status(
                 &self.db_pool,
                 project_id,
-                &self.name,
+                &ext.extension,
                 &serde_json::to_value(&status)?,
             )
             .await
@@ -1562,30 +1649,35 @@ impl Extension for AwsRdsProvisioner {
 
         let mut injected_vars = Vec::new();
 
-        // Inject DATABASE_URL if requested
-        if spec.inject_database_url {
-            let database_url = format!(
-                "postgres://{}:{}@{}/{}",
-                db_username, db_password, endpoint, database_name
-            );
+        // Inject database URL environment variable if requested
+        if let Some(ref env_var_name) = spec.database_url_env_var {
+            if !env_var_name.is_empty() {
+                let database_url = format!(
+                    "postgres://{}:{}@{}/{}",
+                    db_username, db_password, endpoint, database_name
+                );
 
-            let encrypted_database_url = self
-                .encryption_provider
-                .encrypt(&database_url)
+                let encrypted_database_url = self
+                    .encryption_provider
+                    .encrypt(&database_url)
+                    .await
+                    .context(format!("Failed to encrypt {}", env_var_name))?;
+
+                db_env_vars::upsert_deployment_env_var(
+                    &self.db_pool,
+                    deployment_id,
+                    env_var_name,
+                    &encrypted_database_url,
+                    true, // is_secret
+                )
                 .await
-                .context("Failed to encrypt DATABASE_URL")?;
+                .context(format!(
+                    "Failed to write {} to deployment_env_vars",
+                    env_var_name
+                ))?;
 
-            db_env_vars::upsert_deployment_env_var(
-                &self.db_pool,
-                deployment_id,
-                "DATABASE_URL",
-                &encrypted_database_url,
-                true, // is_secret
-            )
-            .await
-            .context("Failed to write DATABASE_URL to deployment_env_vars")?;
-
-            injected_vars.push("DATABASE_URL");
+                injected_vars.push(env_var_name.as_str());
+            }
         }
 
         // Inject PG* environment variables if requested
@@ -1676,7 +1768,7 @@ The extension accepts an optional spec with the following fields:
 - `database_isolation` (optional, default: "shared"): Controls how databases are provisioned:
   - `"shared"`: All deployment groups use the same database (simplest setup)
   - `"isolated"`: Each deployment group gets its own empty database (true data isolation)
-- `inject_database_url` (optional, default: true): Whether to inject the `DATABASE_URL` environment variable
+- `database_url_env_var` (optional, default: "DATABASE_URL"): Name of the environment variable for the database URL (e.g., "DATABASE_URL", "POSTGRES_URL"). Set to null or empty string to disable injection.
 - `inject_pg_vars` (optional, default: true): Whether to inject PostgreSQL environment variables (`PGHOST`, `PGPORT`, etc.)
 
 ## Example Spec
@@ -1698,7 +1790,7 @@ With custom engine version and isolated databases:
 Custom environment variable injection:
 ```json
 {
-  "inject_database_url": true,
+  "database_url_env_var": "POSTGRES_URL",
   "inject_pg_vars": false
 }
 ```
@@ -1728,8 +1820,11 @@ Each deployment group gets its own empty database. This provides true data isola
 
 You can configure which environment variables to inject using the extension spec:
 
-**DATABASE_URL** (enabled by default via `inject_database_url: true`):
-- `DATABASE_URL`: Full PostgreSQL connection string (postgres://user:password@host:port/database)
+**Database URL Variable** (default: `DATABASE_URL`):
+- Configurable via `database_url_env_var` (e.g., "DATABASE_URL", "POSTGRES_URL")
+- Full PostgreSQL connection string (postgres://user:password@host:port/database)
+- Set to null or empty string to disable injection
+- This allows multiple RDS instances to inject different environment variables (e.g., one as `DATABASE_URL`, another as `SECONDARY_DB_URL`)
 
 **PG* Variables** (enabled by default via `inject_pg_vars: true`):
 - `PGHOST`: Database hostname
@@ -1739,7 +1834,8 @@ You can configure which environment variables to inject using the extension spec
 - `PGPASSWORD`: Database password (encrypted at rest, injected at deployment time)
 
 The PG* variables are recognized by `psql` and most PostgreSQL client libraries, allowing you to connect
-with just `psql` without any connection string arguments.
+with just `psql` without any connection string arguments. **Note:** Only one RDS extension should have
+`inject_pg_vars: true` enabled per project, as multiple instances would override each other.
 
 ## Initial Provisioning
 
@@ -1761,15 +1857,15 @@ Creating a new RDS instance typically takes **5-15 minutes**. No new deployments
                     "default": self.default_engine_version,
                     "description": format!("PostgreSQL version (e.g., '16.2'). If not specified, uses the configured default version: {}", self.default_engine_version)
                 },
-                "inject_database_url": {
-                    "type": "boolean",
-                    "default": true,
-                    "description": "Inject DATABASE_URL environment variable (full connection string)"
+                "database_url_env_var": {
+                    "type": "string",
+                    "default": "DATABASE_URL",
+                    "description": "Environment variable name for the database URL (e.g., 'DATABASE_URL', 'POSTGRES_URL'). Set to empty string to disable injection. This allows multiple RDS instances to use different environment variable names."
                 },
                 "inject_pg_vars": {
                     "type": "boolean",
                     "default": true,
-                    "description": "Inject PG* environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)"
+                    "description": "Inject PG* environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD). Note: Only one RDS extension should have this enabled per project."
                 }
             }
         })

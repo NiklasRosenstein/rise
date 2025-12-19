@@ -225,11 +225,12 @@ class RiseAPI {
 
     /**
      * Enable/create an extension for a project
+     * @param {string} extensionType - Extension type identifier (e.g., "aws-rds-provisioner")
      */
-    async createExtension(projectName, extensionName, spec) {
+    async createExtension(projectName, extensionName, extensionType, spec) {
         return this.request(`/projects/${projectName}/extensions/${extensionName}`, {
             method: 'POST',
-            body: JSON.stringify({ spec })
+            body: JSON.stringify({ extension_type: extensionType, spec })
         });
     }
 

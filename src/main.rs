@@ -432,6 +432,9 @@ enum ExtensionCommands {
         project: String,
         /// Extension name
         extension: String,
+        /// Extension type (handler identifier, e.g., "aws-rds-provisioner", "oauth")
+        #[arg(long)]
+        r#type: String,
         /// Extension spec as JSON string
         #[arg(long)]
         spec: String,
@@ -981,11 +984,12 @@ async fn main() -> Result<()> {
             ExtensionCommands::Create {
                 project,
                 extension,
+                r#type,
                 spec,
             } => {
                 let spec: serde_json::Value =
                     serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
-                extension::create_extension(project, extension, spec).await?;
+                extension::create_extension(project, extension, r#type, spec).await?;
             }
             ExtensionCommands::Update {
                 project,

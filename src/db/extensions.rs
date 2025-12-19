@@ -6,29 +6,60 @@ use uuid::Uuid;
 use super::models::ProjectExtension;
 
 /// Create or update extension for project
-pub async fn upsert(
+/// Create a new extension (fails if already exists)
+pub async fn create(
     pool: &PgPool,
     project_id: Uuid,
     extension: &str,
+    extension_type: &str,
     spec: &Value,
 ) -> Result<ProjectExtension> {
     sqlx::query_as!(
         ProjectExtension,
         r#"
-        INSERT INTO project_extensions (project_id, extension, spec)
-        VALUES ($1, $2, $3)
-        ON CONFLICT (project_id, extension)
-        DO UPDATE SET
-            spec = EXCLUDED.spec,
-            updated_at = NOW(),
-            deleted_at = NULL
-        RETURNING project_id, extension,
+        INSERT INTO project_extensions (project_id, extension, extension_type, spec)
+        VALUES ($1, $2, $3, $4)
+        RETURNING project_id, extension, extension_type,
                   spec as "spec: Value",
                   status as "status: Value",
                   created_at, updated_at, deleted_at
         "#,
         project_id,
         extension,
+        extension_type,
+        spec
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to create project extension")
+}
+
+pub async fn upsert(
+    pool: &PgPool,
+    project_id: Uuid,
+    extension: &str,
+    extension_type: &str,
+    spec: &Value,
+) -> Result<ProjectExtension> {
+    sqlx::query_as!(
+        ProjectExtension,
+        r#"
+        INSERT INTO project_extensions (project_id, extension, extension_type, spec)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (project_id, extension)
+        DO UPDATE SET
+            spec = EXCLUDED.spec,
+            extension_type = EXCLUDED.extension_type,
+            updated_at = NOW(),
+            deleted_at = NULL
+        RETURNING project_id, extension, extension_type,
+                  spec as "spec: Value",
+                  status as "status: Value",
+                  created_at, updated_at, deleted_at
+        "#,
+        project_id,
+        extension,
+        extension_type,
         spec
     )
     .fetch_one(pool)
@@ -41,7 +72,7 @@ pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Proj
     sqlx::query_as!(
         ProjectExtension,
         r#"
-        SELECT project_id, extension,
+        SELECT project_id, extension, extension_type,
                spec as "spec: Value",
                status as "status: Value",
                created_at, updated_at, deleted_at
@@ -65,7 +96,7 @@ pub async fn list_by_extension_name(
     sqlx::query_as!(
         ProjectExtension,
         r#"
-        SELECT project_id, extension,
+        SELECT project_id, extension, extension_type,
                spec as "spec: Value",
                status as "status: Value",
                created_at, updated_at, deleted_at
@@ -89,7 +120,7 @@ pub async fn find_by_project_and_name(
     sqlx::query_as!(
         ProjectExtension,
         r#"
-        SELECT project_id, extension,
+        SELECT project_id, extension, extension_type,
                spec as "spec: Value",
                status as "status: Value",
                created_at, updated_at, deleted_at
@@ -116,7 +147,7 @@ pub async fn mark_deleted(
         UPDATE project_extensions
         SET deleted_at = NOW()
         WHERE project_id = $1 AND extension = $2 AND deleted_at IS NULL
-        RETURNING project_id, extension,
+        RETURNING project_id, extension, extension_type,
                   spec as "spec: Value",
                   status as "status: Value",
                   created_at, updated_at, deleted_at
@@ -170,4 +201,28 @@ pub async fn delete_permanently(pool: &PgPool, project_id: Uuid, extension: &str
     .context("Failed to permanently delete extension")?;
 
     Ok(())
+}
+
+/// List all extensions with a specific extension type (across all projects)
+#[allow(dead_code)]
+pub async fn list_by_extension_type(
+    pool: &PgPool,
+    extension_type: &str,
+) -> Result<Vec<ProjectExtension>> {
+    sqlx::query_as!(
+        ProjectExtension,
+        r#"
+        SELECT project_id, extension, extension_type,
+               spec as "spec: Value",
+               status as "status: Value",
+               created_at, updated_at, deleted_at
+        FROM project_extensions
+        WHERE extension_type = $1
+        ORDER BY created_at ASC
+        "#,
+        extension_type
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to list extensions by type")
 }

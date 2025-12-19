@@ -305,11 +305,43 @@ function App() {
 
     if (hash.startsWith('project/')) {
         const parts = hash.split('/');
-        // Check if this is an extension detail page (project/{name}/extensions/{ext})
-        if (parts.length === 4 && parts[2] === 'extensions') {
-            view = 'extension-detail';
-            params.projectName = parts[1];
-            params.extensionName = parts[3];
+        // Check if this is an extension detail page
+        // project/{name}/extensions - extensions tab (list view)
+        // project/{name}/extensions/{type}/@new - creating new instance
+        // project/{name}/extensions/{type}/{instance} - viewing existing instance
+        if (parts[2] === 'extensions') {
+            if (parts.length === 3) {
+                // Just the extensions tab: project/{name}/extensions
+                view = 'project-detail';
+                params.projectName = parts[1];
+                params.tab = 'extensions';
+            } else if (parts.length === 4 && parts[3] === '@new') {
+                // Creating new instance: project/{name}/extensions/@new
+                view = 'extension-create';
+                params.projectName = parts[1];
+                params.extensionType = null; // Will show list to choose from
+            } else if (parts.length === 5 && parts[3]) {
+                // Creating new instance of specific type: project/{name}/extensions/{type}/@new
+                // or viewing instance: project/{name}/extensions/{type}/{instance}
+                if (parts[4] === '@new') {
+                    view = 'extension-detail';
+                    params.projectName = parts[1];
+                    params.extensionType = parts[3];
+                    params.extensionInstance = null; // Signal this is create mode
+                } else {
+                    view = 'extension-detail';
+                    params.projectName = parts[1];
+                    params.extensionType = parts[3];
+                    params.extensionInstance = parts[4];
+                }
+            } else if (parts.length === 4 && parts[3]) {
+                // Legacy fallback: project/{name}/extensions/{type-or-instance}
+                // Try to determine if it's a type or instance
+                view = 'extension-detail';
+                params.projectName = parts[1];
+                params.extensionType = parts[3];
+                params.extensionInstance = null;
+            }
         } else {
             view = 'project-detail';
             params.projectName = parts[1];
@@ -343,7 +375,7 @@ function App() {
                 {view === 'project-detail' && <ProjectDetail projectName={params.projectName} initialTab={params.tab} />}
                 {view === 'team-detail' && <TeamDetail teamName={params.teamName} currentUser={user} />}
                 {view === 'deployment-detail' && <DeploymentDetail projectName={params.projectName} deploymentId={params.deploymentId} />}
-                {view === 'extension-detail' && <ExtensionDetailPage projectName={params.projectName} extensionName={params.extensionName} />}
+                {view === 'extension-detail' && <ExtensionDetailPage projectName={params.projectName} extensionType={params.extensionType} extensionInstance={params.extensionInstance} />}
             </main>
             <Footer version={version} />
             <GettingStartedModal

@@ -17,13 +17,19 @@ pub mod routes;
 /// Extension trait for project resource provisioning
 #[async_trait]
 pub trait Extension: Send + Sync {
-    /// Unique identifier for this extension instance (configurable name)
-    fn name(&self) -> &str;
-
     /// Extension type identifier (constant, used for UI registry lookup)
     /// Examples: "aws-rds-postgres", "aws-s3-bucket"
     /// This should be a constant string that doesn't change based on configuration
     fn extension_type(&self) -> &str;
+
+    /// Human-readable display name for this extension type
+    ///
+    /// This should be a short, friendly name suitable for display in UI lists.
+    /// Examples: "AWS RDS Database", "Google OAuth", "Snowflake OAuth"
+    ///
+    /// # Returns
+    /// A short display name (e.g., "AWS RDS Database")
+    fn display_name(&self) -> &str;
 
     /// Validate extension spec on create/update
     ///

@@ -263,6 +263,7 @@ pub struct CustomDomain {
 pub struct ProjectExtension {
     pub project_id: Uuid,
     pub extension: String,
+    pub extension_type: String,
     pub spec: serde_json::Value,
     pub status: serde_json::Value,
     pub created_at: DateTime<Utc>,

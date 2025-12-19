@@ -448,11 +448,11 @@ impl AppState {
                 match provider_config {
                     #[cfg(feature = "aws")]
                     crate::server::settings::ExtensionProviderConfig::AwsRdsProvisioner {
-                        name,
                         region,
                         instance_size,
                         disk_size,
                         instance_id_template,
+                        instance_id_prefix,
                         default_engine_version,
                         vpc_security_group_ids,
                         db_subnet_group_name,
@@ -462,7 +462,7 @@ impl AppState {
                         access_key_id,
                         secret_access_key,
                     } => {
-                        tracing::info!("Initializing AWS RDS extension provider '{}'", name);
+                        tracing::info!("Initializing AWS RDS extension provider");
 
                         // Create AWS config
                         let mut aws_config_builder =
@@ -495,7 +495,6 @@ impl AppState {
                         let aws_rds_provisioner =
                             crate::server::extensions::providers::aws_rds::AwsRdsProvisioner::new(
                                 crate::server::extensions::providers::aws_rds::AwsRdsProvisionerConfig {
-                                    name: name.clone(),
                                     rds_client,
                                     db_pool: db_pool.clone(),
                                     encryption_provider,
@@ -503,6 +502,7 @@ impl AppState {
                                     instance_size: instance_size.clone(),
                                     disk_size: *disk_size,
                                     instance_id_template: instance_id_template.clone(),
+                                    instance_id_prefix: instance_id_prefix.clone(),
                                     default_engine_version: default_engine_version.clone(),
                                     vpc_security_group_ids: vpc_security_group_ids.clone(),
                                     db_subnet_group_name: db_subnet_group_name.clone(),
@@ -515,15 +515,12 @@ impl AppState {
 
                         let aws_rds_arc: Arc<dyn crate::server::extensions::Extension> =
                             Arc::new(aws_rds_provisioner);
-                        extension_registry.register(aws_rds_arc.clone());
+                        extension_registry.register_type(aws_rds_arc.clone());
 
                         // Start the extension's reconciliation loop
                         aws_rds_arc.start();
 
-                        tracing::info!(
-                            "AWS RDS extension provider '{}' initialized and started",
-                            name
-                        );
+                        tracing::info!("AWS RDS extension provider initialized and started");
                     }
                     // When no extension provider features are enabled, this ensures the match is exhaustive
                     #[allow(unreachable_patterns)]

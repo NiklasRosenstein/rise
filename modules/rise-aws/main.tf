@@ -165,8 +165,8 @@ data "aws_iam_policy_document" "backend" {
         "rds:RemoveTagsFromResource"
       ]
       resources = [
-        "arn:aws:rds:${local.region}:${local.account_id}:db:rise-*",
-        "arn:aws:rds:${local.region}:${local.account_id}:subgrp:rise-*"
+        "arn:aws:rds:${local.region}:${local.account_id}:db:${var.name}-*",
+        "arn:aws:rds:${local.region}:${local.account_id}:subgrp:${var.name}-*"
       ]
     }
   }
@@ -183,7 +183,7 @@ data "aws_iam_policy_document" "backend" {
         "rds:DescribeDBSubnetGroups"
       ]
       resources = [
-        "arn:aws:rds:${local.region}:${local.account_id}:subgrp:rise-*"
+        "arn:aws:rds:${local.region}:${local.account_id}:subgrp:${var.name}-*"
       ]
     }
   }

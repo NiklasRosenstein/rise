@@ -19,9 +19,9 @@ pub async fn list_extension_types(
     let extension_types: Vec<ExtensionTypeMetadata> = state
         .extension_registry
         .iter()
-        .map(|(name, extension)| ExtensionTypeMetadata {
-            name: name.clone(),
+        .map(|(_registry_key, extension)| ExtensionTypeMetadata {
             extension_type: extension.extension_type().to_string(),
+            display_name: extension.display_name().to_string(),
             description: extension.description().to_string(),
             documentation: extension.documentation().to_string(),
             spec_schema: extension.spec_schema(),
@@ -50,11 +50,14 @@ pub async fn create_extension(
         return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
     }
 
-    // Get extension implementation
-    let extension = state.extension_registry.get(&extension_name).ok_or((
-        StatusCode::BAD_REQUEST,
-        format!("Unknown extension: {}", extension_name),
-    ))?;
+    // Get extension handler by type
+    let extension = state
+        .extension_registry
+        .get(&payload.extension_type)
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            format!("Unknown extension type: {}", payload.extension_type),
+        ))?;
 
     // Validate spec
     extension
@@ -62,11 +65,27 @@ pub async fn create_extension(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid spec: {}", e)))?;
 
-    // Create/update extension
-    let ext_record =
-        db_extensions::upsert(&state.db_pool, project.id, &extension_name, &payload.spec)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // Create extension (will fail if already exists)
+    let ext_record = db_extensions::create(
+        &state.db_pool,
+        project.id,
+        &extension_name,
+        &payload.extension_type,
+        &payload.spec,
+    )
+    .await
+    .map_err(|e| {
+        // Check if it's a unique constraint violation
+        let error_msg = e.to_string();
+        if error_msg.contains("duplicate key") || error_msg.contains("unique constraint") {
+            (
+                StatusCode::CONFLICT,
+                format!("Extension '{}' already exists", extension_name),
+            )
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, error_msg)
+        }
+    })?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
@@ -103,11 +122,21 @@ pub async fn update_extension(
         return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
     }
 
-    // Get extension implementation
-    let extension = state.extension_registry.get(&extension_name).ok_or((
-        StatusCode::BAD_REQUEST,
-        format!("Unknown extension: {}", extension_name),
-    ))?;
+    // Get existing extension to determine its type
+    let existing =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
+
+    // Get extension handler by type
+    let extension = state
+        .extension_registry
+        .get(&existing.extension_type)
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            format!("Unknown extension type: {}", existing.extension_type),
+        ))?;
 
     // Validate new spec
     extension
@@ -115,11 +144,16 @@ pub async fn update_extension(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid spec: {}", e)))?;
 
-    // Update extension (upsert will create if not exists, or update if exists)
-    let ext_record =
-        db_extensions::upsert(&state.db_pool, project.id, &extension_name, &payload.spec)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // Update extension (upsert will update existing, keeping the extension_type)
+    let ext_record = db_extensions::upsert(
+        &state.db_pool,
+        project.id,
+        &extension_name,
+        &existing.extension_type,
+        &payload.spec,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
@@ -166,11 +200,14 @@ pub async fn patch_extension(
     // Merge specs (null values in payload remove fields from existing)
     let merged_spec = merge_json_with_nulls(&existing.spec, &payload.spec);
 
-    // Get extension implementation
-    let extension = state.extension_registry.get(&extension_name).ok_or((
-        StatusCode::BAD_REQUEST,
-        format!("Unknown extension: {}", extension_name),
-    ))?;
+    // Get extension handler by type
+    let extension = state
+        .extension_registry
+        .get(&existing.extension_type)
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            format!("Unknown extension type: {}", existing.extension_type),
+        ))?;
 
     // Validate merged spec
     extension.validate_spec(&merged_spec).await.map_err(|e| {
@@ -181,10 +218,15 @@ pub async fn patch_extension(
     })?;
 
     // Update extension with merged spec
-    let ext_record =
-        db_extensions::upsert(&state.db_pool, project.id, &extension_name, &merged_spec)
-            .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let ext_record = db_extensions::upsert(
+        &state.db_pool,
+        project.id,
+        &extension_name,
+        &existing.extension_type,
+        &merged_spec,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
@@ -225,21 +267,16 @@ pub async fn list_extensions(
     let extensions: Vec<Extension> = extensions
         .into_iter()
         .map(|e| {
-            // Get extension provider to format status and extension type
-            let (status_summary, extension_type) = state
+            // Get extension provider by type to format status
+            let status_summary = state
                 .extension_registry
-                .get(&e.extension)
-                .map(|ext| {
-                    (
-                        ext.format_status(&e.status),
-                        ext.extension_type().to_string(),
-                    )
-                })
-                .unwrap_or_else(|| ("Unknown".to_string(), "unknown".to_string()));
+                .get(&e.extension_type)
+                .map(|ext| ext.format_status(&e.status))
+                .unwrap_or_else(|| "Unknown".to_string());
 
             Extension {
                 extension: e.extension,
-                extension_type,
+                extension_type: e.extension_type,
                 spec: e.spec,
                 status: e.status,
                 status_summary,
@@ -273,21 +310,16 @@ pub async fn get_extension(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
 
-    // Get extension provider to format status and extension type
-    let (status_summary, extension_type) = state
+    // Get extension provider by type to format status
+    let status_summary = state
         .extension_registry
-        .get(&extension_name)
-        .map(|ext_provider| {
-            (
-                ext_provider.format_status(&ext.status),
-                ext_provider.extension_type().to_string(),
-            )
-        })
-        .unwrap_or_else(|| ("Unknown".to_string(), "unknown".to_string()));
+        .get(&ext.extension_type)
+        .map(|ext_provider| ext_provider.format_status(&ext.status))
+        .unwrap_or_else(|| "Unknown".to_string());
 
     Ok(Json(Extension {
         extension: ext.extension,
-        extension_type,
+        extension_type: ext.extension_type,
         spec: ext.spec,
         status: ext.status,
         status_summary,

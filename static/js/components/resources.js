@@ -828,79 +828,118 @@ function ExtensionsList({ projectName }) {
     if (error) return <p className="text-red-400">Error loading extensions: {error}</p>;
 
     return (
-        <div>
-            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
-                <table className="w-full">
-                    <thead className="bg-gray-800">
-                        <tr>
-                            <th className="w-12 px-3 py-3"></th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Extension</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Description</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800">
-                        {availableExtensions.length === 0 ? (
-                            <tr>
-                                <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
-                                    No extensions available.
-                                </td>
-                            </tr>
-                        ) : (
-                            availableExtensions
-                                .sort((a, b) => a.name.localeCompare(b.name))
+        <div className="space-y-6">
+            {/* Enabled Extensions - Table with Add Icons */}
+            <div>
+                <div className="flex items-center gap-3 mb-3">
+                    <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+                        Enabled Extensions
+                    </h3>
+                    {availableExtensions.length > 0 && (
+                        <div className="flex items-center gap-2">
+                            {/* Plus icon indicator (non-clickable) */}
+                            <div className="w-8 h-8 flex items-center justify-center text-gray-500">
+                                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                            </div>
+                            {/* Extension add icons */}
+                            {availableExtensions
+                                .sort((a, b) => a.display_name.localeCompare(b.display_name))
                                 .map(extType => {
-                                    const enabled = isEnabled(extType.extension_type);
-                                    const enabledData = getEnabledExtension(extType.extension_type);
-
                                     const iconUrl = getExtensionIcon(extType.extension_type);
 
                                     return (
-                                        <tr
-                                            key={extType.name}
-                                            className="hover:bg-gray-800/50 transition-colors cursor-pointer"
+                                        <button
+                                            key={extType.extension_type}
                                             onClick={() => {
-                                                // Always navigate to detail page
-                                                window.location.hash = `#project/${projectName}/extensions/${extType.name}`;
+                                                window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}/@new`;
                                             }}
+                                            className="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-sm transition-all"
+                                            title={`Add ${extType.display_name}`}
                                         >
-                                            <td className="px-3 py-4">
-                                                {iconUrl ? (
-                                                    <img
-                                                        src={iconUrl}
-                                                        alt={extType.name}
-                                                        className="w-8 h-8 rounded object-contain"
-                                                    />
-                                                ) : (
-                                                    <div className="w-8 h-8"></div>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm">
-                                                <div className="flex items-center gap-3">
-                                                    <span className="font-mono text-gray-200">{extType.name}</span>
-                                                    {enabled ? (
-                                                        <span className="bg-indigo-600 text-white text-xs font-semibold px-2 py-0.5 rounded uppercase">Enabled</span>
-                                                    ) : (
-                                                        <span className="bg-gray-600 text-white text-xs font-semibold px-2 py-0.5 rounded uppercase">Not Enabled</span>
-                                                    )}
+                                            {iconUrl ? (
+                                                <img
+                                                    src={iconUrl}
+                                                    alt={extType.display_name}
+                                                    className="w-6 h-6 rounded object-contain"
+                                                />
+                                            ) : (
+                                                <div className="w-6 h-6 flex items-center justify-center text-gray-400 text-xs font-bold">
+                                                    {extType.display_name.charAt(0).toUpperCase()}
                                                 </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-gray-300">
-                                                {extType.description}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm">
-                                                {enabled && enabledData ? (
-                                                    renderExtensionStatusBadge(enabledData)
-                                                ) : (
-                                                    <span className="text-gray-500">-</span>
-                                                )}
-                                            </td>
-                                        </tr>
+                                            )}
+                                        </button>
                                     );
                                 })
-                        )}
-                    </tbody>
-                </table>
+                            }
+                        </div>
+                    )}
+                </div>
+                {enabledExtensions.length === 0 ? (
+                    <div className="bg-gray-900 rounded-lg border border-gray-800 px-6 py-8 text-center">
+                        <p className="text-gray-400 text-sm">
+                            No extensions enabled yet. Click an extension icon to add one.
+                        </p>
+                    </div>
+                ) : (
+                    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+                        <table className="w-full">
+                            <thead className="bg-gray-800">
+                                <tr>
+                                    <th className="w-12 px-3 py-3"></th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Extension</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Updated</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-800">
+                                {enabledExtensions
+                                    .sort((a, b) => a.extension.localeCompare(b.extension))
+                                    .map(ext => {
+                                        const extType = availableExtensions.find(t => t.extension_type === ext.extension_type);
+                                        const iconUrl = getExtensionIcon(ext.extension_type);
+
+                                        return (
+                                            <tr
+                                                key={ext.extension}
+                                                className="hover:bg-gray-800/50 transition-colors cursor-pointer"
+                                                onClick={() => {
+                                                    // Navigate to the specific extension instance
+                                                    window.location.hash = `#project/${projectName}/extensions/${ext.extension_type}/${ext.extension}`;
+                                                }}
+                                            >
+                                                <td className="px-3 py-4">
+                                                    {iconUrl ? (
+                                                        <img
+                                                            src={iconUrl}
+                                                            alt={ext.extension}
+                                                            className="w-8 h-8 rounded object-contain"
+                                                        />
+                                                    ) : (
+                                                        <div className="w-8 h-8"></div>
+                                                    )}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm">
+                                                    <span className="font-mono text-gray-200">{ext.extension}</span>
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-gray-300">
+                                                    {extType?.description || ext.extension_type}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm">
+                                                    {renderExtensionStatusBadge(ext)}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-gray-400">
+                                                    {formatDate(ext.updated)}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
 
             {/* Configuration Modal */}
@@ -1208,7 +1247,19 @@ function GenericExtensionDetailView({ extension }) {
 }
 
 // Extension Detail Page Component
-function ExtensionDetailPage({ projectName, extensionName }) {
+function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, extensionInstance }) {
+    // Helper to get a user-friendly default name for an extension type
+    const getDefaultExtensionName = (extensionType) => {
+        if (!extensionType) return '';
+
+        // Map extension types to friendly default names
+        const defaults = {
+            'aws-rds-provisioner': 'rds',
+        };
+
+        return defaults[extensionType] || extensionType;
+    };
+
     const [extensionType, setExtensionType] = useState(null);
     const [enabledExtension, setEnabledExtension] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1220,6 +1271,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
     const [deleting, setDeleting] = useState(false);
     const [deleteConfirmName, setDeleteConfirmName] = useState('');
     const [originalSpec, setOriginalSpec] = useState('{}');
+    const [instanceName, setInstanceName] = useState(getDefaultExtensionName(extensionTypeProp)); // Instance name for new extensions
     const { showToast } = useToast();
 
     const isEnabled = enabledExtension !== null;
@@ -1241,15 +1293,39 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                     api.getProjectExtensions(projectName)
                 ]);
 
-                const extType = typesResponse.extension_types.find(t => t.name === extensionName);
-                if (!extType) {
-                    setError('Extension type not found');
+                let enabled = null;
+                let extType = null;
+
+                if (extensionInstance) {
+                    // We're viewing a specific instance - find it by name
+                    enabled = enabledResponse.extensions.find(e => e.extension === extensionInstance);
+                    if (!enabled) {
+                        setError('Extension instance not found');
+                        setLoading(false);
+                        return;
+                    }
+                    // Find the type for this instance
+                    extType = typesResponse.extension_types.find(t => t.extension_type === enabled.extension_type);
+                    if (!extType) {
+                        setError('Extension type not found for this instance');
+                        setLoading(false);
+                        return;
+                    }
+                } else if (extensionTypeProp) {
+                    // We're creating a new instance of a specific type
+                    extType = typesResponse.extension_types.find(t => t.extension_type === extensionTypeProp);
+                    if (!extType) {
+                        setError('Extension type not found');
+                        setLoading(false);
+                        return;
+                    }
+                } else {
+                    setError('No extension type or instance specified');
                     setLoading(false);
                     return;
                 }
-                setExtensionType(extType);
 
-                const enabled = enabledResponse.extensions.find(e => e.extension === extensionName);
+                setExtensionType(extType);
                 setEnabledExtension(enabled || null);
 
                 // Set form data only on initial load
@@ -1276,7 +1352,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
             }
         }
         fetchData();
-    }, [projectName, extensionName]);
+    }, [projectName, extensionTypeProp, extensionInstance]);
 
     // Handle UI spec changes
     const handleUiSpecChange = useCallback((newUiSpec) => {
@@ -1296,6 +1372,12 @@ function ExtensionDetailPage({ projectName, extensionName }) {
     }, []);
 
     const handleSave = async () => {
+        // Validate instance name for new extensions
+        if (!isEnabled && !instanceName.trim()) {
+            showToast('Extension name is required', 'error');
+            return;
+        }
+
         let spec;
         try {
             spec = JSON.parse(formData.spec);
@@ -1308,15 +1390,24 @@ function ExtensionDetailPage({ projectName, extensionName }) {
         setSaving(true);
         try {
             if (isEnabled) {
-                await api.updateExtension(projectName, extensionName, spec);
-                showToast(`Extension ${extensionName} updated successfully`, 'success');
+                // Update existing extension using its instance name
+                await api.updateExtension(projectName, enabledExtension.extension, spec);
+                showToast(`Extension ${extensionType.display_name} updated successfully`, 'success');
             } else {
-                await api.createExtension(projectName, extensionName, spec);
-                showToast(`Extension ${extensionName} enabled successfully`, 'success');
+                // Create new extension using user-provided instance name
+                await api.createExtension(projectName, instanceName.trim(), extensionType.extension_type, spec);
+                showToast(`Extension ${instanceName.trim()} created successfully`, 'success');
             }
             // Refresh data
             const enabledResponse = await api.getProjectExtensions(projectName);
-            const enabled = enabledResponse.extensions.find(e => e.extension === extensionName);
+            // After creating, look for the newly created instance by name
+            // After updating, refresh the existing instance
+            let enabled;
+            if (wasEnabled) {
+                enabled = enabledResponse.extensions.find(e => e.extension === enabledExtension.extension);
+            } else {
+                enabled = enabledResponse.extensions.find(e => e.extension === instanceName.trim());
+            }
             setEnabledExtension(enabled || null);
             if (enabled) {
                 const specJson = JSON.stringify(enabled.spec, null, 2);
@@ -1337,7 +1428,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
 
     const handleDelete = async () => {
         if (!enabledExtension || deleteConfirmName !== enabledExtension.extension) {
-            showToast('Please enter the extension name to confirm deletion', 'error');
+            showToast('Please enter the extension instance name to confirm deletion', 'error');
             return;
         }
 
@@ -1412,13 +1503,13 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                         {getExtensionIcon(extensionType.extension_type) && (
                             <img
                                 src={getExtensionIcon(extensionType.extension_type)}
-                                alt={extensionType.name}
+                                alt={extensionType.display_name}
                                 className="w-12 h-12 rounded object-contain"
                             />
                         )}
                         <div>
                             <h1 className="text-2xl font-bold text-white">
-                                {extensionType.name}
+                                {extensionType.display_name}
                             </h1>
                             <p className="text-gray-400">{extensionType.description}</p>
                         </div>
@@ -1507,6 +1598,21 @@ function ExtensionDetailPage({ projectName, extensionName }) {
 
                 {activeTab === 'configure' && extensionAPI?.renderConfigureTab && (
                     <div className="space-y-4">
+                        {!isEnabled && (
+                            <div className="pb-4 border-b border-gray-700">
+                                <FormField
+                                    label="Extension Name"
+                                    id="extension-instance-name"
+                                    value={instanceName}
+                                    onChange={(e) => setInstanceName(e.target.value)}
+                                    placeholder={getDefaultExtensionName(extensionTypeProp)}
+                                    required
+                                />
+                                <p className="text-sm text-gray-500 mt-2">
+                                    Give this extension instance a unique name. You can create multiple instances of the same extension type with different names.
+                                </p>
+                            </div>
+                        )}
                         {extensionAPI.renderConfigureTab(uiSpec, extensionType.spec_schema, handleUiSpecChange)}
                         <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
                             <Button
@@ -1522,6 +1628,21 @@ function ExtensionDetailPage({ projectName, extensionName }) {
 
                 {activeTab === 'config' && (
                     <div className="space-y-4">
+                        {!isEnabled && (
+                            <div className="pb-4 border-b border-gray-700">
+                                <FormField
+                                    label="Extension Name"
+                                    id="extension-instance-name-config"
+                                    value={instanceName}
+                                    onChange={(e) => setInstanceName(e.target.value)}
+                                    placeholder={getDefaultExtensionName(extensionTypeProp)}
+                                    required
+                                />
+                                <p className="text-sm text-gray-500 mt-2">
+                                    Give this extension instance a unique name. You can create multiple instances of the same extension type with different names.
+                                </p>
+                            </div>
+                        )}
                         <FormField
                             label="Configuration Spec (JSON)"
                             id="extension-spec"
@@ -1608,7 +1729,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                         </div>
 
                         <FormField
-                            label={`Type "${enabledExtension.extension}" to confirm deletion`}
+                            label={`Type the extension instance name "${enabledExtension.extension}" to confirm deletion`}
                             id="delete-confirm-name"
                             value={deleteConfirmName}
                             onChange={(e) => setDeleteConfirmName(e.target.value)}
