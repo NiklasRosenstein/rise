@@ -855,7 +855,7 @@ function ExtensionsList({ projectName }) {
                                             onClick={() => {
                                                 window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}/@new`;
                                             }}
-                                            className="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-full transition-all"
+                                            className="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-sm transition-all"
                                             title={`Add ${extType.display_name}`}
                                         >
                                             {iconUrl ? (
