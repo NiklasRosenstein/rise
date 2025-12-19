@@ -241,6 +241,7 @@ function App() {
     const [showGettingStarted, setShowGettingStarted] = useState(false);
     const [version, setVersion] = useState(null);
     const hash = useHashLocation();
+    const { showToast } = useToast();
 
     useEffect(() => {
         // Check if we're handling extension OAuth callback (tokens in hash fragment)
