@@ -191,7 +191,11 @@ impl AwsRdsProvisioner {
 
     /// Get the finalizer name for this extension instance (new format)
     fn finalizer_name(&self, extension_name: &str) -> String {
-        format!("rise.dev/extension/{}/{}", self.extension_type(), extension_name)
+        format!(
+            "rise.dev/extension/{}/{}",
+            self.extension_type(),
+            extension_name
+        )
     }
 
     /// Get the old finalizer name format (for migration)
@@ -237,19 +241,17 @@ impl AwsRdsProvisioner {
         let new_finalizer = self.finalizer_name(&project_extension.extension);
 
         // Check if project has the old-style finalizer
-        if project.finalizers.contains(&old_finalizer) && !project.finalizers.contains(&new_finalizer) {
+        if project.finalizers.contains(&old_finalizer)
+            && !project.finalizers.contains(&new_finalizer)
+        {
             info!(
                 "Migrating finalizer for extension '{}' from old format '{}' to new format '{}'",
                 project_extension.extension, old_finalizer, new_finalizer
             );
 
             // Remove old finalizer
-            if let Err(e) = db_projects::remove_finalizer(
-                &self.db_pool,
-                project.id,
-                &old_finalizer,
-            )
-            .await
+            if let Err(e) =
+                db_projects::remove_finalizer(&self.db_pool, project.id, &old_finalizer).await
             {
                 error!(
                     "Failed to remove old finalizer '{}' from project {}: {}",
@@ -258,8 +260,8 @@ impl AwsRdsProvisioner {
             }
 
             // Add new finalizer
-            if let Err(e) = db_projects::add_finalizer(&self.db_pool, project.id, &new_finalizer)
-                .await
+            if let Err(e) =
+                db_projects::add_finalizer(&self.db_pool, project.id, &new_finalizer).await
             {
                 error!(
                     "Failed to add new finalizer '{}' to project {}: {}",

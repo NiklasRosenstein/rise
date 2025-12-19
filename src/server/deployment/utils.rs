@@ -134,7 +134,11 @@ pub async fn create_deployment_with_hooks(
 
             // Mark deployment as failed
             // Note: The error message from the extension provider should include the specific instance name
-            let error_msg = format!("Extension type '{}' failed: {}", extension.extension_type(), e);
+            let error_msg = format!(
+                "Extension type '{}' failed: {}",
+                extension.extension_type(),
+                e
+            );
             if let Err(mark_err) =
                 db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
             {
