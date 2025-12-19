@@ -281,7 +281,7 @@ rise extension create analytics oauth-snowflake \
     "client_secret_ref": "OAUTH_SNOWFLAKE_SECRET",
     "authorization_endpoint": "https://myorg.snowflakecomputing.com/oauth/authorize",
     "token_endpoint": "https://myorg.snowflakecomputing.com/oauth/token-request",
-    "scopes": ["session:role:ANALYST", "refresh_token"]
+    "scopes": ["refresh_token"]
   }'
 ```
 

@@ -318,7 +318,7 @@ rise extension create my-app oauth-snowflake \
     "client_secret_ref": "OAUTH_SNOWFLAKE_SECRET",
     "authorization_endpoint": "https://myorg.snowflakecomputing.com/oauth/authorize",
     "token_endpoint": "https://myorg.snowflakecomputing.com/oauth/token-request",
-    "scopes": ["session:role:ANALYST", "refresh_token"]
+    "scopes": ["refresh_token"]
   }'
 ```
 
@@ -494,7 +494,7 @@ const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-pr
                         "type": "string"
                     },
                     "description": "OAuth scopes to request",
-                    "example": ["session:role:ANALYST", "refresh_token"]
+                    "example": ["refresh_token"]
                 }
             }
         })

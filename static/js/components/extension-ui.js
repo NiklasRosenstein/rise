@@ -238,7 +238,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
             name: 'Snowflake',
             authEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/authorize',
             tokenEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/token-request',
-            scopes: 'session:role:ANALYST, refresh_token'
+            scopes: 'refresh_token'
         },
         google: {
             name: 'Google',
