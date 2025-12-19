@@ -266,162 +266,178 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
     };
 
     return (
-        <div className="space-y-4">
-            {/* Top bar with Quick Start Templates */}
-            <div className="flex justify-end gap-2">
-                <button
-                    type="button"
-                    onClick={() => applyTemplate('snowflake')}
-                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors"
-                    title="Apply Snowflake template"
-                >
-                    📋 Snowflake Template
-                </button>
-                <button
-                    type="button"
-                    onClick={() => applyTemplate('google')}
-                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors"
-                    title="Apply Google template"
-                >
-                    📋 Google Template
-                </button>
-                <button
-                    type="button"
-                    onClick={() => applyTemplate('github')}
-                    className="px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors"
-                    title="Apply GitHub template"
-                >
-                    📋 GitHub Template
-                </button>
-            </div>
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left column - Main configuration form */}
+            <div className="lg:col-span-2 space-y-4">
+                <FormField
+                    label="Provider Name"
+                    id="oauth-provider-name"
+                    value={providerName}
+                    onChange={(e) => setProviderName(e.target.value)}
+                    placeholder="e.g., Snowflake Production"
+                    required
+                    helperText="Display name for this OAuth provider"
+                />
 
-            {/* Redirect URI Configuration - Must be set in provider FIRST */}
-            <div className="bg-blue-900/20 border-2 border-blue-600 rounded-lg p-4">
-                <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 Configure This Redirect URI in Your OAuth Provider First!</h3>
-                <p className="text-sm text-blue-200 mb-3">
-                    Before filling out this form, register this callback URL in your OAuth provider's application settings:
-                </p>
-                <div className="flex items-center gap-2 mb-2">
-                    <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-sm text-gray-200 break-all font-mono">
-                        {redirectUri}
-                    </code>
-                    <button
-                        type="button"
-                        onClick={() => {
-                            navigator.clipboard.writeText(redirectUri);
-                            showToast('Redirect URI copied to clipboard', 'success');
-                        }}
-                        className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors whitespace-nowrap font-semibold"
-                        title="Copy redirect URI"
-                    >
-                        Copy
-                    </button>
+                <FormField
+                    label="Description (Optional)"
+                    id="oauth-description"
+                    value={description}
+                    onChange={(e) => setDescription(e.target.value)}
+                    placeholder="e.g., OAuth authentication for analytics access"
+                    helperText="Human-readable description of this OAuth configuration"
+                />
+
+                <FormField
+                    label="Client ID"
+                    id="oauth-client-id"
+                    value={clientId}
+                    onChange={(e) => setClientId(e.target.value)}
+                    placeholder="e.g., ABC123XYZ..."
+                    required
+                    helperText="OAuth client identifier from your provider"
+                />
+
+                <FormField
+                    label="Client Secret Environment Variable"
+                    id="oauth-client-secret-ref"
+                    value={clientSecretRef}
+                    onChange={(e) => setClientSecretRef(e.target.value)}
+                    placeholder="e.g., OAUTH_SNOWFLAKE_SECRET"
+                    required
+                    helperText="Name of the environment variable containing the client secret (must be set as secret env var)"
+                />
+
+                <FormField
+                    label="Authorization Endpoint"
+                    id="oauth-authorization-endpoint"
+                    value={authorizationEndpoint}
+                    onChange={(e) => setAuthorizationEndpoint(e.target.value)}
+                    placeholder="https://provider.com/oauth/authorize"
+                    required
+                    helperText="OAuth provider's authorization URL"
+                />
+
+                <FormField
+                    label="Token Endpoint"
+                    id="oauth-token-endpoint"
+                    value={tokenEndpoint}
+                    onChange={(e) => setTokenEndpoint(e.target.value)}
+                    placeholder="https://provider.com/oauth/token"
+                    required
+                    helperText="OAuth provider's token URL"
+                />
+
+                <FormField
+                    label="Scopes"
+                    id="oauth-scopes"
+                    value={scopes}
+                    onChange={(e) => setScopes(e.target.value)}
+                    placeholder="openid, email, profile"
+                    required
+                    helperText="Comma-separated list of OAuth scopes to request"
+                />
+
+                <div className="bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-gray-300 mb-2">About This Extension</h4>
+                    <p className="text-sm text-gray-400">
+                        The Generic OAuth 2.0 extension allows your application to authenticate end users via any OAuth 2.0 provider
+                        (Snowflake, Google, GitHub, custom SSO, etc.) without managing client secrets locally.
+                    </p>
+                    <p className="text-sm text-gray-400 mt-2">
+                        <strong>Security:</strong> Client secrets are stored encrypted and never exposed to your application.
+                        Tokens are delivered in URL fragments for frontend apps or via secure exchange for backend apps.
+                    </p>
                 </div>
-                <p className="text-xs text-blue-300">
-                    Also called "Redirect URI", "Callback URL", or "Authorized redirect URIs" depending on your provider.
-                    {!isEnabled && instanceName && (
-                        <span className="block mt-1 text-blue-200">
-                            <strong>Note:</strong> This URL uses the extension name "{instanceName}" you entered above. Update it in your provider if you change the name.
-                        </span>
-                    )}
-                </p>
             </div>
 
-            <FormField
-                label="Provider Name"
-                id="oauth-provider-name"
-                value={providerName}
-                onChange={(e) => setProviderName(e.target.value)}
-                placeholder="e.g., Snowflake Production"
-                required
-                helperText="Display name for this OAuth provider"
-            />
+            {/* Right column - Redirect URI and Quick Start */}
+            <div className="lg:col-span-1 space-y-6">
+                {/* Redirect URI Configuration - Must be set in provider FIRST */}
+                <section>
+                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Redirect URI</h2>
+                    <div className="bg-blue-900/20 border-2 border-blue-600 rounded-lg p-4">
+                        <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 Required Setup</h3>
+                        <p className="text-sm text-blue-200 mb-3">
+                            Configure this callback URL in your OAuth provider first:
+                        </p>
+                        <div className="flex items-center gap-2 mb-2">
+                            <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all font-mono">
+                                {redirectUri}
+                            </code>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    navigator.clipboard.writeText(redirectUri);
+                                    showToast('Redirect URI copied to clipboard', 'success');
+                                }}
+                                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
+                                title="Copy redirect URI"
+                            >
+                                Copy
+                            </button>
+                        </div>
+                        <p className="text-xs text-blue-300">
+                            Also called "Callback URL" or "Authorized redirect URIs".
+                            {!isEnabled && instanceName && (
+                                <span className="block mt-2 text-blue-200">
+                                    <strong>Note:</strong> Uses extension name "{instanceName}"
+                                </span>
+                            )}
+                        </p>
+                    </div>
+                </section>
 
-            <FormField
-                label="Description (Optional)"
-                id="oauth-description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="e.g., OAuth authentication for analytics access"
-                helperText="Human-readable description of this OAuth configuration"
-            />
+                {/* Quick Start Templates */}
+                <section>
+                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Quick Start</h2>
+                    <div className="space-y-2">
+                        <button
+                            type="button"
+                            onClick={() => applyTemplate('snowflake')}
+                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors text-left"
+                            title="Apply Snowflake template"
+                        >
+                            📋 Snowflake Template
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => applyTemplate('google')}
+                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors text-left"
+                            title="Apply Google template"
+                        >
+                            📋 Google Template
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => applyTemplate('github')}
+                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors text-left"
+                            title="Apply GitHub template"
+                        >
+                            📋 GitHub Template
+                        </button>
+                    </div>
+                    <p className="text-xs text-gray-500 mt-2">
+                        Click to auto-fill endpoints for common providers
+                    </p>
+                </section>
 
-            <FormField
-                label="Client ID"
-                id="oauth-client-id"
-                value={clientId}
-                onChange={(e) => setClientId(e.target.value)}
-                placeholder="e.g., ABC123XYZ..."
-                required
-                helperText="OAuth client identifier from your provider"
-            />
-
-            <FormField
-                label="Client Secret Environment Variable"
-                id="oauth-client-secret-ref"
-                value={clientSecretRef}
-                onChange={(e) => setClientSecretRef(e.target.value)}
-                placeholder="e.g., OAUTH_SNOWFLAKE_SECRET"
-                required
-                helperText="Name of the environment variable containing the client secret (must be set as secret env var)"
-            />
-
-            <FormField
-                label="Authorization Endpoint"
-                id="oauth-authorization-endpoint"
-                value={authorizationEndpoint}
-                onChange={(e) => setAuthorizationEndpoint(e.target.value)}
-                placeholder="https://provider.com/oauth/authorize"
-                required
-                helperText="OAuth provider's authorization URL"
-            />
-
-            <FormField
-                label="Token Endpoint"
-                id="oauth-token-endpoint"
-                value={tokenEndpoint}
-                onChange={(e) => setTokenEndpoint(e.target.value)}
-                placeholder="https://provider.com/oauth/token"
-                required
-                helperText="OAuth provider's token URL"
-            />
-
-            <FormField
-                label="Scopes"
-                id="oauth-scopes"
-                value={scopes}
-                onChange={(e) => setScopes(e.target.value)}
-                placeholder="openid, email, profile"
-                required
-                helperText="Comma-separated list of OAuth scopes to request"
-            />
-
-            <div className="bg-gray-800 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-gray-300 mb-2">About This Extension</h4>
-                <p className="text-sm text-gray-400">
-                    The Generic OAuth 2.0 extension allows your application to authenticate end users via any OAuth 2.0 provider
-                    (Snowflake, Google, GitHub, custom SSO, etc.) without managing client secrets locally.
-                </p>
-                <p className="text-sm text-gray-400 mt-2">
-                    <strong>Security:</strong> Client secrets are stored encrypted and never exposed to your application.
-                    Tokens are delivered in URL fragments for frontend apps or via secure exchange for backend apps.
-                </p>
-            </div>
-
-            <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-yellow-300 mb-2">⚙️ Additional Setup Steps</h4>
-                <p className="text-sm text-yellow-200 mb-3">
-                    After configuring the redirect URI above:
-                </p>
-                <ol className="text-sm text-yellow-200 list-decimal list-inside space-y-2">
-                    <li>Complete the OAuth application registration with your provider to get client credentials</li>
-                    <li>Store the client secret as an encrypted environment variable:
-                        <code className="block bg-gray-800 px-2 py-1 rounded mt-1 text-xs ml-6">
-                            rise env set {displayProjectName} {clientSecretRef || 'OAUTH_SECRET'} "your_secret" --secret
-                        </code>
-                    </li>
-                    <li>Fill out the form below with your OAuth provider's details</li>
-                </ol>
+                {/* Setup Steps */}
+                <section>
+                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Setup Steps</h2>
+                    <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
+                        <ol className="text-sm text-yellow-200 list-decimal list-inside space-y-2">
+                            <li>Configure redirect URI in OAuth provider</li>
+                            <li>Get client ID and secret from provider</li>
+                            <li>Store secret as encrypted env var:
+                                <code className="block bg-gray-800 px-2 py-1 rounded mt-1 text-xs">
+                                    rise env set {displayProjectName} {clientSecretRef || 'OAUTH_SECRET'} "..." --secret
+                                </code>
+                            </li>
+                            <li>Fill out the form and enable</li>
+                        </ol>
+                    </div>
+                </section>
             </div>
         </div>
     );
@@ -748,34 +764,6 @@ function OAuthDetailView({ extension, projectName }) {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Left column - Main content */}
                 <div className="lg:col-span-2 space-y-6">
-                    {/* Redirect URI Configuration */}
-                    <section>
-                        <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
-                            <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 OAuth Provider Configuration</h3>
-                            <p className="text-sm text-blue-200 mb-3">
-                                This callback URL must be configured in your OAuth provider's application settings:
-                            </p>
-                            <div className="flex items-center gap-2 mb-2">
-                                <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
-                                    {callbackUrl}
-                                </code>
-                                <button
-                                    onClick={() => {
-                                        navigator.clipboard.writeText(callbackUrl);
-                                        showToast('Redirect URI copied to clipboard', 'success');
-                                    }}
-                                    className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap"
-                                    title="Copy redirect URI"
-                                >
-                                    Copy
-                                </button>
-                            </div>
-                            <p className="text-xs text-blue-300">
-                                Also called "Redirect URI", "Callback URL", or "Authorized redirect URIs" depending on your provider.
-                            </p>
-                        </div>
-                    </section>
-
                     {/* Provider Configuration */}
                     <section>
                         <h2 className="text-lg font-semibold text-gray-200 mb-3">OAuth Provider</h2>
