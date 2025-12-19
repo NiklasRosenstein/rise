@@ -1589,7 +1589,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
 
                 {/* Tab Content */}
                 {activeTab === 'overview' && isEnabled && CustomDetailView && (
-                    <CustomDetailView extension={enabledExtension} />
+                    <CustomDetailView extension={enabledExtension} projectName={projectName} />
                 )}
 
                 {activeTab === 'overview' && isEnabled && !CustomDetailView && (

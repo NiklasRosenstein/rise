@@ -174,8 +174,8 @@ const AwsRdsExtensionAPI = {
         );
     },
 
-    renderOverviewTab(extension) {
-        return <AwsRdsDetailView extension={extension} />;
+    renderOverviewTab(extension, projectName) {
+        return <AwsRdsDetailView extension={extension} projectName={projectName} />;
     },
 
     renderConfigureTab(spec, schema, onChange) {
@@ -423,8 +423,8 @@ const OAuthExtensionAPI = {
         );
     },
 
-    renderOverviewTab(extension) {
-        return <OAuthDetailView extension={extension} />;
+    renderOverviewTab(extension, projectName) {
+        return <OAuthDetailView extension={extension} projectName={projectName} />;
     },
 
     renderConfigureTab(spec, schema, onChange) {
@@ -433,11 +433,12 @@ const OAuthExtensionAPI = {
 };
 
 // OAuth Detail View Component
-function OAuthDetailView({ extension }) {
+function OAuthDetailView({ extension, projectName }) {
     const status = extension.status || {};
     const spec = extension.spec || {};
 
     const scopesArray = spec.scopes || [];
+    const extensionName = extension.extension;
 
     return (
         <div className="space-y-6">
@@ -539,7 +540,7 @@ function OAuthDetailView({ extension }) {
                             <strong>OAuth Authorization URL:</strong>
                         </p>
                         <code className="block bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
-                            {`https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize`}
+                            {`https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`}
                         </code>
                     </div>
                     <div>
@@ -547,7 +548,7 @@ function OAuthDetailView({ extension }) {
                             <strong>OAuth Callback URL (configured in provider):</strong>
                         </p>
                         <code className="block bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
-                            {`https://api.rise.dev/api/v1/oauth/callback/${extension.project_name}/${extension.name}`}
+                            {`https://api.rise.dev/api/v1/oauth/callback/${projectName}/${extensionName}`}
                         </code>
                     </div>
 
@@ -559,7 +560,7 @@ function OAuthDetailView({ extension }) {
                         <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
 {`// Initiate OAuth login (fragment flow is default)
 function login() {
-  const authUrl = 'https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize';
+  const authUrl = 'https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize';
   window.location.href = authUrl;
 }
 
@@ -583,7 +584,7 @@ sessionStorage.setItem('access_token', accessToken);`}
                         <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
 {`// Initiate OAuth login with exchange flow
 app.get('/login', (req, res) => {
-  const authUrl = 'https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize?flow=exchange';
+  const authUrl = 'https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?flow=exchange';
   res.redirect(authUrl);
 });
 
@@ -593,7 +594,7 @@ app.get('/oauth/callback', async (req, res) => {
 
   // Exchange for actual OAuth tokens
   const response = await fetch(
-    \`https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/exchange?exchange_token=\${exchangeToken}\`
+    \`https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/exchange?exchange_token=\${exchangeToken}\`
   );
 
   const tokens = await response.json();
@@ -614,10 +615,10 @@ app.get('/oauth/callback', async (req, res) => {
                         </p>
                         <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
 {`// Fragment flow
-const authUrl = 'https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize?redirect_uri=http://localhost:3000/callback';
+const authUrl = 'https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?redirect_uri=http://localhost:3000/callback';
 
 // Exchange flow
-const authUrl = 'https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize?flow=exchange&redirect_uri=http://localhost:3000/oauth/callback';`}
+const authUrl = 'https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?flow=exchange&redirect_uri=http://localhost:3000/oauth/callback';`}
                         </pre>
                     </div>
                 </div>
@@ -646,7 +647,7 @@ const ExtensionUIRegistry = {
 };
 
 // AWS RDS Custom Detail View Component
-function AwsRdsDetailView({ extension }) {
+function AwsRdsDetailView({ extension, projectName }) {
     const status = extension.status || {};
     const spec = extension.spec || {};
     const databases = status.databases || {};
@@ -879,7 +880,7 @@ function hasExtensionDetailView(extensionType) {
 function getExtensionDetailView(extensionType) {
     const api = getExtensionUIAPI(extensionType);
     return api?.renderOverviewTab ?
-        (props) => api.renderOverviewTab(props.extension) :
+        (props) => api.renderOverviewTab(props.extension, props.projectName) :
         null;
 }
 
