@@ -373,19 +373,25 @@ function OAuthExtensionUI({ spec, schema, onChange }) {
 
             <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-blue-300 mb-2">⚙️ Setup Required</h4>
-                <p className="text-sm text-blue-200 mb-2">
+                <p className="text-sm text-blue-200 mb-3">
                     Before creating this extension:
                 </p>
-                <ol className="text-sm text-blue-200 list-decimal list-inside space-y-1">
+                <ol className="text-sm text-blue-200 list-decimal list-inside space-y-3">
                     <li>Register an OAuth application with your provider to get client credentials</li>
-                    <li>Store the client secret as an encrypted environment variable:
-                        <code className="block bg-gray-800 px-2 py-1 rounded mt-1 text-xs">
-                            rise env set PROJECT_NAME {clientSecretRef || 'OAUTH_SECRET'} "your_secret" --secret
-                        </code>
+                    <li>
+                        <strong>Configure the OAuth callback URL in your provider:</strong>
+                        <div className="mt-2 ml-6">
+                            <code className="block bg-gray-800 px-3 py-2 rounded text-xs">
+                                https://api.rise.dev/api/v1/oauth/callback/PROJECT_NAME/EXTENSION_NAME
+                            </code>
+                            <p className="text-xs text-blue-300 mt-1">
+                                Also called "Redirect URI", "Callback URL", or "Authorized redirect URIs"
+                            </p>
+                        </div>
                     </li>
-                    <li>Configure the OAuth callback URL in your provider:
-                        <code className="block bg-gray-800 px-2 py-1 rounded mt-1 text-xs">
-                            https://api.rise.dev/api/v1/oauth/callback/PROJECT_NAME/EXTENSION_NAME
+                    <li>Store the client secret as an encrypted environment variable:
+                        <code className="block bg-gray-800 px-2 py-1 rounded mt-1 text-xs ml-6">
+                            rise env set PROJECT_NAME {clientSecretRef || 'OAUTH_SECRET'} "your_secret" --secret
                         </code>
                     </li>
                 </ol>
@@ -439,9 +445,39 @@ function OAuthDetailView({ extension, projectName }) {
 
     const scopesArray = spec.scopes || [];
     const extensionName = extension.extension;
+    const { showToast } = useToast();
 
     return (
         <div className="space-y-6">
+            {/* Redirect URI Configuration */}
+            <section>
+                <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
+                    <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 OAuth Provider Configuration Required</h3>
+                    <p className="text-sm text-blue-200 mb-3">
+                        Configure this callback URL in your OAuth provider's application settings:
+                    </p>
+                    <div className="flex items-center gap-2 mb-2">
+                        <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                            {`https://api.rise.dev/api/v1/oauth/callback/${projectName}/${extensionName}`}
+                        </code>
+                        <button
+                            onClick={() => {
+                                navigator.clipboard.writeText(`https://api.rise.dev/api/v1/oauth/callback/${projectName}/${extensionName}`);
+                                showToast('Redirect URI copied to clipboard', 'success');
+                            }}
+                            className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap"
+                            title="Copy redirect URI"
+                        >
+                            Copy
+                        </button>
+                    </div>
+                    <p className="text-xs text-blue-300">
+                        This URL is where the OAuth provider will redirect users after authentication.
+                        Also called "Redirect URI", "Callback URL", or "Authorized redirect URIs" depending on your provider.
+                    </p>
+                </div>
+            </section>
+
             {/* Configuration Status */}
             <section>
                 <h2 className="text-lg font-semibold text-gray-200 mb-3">Configuration Status</h2>
