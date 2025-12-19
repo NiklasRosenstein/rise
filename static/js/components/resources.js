@@ -1427,7 +1427,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
 
     const handleDelete = async () => {
         if (!enabledExtension || deleteConfirmName !== enabledExtension.extension) {
-            showToast('Please enter the extension name to confirm deletion', 'error');
+            showToast('Please enter the extension instance name to confirm deletion', 'error');
             return;
         }
 
@@ -1728,7 +1728,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                         </div>
 
                         <FormField
-                            label={`Type "${enabledExtension.extension}" to confirm deletion`}
+                            label={`Type the extension instance name "${enabledExtension.extension}" to confirm deletion`}
                             id="delete-confirm-name"
                             value={deleteConfirmName}
                             onChange={(e) => setDeleteConfirmName(e.target.value)}
