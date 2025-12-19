@@ -848,7 +848,7 @@ function ExtensionsList({ projectName }) {
                                     <button
                                         key={extType.extension_type}
                                         onClick={() => {
-                                            window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}`;
+                                            window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}/@new`;
                                         }}
                                         className="group relative flex flex-col items-center justify-center w-28 h-28 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-lg transition-all p-3"
                                         title={extType.description}
@@ -918,7 +918,7 @@ function ExtensionsList({ projectName }) {
                                                 className="hover:bg-gray-800/50 transition-colors cursor-pointer"
                                                 onClick={() => {
                                                     // Navigate to the specific extension instance
-                                                    window.location.hash = `#project/${projectName}/extensions/${ext.extension}`;
+                                                    window.location.hash = `#project/${projectName}/extensions/${ext.extension_type}/${ext.extension}`;
                                                 }}
                                             >
                                                 <td className="px-3 py-4">
@@ -1258,7 +1258,7 @@ function GenericExtensionDetailView({ extension }) {
 }
 
 // Extension Detail Page Component
-function ExtensionDetailPage({ projectName, extensionName }) {
+function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, extensionInstance }) {
     const [extensionType, setExtensionType] = useState(null);
     const [enabledExtension, setEnabledExtension] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1270,7 +1270,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
     const [deleting, setDeleting] = useState(false);
     const [deleteConfirmName, setDeleteConfirmName] = useState('');
     const [originalSpec, setOriginalSpec] = useState('{}');
-    const [instanceName, setInstanceName] = useState(extensionName); // Instance name for new extensions
+    const [instanceName, setInstanceName] = useState(extensionTypeProp || ''); // Instance name for new extensions
     const { showToast } = useToast();
 
     const isEnabled = enabledExtension !== null;
@@ -1292,26 +1292,36 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                     api.getProjectExtensions(projectName)
                 ]);
 
-                // First, try to find an extension instance with this name
-                let enabled = enabledResponse.extensions.find(e => e.extension === extensionName);
-                let extType;
+                let enabled = null;
+                let extType = null;
 
-                if (enabled) {
-                    // We're viewing an existing instance - find its type
+                if (extensionInstance) {
+                    // We're viewing a specific instance - find it by name
+                    enabled = enabledResponse.extensions.find(e => e.extension === extensionInstance);
+                    if (!enabled) {
+                        setError('Extension instance not found');
+                        setLoading(false);
+                        return;
+                    }
+                    // Find the type for this instance
                     extType = typesResponse.extension_types.find(t => t.extension_type === enabled.extension_type);
                     if (!extType) {
                         setError('Extension type not found for this instance');
                         setLoading(false);
                         return;
                     }
-                } else {
-                    // Not an instance name, try as extension type (creating new instance)
-                    extType = typesResponse.extension_types.find(t => t.extension_type === extensionName);
+                } else if (extensionTypeProp) {
+                    // We're creating a new instance of a specific type
+                    extType = typesResponse.extension_types.find(t => t.extension_type === extensionTypeProp);
                     if (!extType) {
-                        setError('Extension not found');
+                        setError('Extension type not found');
                         setLoading(false);
                         return;
                     }
+                } else {
+                    setError('No extension type or instance specified');
+                    setLoading(false);
+                    return;
                 }
 
                 setExtensionType(extType);
@@ -1341,7 +1351,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
             }
         }
         fetchData();
-    }, [projectName, extensionName]);
+    }, [projectName, extensionTypeProp, extensionInstance]);
 
     // Handle UI spec changes
     const handleUiSpecChange = useCallback((newUiSpec) => {
@@ -1384,7 +1394,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                 showToast(`Extension ${extensionType.display_name} updated successfully`, 'success');
             } else {
                 // Create new extension using user-provided instance name
-                await api.createExtension(projectName, instanceName.trim(), extensionName, spec);
+                await api.createExtension(projectName, instanceName.trim(), extensionType.extension_type, spec);
                 showToast(`Extension ${instanceName.trim()} created successfully`, 'success');
             }
             // Refresh data
