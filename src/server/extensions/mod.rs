@@ -25,6 +25,15 @@ pub trait Extension: Send + Sync {
     /// This should be a constant string that doesn't change based on configuration
     fn extension_type(&self) -> &str;
 
+    /// Human-readable display name for this extension type
+    ///
+    /// This should be a short, friendly name suitable for display in UI lists.
+    /// Examples: "AWS RDS Database", "Google OAuth", "Snowflake OAuth"
+    ///
+    /// # Returns
+    /// A short display name (e.g., "AWS RDS Database")
+    fn display_name(&self) -> &str;
+
     /// Validate extension spec on create/update
     ///
     /// Should check that the spec is valid JSONB and contains required fields.

@@ -1146,6 +1146,10 @@ impl Extension for AwsRdsProvisioner {
         "aws-rds-provisioner"
     }
 
+    fn display_name(&self) -> &str {
+        "AWS RDS Database"
+    }
+
     async fn validate_spec(&self, spec: &Value) -> Result<()> {
         let parsed: AwsRdsSpec =
             serde_json::from_value(spec.clone()).context("Failed to parse AWS RDS spec")?;

@@ -51,11 +51,11 @@ pub struct ListExtensionsResponse {
 /// Metadata about an available extension type
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ExtensionTypeMetadata {
-    /// Extension name/identifier (configurable, e.g., "aws-rds")
-    pub name: String,
-    /// Extension type (constant identifier for UI registry lookup, e.g., "aws-rds-postgres")
+    /// Extension type (constant identifier for UI registry lookup, e.g., "aws-rds-provisioner")
     pub extension_type: String,
-    /// Human-readable description
+    /// Human-readable display name (e.g., "AWS RDS Database")
+    pub display_name: String,
+    /// Human-readable description (longer, more detailed)
     pub description: String,
     /// Full documentation (markdown)
     pub documentation: String,

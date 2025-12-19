@@ -19,9 +19,9 @@ pub async fn list_extension_types(
     let extension_types: Vec<ExtensionTypeMetadata> = state
         .extension_registry
         .iter()
-        .map(|(name, extension)| ExtensionTypeMetadata {
-            name: name.clone(),
+        .map(|(_registry_key, extension)| ExtensionTypeMetadata {
             extension_type: extension.extension_type().to_string(),
+            display_name: extension.display_name().to_string(),
             description: extension.description().to_string(),
             documentation: extension.documentation().to_string(),
             spec_schema: extension.spec_schema(),

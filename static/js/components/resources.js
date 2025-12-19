@@ -839,16 +839,16 @@ function ExtensionsList({ projectName }) {
                         <p className="text-gray-400 text-sm">No extensions available.</p>
                     ) : (
                         availableExtensions
-                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .sort((a, b) => a.display_name.localeCompare(b.display_name))
                             .map(extType => {
                                 const enabled = isEnabled(extType.extension_type);
                                 const iconUrl = getExtensionIcon(extType.extension_type);
 
                                 return (
                                     <button
-                                        key={extType.name}
+                                        key={extType.extension_type}
                                         onClick={() => {
-                                            window.location.hash = `#project/${projectName}/extensions/${extType.name}`;
+                                            window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}`;
                                         }}
                                         className="group relative flex flex-col items-center justify-center w-32 h-32 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-lg transition-all"
                                         title={extType.description}
@@ -857,17 +857,17 @@ function ExtensionsList({ projectName }) {
                                         {iconUrl ? (
                                             <img
                                                 src={iconUrl}
-                                                alt={extType.name}
+                                                alt={extType.display_name}
                                                 className="w-12 h-12 rounded object-contain mb-2"
                                             />
                                         ) : (
                                             <div className="w-12 h-12 mb-2 flex items-center justify-center bg-gray-700 rounded text-gray-400 text-2xl font-bold">
-                                                {extType.name.charAt(0).toUpperCase()}
+                                                {extType.display_name.charAt(0).toUpperCase()}
                                             </div>
                                         )}
                                         {/* Name */}
                                         <span className="text-xs text-gray-300 text-center px-2 line-clamp-2">
-                                            {extType.name}
+                                            {extType.display_name}
                                         </span>
                                         {/* Enabled Badge */}
                                         {enabled && (
@@ -917,8 +917,7 @@ function ExtensionsList({ projectName }) {
                                                 key={ext.extension}
                                                 className="hover:bg-gray-800/50 transition-colors cursor-pointer"
                                                 onClick={() => {
-                                                    const typeName = extType?.name || ext.extension;
-                                                    window.location.hash = `#project/${projectName}/extensions/${typeName}`;
+                                                    window.location.hash = `#project/${projectName}/extensions/${ext.extension_type}`;
                                                 }}
                                             >
                                                 <td className="px-3 py-4">
@@ -1291,7 +1290,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                     api.getProjectExtensions(projectName)
                 ]);
 
-                const extType = typesResponse.extension_types.find(t => t.name === extensionName);
+                const extType = typesResponse.extension_types.find(t => t.extension_type === extensionName);
                 if (!extType) {
                     setError('Extension type not found');
                     setLoading(false);
@@ -1299,7 +1298,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                 }
                 setExtensionType(extType);
 
-                const enabled = enabledResponse.extensions.find(e => e.extension === extensionName);
+                const enabled = enabledResponse.extensions.find(e => e.extension_type === extensionName);
                 setEnabledExtension(enabled || null);
 
                 // Set form data only on initial load
@@ -1358,15 +1357,17 @@ function ExtensionDetailPage({ projectName, extensionName }) {
         setSaving(true);
         try {
             if (isEnabled) {
-                await api.updateExtension(projectName, extensionName, spec);
-                showToast(`Extension ${extensionName} updated successfully`, 'success');
+                // Update existing extension using its instance name
+                await api.updateExtension(projectName, enabledExtension.extension, spec);
+                showToast(`Extension ${extensionType.display_name} updated successfully`, 'success');
             } else {
-                await api.createExtension(projectName, extensionName, spec);
-                showToast(`Extension ${extensionName} enabled successfully`, 'success');
+                // Create new extension - use extension_type as default instance name
+                await api.createExtension(projectName, extensionName, extensionName, spec);
+                showToast(`Extension ${extensionType.display_name} enabled successfully`, 'success');
             }
             // Refresh data
             const enabledResponse = await api.getProjectExtensions(projectName);
-            const enabled = enabledResponse.extensions.find(e => e.extension === extensionName);
+            const enabled = enabledResponse.extensions.find(e => e.extension_type === extensionName);
             setEnabledExtension(enabled || null);
             if (enabled) {
                 const specJson = JSON.stringify(enabled.spec, null, 2);
@@ -1462,13 +1463,13 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                         {getExtensionIcon(extensionType.extension_type) && (
                             <img
                                 src={getExtensionIcon(extensionType.extension_type)}
-                                alt={extensionType.name}
+                                alt={extensionType.display_name}
                                 className="w-12 h-12 rounded object-contain"
                             />
                         )}
                         <div>
                             <h1 className="text-2xl font-bold text-white">
-                                {extensionType.name}
+                                {extensionType.display_name}
                             </h1>
                             <p className="text-gray-400">{extensionType.description}</p>
                         </div>
