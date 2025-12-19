@@ -395,7 +395,7 @@ function OAuthExtensionUI({ spec, schema, onChange }) {
 }
 
 const OAuthExtensionAPI = {
-    icon: null, // No specific icon for OAuth (could add a generic OAuth logo)
+    icon: '/assets/oauth2.jpg',
 
     renderStatusBadge(extension) {
         const status = extension.status || {};
