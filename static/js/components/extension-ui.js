@@ -183,10 +183,413 @@ const AwsRdsExtensionAPI = {
     }
 };
 
+// OAuth Extension UI Component
+function OAuthExtensionUI({ spec, schema, onChange }) {
+    const [providerName, setProviderName] = useState(spec?.provider_name || '');
+    const [description, setDescription] = useState(spec?.description || '');
+    const [clientId, setClientId] = useState(spec?.client_id || '');
+    const [clientSecretRef, setClientSecretRef] = useState(spec?.client_secret_ref || '');
+    const [authorizationEndpoint, setAuthorizationEndpoint] = useState(spec?.authorization_endpoint || '');
+    const [tokenEndpoint, setTokenEndpoint] = useState(spec?.token_endpoint || '');
+    const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
+
+    // Use a ref to store the latest onChange callback
+    const onChangeRef = React.useRef(onChange);
+    React.useEffect(() => {
+        onChangeRef.current = onChange;
+    }, [onChange]);
+
+    // Update parent when values change
+    useEffect(() => {
+        // Parse scopes from comma-separated string
+        const scopesArray = scopes
+            .split(',')
+            .map(s => s.trim())
+            .filter(s => s.length > 0);
+
+        // Build the spec object
+        const newSpec = {
+            provider_name: providerName,
+            client_id: clientId,
+            client_secret_ref: clientSecretRef,
+            authorization_endpoint: authorizationEndpoint,
+            token_endpoint: tokenEndpoint,
+            scopes: scopesArray,
+        };
+
+        // Only include description if it's not empty
+        if (description && description.trim() !== '') {
+            newSpec.description = description;
+        }
+
+        onChangeRef.current(newSpec);
+    }, [providerName, description, clientId, clientSecretRef, authorizationEndpoint, tokenEndpoint, scopes]);
+
+    // Common provider templates
+    const providerTemplates = {
+        snowflake: {
+            name: 'Snowflake',
+            authEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/authorize',
+            tokenEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/token-request',
+            scopes: 'session:role:ANALYST, refresh_token'
+        },
+        google: {
+            name: 'Google',
+            authEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+            tokenEndpoint: 'https://oauth2.googleapis.com/token',
+            scopes: 'openid, email, profile'
+        },
+        github: {
+            name: 'GitHub',
+            authEndpoint: 'https://github.com/login/oauth/authorize',
+            tokenEndpoint: 'https://github.com/login/oauth/access_token',
+            scopes: 'read:user, user:email'
+        }
+    };
+
+    const applyTemplate = (templateKey) => {
+        const template = providerTemplates[templateKey];
+        if (template) {
+            setProviderName(template.name);
+            setAuthorizationEndpoint(template.authEndpoint);
+            setTokenEndpoint(template.tokenEndpoint);
+            setScopes(template.scopes);
+        }
+    };
+
+    return (
+        <div className="space-y-4">
+            {/* Provider Templates */}
+            <div className="bg-gray-800 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-300 mb-2">Quick Start Templates</h4>
+                <div className="flex gap-2 flex-wrap">
+                    <button
+                        type="button"
+                        onClick={() => applyTemplate('snowflake')}
+                        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200"
+                    >
+                        Snowflake
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => applyTemplate('google')}
+                        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200"
+                    >
+                        Google
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => applyTemplate('github')}
+                        className="px-3 py-1 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200"
+                    >
+                        GitHub
+                    </button>
+                </div>
+                <p className="text-xs text-gray-500 mt-2">
+                    Click a template to auto-fill common provider endpoints. Don't forget to update account-specific values!
+                </p>
+            </div>
+
+            <FormField
+                label="Provider Name"
+                id="oauth-provider-name"
+                value={providerName}
+                onChange={(e) => setProviderName(e.target.value)}
+                placeholder="e.g., Snowflake Production"
+                required
+                helperText="Display name for this OAuth provider"
+            />
+
+            <FormField
+                label="Description (Optional)"
+                id="oauth-description"
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                placeholder="e.g., OAuth authentication for analytics access"
+                helperText="Human-readable description of this OAuth configuration"
+            />
+
+            <FormField
+                label="Client ID"
+                id="oauth-client-id"
+                value={clientId}
+                onChange={(e) => setClientId(e.target.value)}
+                placeholder="e.g., ABC123XYZ..."
+                required
+                helperText="OAuth client identifier from your provider"
+            />
+
+            <FormField
+                label="Client Secret Environment Variable"
+                id="oauth-client-secret-ref"
+                value={clientSecretRef}
+                onChange={(e) => setClientSecretRef(e.target.value)}
+                placeholder="e.g., OAUTH_SNOWFLAKE_SECRET"
+                required
+                helperText="Name of the environment variable containing the client secret (must be set as secret env var)"
+            />
+
+            <FormField
+                label="Authorization Endpoint"
+                id="oauth-authorization-endpoint"
+                value={authorizationEndpoint}
+                onChange={(e) => setAuthorizationEndpoint(e.target.value)}
+                placeholder="https://provider.com/oauth/authorize"
+                required
+                helperText="OAuth provider's authorization URL"
+            />
+
+            <FormField
+                label="Token Endpoint"
+                id="oauth-token-endpoint"
+                value={tokenEndpoint}
+                onChange={(e) => setTokenEndpoint(e.target.value)}
+                placeholder="https://provider.com/oauth/token"
+                required
+                helperText="OAuth provider's token URL"
+            />
+
+            <FormField
+                label="Scopes"
+                id="oauth-scopes"
+                value={scopes}
+                onChange={(e) => setScopes(e.target.value)}
+                placeholder="openid, email, profile"
+                required
+                helperText="Comma-separated list of OAuth scopes to request"
+            />
+
+            <div className="bg-gray-800 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-300 mb-2">About This Extension</h4>
+                <p className="text-sm text-gray-400">
+                    The Generic OAuth 2.0 extension allows your application to authenticate end users via any OAuth 2.0 provider
+                    (Snowflake, Google, GitHub, custom SSO, etc.) without managing client secrets locally.
+                </p>
+                <p className="text-sm text-gray-400 mt-2">
+                    <strong>Security:</strong> Client secrets are stored encrypted and never exposed to your application.
+                    Tokens are delivered in URL fragments for frontend apps or via secure exchange for backend apps.
+                </p>
+            </div>
+
+            <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-blue-300 mb-2">⚙️ Setup Required</h4>
+                <p className="text-sm text-blue-200 mb-2">
+                    Before creating this extension:
+                </p>
+                <ol className="text-sm text-blue-200 list-decimal list-inside space-y-1">
+                    <li>Register an OAuth application with your provider to get client credentials</li>
+                    <li>Store the client secret as an encrypted environment variable:
+                        <code className="block bg-gray-800 px-2 py-1 rounded mt-1 text-xs">
+                            rise env set PROJECT_NAME {clientSecretRef || 'OAUTH_SECRET'} "your_secret" --secret
+                        </code>
+                    </li>
+                    <li>Configure the OAuth callback URL in your provider:
+                        <code className="block bg-gray-800 px-2 py-1 rounded mt-1 text-xs">
+                            https://api.rise.dev/api/v1/oauth/callback/PROJECT_NAME/EXTENSION_NAME
+                        </code>
+                    </li>
+                </ol>
+            </div>
+        </div>
+    );
+}
+
+const OAuthExtensionAPI = {
+    icon: null, // No specific icon for OAuth (could add a generic OAuth logo)
+
+    renderStatusBadge(extension) {
+        const status = extension.status || {};
+
+        if (status.error) {
+            return (
+                <span className="bg-red-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
+                    Error
+                </span>
+            );
+        }
+
+        if (status.configured_at) {
+            return (
+                <span className="bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
+                    Configured
+                </span>
+            );
+        }
+
+        return (
+            <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
+                Not Configured
+            </span>
+        );
+    },
+
+    renderOverviewTab(extension) {
+        return <OAuthDetailView extension={extension} />;
+    },
+
+    renderConfigureTab(spec, schema, onChange) {
+        return <OAuthExtensionUI spec={spec} schema={schema} onChange={onChange} />;
+    }
+};
+
+// OAuth Detail View Component
+function OAuthDetailView({ extension }) {
+    const status = extension.status || {};
+    const spec = extension.spec || {};
+
+    const scopesArray = spec.scopes || [];
+
+    return (
+        <div className="space-y-6">
+            {/* Configuration Status */}
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">Configuration Status</h2>
+                <div className="bg-gray-900 rounded p-4">
+                    {status.error ? (
+                        <div className="p-3 bg-red-900/20 border border-red-700 rounded">
+                            <p className="text-sm text-red-300">
+                                <strong>Error:</strong> {status.error}
+                            </p>
+                        </div>
+                    ) : status.configured_at ? (
+                        <div className="p-3 bg-green-900/20 border border-green-700 rounded">
+                            <p className="text-sm text-green-300">
+                                ✓ OAuth provider configured at {formatDate(status.configured_at)}
+                            </p>
+                        </div>
+                    ) : (
+                        <div className="p-3 bg-gray-800 rounded">
+                            <p className="text-sm text-gray-400">
+                                Configuration pending...
+                            </p>
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            {/* Provider Configuration */}
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">OAuth Provider</h2>
+                <div className="bg-gray-900 rounded p-4 space-y-3">
+                    <div>
+                        <p className="text-sm text-gray-500">Provider Name</p>
+                        <p className="text-gray-300 font-semibold">{spec.provider_name || 'N/A'}</p>
+                    </div>
+                    {spec.description && (
+                        <div>
+                            <p className="text-sm text-gray-500">Description</p>
+                            <p className="text-gray-300">{spec.description}</p>
+                        </div>
+                    )}
+                    <div>
+                        <p className="text-sm text-gray-500">Client ID</p>
+                        <p className="text-gray-300 font-mono text-sm">{spec.client_id || 'N/A'}</p>
+                    </div>
+                    <div>
+                        <p className="text-sm text-gray-500">Client Secret Reference</p>
+                        <p className="text-gray-300 font-mono text-sm">{spec.client_secret_ref || 'N/A'}</p>
+                    </div>
+                </div>
+            </section>
+
+            {/* Endpoints */}
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">OAuth Endpoints</h2>
+                <div className="bg-gray-900 rounded p-4 space-y-3">
+                    <div>
+                        <p className="text-sm text-gray-500">Authorization Endpoint</p>
+                        <p className="text-gray-300 font-mono text-xs break-all">{spec.authorization_endpoint || 'N/A'}</p>
+                    </div>
+                    <div>
+                        <p className="text-sm text-gray-500">Token Endpoint</p>
+                        <p className="text-gray-300 font-mono text-xs break-all">{spec.token_endpoint || 'N/A'}</p>
+                    </div>
+                </div>
+            </section>
+
+            {/* Scopes */}
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">
+                    OAuth Scopes ({scopesArray.length})
+                </h2>
+                <div className="bg-gray-900 rounded p-4">
+                    {scopesArray.length === 0 ? (
+                        <p className="text-gray-400 text-sm">No scopes configured</p>
+                    ) : (
+                        <div className="flex flex-wrap gap-2">
+                            {scopesArray.map((scope, idx) => (
+                                <span
+                                    key={idx}
+                                    className="bg-indigo-600 text-white text-xs font-semibold px-3 py-1 rounded-full"
+                                >
+                                    {scope}
+                                </span>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </section>
+
+            {/* Integration Guide */}
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">Integration Guide</h2>
+                <div className="bg-gray-900 rounded p-4 space-y-3">
+                    <div>
+                        <p className="text-sm text-gray-400 mb-2">
+                            <strong>OAuth Authorization URL:</strong>
+                        </p>
+                        <code className="block bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                            {`https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize`}
+                        </code>
+                    </div>
+                    <div>
+                        <p className="text-sm text-gray-400 mb-2">
+                            <strong>OAuth Callback URL (configured in provider):</strong>
+                        </p>
+                        <code className="block bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                            {`https://api.rise.dev/api/v1/oauth/callback/${extension.project_name}/${extension.name}`}
+                        </code>
+                    </div>
+                    <div className="pt-2 border-t border-gray-700">
+                        <p className="text-sm text-gray-400 mb-2">
+                            <strong>Example JavaScript Integration:</strong>
+                        </p>
+                        <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+{`// Initiate OAuth login
+function login() {
+  const authUrl = 'https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize';
+  window.location.href = authUrl;
+}
+
+// Extract tokens from URL fragment
+const fragment = window.location.hash.substring(1);
+const params = new URLSearchParams(fragment);
+const accessToken = params.get('access_token');
+const idToken = params.get('id_token');`}
+                        </pre>
+                    </div>
+                </div>
+            </section>
+
+            {/* Documentation Link */}
+            <section>
+                <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-blue-300 mb-2">📚 Documentation</h4>
+                    <p className="text-sm text-blue-200">
+                        For detailed documentation on OAuth flows, security, and advanced configuration,
+                        see the <a href="/docs/oauth.md" className="underline">OAuth Extension Documentation</a>.
+                    </p>
+                </div>
+            </section>
+        </div>
+    );
+}
+
 // Extension UI Registry
 // Maps extension type identifiers to their UI API implementations
 const ExtensionUIRegistry = {
     'aws-rds-provisioner': AwsRdsExtensionAPI,
+    'oauth': OAuthExtensionAPI,
     // Add more extension UIs here as needed
 };
 

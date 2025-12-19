@@ -95,4 +95,3 @@ fn render_index(state: &AppState) -> Response {
         }
     }
 }
-

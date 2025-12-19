@@ -47,9 +47,12 @@ fn validate_redirect_uri(
     project_name: &str,
     api_url: &str,
 ) -> Result<(), String> {
-    let redirect_url = Url::parse(redirect_uri).map_err(|e| format!("Invalid redirect URI: {}", e))?;
+    let redirect_url =
+        Url::parse(redirect_uri).map_err(|e| format!("Invalid redirect URI: {}", e))?;
 
-    let host = redirect_url.host_str().ok_or("Missing host in redirect URI")?;
+    let host = redirect_url
+        .host_str()
+        .ok_or("Missing host in redirect URI")?;
     let port = redirect_url.port();
 
     // Allow localhost for local development (any port)
@@ -281,7 +284,9 @@ pub async fn authorize(
 
                                 // Pass through application's CSRF state if provided
                                 if let Some(app_state) = req.state {
-                                    redirect_url.query_pairs_mut().append_pair("state", &app_state);
+                                    redirect_url
+                                        .query_pairs_mut()
+                                        .append_pair("state", &app_state);
                                 }
                             }
                         }
