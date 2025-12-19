@@ -605,11 +605,13 @@ function OAuthDetailView({ extension, projectName }) {
                 <div className="bg-gray-900 rounded p-4 space-y-3">
                     <p className="text-sm text-gray-400">
                         Click the button below to test the OAuth flow. You'll be redirected to the OAuth provider for authentication,
-                        then returned with tokens in the URL fragment.
+                        then returned to this page with tokens in the URL fragment.
                     </p>
                     <button
                         onClick={() => {
-                            const authUrl = `/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`;
+                            // Build the redirect URI to come back to this extension page
+                            const redirectUri = window.location.origin + window.location.pathname + window.location.search;
+                            const authUrl = `/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
                             window.location.href = authUrl;
                         }}
                         className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors"
@@ -617,8 +619,7 @@ function OAuthDetailView({ extension, projectName }) {
                         Test OAuth Flow
                     </button>
                     <p className="text-xs text-gray-500">
-                        After authentication, you'll be redirected back to this page with the access token in the URL fragment.
-                        Check your browser's developer console or URL bar to see the token.
+                        After authentication, you'll be redirected back to this extension page with the access token in the URL fragment.
                     </p>
                 </div>
             </section>
