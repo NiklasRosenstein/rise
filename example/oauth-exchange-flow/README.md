@@ -99,14 +99,16 @@ cd example/oauth-exchange-flow
 
 # Deploy the application
 rise deployment create oauth-demo
-
-# Note: Update the server.js CONFIG to use environment variables:
-# - RISE_API_URL: Your Rise API domain
-# - PROJECT_NAME: oauth-demo
-# - EXTENSION_NAME: oauth-dex
 ```
 
-When deployed, the OAuth flow will redirect to your deployed app's domain.
+When deployed:
+- The app listens on port 8080 (Rise's default)
+- OAuth callbacks will redirect to your deployed app's domain
+- Set environment variables for production:
+  - `RISE_API_URL`: Your Rise API domain (e.g., `https://api.rise.example.com`)
+  - `PROJECT_NAME`: `oauth-demo` (or your project name)
+  - `EXTENSION_NAME`: `oauth-dex` (or your extension name)
+  - `SESSION_SECRET`: Generate with `openssl rand -base64 32`
 
 ## Environment Variables
 

@@ -20,11 +20,13 @@ Demonstrate the OAuth 2.0 extension for end-user authentication.
   - Tokens delivered in URL fragment (`#access_token=...`)
   - Best for: React, Vue, Angular, vanilla JavaScript
   - Security: Tokens never sent to server, no logs/referer leaks
+  - Stack: nginx serving static HTML/JS (port 8080)
 
 - **[oauth-exchange-flow](./oauth-exchange-flow/)** - Exchange token flow for backend apps
   - Temporary token exchanged server-side
   - Best for: Rails, Django, Express, server-rendered apps
   - Security: HttpOnly cookies, XSS-safe, tokens never exposed to browser
+  - Stack: Node.js/Express (port 8080)
 
 ## Quick Start
 

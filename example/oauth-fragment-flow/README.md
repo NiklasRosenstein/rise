@@ -64,7 +64,9 @@ cd example/oauth-fragment-flow
 rise deployment create oauth-demo
 ```
 
-The app will be accessible at `https://oauth-demo.{your-domain}` (or via port-forward for local dev).
+The app will be accessible at `https://oauth-demo.{your-domain}`.
+
+**Note**: The app listens on port 8080 (Rise's default), as configured in `nginx.conf`.
 
 ## How It Works
 
