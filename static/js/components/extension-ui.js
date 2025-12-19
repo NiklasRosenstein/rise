@@ -440,76 +440,64 @@ function OAuthDetailView({ extension, projectName }) {
     const scopesArray = spec.scopes || [];
     const extensionName = extension.extension;
 
-    // Check if we have tokens in the URL fragment (from OAuth redirect)
-    const [tokenInfo, setTokenInfo] = React.useState(null);
+    // Get toast function from context
+    const { showToast } = useToast();
 
+    // Check if we're returning from OAuth flow
     React.useEffect(() => {
-        // Parse URL fragment for OAuth tokens
-        if (window.location.hash) {
+        // Check if we have OAuth callback in the URL fragment
+        if (window.location.hash && (window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
             const fragment = window.location.hash.substring(1);
             const params = new URLSearchParams(fragment);
 
-            const accessToken = params.get('access_token');
-            if (accessToken) {
-                setTokenInfo({
-                    accessToken,
-                    tokenType: params.get('token_type') || 'Bearer',
-                    expiresAt: params.get('expires_at'),
-                    idToken: params.get('id_token'),
-                });
+            // Restore the original page location from sessionStorage
+            const returnPath = sessionStorage.getItem('oauth_return_path');
+            sessionStorage.removeItem('oauth_return_path');
 
-                // Clean the URL fragment after extracting tokens
-                window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            const error = params.get('error');
+            const errorDescription = params.get('error_description');
+            const accessToken = params.get('access_token');
+
+            if (error) {
+                // OAuth flow failed
+                const message = errorDescription || `OAuth flow failed: ${error}`;
+                showToast(message, 'error');
+
+                if (returnPath) {
+                    window.location.hash = returnPath;
+                } else {
+                    window.location.hash = `project/${projectName}/extension/${extensionName}`;
+                }
+            } else if (accessToken) {
+                // OAuth flow succeeded
+                const expiresAt = params.get('expires_at');
+                const expiresIn = params.get('expires_in');
+
+                // Calculate expiration time
+                let expiresAtDate;
+                if (expiresAt) {
+                    expiresAtDate = new Date(expiresAt);
+                } else if (expiresIn) {
+                    expiresAtDate = new Date(Date.now() + parseInt(expiresIn) * 1000);
+                }
+
+                // Show success toast
+                const message = `OAuth flow successful! Token expires ${expiresAtDate ? expiresAtDate.toLocaleString() : 'soon'}`;
+                showToast(message, 'success');
+
+                if (returnPath) {
+                    // Navigate back to the extension page
+                    window.location.hash = returnPath;
+                } else {
+                    // Fallback: just clean the URL
+                    window.location.hash = `project/${projectName}/extension/${extensionName}`;
+                }
             }
         }
-    }, []);
+    }, [projectName, extensionName, showToast]);
 
     return (
         <div className="space-y-6">
-            {/* OAuth Test Result */}
-            {tokenInfo && (
-                <section>
-                    <div className="bg-green-900/20 border border-green-700 rounded-lg p-4">
-                        <div className="flex items-start justify-between">
-                            <div className="flex-1">
-                                <h3 className="text-sm font-semibold text-green-300 mb-2">✓ OAuth Flow Successful!</h3>
-                                <p className="text-sm text-green-200 mb-3">
-                                    Successfully obtained access token from OAuth provider.
-                                </p>
-                                <div className="space-y-2">
-                                    <div>
-                                        <p className="text-xs text-green-400 font-semibold">Access Token:</p>
-                                        <code className="block bg-gray-800 px-2 py-1 rounded text-xs text-gray-200 break-all mt-1">
-                                            {tokenInfo.accessToken.substring(0, 50)}...
-                                        </code>
-                                    </div>
-                                    {tokenInfo.idToken && (
-                                        <div>
-                                            <p className="text-xs text-green-400 font-semibold">ID Token:</p>
-                                            <code className="block bg-gray-800 px-2 py-1 rounded text-xs text-gray-200 break-all mt-1">
-                                                {tokenInfo.idToken.substring(0, 50)}...
-                                            </code>
-                                        </div>
-                                    )}
-                                    <div className="flex gap-4 text-xs text-green-300">
-                                        <span>Type: {tokenInfo.tokenType}</span>
-                                        {tokenInfo.expiresAt && (
-                                            <span>Expires: {new Date(tokenInfo.expiresAt).toLocaleString()}</span>
-                                        )}
-                                    </div>
-                                </div>
-                            </div>
-                            <button
-                                onClick={() => setTokenInfo(null)}
-                                className="ml-4 text-green-400 hover:text-green-300"
-                            >
-                                ✕
-                            </button>
-                        </div>
-                    </div>
-                </section>
-            )}
-
             {/* Configuration Status */}
             <section>
                 <h2 className="text-lg font-semibold text-gray-200 mb-3">Configuration Status</h2>
@@ -605,12 +593,16 @@ function OAuthDetailView({ extension, projectName }) {
                 <div className="bg-gray-900 rounded p-4 space-y-3">
                     <p className="text-sm text-gray-400">
                         Click the button below to test the OAuth flow. You'll be redirected to the OAuth provider for authentication,
-                        then returned to this page with tokens in the URL fragment.
+                        then returned to this page with a success notification.
                     </p>
                     <button
                         onClick={() => {
-                            // Build the redirect URI to come back to this extension page
-                            const redirectUri = window.location.origin + window.location.pathname + window.location.search;
+                            // Store the current hash location to return to after OAuth
+                            const currentHash = window.location.hash.substring(1); // Remove leading #
+                            sessionStorage.setItem('oauth_return_path', currentHash);
+
+                            // Use the origin as redirect URI (hash router doesn't work with fragments)
+                            const redirectUri = window.location.origin + '/';
                             const authUrl = `/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
                             window.location.href = authUrl;
                         }}
@@ -619,7 +611,7 @@ function OAuthDetailView({ extension, projectName }) {
                         Test OAuth Flow
                     </button>
                     <p className="text-xs text-gray-500">
-                        After authentication, you'll be redirected back to this extension page with the access token in the URL fragment.
+                        After authentication, you'll be redirected back to this page and see a success notification.
                     </p>
                 </div>
             </section>
