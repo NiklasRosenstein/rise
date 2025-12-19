@@ -1335,6 +1335,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                         setFormData({ spec: specJson });
                         setOriginalSpec(specJson);
                         setUiSpec(enabled.spec);
+                        setInstanceName(enabled.extension); // Set instance name from enabled extension
                         setActiveTab('overview');
                     } else {
                         const defaultSpec = {};
@@ -1414,6 +1415,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                 setFormData({ spec: specJson });
                 setOriginalSpec(specJson);
                 setUiSpec(enabled.spec);
+                setInstanceName(enabled.extension); // Update instance name
                 // Only switch to overview tab when first enabling, not when updating
                 if (!wasEnabled) {
                     setActiveTab('overview');
