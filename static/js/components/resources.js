@@ -829,68 +829,57 @@ function ExtensionsList({ projectName }) {
 
     return (
         <div className="space-y-6">
-            {/* Available Extensions - Icon Buttons */}
+            {/* Enabled Extensions - Table with Add Icons */}
             <div>
-                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                    Available Extensions
-                </h3>
-                <div className="flex flex-wrap gap-3">
-                    {availableExtensions.length === 0 ? (
-                        <p className="text-gray-400 text-sm">No extensions available.</p>
-                    ) : (
-                        availableExtensions
-                            .sort((a, b) => a.display_name.localeCompare(b.display_name))
-                            .map(extType => {
-                                const enabled = isEnabled(extType.extension_type);
-                                const iconUrl = getExtensionIcon(extType.extension_type);
+                <div className="flex items-center gap-3 mb-3">
+                    <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+                        Enabled Extensions
+                    </h3>
+                    {availableExtensions.length > 0 && (
+                        <div className="flex items-center gap-2">
+                            {/* Plus icon indicator (non-clickable) */}
+                            <div className="w-8 h-8 flex items-center justify-center text-gray-500">
+                                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                                    <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                                </svg>
+                            </div>
+                            {/* Extension add icons */}
+                            {availableExtensions
+                                .sort((a, b) => a.display_name.localeCompare(b.display_name))
+                                .map(extType => {
+                                    const iconUrl = getExtensionIcon(extType.extension_type);
 
-                                return (
-                                    <button
-                                        key={extType.extension_type}
-                                        onClick={() => {
-                                            window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}/@new`;
-                                        }}
-                                        className="group relative flex flex-col items-center justify-center w-28 h-28 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-lg transition-all p-3"
-                                        title={extType.description}
-                                    >
-                                        {/* Icon */}
-                                        {iconUrl ? (
-                                            <img
-                                                src={iconUrl}
-                                                alt={extType.display_name}
-                                                className="w-12 h-12 rounded object-contain mb-2"
-                                            />
-                                        ) : (
-                                            <div className="w-12 h-12 mb-2 flex items-center justify-center bg-gray-700 rounded text-gray-400 text-2xl font-bold">
-                                                {extType.display_name.charAt(0).toUpperCase()}
-                                            </div>
-                                        )}
-                                        {/* Name */}
-                                        <span className="text-xs text-gray-300 text-center px-2 line-clamp-2">
-                                            {extType.display_name}
-                                        </span>
-                                        {/* Enabled Badge */}
-                                        {enabled && (
-                                            <div className="absolute top-2 right-2">
-                                                <div className="w-3 h-3 bg-green-500 rounded-full border-2 border-gray-800" title="Enabled"></div>
-                                            </div>
-                                        )}
-                                    </button>
-                                );
-                            })
+                                    return (
+                                        <button
+                                            key={extType.extension_type}
+                                            onClick={() => {
+                                                window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}/@new`;
+                                            }}
+                                            className="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-full transition-all"
+                                            title={`Add ${extType.display_name}`}
+                                        >
+                                            {iconUrl ? (
+                                                <img
+                                                    src={iconUrl}
+                                                    alt={extType.display_name}
+                                                    className="w-6 h-6 rounded object-contain"
+                                                />
+                                            ) : (
+                                                <div className="w-6 h-6 flex items-center justify-center text-gray-400 text-xs font-bold">
+                                                    {extType.display_name.charAt(0).toUpperCase()}
+                                                </div>
+                                            )}
+                                        </button>
+                                    );
+                                })
+                            }
+                        </div>
                     )}
                 </div>
-            </div>
-
-            {/* Enabled Extensions - Table */}
-            <div>
-                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
-                    Enabled Extensions
-                </h3>
                 {enabledExtensions.length === 0 ? (
                     <div className="bg-gray-900 rounded-lg border border-gray-800 px-6 py-8 text-center">
                         <p className="text-gray-400 text-sm">
-                            No extensions enabled yet. Click an extension above to get started.
+                            No extensions enabled yet. Click an extension icon to add one.
                         </p>
                     </div>
                 ) : (
