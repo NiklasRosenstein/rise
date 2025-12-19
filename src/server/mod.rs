@@ -80,7 +80,8 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
         .route("/version", axum::routing::get(version_info))
-        .merge(auth::routes::public_routes());
+        .merge(auth::routes::public_routes())
+        .merge(extensions::providers::oauth::routes::oauth_routes());
 
     // Protected routes (require authentication)
     let protected_routes = Router::new()

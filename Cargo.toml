@@ -100,7 +100,7 @@ regex = { version = "1.11", optional = true }
 aes-gcm = { version = "0.10", optional = true }
 
 # Server: OAuth2 proxy
-moka = { version = "0.12", features = ["sync"], optional = true }
+moka = { version = "0.12", features = ["sync", "future"], optional = true }
 base64ct = { version = "1.6", features = ["alloc"], optional = true }
 
 # Server: OCI registry

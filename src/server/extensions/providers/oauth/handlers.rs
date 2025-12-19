@@ -1,0 +1,601 @@
+use super::models::{
+    AuthorizeRequest, CallbackRequest, OAuthExtensionSpec, OAuthExtensionStatus, OAuthState,
+    TokenResponse,
+};
+use crate::db::{extensions as db_extensions, projects as db_projects, user_oauth_tokens};
+use crate::server::state::AppState;
+use axum::{
+    extract::{Path, Query, State},
+    http::{header, StatusCode},
+    response::{IntoResponse, Redirect, Response},
+};
+use chrono::{Duration, Utc};
+use tracing::{debug, error, info, warn};
+use url::Url;
+use uuid::Uuid;
+
+/// Generate a random state token for CSRF protection
+fn generate_state_token() -> String {
+    use rand::Rng;
+    let mut rng = rand::thread_rng();
+    (0..32)
+        .map(|_| format!("{:02x}", rng.gen::<u8>()))
+        .collect()
+}
+
+/// Generate a random session ID
+fn generate_session_id() -> String {
+    Uuid::new_v4().to_string()
+}
+
+/// Extract session ID from cookie header
+fn extract_session_id_from_cookie(cookie_header: Option<&str>) -> Option<String> {
+    cookie_header?.split(';').find_map(|cookie| {
+        let cookie = cookie.trim();
+        if cookie.starts_with("rise_oauth_session=") {
+            Some(cookie.trim_start_matches("rise_oauth_session=").to_string())
+        } else {
+            None
+        }
+    })
+}
+
+/// Validate redirect URI against allowed origins
+fn validate_redirect_uri(
+    redirect_uri: &str,
+    project_name: &str,
+    api_domain: &str,
+) -> Result<(), String> {
+    let url = Url::parse(redirect_uri).map_err(|e| format!("Invalid redirect URI: {}", e))?;
+
+    let host = url.host_str().ok_or("Missing host in redirect URI")?;
+
+    // Allow localhost for local development
+    if host == "localhost" || host == "127.0.0.1" {
+        return Ok(());
+    }
+
+    // Allow project's default URL
+    let project_domain = format!("{}.{}", project_name, api_domain.trim_start_matches("api."));
+    if host == project_domain {
+        return Ok(());
+    }
+
+    // TODO: Allow project's custom domains (requires custom domain support)
+
+    Err(format!(
+        "Invalid redirect URI: not authorized for this project (allowed: localhost, {})",
+        project_domain
+    ))
+}
+
+/// Initiate OAuth authorization flow
+///
+/// GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize
+///
+/// Query params:
+/// - redirect_uri (optional): Where to redirect after auth (for local dev/custom domains)
+/// - state (optional): Application's CSRF state parameter (passed through to final redirect)
+pub async fn authorize(
+    State(state): State<AppState>,
+    Path((project_name, extension_name)): Path<(String, String)>,
+    Query(req): Query<AuthorizeRequest>,
+    headers: axum::http::HeaderMap,
+) -> Result<Response, (StatusCode, String)> {
+    debug!(
+        "OAuth authorize request for project={}, extension={}",
+        project_name, extension_name
+    );
+
+    // Get project
+    let project = db_projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    // Get OAuth extension
+    let extension =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                "OAuth extension not configured".to_string(),
+            ))?;
+
+    // Verify extension type is oauth
+    if extension.extension_type != "oauth" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Extension '{}' is not an OAuth extension (type: {})",
+                extension_name, extension.extension_type
+            ),
+        ));
+    }
+
+    // Parse spec
+    let spec: OAuthExtensionSpec = serde_json::from_value(extension.spec.clone()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid spec: {}", e),
+        )
+    })?;
+
+    // Extract session ID from cookie (if present)
+    let cookie_header = headers.get(header::COOKIE).and_then(|h| h.to_str().ok());
+    let existing_session_id = extract_session_id_from_cookie(cookie_header);
+
+    debug!("Existing session ID from cookie: {:?}", existing_session_id);
+
+    // Check for cached token if we have a session ID
+    if let Some(ref session_id) = existing_session_id {
+        match user_oauth_tokens::get_by_session(
+            &state.db_pool,
+            project.id,
+            &extension_name,
+            session_id,
+        )
+        .await
+        {
+            Ok(Some(cached_token)) => {
+                debug!("Found cached OAuth token for session {}", session_id);
+
+                // Check if token is still valid or can be refreshed
+                if let Some(expires_at) = cached_token.expires_at {
+                    if expires_at > Utc::now() {
+                        // Token is still valid, use it immediately
+                        info!("Cached token still valid, redirecting with cached token");
+
+                        // Update last_accessed_at
+                        if let Err(e) =
+                            user_oauth_tokens::update_last_accessed(&state.db_pool, cached_token.id)
+                                .await
+                        {
+                            warn!("Failed to update last_accessed_at: {:?}", e);
+                        }
+
+                        // Decrypt tokens
+                        let encryption_provider = state.encryption_provider.as_ref().ok_or((
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Encryption provider not configured".to_string(),
+                        ))?;
+
+                        let access_token = encryption_provider
+                            .decrypt(&cached_token.access_token_encrypted)
+                            .await
+                            .map_err(|e| {
+                                (
+                                    StatusCode::INTERNAL_SERVER_ERROR,
+                                    format!("Failed to decrypt access token: {}", e),
+                                )
+                            })?;
+
+                        let id_token =
+                            if let Some(ref id_token_encrypted) = cached_token.id_token_encrypted {
+                                Some(
+                                    encryption_provider
+                                        .decrypt(id_token_encrypted)
+                                        .await
+                                        .map_err(|e| {
+                                            (
+                                                StatusCode::INTERNAL_SERVER_ERROR,
+                                                format!("Failed to decrypt ID token: {}", e),
+                                            )
+                                        })?,
+                                )
+                            } else {
+                                None
+                            };
+
+                        // Determine final redirect URI
+                        let final_redirect_uri = req.redirect_uri.unwrap_or_else(|| {
+                            // Default to project's primary URL
+                            format!(
+                                "https://{}.{}",
+                                project_name,
+                                state.public_url.trim_start_matches("https://api.")
+                            )
+                        });
+
+                        // Build redirect URL with tokens in fragment
+                        let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
+                            (
+                                StatusCode::INTERNAL_SERVER_ERROR,
+                                format!("Invalid redirect URI: {}", e),
+                            )
+                        })?;
+
+                        let expires_in = (expires_at - Utc::now()).num_seconds();
+                        let mut fragment_parts = vec![
+                            format!("access_token={}", access_token),
+                            format!("token_type=Bearer"),
+                            format!("expires_in={}", expires_in),
+                        ];
+
+                        if let Some(id_token) = id_token {
+                            fragment_parts.push(format!("id_token={}", id_token));
+                        }
+
+                        if let Some(app_state) = req.state {
+                            fragment_parts.push(format!("state={}", app_state));
+                        }
+
+                        redirect_url.set_fragment(Some(&fragment_parts.join("&")));
+
+                        return Ok(Redirect::to(redirect_url.as_str()).into_response());
+                    } else if cached_token.refresh_token_encrypted.is_some() {
+                        // Token expired but we have a refresh token - refresh it
+                        debug!("Cached token expired, attempting refresh");
+                        // TODO: Implement inline token refresh
+                        // For now, fall through to full OAuth flow
+                    } else {
+                        // Token expired and no refresh token - delete it
+                        debug!("Cached token expired without refresh token, deleting");
+                        if let Err(e) =
+                            user_oauth_tokens::delete(&state.db_pool, cached_token.id).await
+                        {
+                            warn!("Failed to delete expired token: {:?}", e);
+                        }
+                    }
+                }
+            }
+            Ok(None) => {
+                debug!("No cached token found for session {}", session_id);
+            }
+            Err(e) => {
+                warn!("Error checking for cached token: {:?}", e);
+            }
+        }
+    }
+
+    // No valid cached token - proceed with full OAuth flow
+
+    // Determine final redirect URI
+    let final_redirect_uri = if let Some(ref uri) = req.redirect_uri {
+        // Validate redirect URI
+        validate_redirect_uri(uri, &project_name, &state.public_url)
+            .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+        uri.clone()
+    } else {
+        // Default to project's primary URL
+        format!(
+            "https://{}.{}",
+            project_name,
+            state.public_url.trim_start_matches("https://api.")
+        )
+    };
+
+    // Generate CSRF state token
+    let state_token = generate_state_token();
+
+    // Store OAuth state in cache
+    let oauth_state = OAuthState {
+        redirect_uri: Some(final_redirect_uri),
+        application_state: req.state,
+        project_name: project_name.clone(),
+        extension_name: extension_name.clone(),
+        session_id: existing_session_id,
+        created_at: Utc::now(),
+    };
+
+    // Store state in cache (TTL configured on cache builder)
+    state
+        .oauth_state_store
+        .insert(state_token.clone(), oauth_state)
+        .await;
+
+    // Compute redirect URI for this extension
+    let redirect_uri = format!(
+        "https://{}/api/v1/oauth/callback/{}/{}",
+        state.public_url.trim_start_matches("https://"),
+        project_name,
+        extension_name
+    );
+
+    // Build authorization URL
+    let mut auth_url = Url::parse(&spec.authorization_endpoint).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid authorization endpoint: {}", e),
+        )
+    })?;
+
+    auth_url
+        .query_pairs_mut()
+        .append_pair("client_id", &spec.client_id)
+        .append_pair("redirect_uri", &redirect_uri)
+        .append_pair("response_type", "code")
+        .append_pair("scope", &spec.scopes.join(" "))
+        .append_pair("state", &state_token);
+
+    debug!("Redirecting to OAuth provider: {}", auth_url.as_str());
+
+    // Redirect to OAuth provider
+    Ok(Redirect::to(auth_url.as_str()).into_response())
+}
+
+/// Handle OAuth callback from provider
+///
+/// GET /api/v1/oauth/callback/{project}/{extension}
+///
+/// Query params:
+/// - code: Authorization code from provider
+/// - state: CSRF state token
+pub async fn callback(
+    State(state): State<AppState>,
+    Path((project_name, extension_name)): Path<(String, String)>,
+    Query(req): Query<CallbackRequest>,
+) -> Result<Response, (StatusCode, String)> {
+    debug!(
+        "OAuth callback for project={}, extension={}",
+        project_name, extension_name
+    );
+
+    // Retrieve and validate state
+    let oauth_state = state
+        .oauth_state_store
+        .get(&req.state)
+        .await
+        .ok_or((StatusCode::BAD_REQUEST, "Invalid state token".to_string()))?;
+
+    // Verify project and extension match
+    if oauth_state.project_name != project_name || oauth_state.extension_name != extension_name {
+        return Err((StatusCode::BAD_REQUEST, "State mismatch".to_string()));
+    }
+
+    // Get project
+    let project = db_projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    // Get OAuth extension
+    let extension =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                "OAuth extension not configured".to_string(),
+            ))?;
+
+    // Parse spec
+    let spec: OAuthExtensionSpec = serde_json::from_value(extension.spec.clone()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid spec: {}", e),
+        )
+    })?;
+
+    // Resolve client_secret from environment variable
+    let env_vars = crate::db::env_vars::list_project_env_vars(&state.db_pool, project.id)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let env_var = env_vars
+        .iter()
+        .find(|var| var.key == spec.client_secret_ref)
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!(
+                    "Environment variable '{}' not found for OAuth client secret",
+                    spec.client_secret_ref
+                ),
+            )
+        })?;
+
+    let client_secret = if env_var.is_secret {
+        let encryption_provider = state.encryption_provider.as_ref().ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Encryption provider not configured".to_string(),
+        ))?;
+
+        encryption_provider
+            .decrypt(&env_var.value)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to decrypt OAuth client secret: {}", e),
+                )
+            })?
+    } else {
+        env_var.value.clone()
+    };
+
+    // Compute redirect URI
+    let redirect_uri = format!(
+        "https://{}/api/v1/oauth/callback/{}/{}",
+        state.public_url.trim_start_matches("https://"),
+        project_name,
+        extension_name
+    );
+
+    // Exchange authorization code for tokens
+    let http_client = reqwest::Client::new();
+    let response = http_client
+        .post(&spec.token_endpoint)
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", &req.code),
+            ("client_id", &spec.client_id),
+            ("client_secret", &client_secret),
+            ("redirect_uri", &redirect_uri),
+        ])
+        .send()
+        .await
+        .map_err(|e| {
+            error!("Token exchange request failed: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Token exchange request failed: {}", e),
+            )
+        })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unable to read error response".to_string());
+        error!(
+            "Token exchange failed with status {}: {}",
+            status, error_text
+        );
+        return Err((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!(
+                "Token exchange failed with status {}: {}",
+                status, error_text
+            ),
+        ));
+    }
+
+    let token_response: TokenResponse = response.json().await.map_err(|e| {
+        error!("Failed to parse token response: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to parse token response: {}", e),
+        )
+    })?;
+
+    // Encrypt tokens
+    let encryption_provider = state.encryption_provider.as_ref().ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Encryption provider not configured".to_string(),
+    ))?;
+
+    let access_token_encrypted = encryption_provider
+        .encrypt(&token_response.access_token)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to encrypt access token: {}", e),
+            )
+        })?;
+
+    let refresh_token_encrypted = match &token_response.refresh_token {
+        Some(refresh_token) => Some(
+            encryption_provider
+                .encrypt(refresh_token)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to encrypt refresh token: {}", e),
+                    )
+                })?,
+        ),
+        None => None,
+    };
+
+    let id_token_encrypted = match &token_response.id_token {
+        Some(id_token) => Some(encryption_provider.encrypt(id_token).await.map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to encrypt ID token: {}", e),
+            )
+        })?),
+        None => None,
+    };
+
+    // Determine session ID (use existing or generate new)
+    let session_id = oauth_state.session_id.unwrap_or_else(generate_session_id);
+
+    // Store user OAuth token in database
+    let expires_at = Some(Utc::now() + Duration::seconds(token_response.expires_in));
+    user_oauth_tokens::upsert(
+        &state.db_pool,
+        project.id,
+        &extension_name,
+        &session_id,
+        &access_token_encrypted,
+        refresh_token_encrypted.as_deref(),
+        id_token_encrypted.as_deref(),
+        expires_at,
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to store user OAuth token: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to store token: {}", e),
+        )
+    })?;
+
+    info!("Successfully stored OAuth token for session {}", session_id);
+
+    // Update extension status
+    let status = OAuthExtensionStatus {
+        redirect_uri: Some(redirect_uri),
+        configured_at: Some(Utc::now()),
+        error: None,
+    };
+
+    db_extensions::update_status(
+        &state.db_pool,
+        project.id,
+        &extension_name,
+        &serde_json::to_value(&status).unwrap(),
+    )
+    .await
+    .map_err(|e| {
+        warn!("Failed to update extension status: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to update status: {}", e),
+        )
+    })?;
+
+    // Clear state token from cache
+    state.oauth_state_store.invalidate(&req.state).await;
+
+    // Determine final redirect URI
+    let final_redirect_uri = oauth_state.redirect_uri.ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Missing redirect URI in state".to_string(),
+    ))?;
+
+    // Build redirect URL with tokens in fragment
+    let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid redirect URI: {}", e),
+        )
+    })?;
+
+    let mut fragment_parts = vec![
+        format!("access_token={}", token_response.access_token),
+        format!("token_type={}", token_response.token_type),
+        format!("expires_in={}", token_response.expires_in),
+    ];
+
+    if let Some(id_token) = token_response.id_token {
+        fragment_parts.push(format!("id_token={}", id_token));
+    }
+
+    // Pass through application's CSRF state
+    if let Some(app_state) = oauth_state.application_state {
+        fragment_parts.push(format!("state={}", app_state));
+    }
+
+    redirect_url.set_fragment(Some(&fragment_parts.join("&")));
+
+    // Set session cookie
+    let cookie_value = format!(
+        "rise_oauth_session={}; HttpOnly; Secure; SameSite=Lax; Max-Age={}; Path=/",
+        session_id,
+        90 * 24 * 60 * 60 // 90 days
+    );
+
+    // Build response with cookie
+    let mut response = Redirect::to(redirect_url.as_str()).into_response();
+    response
+        .headers_mut()
+        .insert(header::SET_COOKIE, cookie_value.parse().unwrap());
+
+    Ok(response)
+}
