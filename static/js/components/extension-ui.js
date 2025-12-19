@@ -440,8 +440,76 @@ function OAuthDetailView({ extension, projectName }) {
     const scopesArray = spec.scopes || [];
     const extensionName = extension.extension;
 
+    // Check if we have tokens in the URL fragment (from OAuth redirect)
+    const [tokenInfo, setTokenInfo] = React.useState(null);
+
+    React.useEffect(() => {
+        // Parse URL fragment for OAuth tokens
+        if (window.location.hash) {
+            const fragment = window.location.hash.substring(1);
+            const params = new URLSearchParams(fragment);
+
+            const accessToken = params.get('access_token');
+            if (accessToken) {
+                setTokenInfo({
+                    accessToken,
+                    tokenType: params.get('token_type') || 'Bearer',
+                    expiresAt: params.get('expires_at'),
+                    idToken: params.get('id_token'),
+                });
+
+                // Clean the URL fragment after extracting tokens
+                window.history.replaceState(null, '', window.location.pathname + window.location.search);
+            }
+        }
+    }, []);
+
     return (
         <div className="space-y-6">
+            {/* OAuth Test Result */}
+            {tokenInfo && (
+                <section>
+                    <div className="bg-green-900/20 border border-green-700 rounded-lg p-4">
+                        <div className="flex items-start justify-between">
+                            <div className="flex-1">
+                                <h3 className="text-sm font-semibold text-green-300 mb-2">✓ OAuth Flow Successful!</h3>
+                                <p className="text-sm text-green-200 mb-3">
+                                    Successfully obtained access token from OAuth provider.
+                                </p>
+                                <div className="space-y-2">
+                                    <div>
+                                        <p className="text-xs text-green-400 font-semibold">Access Token:</p>
+                                        <code className="block bg-gray-800 px-2 py-1 rounded text-xs text-gray-200 break-all mt-1">
+                                            {tokenInfo.accessToken.substring(0, 50)}...
+                                        </code>
+                                    </div>
+                                    {tokenInfo.idToken && (
+                                        <div>
+                                            <p className="text-xs text-green-400 font-semibold">ID Token:</p>
+                                            <code className="block bg-gray-800 px-2 py-1 rounded text-xs text-gray-200 break-all mt-1">
+                                                {tokenInfo.idToken.substring(0, 50)}...
+                                            </code>
+                                        </div>
+                                    )}
+                                    <div className="flex gap-4 text-xs text-green-300">
+                                        <span>Type: {tokenInfo.tokenType}</span>
+                                        {tokenInfo.expiresAt && (
+                                            <span>Expires: {new Date(tokenInfo.expiresAt).toLocaleString()}</span>
+                                        )}
+                                    </div>
+                                </div>
+                            </div>
+                            <button
+                                onClick={() => setTokenInfo(null)}
+                                className="ml-4 text-green-400 hover:text-green-300"
+                            >
+                                ✕
+                            </button>
+                        </div>
+                    </div>
+                </section>
+            )}
+
             {/* Configuration Status */}
             <section>
                 <h2 className="text-lg font-semibold text-gray-200 mb-3">Configuration Status</h2>
@@ -528,6 +596,30 @@ function OAuthDetailView({ extension, projectName }) {
                             ))}
                         </div>
                     )}
+                </div>
+            </section>
+
+            {/* Test OAuth Flow */}
+            <section>
+                <h2 className="text-lg font-semibold text-gray-200 mb-3">Test OAuth Flow</h2>
+                <div className="bg-gray-900 rounded p-4 space-y-3">
+                    <p className="text-sm text-gray-400">
+                        Click the button below to test the OAuth flow. You'll be redirected to the OAuth provider for authentication,
+                        then returned with tokens in the URL fragment.
+                    </p>
+                    <button
+                        onClick={() => {
+                            const authUrl = `/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`;
+                            window.location.href = authUrl;
+                        }}
+                        className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors"
+                    >
+                        Test OAuth Flow
+                    </button>
+                    <p className="text-xs text-gray-500">
+                        After authentication, you'll be redirected back to this page with the access token in the URL fragment.
+                        Check your browser's developer console or URL bar to see the token.
+                    </p>
                 </div>
             </section>
 
