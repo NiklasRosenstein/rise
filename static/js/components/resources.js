@@ -917,7 +917,8 @@ function ExtensionsList({ projectName }) {
                                                 key={ext.extension}
                                                 className="hover:bg-gray-800/50 transition-colors cursor-pointer"
                                                 onClick={() => {
-                                                    window.location.hash = `#project/${projectName}/extensions/${ext.extension_type}`;
+                                                    // Navigate to the specific extension instance
+                                                    window.location.hash = `#project/${projectName}/extensions/${ext.extension}`;
                                                 }}
                                             >
                                                 <td className="px-3 py-4">
@@ -1269,6 +1270,7 @@ function ExtensionDetailPage({ projectName, extensionName }) {
     const [deleting, setDeleting] = useState(false);
     const [deleteConfirmName, setDeleteConfirmName] = useState('');
     const [originalSpec, setOriginalSpec] = useState('{}');
+    const [instanceName, setInstanceName] = useState(extensionName); // Instance name for new extensions
     const { showToast } = useToast();
 
     const isEnabled = enabledExtension !== null;
@@ -1290,15 +1292,29 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                     api.getProjectExtensions(projectName)
                 ]);
 
-                const extType = typesResponse.extension_types.find(t => t.extension_type === extensionName);
-                if (!extType) {
-                    setError('Extension type not found');
-                    setLoading(false);
-                    return;
-                }
-                setExtensionType(extType);
+                // First, try to find an extension instance with this name
+                let enabled = enabledResponse.extensions.find(e => e.extension === extensionName);
+                let extType;
 
-                const enabled = enabledResponse.extensions.find(e => e.extension_type === extensionName);
+                if (enabled) {
+                    // We're viewing an existing instance - find its type
+                    extType = typesResponse.extension_types.find(t => t.extension_type === enabled.extension_type);
+                    if (!extType) {
+                        setError('Extension type not found for this instance');
+                        setLoading(false);
+                        return;
+                    }
+                } else {
+                    // Not an instance name, try as extension type (creating new instance)
+                    extType = typesResponse.extension_types.find(t => t.extension_type === extensionName);
+                    if (!extType) {
+                        setError('Extension not found');
+                        setLoading(false);
+                        return;
+                    }
+                }
+
+                setExtensionType(extType);
                 setEnabledExtension(enabled || null);
 
                 // Set form data only on initial load
@@ -1345,6 +1361,12 @@ function ExtensionDetailPage({ projectName, extensionName }) {
     }, []);
 
     const handleSave = async () => {
+        // Validate instance name for new extensions
+        if (!isEnabled && !instanceName.trim()) {
+            showToast('Extension name is required', 'error');
+            return;
+        }
+
         let spec;
         try {
             spec = JSON.parse(formData.spec);
@@ -1361,13 +1383,20 @@ function ExtensionDetailPage({ projectName, extensionName }) {
                 await api.updateExtension(projectName, enabledExtension.extension, spec);
                 showToast(`Extension ${extensionType.display_name} updated successfully`, 'success');
             } else {
-                // Create new extension - use extension_type as default instance name
-                await api.createExtension(projectName, extensionName, extensionName, spec);
-                showToast(`Extension ${extensionType.display_name} enabled successfully`, 'success');
+                // Create new extension using user-provided instance name
+                await api.createExtension(projectName, instanceName.trim(), extensionName, spec);
+                showToast(`Extension ${instanceName.trim()} created successfully`, 'success');
             }
             // Refresh data
             const enabledResponse = await api.getProjectExtensions(projectName);
-            const enabled = enabledResponse.extensions.find(e => e.extension_type === extensionName);
+            // After creating, look for the newly created instance by name
+            // After updating, refresh the existing instance
+            let enabled;
+            if (wasEnabled) {
+                enabled = enabledResponse.extensions.find(e => e.extension === enabledExtension.extension);
+            } else {
+                enabled = enabledResponse.extensions.find(e => e.extension === instanceName.trim());
+            }
             setEnabledExtension(enabled || null);
             if (enabled) {
                 const specJson = JSON.stringify(enabled.spec, null, 2);
@@ -1558,6 +1587,21 @@ function ExtensionDetailPage({ projectName, extensionName }) {
 
                 {activeTab === 'configure' && extensionAPI?.renderConfigureTab && (
                     <div className="space-y-4">
+                        {!isEnabled && (
+                            <div className="pb-4 border-b border-gray-700">
+                                <FormField
+                                    label="Extension Name"
+                                    id="extension-instance-name"
+                                    value={instanceName}
+                                    onChange={(e) => setInstanceName(e.target.value)}
+                                    placeholder={extensionName}
+                                    required
+                                />
+                                <p className="text-sm text-gray-500 mt-2">
+                                    Give this extension instance a unique name. You can create multiple instances of the same extension type with different names.
+                                </p>
+                            </div>
+                        )}
                         {extensionAPI.renderConfigureTab(uiSpec, extensionType.spec_schema, handleUiSpecChange)}
                         <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
                             <Button
@@ -1573,6 +1617,21 @@ function ExtensionDetailPage({ projectName, extensionName }) {
 
                 {activeTab === 'config' && (
                     <div className="space-y-4">
+                        {!isEnabled && (
+                            <div className="pb-4 border-b border-gray-700">
+                                <FormField
+                                    label="Extension Name"
+                                    id="extension-instance-name-config"
+                                    value={instanceName}
+                                    onChange={(e) => setInstanceName(e.target.value)}
+                                    placeholder={extensionName}
+                                    required
+                                />
+                                <p className="text-sm text-gray-500 mt-2">
+                                    Give this extension instance a unique name. You can create multiple instances of the same extension type with different names.
+                                </p>
+                            </div>
+                        )}
                         <FormField
                             label="Configuration Spec (JSON)"
                             id="extension-spec"
