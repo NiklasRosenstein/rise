@@ -492,13 +492,37 @@ pub async fn callback(
         env_var.value.clone()
     };
 
-    // Compute redirect URI
-    let redirect_uri = format!(
-        "https://{}/api/v1/oauth/callback/{}/{}",
-        state.public_url.trim_start_matches("https://"),
-        project_name,
-        extension_name
-    );
+    // Compute callback redirect URI - must match exactly what was sent in authorize request
+    let api_url = Url::parse(&state.public_url).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid API URL configuration: {}", e),
+        )
+    })?;
+
+    let api_host = api_url.host_str().ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Missing host in API URL".to_string(),
+    ))?;
+
+    let redirect_uri = if let Some(port) = api_url.port() {
+        format!(
+            "{}://{}:{}/api/v1/oauth/callback/{}/{}",
+            api_url.scheme(),
+            api_host,
+            port,
+            project_name,
+            extension_name
+        )
+    } else {
+        format!(
+            "{}://{}/api/v1/oauth/callback/{}/{}",
+            api_url.scheme(),
+            api_host,
+            project_name,
+            extension_name
+        )
+    };
 
     // Exchange authorization code for tokens
     let http_client = reqwest::Client::new();
