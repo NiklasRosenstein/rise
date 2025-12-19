@@ -1604,7 +1604,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                                     id="extension-instance-name"
                                     value={instanceName}
                                     onChange={(e) => setInstanceName(e.target.value)}
-                                    placeholder={extensionName}
+                                    placeholder={extensionTypeProp}
                                     required
                                 />
                                 <p className="text-sm text-gray-500 mt-2">
@@ -1634,7 +1634,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                                     id="extension-instance-name-config"
                                     value={instanceName}
                                     onChange={(e) => setInstanceName(e.target.value)}
-                                    placeholder={extensionName}
+                                    placeholder={extensionTypeProp}
                                     required
                                 />
                                 <p className="text-sm text-gray-500 mt-2">
