@@ -229,7 +229,7 @@ pub async fn authorize(
                             )
                         });
 
-                        // Build redirect URL with tokens in fragment
+                        // Build redirect URL based on requested flow type
                         let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
                             (
                                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -237,22 +237,54 @@ pub async fn authorize(
                             )
                         })?;
 
-                        let expires_in = (expires_at - Utc::now()).num_seconds();
-                        let mut fragment_parts = vec![
-                            format!("access_token={}", access_token),
-                            format!("token_type=Bearer"),
-                            format!("expires_in={}", expires_in),
-                        ];
+                        match req.flow {
+                            OAuthFlowType::Fragment => {
+                                // Fragment flow: Return tokens in URL fragment
+                                let expires_in = (expires_at - Utc::now()).num_seconds();
+                                let mut fragment_parts = vec![
+                                    format!("access_token={}", access_token),
+                                    format!("token_type=Bearer"),
+                                    format!("expires_in={}", expires_in),
+                                ];
 
-                        if let Some(id_token) = id_token {
-                            fragment_parts.push(format!("id_token={}", id_token));
+                                if let Some(id_token) = id_token {
+                                    fragment_parts.push(format!("id_token={}", id_token));
+                                }
+
+                                if let Some(app_state) = req.state {
+                                    fragment_parts.push(format!("state={}", app_state));
+                                }
+
+                                redirect_url.set_fragment(Some(&fragment_parts.join("&")));
+                            }
+                            OAuthFlowType::Exchange => {
+                                // Exchange flow: Generate exchange token for backend to retrieve
+                                let exchange_token = generate_state_token();
+
+                                let exchange_state = OAuthExchangeState {
+                                    project_id: project.id,
+                                    extension_name: extension_name.clone(),
+                                    session_id: session_id.clone(),
+                                    created_at: Utc::now(),
+                                };
+
+                                // Store exchange token in cache (5-minute TTL)
+                                state
+                                    .oauth_exchange_store
+                                    .insert(exchange_token.clone(), exchange_state)
+                                    .await;
+
+                                // Return exchange token in query parameter
+                                redirect_url
+                                    .query_pairs_mut()
+                                    .append_pair("exchange_token", &exchange_token);
+
+                                // Pass through application's CSRF state if provided
+                                if let Some(app_state) = req.state {
+                                    redirect_url.query_pairs_mut().append_pair("state", &app_state);
+                                }
+                            }
                         }
-
-                        if let Some(app_state) = req.state {
-                            fragment_parts.push(format!("state={}", app_state));
-                        }
-
-                        redirect_url.set_fragment(Some(&fragment_parts.join("&")));
 
                         return Ok(Redirect::to(redirect_url.as_str()).into_response());
                     } else if cached_token.refresh_token_encrypted.is_some() {
