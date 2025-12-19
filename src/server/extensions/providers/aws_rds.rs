@@ -140,6 +140,7 @@ pub struct AwsRdsProvisionerConfig {
     pub instance_size: String,
     pub disk_size: i32,
     pub instance_id_template: String,
+    pub instance_id_prefix: String,
     pub default_engine_version: String,
     pub vpc_security_group_ids: Option<Vec<String>>,
     pub db_subnet_group_name: Option<String>,
@@ -156,6 +157,7 @@ pub struct AwsRdsProvisioner {
     instance_size: String,
     disk_size: i32,
     instance_id_template: String,
+    instance_id_prefix: String,
     default_engine_version: String,
     vpc_security_group_ids: Option<Vec<String>>,
     db_subnet_group_name: Option<String>,
@@ -174,6 +176,7 @@ impl AwsRdsProvisioner {
             instance_size: config.instance_size,
             disk_size: config.disk_size,
             instance_id_template: config.instance_id_template,
+            instance_id_prefix: config.instance_id_prefix,
             default_engine_version: config.default_engine_version,
             vpc_security_group_ids: config.vpc_security_group_ids,
             db_subnet_group_name: config.db_subnet_group_name,
@@ -185,6 +188,7 @@ impl AwsRdsProvisioner {
 
     fn instance_id_for_project(&self, project_name: &str, extension_name: &str) -> String {
         self.instance_id_template
+            .replace("{prefix}", &self.instance_id_prefix)
             .replace("{project_name}", project_name)
             .replace("{extension_name}", extension_name)
     }
@@ -1243,6 +1247,7 @@ impl Extension for AwsRdsProvisioner {
             instance_size: self.instance_size.clone(),
             disk_size: self.disk_size,
             instance_id_template: self.instance_id_template.clone(),
+            instance_id_prefix: self.instance_id_prefix.clone(),
             default_engine_version: self.default_engine_version.clone(),
             vpc_security_group_ids: self.vpc_security_group_ids.clone(),
             db_subnet_group_name: self.db_subnet_group_name.clone(),

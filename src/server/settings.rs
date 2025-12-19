@@ -617,10 +617,15 @@ pub enum ExtensionProviderConfig {
         instance_size: String,
         disk_size: i32, // in GiB
         /// Template for RDS instance identifiers
-        /// Available placeholders: {project_name}, {extension_name}
-        /// Default: "rise-{project_name}-{extension_name}"
+        /// Available placeholders: {prefix}, {project_name}, {extension_name}
+        /// Default: "{prefix}-{project_name}-{extension_name}"
         #[serde(default = "default_instance_id_template")]
         instance_id_template: String,
+        /// Prefix for RDS instance identifiers
+        /// Must match the IAM policy prefix configured in your Terraform infrastructure
+        /// Default: "rise"
+        #[serde(default = "default_instance_id_prefix")]
+        instance_id_prefix: String,
         /// Default engine version to use if not specified in project extension spec
         /// Use AWS CLI to find versions: aws rds describe-db-engine-versions --engine postgres --query "DBEngineVersions[*].EngineVersion"
         #[serde(default = "default_engine_version")]
@@ -649,7 +654,12 @@ pub enum ExtensionProviderConfig {
 
 #[allow(dead_code)]
 fn default_instance_id_template() -> String {
-    "rise-{project_name}-{extension_name}".to_string()
+    "{prefix}-{project_name}-{extension_name}".to_string()
+}
+
+#[allow(dead_code)]
+fn default_instance_id_prefix() -> String {
+    "rise".to_string()
 }
 
 #[allow(dead_code)]
