@@ -51,6 +51,8 @@ pub struct OAuthState {
     pub session_id: Option<String>,
     /// OAuth flow type (fragment or exchange)
     pub flow_type: OAuthFlowType,
+    /// PKCE code verifier (for providers that require PKCE like Snowflake)
+    pub code_verifier: String,
     /// When this state was created
     pub created_at: DateTime<Utc>,
 }

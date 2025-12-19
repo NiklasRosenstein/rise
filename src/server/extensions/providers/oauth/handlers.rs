@@ -10,6 +10,7 @@ use axum::{
     response::{IntoResponse, Redirect, Response},
     Json,
 };
+use base64::Engine;
 use chrono::{Duration, Utc};
 use tracing::{debug, error, info, warn};
 use url::Url;
@@ -27,6 +28,30 @@ fn generate_state_token() -> String {
 /// Generate a random session ID
 fn generate_session_id() -> String {
     Uuid::new_v4().to_string()
+}
+
+/// Generate a PKCE code verifier (random string)
+fn generate_code_verifier() -> String {
+    use rand::Rng;
+    const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
+    let mut rng = rand::thread_rng();
+    (0..128)
+        .map(|_| {
+            let idx = rng.gen_range(0..CHARSET.len());
+            CHARSET[idx] as char
+        })
+        .collect()
+}
+
+/// Generate a PKCE code challenge from a code verifier (SHA256 hash, base64url encoded)
+fn generate_code_challenge(verifier: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let mut hasher = Sha256::new();
+    hasher.update(verifier.as_bytes());
+    let hash = hasher.finalize();
+
+    // Base64url encode (no padding)
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash)
 }
 
 /// Extract session ID from cookie header
@@ -367,6 +392,10 @@ pub async fn authorize(
     // Generate CSRF state token
     let state_token = generate_state_token();
 
+    // Generate PKCE code verifier and challenge
+    let code_verifier = generate_code_verifier();
+    let code_challenge = generate_code_challenge(&code_verifier);
+
     // Store OAuth state in cache
     let oauth_state = OAuthState {
         redirect_uri: Some(final_redirect_uri),
@@ -375,6 +404,7 @@ pub async fn authorize(
         extension_name: extension_name.clone(),
         session_id: existing_session_id,
         flow_type: req.flow,
+        code_verifier,
         created_at: Utc::now(),
     };
 
@@ -431,7 +461,9 @@ pub async fn authorize(
         .append_pair("redirect_uri", &redirect_uri)
         .append_pair("response_type", "code")
         .append_pair("scope", &spec.scopes.join(" "))
-        .append_pair("state", &state_token);
+        .append_pair("state", &state_token)
+        .append_pair("code_challenge", &code_challenge)
+        .append_pair("code_challenge_method", "S256");
 
     debug!("Redirecting to OAuth provider: {}", auth_url.as_str());
 
@@ -561,7 +593,7 @@ pub async fn callback(
         )
     };
 
-    // Exchange authorization code for tokens
+    // Exchange authorization code for tokens (with PKCE code verifier)
     let http_client = reqwest::Client::new();
     let response = http_client
         .post(&spec.token_endpoint)
@@ -571,6 +603,7 @@ pub async fn callback(
             ("client_id", &spec.client_id),
             ("client_secret", &client_secret),
             ("redirect_uri", &redirect_uri),
+            ("code_verifier", &oauth_state.code_verifier),
         ])
         .send()
         .await
