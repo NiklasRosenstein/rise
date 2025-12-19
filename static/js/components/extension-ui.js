@@ -178,13 +178,13 @@ const AwsRdsExtensionAPI = {
         return <AwsRdsDetailView extension={extension} projectName={projectName} />;
     },
 
-    renderConfigureTab(spec, schema, onChange) {
+    renderConfigureTab(spec, schema, onChange, projectName, instanceName, isEnabled) {
         return <AwsRdsExtensionUI spec={spec} schema={schema} onChange={onChange} />;
     }
 };
 
 // OAuth Extension UI Component
-function OAuthExtensionUI({ spec, schema, onChange }) {
+function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, isEnabled }) {
     const [providerName, setProviderName] = useState(spec?.provider_name || '');
     const [description, setDescription] = useState(spec?.description || '');
     const [clientId, setClientId] = useState(spec?.client_id || '');
@@ -192,6 +192,13 @@ function OAuthExtensionUI({ spec, schema, onChange }) {
     const [authorizationEndpoint, setAuthorizationEndpoint] = useState(spec?.authorization_endpoint || '');
     const [tokenEndpoint, setTokenEndpoint] = useState(spec?.token_endpoint || '');
     const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
+    const { showToast } = useToast();
+
+    // Build the redirect URI for display
+    const backendUrl = CONFIG.backendUrl.replace(/\/$/, ''); // Remove trailing slash
+    const displayProjectName = projectName || 'YOUR_PROJECT';
+    const displayExtensionName = isEnabled ? instanceName : (instanceName || 'YOUR_EXTENSION_NAME');
+    const redirectUri = `${backendUrl}/api/v1/oauth/callback/${displayProjectName}/${displayExtensionName}`;
 
     // Use a ref to store the latest onChange callback
     const onChangeRef = React.useRef(onChange);
@@ -259,6 +266,38 @@ function OAuthExtensionUI({ spec, schema, onChange }) {
 
     return (
         <div className="space-y-4">
+            {/* Redirect URI Configuration - Must be set in provider FIRST */}
+            <div className="bg-blue-900/20 border-2 border-blue-600 rounded-lg p-4">
+                <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 Configure This Redirect URI in Your OAuth Provider First!</h3>
+                <p className="text-sm text-blue-200 mb-3">
+                    Before filling out this form, register this callback URL in your OAuth provider's application settings:
+                </p>
+                <div className="flex items-center gap-2 mb-2">
+                    <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-sm text-gray-200 break-all font-mono">
+                        {redirectUri}
+                    </code>
+                    <button
+                        type="button"
+                        onClick={() => {
+                            navigator.clipboard.writeText(redirectUri);
+                            showToast('Redirect URI copied to clipboard', 'success');
+                        }}
+                        className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm rounded transition-colors whitespace-nowrap font-semibold"
+                        title="Copy redirect URI"
+                    >
+                        Copy
+                    </button>
+                </div>
+                <p className="text-xs text-blue-300">
+                    Also called "Redirect URI", "Callback URL", or "Authorized redirect URIs" depending on your provider.
+                    {!isEnabled && instanceName && (
+                        <span className="block mt-1 text-blue-200">
+                            <strong>Note:</strong> This URL uses the extension name "{instanceName}" you entered above. Update it in your provider if you change the name.
+                        </span>
+                    )}
+                </p>
+            </div>
+
             {/* Provider Templates */}
             <div className="bg-gray-800 rounded-lg p-4">
                 <h4 className="text-sm font-semibold text-gray-300 mb-2">Quick Start Templates</h4>
@@ -371,29 +410,19 @@ function OAuthExtensionUI({ spec, schema, onChange }) {
                 </p>
             </div>
 
-            <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-blue-300 mb-2">⚙️ Setup Required</h4>
-                <p className="text-sm text-blue-200 mb-3">
-                    Before creating this extension:
+            <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-yellow-300 mb-2">⚙️ Additional Setup Steps</h4>
+                <p className="text-sm text-yellow-200 mb-3">
+                    After configuring the redirect URI above:
                 </p>
-                <ol className="text-sm text-blue-200 list-decimal list-inside space-y-3">
-                    <li>Register an OAuth application with your provider to get client credentials</li>
-                    <li>
-                        <strong>Configure the OAuth callback URL in your provider:</strong>
-                        <div className="mt-2 ml-6">
-                            <code className="block bg-gray-800 px-3 py-2 rounded text-xs">
-                                https://api.rise.dev/api/v1/oauth/callback/PROJECT_NAME/EXTENSION_NAME
-                            </code>
-                            <p className="text-xs text-blue-300 mt-1">
-                                Also called "Redirect URI", "Callback URL", or "Authorized redirect URIs"
-                            </p>
-                        </div>
-                    </li>
+                <ol className="text-sm text-yellow-200 list-decimal list-inside space-y-2">
+                    <li>Complete the OAuth application registration with your provider to get client credentials</li>
                     <li>Store the client secret as an encrypted environment variable:
                         <code className="block bg-gray-800 px-2 py-1 rounded mt-1 text-xs ml-6">
-                            rise env set PROJECT_NAME {clientSecretRef || 'OAUTH_SECRET'} "your_secret" --secret
+                            rise env set {displayProjectName} {clientSecretRef || 'OAUTH_SECRET'} "your_secret" --secret
                         </code>
                     </li>
+                    <li>Fill out the form below with your OAuth provider's details</li>
                 </ol>
             </div>
         </div>
@@ -433,8 +462,8 @@ const OAuthExtensionAPI = {
         return <OAuthDetailView extension={extension} projectName={projectName} />;
     },
 
-    renderConfigureTab(spec, schema, onChange) {
-        return <OAuthExtensionUI spec={spec} schema={schema} onChange={onChange} />;
+    renderConfigureTab(spec, schema, onChange, projectName, instanceName, isEnabled) {
+        return <OAuthExtensionUI spec={spec} schema={schema} onChange={onChange} projectName={projectName} instanceName={instanceName} isEnabled={isEnabled} />;
     }
 };
 
@@ -447,22 +476,28 @@ function OAuthDetailView({ extension, projectName }) {
     const extensionName = extension.extension;
     const { showToast } = useToast();
 
+    // Build URLs using actual backend URL
+    const backendUrl = CONFIG.backendUrl.replace(/\/$/, ''); // Remove trailing slash
+    const callbackUrl = `${backendUrl}/api/v1/oauth/callback/${projectName}/${extensionName}`;
+    const authorizeUrl = `${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`;
+    const exchangeUrl = `${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/exchange`;
+
     return (
         <div className="space-y-6">
             {/* Redirect URI Configuration */}
             <section>
                 <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-4">
-                    <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 OAuth Provider Configuration Required</h3>
+                    <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 OAuth Provider Configuration</h3>
                     <p className="text-sm text-blue-200 mb-3">
-                        Configure this callback URL in your OAuth provider's application settings:
+                        This callback URL must be configured in your OAuth provider's application settings:
                     </p>
                     <div className="flex items-center gap-2 mb-2">
                         <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
-                            {`https://api.rise.dev/api/v1/oauth/callback/${projectName}/${extensionName}`}
+                            {callbackUrl}
                         </code>
                         <button
                             onClick={() => {
-                                navigator.clipboard.writeText(`https://api.rise.dev/api/v1/oauth/callback/${projectName}/${extensionName}`);
+                                navigator.clipboard.writeText(callbackUrl);
                                 showToast('Redirect URI copied to clipboard', 'success');
                             }}
                             className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap"
@@ -472,7 +507,6 @@ function OAuthDetailView({ extension, projectName }) {
                         </button>
                     </div>
                     <p className="text-xs text-blue-300">
-                        This URL is where the OAuth provider will redirect users after authentication.
                         Also called "Redirect URI", "Callback URL", or "Authorized redirect URIs" depending on your provider.
                     </p>
                 </div>
@@ -605,7 +639,7 @@ function OAuthDetailView({ extension, projectName }) {
                             <strong>OAuth Authorization URL:</strong>
                         </p>
                         <code className="block bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
-                            {`https://api.rise.dev/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`}
+                            {authorizeUrl}
                         </code>
                     </div>
                     <div>
@@ -613,7 +647,7 @@ function OAuthDetailView({ extension, projectName }) {
                             <strong>OAuth Callback URL (configured in provider):</strong>
                         </p>
                         <code className="block bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all">
-                            {`https://api.rise.dev/api/v1/oauth/callback/${projectName}/${extensionName}`}
+                            {callbackUrl}
                         </code>
                     </div>
 

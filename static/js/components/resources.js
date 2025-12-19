@@ -1613,7 +1613,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                                 </p>
                             </div>
                         )}
-                        {extensionAPI.renderConfigureTab(uiSpec, extensionType.spec_schema, handleUiSpecChange)}
+                        {extensionAPI.renderConfigureTab(uiSpec, extensionType.spec_schema, handleUiSpecChange, projectName, instanceName, isEnabled)}
                         <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
                             <Button
                                 variant="primary"
