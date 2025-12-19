@@ -178,9 +178,10 @@ impl AwsRdsProvisioner {
         })
     }
 
-    fn instance_id_for_project(&self, project_name: &str) -> String {
+    fn instance_id_for_project(&self, project_name: &str, extension_name: &str) -> String {
         self.instance_id_template
             .replace("{project_name}", project_name)
+            .replace("{extension_name}", extension_name)
     }
 
     /// Reconcile a single RDS extension
@@ -343,10 +344,16 @@ impl AwsRdsProvisioner {
         project_id: Uuid,
         extension_name: &str,
     ) -> Result<()> {
-        let instance_id = self.instance_id_for_project(project_name);
+        // Use stored instance_id if already set, otherwise generate a new unique one
+        let instance_id = if let Some(ref existing_id) = status.instance_id {
+            existing_id.clone()
+        } else {
+            self.instance_id_for_project(project_name, extension_name)
+        };
+
         info!(
-            "Creating RDS instance {} for project {}",
-            instance_id, project_name
+            "Creating RDS instance {} for project {} (extension: {})",
+            instance_id, project_name, extension_name
         );
 
         // Generate master credentials

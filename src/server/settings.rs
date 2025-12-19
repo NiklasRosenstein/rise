@@ -616,6 +616,9 @@ pub enum ExtensionProviderConfig {
         region: String,
         instance_size: String,
         disk_size: i32, // in GiB
+        /// Template for RDS instance identifiers
+        /// Available placeholders: {project_name}, {extension_name}
+        /// Default: "rise-{project_name}-{extension_name}"
         #[serde(default = "default_instance_id_template")]
         instance_id_template: String,
         /// Default engine version to use if not specified in project extension spec
@@ -646,7 +649,7 @@ pub enum ExtensionProviderConfig {
 
 #[allow(dead_code)]
 fn default_instance_id_template() -> String {
-    "rise-{project_name}".to_string()
+    "rise-{project_name}-{extension_name}".to_string()
 }
 
 #[allow(dead_code)]
