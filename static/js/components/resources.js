@@ -1248,6 +1248,18 @@ function GenericExtensionDetailView({ extension }) {
 
 // Extension Detail Page Component
 function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, extensionInstance }) {
+    // Helper to get a user-friendly default name for an extension type
+    const getDefaultExtensionName = (extensionType) => {
+        if (!extensionType) return '';
+
+        // Map extension types to friendly default names
+        const defaults = {
+            'aws-rds-provisioner': 'rds',
+        };
+
+        return defaults[extensionType] || extensionType;
+    };
+
     const [extensionType, setExtensionType] = useState(null);
     const [enabledExtension, setEnabledExtension] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1259,7 +1271,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
     const [deleting, setDeleting] = useState(false);
     const [deleteConfirmName, setDeleteConfirmName] = useState('');
     const [originalSpec, setOriginalSpec] = useState('{}');
-    const [instanceName, setInstanceName] = useState(extensionTypeProp || ''); // Instance name for new extensions
+    const [instanceName, setInstanceName] = useState(getDefaultExtensionName(extensionTypeProp)); // Instance name for new extensions
     const { showToast } = useToast();
 
     const isEnabled = enabledExtension !== null;
@@ -1593,7 +1605,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                                     id="extension-instance-name"
                                     value={instanceName}
                                     onChange={(e) => setInstanceName(e.target.value)}
-                                    placeholder={extensionTypeProp}
+                                    placeholder={getDefaultExtensionName(extensionTypeProp)}
                                     required
                                 />
                                 <p className="text-sm text-gray-500 mt-2">
@@ -1623,7 +1635,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                                     id="extension-instance-name-config"
                                     value={instanceName}
                                     onChange={(e) => setInstanceName(e.target.value)}
-                                    placeholder={extensionTypeProp}
+                                    placeholder={getDefaultExtensionName(extensionTypeProp)}
                                     required
                                 />
                                 <p className="text-sm text-gray-500 mt-2">
