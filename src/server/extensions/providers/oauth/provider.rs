@@ -20,6 +20,7 @@ pub struct OAuthProviderConfig {
     pub api_domain: String,
 }
 
+#[allow(dead_code)]
 pub struct OAuthProvider {
     db_pool: PgPool,
     encryption_provider: Arc<dyn EncryptionProvider>,
@@ -38,6 +39,7 @@ impl OAuthProvider {
     }
 
     /// Compute the redirect URI for this OAuth extension
+    #[allow(dead_code)]
     pub fn compute_redirect_uri(&self, project_name: &str, extension_name: &str) -> String {
         format!(
             "https://{}/api/v1/oauth/callback/{}/{}",
@@ -46,6 +48,7 @@ impl OAuthProvider {
     }
 
     /// Resolve client_secret from project environment variable
+    #[allow(dead_code)]
     pub async fn resolve_client_secret(
         &self,
         project_id: Uuid,
@@ -79,6 +82,7 @@ impl OAuthProvider {
     }
 
     /// Exchange authorization code for tokens
+    #[allow(dead_code)]
     pub async fn exchange_code_for_tokens(
         &self,
         spec: &OAuthExtensionSpec,
@@ -131,6 +135,7 @@ impl OAuthProvider {
     }
 
     /// Refresh an expired token using refresh_token
+    #[allow(dead_code)]
     pub async fn refresh_token(
         &self,
         spec: &OAuthExtensionSpec,

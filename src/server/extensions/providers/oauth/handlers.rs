@@ -1,6 +1,6 @@
 use super::models::{
-    AuthorizeRequest, CallbackRequest, OAuthExtensionSpec, OAuthExtensionStatus, OAuthState,
-    TokenResponse,
+    AuthorizeFlowQuery, CallbackRequest, OAuthExchangeState, OAuthExtensionSpec,
+    OAuthExtensionStatus, OAuthFlowType, OAuthState, TokenResponse,
 };
 use crate::db::{extensions as db_extensions, projects as db_projects, user_oauth_tokens};
 use crate::server::state::AppState;
@@ -8,6 +8,7 @@ use axum::{
     extract::{Path, Query, State},
     http::{header, StatusCode},
     response::{IntoResponse, Redirect, Response},
+    Json,
 };
 use chrono::{Duration, Utc};
 use tracing::{debug, error, info, warn};
@@ -76,10 +77,11 @@ fn validate_redirect_uri(
 /// Query params:
 /// - redirect_uri (optional): Where to redirect after auth (for local dev/custom domains)
 /// - state (optional): Application's CSRF state parameter (passed through to final redirect)
+/// - flow (optional): "fragment" (default, for SPAs) or "exchange" (for backend apps)
 pub async fn authorize(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
-    Query(req): Query<AuthorizeRequest>,
+    Query(req): Query<AuthorizeFlowQuery>,
     headers: axum::http::HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
     debug!(
@@ -276,6 +278,7 @@ pub async fn authorize(
         project_name: project_name.clone(),
         extension_name: extension_name.clone(),
         session_id: existing_session_id,
+        flow_type: req.flow,
         created_at: Utc::now(),
     };
 
@@ -478,17 +481,14 @@ pub async fn callback(
         })?;
 
     let refresh_token_encrypted = match &token_response.refresh_token {
-        Some(refresh_token) => Some(
-            encryption_provider
-                .encrypt(refresh_token)
-                .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to encrypt refresh token: {}", e),
-                    )
-                })?,
-        ),
+        Some(refresh_token) => Some(encryption_provider.encrypt(refresh_token).await.map_err(
+            |e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to encrypt refresh token: {}", e),
+                )
+            },
+        )?),
         None => None,
     };
 
@@ -559,7 +559,7 @@ pub async fn callback(
         "Missing redirect URI in state".to_string(),
     ))?;
 
-    // Build redirect URL with tokens in fragment
+    // Build redirect URL - different flow based on oauth_state.flow_type
     let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -567,22 +567,63 @@ pub async fn callback(
         )
     })?;
 
-    let mut fragment_parts = vec![
-        format!("access_token={}", token_response.access_token),
-        format!("token_type={}", token_response.token_type),
-        format!("expires_in={}", token_response.expires_in),
-    ];
+    match oauth_state.flow_type {
+        OAuthFlowType::Fragment => {
+            // Fragment flow: Return tokens directly in URL fragment (for SPAs)
+            let mut fragment_parts = vec![
+                format!("access_token={}", token_response.access_token),
+                format!("token_type={}", token_response.token_type),
+                format!("expires_in={}", token_response.expires_in),
+            ];
 
-    if let Some(id_token) = token_response.id_token {
-        fragment_parts.push(format!("id_token={}", id_token));
+            if let Some(id_token) = token_response.id_token {
+                fragment_parts.push(format!("id_token={}", id_token));
+            }
+
+            // Pass through application's CSRF state
+            if let Some(app_state) = oauth_state.application_state {
+                fragment_parts.push(format!("state={}", app_state));
+            }
+
+            redirect_url.set_fragment(Some(&fragment_parts.join("&")));
+
+            debug!("Fragment flow: Returning tokens in URL fragment");
+        }
+        OAuthFlowType::Exchange => {
+            // Exchange flow: Generate exchange token for backend to retrieve (for server-rendered apps)
+            let exchange_token = generate_state_token(); // Reuse same random token generator
+
+            let exchange_state = OAuthExchangeState {
+                project_id: project.id,
+                extension_name: extension_name.clone(),
+                session_id: session_id.clone(),
+                created_at: Utc::now(),
+            };
+
+            // Store exchange token in cache (5-minute TTL, single-use)
+            state
+                .oauth_exchange_store
+                .insert(exchange_token.clone(), exchange_state)
+                .await;
+
+            // Add exchange token as query parameter
+            redirect_url
+                .query_pairs_mut()
+                .append_pair("exchange_token", &exchange_token);
+
+            // Pass through application's CSRF state
+            if let Some(app_state) = oauth_state.application_state {
+                redirect_url
+                    .query_pairs_mut()
+                    .append_pair("state", &app_state);
+            }
+
+            info!(
+                "Exchange flow: Generated exchange token for session {}",
+                session_id
+            );
+        }
     }
-
-    // Pass through application's CSRF state
-    if let Some(app_state) = oauth_state.application_state {
-        fragment_parts.push(format!("state={}", app_state));
-    }
-
-    redirect_url.set_fragment(Some(&fragment_parts.join("&")));
 
     // Set session cookie
     let cookie_value = format!(
@@ -598,4 +639,124 @@ pub async fn callback(
         .insert(header::SET_COOKIE, cookie_value.parse().unwrap());
 
     Ok(response)
+}
+
+/// Exchange a temporary token for OAuth credentials (Exchange Flow)
+///
+/// POST /api/v1/projects/{project}/extensions/{extension}/oauth/exchange
+///
+/// Query params:
+/// - exchange_token: Temporary exchange token from callback
+///
+/// This endpoint is called by backend applications that received an exchange_token
+/// from the OAuth callback. They exchange it for the actual OAuth credentials.
+/// Requires service account authentication (RISE_SERVICE_ACCOUNT_TOKEN).
+pub async fn exchange_credentials(
+    State(state): State<AppState>,
+    Path((project_name, extension_name)): Path<(String, String)>,
+    Query(params): Query<super::models::ExchangeTokenRequest>,
+) -> Result<Json<super::models::CredentialsResponse>, (StatusCode, String)> {
+    debug!(
+        "Exchange credentials request for project={}, extension={}",
+        project_name, extension_name
+    );
+
+    // Get project
+    let project = db_projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    // Retrieve and validate exchange token (single-use, 5-minute TTL)
+    let exchange_state = state
+        .oauth_exchange_store
+        .get(&params.exchange_token)
+        .await
+        .ok_or((
+            StatusCode::BAD_REQUEST,
+            "Invalid or expired exchange token".to_string(),
+        ))?;
+
+    // Invalidate exchange token immediately (single-use)
+    state
+        .oauth_exchange_store
+        .invalidate(&params.exchange_token)
+        .await;
+
+    debug!(
+        "Exchange token validated and invalidated for session {}",
+        exchange_state.session_id
+    );
+
+    // Verify project and extension match
+    if exchange_state.project_id != project.id || exchange_state.extension_name != extension_name {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Exchange token does not match project/extension".to_string(),
+        ));
+    }
+
+    // Get tokens from database
+    let token = user_oauth_tokens::get_by_session(
+        &state.db_pool,
+        project.id,
+        &extension_name,
+        &exchange_state.session_id,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+    .ok_or((
+        StatusCode::NOT_FOUND,
+        "OAuth token not found for this session".to_string(),
+    ))?;
+
+    // Update last_accessed_at
+    if let Err(e) = user_oauth_tokens::update_last_accessed(&state.db_pool, token.id).await {
+        warn!("Failed to update last_accessed_at: {:?}", e);
+    }
+
+    // Decrypt tokens
+    let encryption_provider = state.encryption_provider.as_ref().ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Encryption provider not configured".to_string(),
+    ))?;
+
+    let access_token = encryption_provider
+        .decrypt(&token.access_token_encrypted)
+        .await
+        .map_err(|e| {
+            error!("Failed to decrypt access token: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to decrypt access token: {}", e),
+            )
+        })?;
+
+    let refresh_token = match &token.refresh_token_encrypted {
+        Some(refresh_token_encrypted) => Some(
+            encryption_provider
+                .decrypt(refresh_token_encrypted)
+                .await
+                .map_err(|e| {
+                    error!("Failed to decrypt refresh token: {:?}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to decrypt refresh token: {}", e),
+                    )
+                })?,
+        ),
+        None => None,
+    };
+
+    info!(
+        "Exchange successful for session {} on project {} extension {}",
+        exchange_state.session_id, project_name, extension_name
+    );
+
+    Ok(Json(super::models::CredentialsResponse {
+        access_token,
+        token_type: "Bearer".to_string(),
+        expires_at: token.expires_at.unwrap_or_else(Utc::now),
+        refresh_token, // Include refresh token for backend apps
+    }))
 }

@@ -49,6 +49,8 @@ pub struct OAuthState {
     pub extension_name: String,
     /// Session ID from cookie (if present)
     pub session_id: Option<String>,
+    /// OAuth flow type (fragment or exchange)
+    pub flow_type: OAuthFlowType,
     /// When this state was created
     pub created_at: DateTime<Utc>,
 }
@@ -63,15 +65,6 @@ pub struct TokenResponse {
     pub refresh_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id_token: Option<String>,
-}
-
-/// Request to initiate OAuth authorization
-#[derive(Debug, Deserialize)]
-pub struct AuthorizeRequest {
-    /// Where to redirect after OAuth completes (optional, for local dev)
-    pub redirect_uri: Option<String>,
-    /// Application's CSRF state parameter (passed through)
-    pub state: Option<String>,
 }
 
 /// OAuth callback request from provider
@@ -95,6 +88,7 @@ pub struct CredentialsResponse {
 
 /// User OAuth token record from database
 #[derive(Debug, Clone, sqlx::FromRow)]
+#[allow(dead_code)]
 pub struct UserOAuthToken {
     pub id: Uuid,
     pub project_id: Uuid,
@@ -108,4 +102,48 @@ pub struct UserOAuthToken {
     pub last_accessed_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
+}
+
+/// Exchange token state for secure backend flow
+/// Temporary state linking an exchange token to a user's OAuth session
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OAuthExchangeState {
+    /// Project ID
+    pub project_id: Uuid,
+    /// Extension name
+    pub extension_name: String,
+    /// Session ID from OAuth flow
+    pub session_id: String,
+    /// When this exchange token was created
+    pub created_at: DateTime<Utc>,
+}
+
+/// Request to exchange a temporary token for OAuth credentials
+#[derive(Debug, Deserialize)]
+pub struct ExchangeTokenRequest {
+    /// Temporary exchange token (single-use, short TTL)
+    pub exchange_token: String,
+}
+
+/// Query parameter to enable exchange flow
+#[derive(Debug, Deserialize)]
+pub struct AuthorizeFlowQuery {
+    /// Where to redirect after OAuth completes (optional, for local dev)
+    pub redirect_uri: Option<String>,
+    /// Application's CSRF state parameter (passed through)
+    pub state: Option<String>,
+    /// OAuth flow type: "fragment" (default) or "exchange" (for backend apps)
+    #[serde(default)]
+    pub flow: OAuthFlowType,
+}
+
+/// OAuth flow type
+#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum OAuthFlowType {
+    /// Fragment-based flow (tokens in URL fragment) - best for SPAs
+    #[default]
+    Fragment,
+    /// Exchange token flow (backend exchanges token) - best for server-rendered apps
+    Exchange,
 }

@@ -34,6 +34,7 @@ pub async fn get_by_session(
 }
 
 /// Create or update a user OAuth token (upsert)
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert(
     pool: &PgPool,
     project_id: Uuid,
@@ -117,6 +118,7 @@ pub async fn delete(pool: &PgPool, id: Uuid) -> Result<bool> {
 
 /// Delete all user OAuth tokens for a specific project and extension
 /// This is used when deleting an OAuth extension
+#[allow(dead_code)]
 pub async fn delete_by_extension(pool: &PgPool, project_id: Uuid, extension: &str) -> Result<u64> {
     let result = sqlx::query!(
         r#"
@@ -134,6 +136,7 @@ pub async fn delete_by_extension(pool: &PgPool, project_id: Uuid, extension: &st
 }
 
 /// Find tokens that are expired but have refresh tokens (for background refresh job)
+#[allow(dead_code)]
 pub async fn find_expiring_tokens(pool: &PgPool) -> Result<Vec<UserOAuthToken>> {
     let tokens = sqlx::query_as!(
         UserOAuthToken,
@@ -157,6 +160,7 @@ pub async fn find_expiring_tokens(pool: &PgPool) -> Result<Vec<UserOAuthToken>> 
 }
 
 /// Find inactive tokens for cleanup (not accessed within retention period)
+#[allow(dead_code)]
 pub async fn find_inactive_tokens(
     pool: &PgPool,
     inactive_since: DateTime<Utc>,

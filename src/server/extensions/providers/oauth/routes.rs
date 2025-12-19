@@ -14,4 +14,8 @@ pub fn oauth_routes() -> Router<AppState> {
             "/api/v1/oauth/callback/:project/:extension",
             get(handlers::callback),
         )
+        .route(
+            "/api/v1/projects/:project/extensions/:extension/oauth/exchange",
+            get(handlers::exchange_credentials),
+        )
 }
