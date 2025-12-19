@@ -440,62 +440,6 @@ function OAuthDetailView({ extension, projectName }) {
     const scopesArray = spec.scopes || [];
     const extensionName = extension.extension;
 
-    // Get toast function from context
-    const { showToast } = useToast();
-
-    // Check if we're returning from OAuth flow
-    React.useEffect(() => {
-        // Check if we have OAuth callback in the URL fragment
-        if (window.location.hash && (window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
-            const fragment = window.location.hash.substring(1);
-            const params = new URLSearchParams(fragment);
-
-            // Restore the original page location from sessionStorage
-            const returnPath = sessionStorage.getItem('oauth_return_path');
-            sessionStorage.removeItem('oauth_return_path');
-
-            const error = params.get('error');
-            const errorDescription = params.get('error_description');
-            const accessToken = params.get('access_token');
-
-            if (error) {
-                // OAuth flow failed
-                const message = errorDescription || `OAuth flow failed: ${error}`;
-                showToast(message, 'error');
-
-                if (returnPath) {
-                    window.location.hash = returnPath;
-                } else {
-                    window.location.hash = `project/${projectName}/extension/${extensionName}`;
-                }
-            } else if (accessToken) {
-                // OAuth flow succeeded
-                const expiresAt = params.get('expires_at');
-                const expiresIn = params.get('expires_in');
-
-                // Calculate expiration time
-                let expiresAtDate;
-                if (expiresAt) {
-                    expiresAtDate = new Date(expiresAt);
-                } else if (expiresIn) {
-                    expiresAtDate = new Date(Date.now() + parseInt(expiresIn) * 1000);
-                }
-
-                // Show success toast
-                const message = `OAuth flow successful! Token expires ${expiresAtDate ? expiresAtDate.toLocaleString() : 'soon'}`;
-                showToast(message, 'success');
-
-                if (returnPath) {
-                    // Navigate back to the extension page
-                    window.location.hash = returnPath;
-                } else {
-                    // Fallback: just clean the URL
-                    window.location.hash = `project/${projectName}/extension/${extensionName}`;
-                }
-            }
-        }
-    }, [projectName, extensionName, showToast]);
-
     return (
         <div className="space-y-6">
             {/* Configuration Status */}

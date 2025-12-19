@@ -243,7 +243,57 @@ function App() {
     const hash = useHashLocation();
 
     useEffect(() => {
-        // Check if we're handling OAuth callback
+        // Check if we're handling extension OAuth callback (tokens in hash fragment)
+        if (window.location.hash && (window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
+            const fragment = window.location.hash.substring(1);
+            const params = new URLSearchParams(fragment);
+
+            // Restore the original page location from sessionStorage
+            const returnPath = sessionStorage.getItem('oauth_return_path');
+
+            const error = params.get('error');
+            const errorDescription = params.get('error_description');
+            const accessToken = params.get('access_token');
+
+            if (error) {
+                // OAuth flow failed
+                const message = errorDescription || `OAuth flow failed: ${error}`;
+                showToast(message, 'error');
+            } else if (accessToken) {
+                // OAuth flow succeeded
+                const expiresIn = params.get('expires_in');
+                const expiresAt = params.get('expires_at');
+
+                // Calculate expiration time
+                let expiresAtDate;
+                if (expiresAt) {
+                    expiresAtDate = new Date(expiresAt);
+                } else if (expiresIn) {
+                    expiresAtDate = new Date(Date.now() + parseInt(expiresIn) * 1000);
+                }
+
+                // Show success toast
+                const message = `OAuth flow successful! Token expires ${expiresAtDate ? expiresAtDate.toLocaleString() : 'soon'}`;
+                showToast(message, 'success');
+            }
+
+            // Clean up sessionStorage
+            sessionStorage.removeItem('oauth_return_path');
+
+            // Navigate back to the extension page
+            if (returnPath) {
+                window.location.hash = returnPath;
+            } else {
+                // Fallback to home if no return path
+                window.location.hash = '';
+            }
+
+            // Don't continue with normal auth check
+            setAuthChecked(true);
+            return;
+        }
+
+        // Check if we're handling main app OAuth callback
         const params = new URLSearchParams(window.location.search);
         if (params.has('code')) {
             // Let LoginPage handle the callback
