@@ -354,12 +354,19 @@ rise extension create my-app oauth-github \
   }'
 ```
 
-## Application Integration
+## OAuth Flows
 
-### Frontend (JavaScript)
+The extension supports two OAuth flows:
+
+### Fragment Flow (Default - Recommended for SPAs)
+
+Tokens are returned in the URL fragment (`#access_token=...`), which never reaches the server.
+This is the most secure option for single-page applications.
+
+**Frontend Integration:**
 
 ```javascript
-// Initiate OAuth login
+// Initiate OAuth login (fragment flow is default)
 function login() {
   window.location.href = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize';
 }
@@ -370,26 +377,69 @@ function extractTokens() {
   const params = new URLSearchParams(fragment);
   const accessToken = params.get('access_token');
   const idToken = params.get('id_token');
-  return { accessToken, idToken };
+  const expiresAt = params.get('expires_at');
+
+  // Store in sessionStorage or localStorage
+  sessionStorage.setItem('access_token', accessToken);
+
+  return { accessToken, idToken, expiresAt };
 }
+```
+
+### Exchange Token Flow (For Backend Apps)
+
+For server-rendered applications, use the exchange flow. The callback receives a temporary
+exchange token as a query parameter, which your backend exchanges for the actual OAuth tokens.
+
+**Backend Integration (Node.js/Express example):**
+
+```javascript
+// Initiate OAuth login with exchange flow
+app.get('/login', (req, res) => {
+  const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?flow=exchange';
+  res.redirect(authUrl);
+});
+
+// Handle OAuth callback
+app.get('/oauth/callback', async (req, res) => {
+  const exchangeToken = req.query.exchange_token;
+
+  // Exchange the temporary token for actual OAuth tokens
+  const response = await fetch(
+    `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/exchange?exchange_token=${exchangeToken}`
+  );
+
+  const tokens = await response.json();
+
+  // Store tokens in session (HttpOnly cookie recommended)
+  req.session.accessToken = tokens.access_token;
+  req.session.idToken = tokens.id_token;
+
+  res.redirect('/dashboard');
+});
 ```
 
 ### Local Development
 
-For local development, pass a `redirect_uri` parameter:
+For local development, override the redirect URI:
 
 ```javascript
-const localCallbackUrl = 'http://localhost:3000/oauth/callback';
-window.location.href = `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?redirect_uri=${encodeURIComponent(localCallbackUrl)}`;
+// Fragment flow
+const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?redirect_uri=http://localhost:3000/callback';
+
+// Exchange flow
+const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?flow=exchange&redirect_uri=http://localhost:3000/oauth/callback';
 ```
 
 ## Security Features
 
 - Client secrets stored encrypted in database
-- Tokens passed in URL fragments (not query params)
+- Fragment flow: Tokens in URL fragments (never sent to server)
+- Exchange flow: Temporary single-use tokens with 5-minute TTL
 - Redirect URI validation (localhost or project domains only)
 - CSRF protection via state tokens
 - User token caching with automatic refresh
+- Session-based token storage with encrypted credentials
 - Configurable token retention policies
 "#
     }

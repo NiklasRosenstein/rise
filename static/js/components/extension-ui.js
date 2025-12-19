@@ -533,7 +533,7 @@ function OAuthDetailView({ extension }) {
             {/* Integration Guide */}
             <section>
                 <h2 className="text-lg font-semibold text-gray-200 mb-3">Integration Guide</h2>
-                <div className="bg-gray-900 rounded p-4 space-y-3">
+                <div className="bg-gray-900 rounded p-4 space-y-4">
                     <div>
                         <p className="text-sm text-gray-400 mb-2">
                             <strong>OAuth Authorization URL:</strong>
@@ -550,22 +550,74 @@ function OAuthDetailView({ extension }) {
                             {`https://api.rise.dev/api/v1/oauth/callback/${extension.project_name}/${extension.name}`}
                         </code>
                     </div>
+
                     <div className="pt-2 border-t border-gray-700">
-                        <p className="text-sm text-gray-400 mb-2">
-                            <strong>Example JavaScript Integration:</strong>
+                        <p className="text-sm font-semibold text-gray-300 mb-3">Fragment Flow (Default - For SPAs)</p>
+                        <p className="text-xs text-gray-400 mb-2">
+                            Tokens are returned in the URL fragment. Best for single-page applications.
                         </p>
                         <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
-{`// Initiate OAuth login
+{`// Initiate OAuth login (fragment flow is default)
 function login() {
   const authUrl = 'https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize';
   window.location.href = authUrl;
 }
 
-// Extract tokens from URL fragment
+// Extract tokens from URL fragment after redirect
 const fragment = window.location.hash.substring(1);
 const params = new URLSearchParams(fragment);
 const accessToken = params.get('access_token');
-const idToken = params.get('id_token');`}
+const idToken = params.get('id_token');
+const expiresAt = params.get('expires_at');
+
+// Store securely
+sessionStorage.setItem('access_token', accessToken);`}
+                        </pre>
+                    </div>
+
+                    <div className="pt-2 border-t border-gray-700">
+                        <p className="text-sm font-semibold text-gray-300 mb-3">Exchange Token Flow (For Backend Apps)</p>
+                        <p className="text-xs text-gray-400 mb-2">
+                            Your backend receives a temporary exchange token and exchanges it for OAuth tokens.
+                        </p>
+                        <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+{`// Initiate OAuth login with exchange flow
+app.get('/login', (req, res) => {
+  const authUrl = 'https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize?flow=exchange';
+  res.redirect(authUrl);
+});
+
+// Handle OAuth callback
+app.get('/oauth/callback', async (req, res) => {
+  const exchangeToken = req.query.exchange_token;
+
+  // Exchange for actual OAuth tokens
+  const response = await fetch(
+    \`https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/exchange?exchange_token=\${exchangeToken}\`
+  );
+
+  const tokens = await response.json();
+
+  // Store in HttpOnly session cookie
+  req.session.accessToken = tokens.access_token;
+  req.session.idToken = tokens.id_token;
+
+  res.redirect('/dashboard');
+});`}
+                        </pre>
+                    </div>
+
+                    <div className="pt-2 border-t border-gray-700">
+                        <p className="text-sm font-semibold text-gray-300 mb-2">Local Development</p>
+                        <p className="text-xs text-gray-400 mb-2">
+                            Override the redirect URI for local testing:
+                        </p>
+                        <pre className="bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+{`// Fragment flow
+const authUrl = 'https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize?redirect_uri=http://localhost:3000/callback';
+
+// Exchange flow
+const authUrl = 'https://api.rise.dev/api/v1/projects/${extension.project_name}/extensions/${extension.name}/oauth/authorize?flow=exchange&redirect_uri=http://localhost:3000/oauth/callback';`}
                         </pre>
                     </div>
                 </div>
