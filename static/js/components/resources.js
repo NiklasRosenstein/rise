@@ -828,79 +828,129 @@ function ExtensionsList({ projectName }) {
     if (error) return <p className="text-red-400">Error loading extensions: {error}</p>;
 
     return (
-        <div>
-            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
-                <table className="w-full">
-                    <thead className="bg-gray-800">
-                        <tr>
-                            <th className="w-12 px-3 py-3"></th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Extension</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Description</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
-                        </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-800">
-                        {availableExtensions.length === 0 ? (
-                            <tr>
-                                <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
-                                    No extensions available.
-                                </td>
-                            </tr>
-                        ) : (
-                            availableExtensions
-                                .sort((a, b) => a.name.localeCompare(b.name))
-                                .map(extType => {
-                                    const enabled = isEnabled(extType.extension_type);
-                                    const enabledData = getEnabledExtension(extType.extension_type);
+        <div className="space-y-6">
+            {/* Available Extensions - Icon Buttons */}
+            <div>
+                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                    Available Extensions
+                </h3>
+                <div className="flex flex-wrap gap-3">
+                    {availableExtensions.length === 0 ? (
+                        <p className="text-gray-400 text-sm">No extensions available.</p>
+                    ) : (
+                        availableExtensions
+                            .sort((a, b) => a.name.localeCompare(b.name))
+                            .map(extType => {
+                                const enabled = isEnabled(extType.extension_type);
+                                const iconUrl = getExtensionIcon(extType.extension_type);
 
-                                    const iconUrl = getExtensionIcon(extType.extension_type);
+                                return (
+                                    <button
+                                        key={extType.name}
+                                        onClick={() => {
+                                            window.location.hash = `#project/${projectName}/extensions/${extType.name}`;
+                                        }}
+                                        className="group relative flex flex-col items-center justify-center w-32 h-32 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-lg transition-all"
+                                        title={extType.description}
+                                    >
+                                        {/* Icon */}
+                                        {iconUrl ? (
+                                            <img
+                                                src={iconUrl}
+                                                alt={extType.name}
+                                                className="w-12 h-12 rounded object-contain mb-2"
+                                            />
+                                        ) : (
+                                            <div className="w-12 h-12 mb-2 flex items-center justify-center bg-gray-700 rounded text-gray-400 text-2xl font-bold">
+                                                {extType.name.charAt(0).toUpperCase()}
+                                            </div>
+                                        )}
+                                        {/* Name */}
+                                        <span className="text-xs text-gray-300 text-center px-2 line-clamp-2">
+                                            {extType.name}
+                                        </span>
+                                        {/* Enabled Badge */}
+                                        {enabled && (
+                                            <div className="absolute top-2 right-2">
+                                                <div className="w-3 h-3 bg-green-500 rounded-full border-2 border-gray-800" title="Enabled"></div>
+                                            </div>
+                                        )}
+                                    </button>
+                                );
+                            })
+                    )}
+                </div>
+            </div>
 
-                                    return (
-                                        <tr
-                                            key={extType.name}
-                                            className="hover:bg-gray-800/50 transition-colors cursor-pointer"
-                                            onClick={() => {
-                                                // Always navigate to detail page
-                                                window.location.hash = `#project/${projectName}/extensions/${extType.name}`;
-                                            }}
-                                        >
-                                            <td className="px-3 py-4">
-                                                {iconUrl ? (
-                                                    <img
-                                                        src={iconUrl}
-                                                        alt={extType.name}
-                                                        className="w-8 h-8 rounded object-contain"
-                                                    />
-                                                ) : (
-                                                    <div className="w-8 h-8"></div>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm">
-                                                <div className="flex items-center gap-3">
-                                                    <span className="font-mono text-gray-200">{extType.name}</span>
-                                                    {enabled ? (
-                                                        <span className="bg-indigo-600 text-white text-xs font-semibold px-2 py-0.5 rounded uppercase">Enabled</span>
+            {/* Enabled Extensions - Table */}
+            <div>
+                <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">
+                    Enabled Extensions
+                </h3>
+                {enabledExtensions.length === 0 ? (
+                    <div className="bg-gray-900 rounded-lg border border-gray-800 px-6 py-8 text-center">
+                        <p className="text-gray-400 text-sm">
+                            No extensions enabled yet. Click an extension above to get started.
+                        </p>
+                    </div>
+                ) : (
+                    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+                        <table className="w-full">
+                            <thead className="bg-gray-800">
+                                <tr>
+                                    <th className="w-12 px-3 py-3"></th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Extension</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Updated</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-800">
+                                {enabledExtensions
+                                    .sort((a, b) => a.extension.localeCompare(b.extension))
+                                    .map(ext => {
+                                        const extType = availableExtensions.find(t => t.extension_type === ext.extension_type);
+                                        const iconUrl = getExtensionIcon(ext.extension_type);
+
+                                        return (
+                                            <tr
+                                                key={ext.extension}
+                                                className="hover:bg-gray-800/50 transition-colors cursor-pointer"
+                                                onClick={() => {
+                                                    const typeName = extType?.name || ext.extension;
+                                                    window.location.hash = `#project/${projectName}/extensions/${typeName}`;
+                                                }}
+                                            >
+                                                <td className="px-3 py-4">
+                                                    {iconUrl ? (
+                                                        <img
+                                                            src={iconUrl}
+                                                            alt={ext.extension}
+                                                            className="w-8 h-8 rounded object-contain"
+                                                        />
                                                     ) : (
-                                                        <span className="bg-gray-600 text-white text-xs font-semibold px-2 py-0.5 rounded uppercase">Not Enabled</span>
+                                                        <div className="w-8 h-8"></div>
                                                     )}
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4 text-sm text-gray-300">
-                                                {extType.description}
-                                            </td>
-                                            <td className="px-6 py-4 text-sm">
-                                                {enabled && enabledData ? (
-                                                    renderExtensionStatusBadge(enabledData)
-                                                ) : (
-                                                    <span className="text-gray-500">-</span>
-                                                )}
-                                            </td>
-                                        </tr>
-                                    );
-                                })
-                        )}
-                    </tbody>
-                </table>
+                                                </td>
+                                                <td className="px-6 py-4 text-sm">
+                                                    <span className="font-mono text-gray-200">{ext.extension}</span>
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-gray-300">
+                                                    {extType?.description || ext.extension_type}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm">
+                                                    {renderExtensionStatusBadge(ext)}
+                                                </td>
+                                                <td className="px-6 py-4 text-sm text-gray-400">
+                                                    {formatDate(ext.updated)}
+                                                </td>
+                                            </tr>
+                                        );
+                                    })}
+                            </tbody>
+                        </table>
+                    </div>
+                )}
             </div>
 
             {/* Configuration Modal */}
