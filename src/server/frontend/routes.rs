@@ -16,15 +16,22 @@ use super::StaticAssets;
 pub fn frontend_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(serve_index))
-        .route("/{*path}", get(serve_static))
+        .route("/js/{*path}", get(serve_static))
+        .route("/css/{*path}", get(serve_static))
+        .fallback(fallback_handler)
 }
 
 async fn serve_index(State(state): State<AppState>) -> Response {
     render_index(&state)
 }
 
-async fn serve_static(Path(path): Path<String>, State(state): State<AppState>) -> Response {
-    serve_file(&path, &state)
+async fn serve_static(Path(path): Path<String>) -> Response {
+    serve_file(&path)
+}
+
+async fn fallback_handler(State(state): State<AppState>) -> Response {
+    // For all unmatched routes, render index.html (SPA fallback)
+    render_index(&state)
 }
 
 fn render_index(state: &AppState) -> Response {
@@ -77,7 +84,7 @@ fn render_index(state: &AppState) -> Response {
     }
 }
 
-fn serve_file(path: &str, state: &AppState) -> Response {
+fn serve_file(path: &str) -> Response {
     let path = path.trim_start_matches('/');
 
     // Try to get the file from embedded assets
@@ -92,14 +99,8 @@ fn serve_file(path: &str, state: &AppState) -> Response {
                 .unwrap()
         }
         None => {
-            // Check if this is an API route (all API routes now under /api/v1)
-            if path.starts_with("api/v1/") {
-                // Let it 404 as an API route
-                return (StatusCode::NOT_FOUND, "Not found").into_response();
-            }
-
-            // For all other routes, render index.html with config (SPA fallback)
-            render_index(state)
+            // File not found in embedded assets
+            (StatusCode::NOT_FOUND, "File not found").into_response()
         }
     }
 }
