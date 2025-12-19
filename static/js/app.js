@@ -306,10 +306,16 @@ function App() {
     if (hash.startsWith('project/')) {
         const parts = hash.split('/');
         // Check if this is an extension detail page
+        // project/{name}/extensions - extensions tab (list view)
         // project/{name}/extensions/{type}/@new - creating new instance
         // project/{name}/extensions/{type}/{instance} - viewing existing instance
         if (parts[2] === 'extensions') {
-            if (parts.length === 4 && parts[3] === '@new') {
+            if (parts.length === 3) {
+                // Just the extensions tab: project/{name}/extensions
+                view = 'project-detail';
+                params.projectName = parts[1];
+                params.tab = 'extensions';
+            } else if (parts.length === 4 && parts[3] === '@new') {
                 // Creating new instance: project/{name}/extensions/@new
                 view = 'extension-create';
                 params.projectName = parts[1];
