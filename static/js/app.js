@@ -289,9 +289,8 @@ function App() {
                 window.location.hash = '';
             }
 
-            // Don't continue with normal auth check
-            setAuthChecked(true);
-            return;
+            // Continue with normal auth check - don't skip it!
+            // This ensures the user stays logged in after OAuth extension callback
         }
 
         // Check if we're handling main app OAuth callback
