@@ -448,7 +448,6 @@ impl AppState {
                 match provider_config {
                     #[cfg(feature = "aws")]
                     crate::server::settings::ExtensionProviderConfig::AwsRdsProvisioner {
-                        name,
                         region,
                         instance_size,
                         disk_size,
@@ -462,7 +461,7 @@ impl AppState {
                         access_key_id,
                         secret_access_key,
                     } => {
-                        tracing::info!("Initializing AWS RDS extension provider '{}'", name);
+                        tracing::info!("Initializing AWS RDS extension provider");
 
                         // Create AWS config
                         let mut aws_config_builder =
@@ -495,7 +494,6 @@ impl AppState {
                         let aws_rds_provisioner =
                             crate::server::extensions::providers::aws_rds::AwsRdsProvisioner::new(
                                 crate::server::extensions::providers::aws_rds::AwsRdsProvisionerConfig {
-                                    name: name.clone(),
                                     rds_client,
                                     db_pool: db_pool.clone(),
                                     encryption_provider,
@@ -520,10 +518,7 @@ impl AppState {
                         // Start the extension's reconciliation loop
                         aws_rds_arc.start();
 
-                        tracing::info!(
-                            "AWS RDS extension provider '{}' initialized and started",
-                            name
-                        );
+                        tracing::info!("AWS RDS extension provider initialized and started");
                     }
                     // When no extension provider features are enabled, this ensures the match is exhaustive
                     #[allow(unreachable_patterns)]

@@ -17,9 +17,6 @@ pub mod routes;
 /// Extension trait for project resource provisioning
 #[async_trait]
 pub trait Extension: Send + Sync {
-    /// Unique identifier for this extension instance (configurable name)
-    fn name(&self) -> &str;
-
     /// Extension type identifier (constant, used for UI registry lookup)
     /// Examples: "aws-rds-postgres", "aws-s3-bucket"
     /// This should be a constant string that doesn't change based on configuration

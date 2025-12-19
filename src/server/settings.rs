@@ -613,9 +613,6 @@ pub struct ExtensionsSettings {
 pub enum ExtensionProviderConfig {
     #[cfg(feature = "aws")]
     AwsRdsProvisioner {
-        /// Name of this extension (e.g., "aws-rds-postgres")
-        /// This is used as the extension identifier in the database
-        name: String,
         region: String,
         instance_size: String,
         disk_size: i32, // in GiB
