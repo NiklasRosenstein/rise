@@ -45,28 +45,57 @@ fn extract_session_id_from_cookie(cookie_header: Option<&str>) -> Option<String>
 fn validate_redirect_uri(
     redirect_uri: &str,
     project_name: &str,
-    api_domain: &str,
+    api_url: &str,
 ) -> Result<(), String> {
-    let url = Url::parse(redirect_uri).map_err(|e| format!("Invalid redirect URI: {}", e))?;
+    let redirect_url = Url::parse(redirect_uri).map_err(|e| format!("Invalid redirect URI: {}", e))?;
 
-    let host = url.host_str().ok_or("Missing host in redirect URI")?;
+    let host = redirect_url.host_str().ok_or("Missing host in redirect URI")?;
+    let port = redirect_url.port();
 
-    // Allow localhost for local development
+    // Allow localhost for local development (any port)
     if host == "localhost" || host == "127.0.0.1" {
         return Ok(());
     }
 
-    // Allow project's default URL
-    let project_domain = format!("{}.{}", project_name, api_domain.trim_start_matches("api."));
-    if host == project_domain {
-        return Ok(());
+    // Parse the API URL to extract the base domain
+    let api_parsed = Url::parse(api_url).map_err(|e| format!("Invalid API URL: {}", e))?;
+    let api_host = api_parsed.host_str().ok_or("Missing host in API URL")?;
+
+    // Construct project domains
+    let mut allowed_domains = vec![];
+
+    // Pattern 1: api.domain.com -> project.domain.com
+    if let Some(base_domain) = api_host.strip_prefix("api.") {
+        allowed_domains.push(format!("{}.{}", project_name, base_domain));
+    }
+
+    // Pattern 2: localhost -> project.apps.rise.local (for deployed apps)
+    // This handles the case where API is at localhost but apps are at *.apps.rise.local
+    if api_host == "localhost" || api_host == "127.0.0.1" {
+        allowed_domains.push(format!("{}.apps.rise.local", project_name));
+    }
+
+    // Pattern 3: domain.com -> project.domain.com (without api prefix)
+    allowed_domains.push(format!("{}.{}", project_name, api_host));
+
+    // Check if the redirect host matches any allowed domain (with or without port)
+    let host_with_port = if let Some(p) = port {
+        format!("{}:{}", host, p)
+    } else {
+        host.to_string()
+    };
+
+    for allowed in &allowed_domains {
+        if host == allowed || host_with_port == *allowed {
+            return Ok(());
+        }
     }
 
     // TODO: Allow project's custom domains (requires custom domain support)
 
     Err(format!(
         "Invalid redirect URI: not authorized for this project (allowed: localhost, {})",
-        project_domain
+        allowed_domains.join(", ")
     ))
 }
 
@@ -261,11 +290,41 @@ pub async fn authorize(
         uri.clone()
     } else {
         // Default to project's primary URL
-        format!(
-            "https://{}.{}",
-            project_name,
-            state.public_url.trim_start_matches("https://api.")
-        )
+        // Parse API URL to construct project URL
+        let api_url = Url::parse(&state.public_url).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Invalid API URL configuration: {}", e),
+            )
+        })?;
+
+        let api_host = api_url.host_str().ok_or((
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Missing host in API URL".to_string(),
+        ))?;
+
+        let project_host = if let Some(base_domain) = api_host.strip_prefix("api.") {
+            // api.domain.com -> project.domain.com
+            format!("{}.{}", project_name, base_domain)
+        } else if api_host == "localhost" || api_host == "127.0.0.1" {
+            // localhost -> project.apps.rise.local
+            format!("{}.apps.rise.local", project_name)
+        } else {
+            // domain.com -> project.domain.com
+            format!("{}.{}", project_name, api_host)
+        };
+
+        let scheme = api_url.scheme();
+
+        // For deployed Rise apps, use port 8080 (the default app port)
+        // For production with proper DNS, don't include port
+        if api_host == "localhost" || api_host == "127.0.0.1" {
+            // Deployed locally - use port 8080
+            format!("{}://{}:8080/", scheme, project_host)
+        } else {
+            // Production - no port (handled by ingress)
+            format!("{}://{}/", scheme, project_host)
+        }
     };
 
     // Generate CSRF state token
