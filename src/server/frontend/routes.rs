@@ -1,7 +1,7 @@
 use axum::{
     body::Body,
-    extract::{Path, State},
-    http::{header, StatusCode},
+    extract::State,
+    http::{header, StatusCode, Uri},
     response::{Html, IntoResponse, Response},
     routing::get,
     Router,
@@ -16,8 +16,6 @@ use super::StaticAssets;
 pub fn frontend_routes() -> Router<AppState> {
     Router::new()
         .route("/", get(serve_index))
-        .route("/js/{*path}", get(serve_static))
-        .route("/css/{*path}", get(serve_static))
         .fallback(fallback_handler)
 }
 
@@ -25,13 +23,27 @@ async fn serve_index(State(state): State<AppState>) -> Response {
     render_index(&state)
 }
 
-async fn serve_static(Path(path): Path<String>) -> Response {
-    serve_file(&path)
-}
+async fn fallback_handler(uri: Uri, State(state): State<AppState>) -> Response {
+    let path = uri.path().trim_start_matches('/');
 
-async fn fallback_handler(State(state): State<AppState>) -> Response {
-    // For all unmatched routes, render index.html (SPA fallback)
-    render_index(&state)
+    // Try to serve as static file first
+    if let Some(content) = StaticAssets::get(path) {
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        return Response::builder()
+            .status(StatusCode::OK)
+            .header(header::CONTENT_TYPE, mime.as_ref())
+            .header(header::CACHE_CONTROL, "public, max-age=3600")
+            .body(Body::from(content.data))
+            .unwrap();
+    }
+
+    // If not a static file and not an API route, serve SPA index.html
+    if !path.starts_with("api/") {
+        return render_index(&state);
+    }
+
+    // API route that wasn't matched - return 404
+    (StatusCode::NOT_FOUND, "Not found").into_response()
 }
 
 fn render_index(state: &AppState) -> Response {
@@ -84,23 +96,3 @@ fn render_index(state: &AppState) -> Response {
     }
 }
 
-fn serve_file(path: &str) -> Response {
-    let path = path.trim_start_matches('/');
-
-    // Try to get the file from embedded assets
-    match StaticAssets::get(path) {
-        Some(content) => {
-            let mime = mime_guess::from_path(path).first_or_octet_stream();
-            Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, mime.as_ref())
-                .header(header::CACHE_CONTROL, "public, max-age=3600")
-                .body(Body::from(content.data))
-                .unwrap()
-        }
-        None => {
-            // File not found in embedded assets
-            (StatusCode::NOT_FOUND, "File not found").into_response()
-        }
-    }
-}
