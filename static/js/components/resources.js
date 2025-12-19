@@ -850,7 +850,7 @@ function ExtensionsList({ projectName }) {
                                         onClick={() => {
                                             window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}`;
                                         }}
-                                        className="group relative flex flex-col items-center justify-center w-32 h-32 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-lg transition-all"
+                                        className="group relative flex flex-col items-center justify-center w-28 h-28 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-lg transition-all p-3"
                                         title={extType.description}
                                     >
                                         {/* Icon */}
