@@ -184,6 +184,17 @@ impl AwsRdsProvisioner {
             .replace("{extension_name}", extension_name)
     }
 
+    /// Get the finalizer name for this extension instance (new format)
+    fn finalizer_name(&self, extension_name: &str) -> String {
+        format!("rise.dev/extension/{}/{}", self.extension_type(), extension_name)
+    }
+
+    /// Get the old finalizer name format (for migration)
+    /// TODO: Remove this in a future version after migration period
+    fn old_finalizer_name(&self, extension_name: &str) -> String {
+        extension_name.to_string()
+    }
+
     /// Reconcile a single RDS extension
     ///
     /// Returns `Ok(true)` if more work can be done immediately (should not wait),
@@ -215,6 +226,48 @@ impl AwsRdsProvisioner {
                 error: None,
             });
 
+        // Migrate old finalizer format to new format
+        // TODO: Remove this migration logic in a future version
+        let old_finalizer = self.old_finalizer_name(&project_extension.extension);
+        let new_finalizer = self.finalizer_name(&project_extension.extension);
+
+        // Check if project has the old-style finalizer
+        if project.finalizers.contains(&old_finalizer) && !project.finalizers.contains(&new_finalizer) {
+            info!(
+                "Migrating finalizer for extension '{}' from old format '{}' to new format '{}'",
+                project_extension.extension, old_finalizer, new_finalizer
+            );
+
+            // Remove old finalizer
+            if let Err(e) = db_projects::remove_finalizer(
+                &self.db_pool,
+                project.id,
+                &old_finalizer,
+            )
+            .await
+            {
+                error!(
+                    "Failed to remove old finalizer '{}' from project {}: {}",
+                    old_finalizer, project.name, e
+                );
+            }
+
+            // Add new finalizer
+            if let Err(e) = db_projects::add_finalizer(&self.db_pool, project.id, &new_finalizer)
+                .await
+            {
+                error!(
+                    "Failed to add new finalizer '{}' to project {}: {}",
+                    new_finalizer, project.name, e
+                );
+            } else {
+                info!(
+                    "Successfully migrated finalizer for extension '{}' in project {}",
+                    project_extension.extension, project.name
+                );
+            }
+        }
+
         // Check if marked for deletion
         if project_extension.deleted_at.is_some() {
             // Handle deletion
@@ -231,22 +284,24 @@ impl AwsRdsProvisioner {
 
                 // If deletion is complete, hard delete the record and remove finalizer
                 if status.state == RdsState::Deleted {
+                    let finalizer = self.finalizer_name(&project_extension.extension);
+
                     // Remove finalizer so project can be deleted
                     if let Err(e) = db_projects::remove_finalizer(
                         &self.db_pool,
                         project_extension.project_id,
-                        &project_extension.extension,
+                        &finalizer,
                     )
                     .await
                     {
                         error!(
-                            "Failed to remove finalizer from project {}: {}",
-                            project.name, e
+                            "Failed to remove finalizer '{}' from project {}: {}",
+                            finalizer, project.name, e
                         );
                     } else {
                         info!(
                             "Removed finalizer '{}' from project {}",
-                            project_extension.extension, project.name
+                            finalizer, project.name
                         );
                     }
 
@@ -443,17 +498,18 @@ impl AwsRdsProvisioner {
                 status.error = None;
 
                 // Add finalizer immediately to ensure cleanup if project is deleted during provisioning
+                let finalizer = self.finalizer_name(extension_name);
                 if let Err(e) =
-                    db_projects::add_finalizer(&self.db_pool, project_id, extension_name).await
+                    db_projects::add_finalizer(&self.db_pool, project_id, &finalizer).await
                 {
                     error!(
-                        "Failed to add finalizer for project {}: {}",
-                        project_name, e
+                        "Failed to add finalizer '{}' for project {}: {}",
+                        finalizer, project_name, e
                     );
                 } else {
                     info!(
                         "Added finalizer '{}' to project {}",
-                        extension_name, project_name
+                        finalizer, project_name
                     );
                 }
             }
