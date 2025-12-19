@@ -65,8 +65,8 @@ pub async fn create_extension(
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid spec: {}", e)))?;
 
-    // Create/update extension
-    let ext_record = db_extensions::upsert(
+    // Create extension (will fail if already exists)
+    let ext_record = db_extensions::create(
         &state.db_pool,
         project.id,
         &extension_name,
@@ -74,7 +74,18 @@ pub async fn create_extension(
         &payload.spec,
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .map_err(|e| {
+        // Check if it's a unique constraint violation
+        let error_msg = e.to_string();
+        if error_msg.contains("duplicate key") || error_msg.contains("unique constraint") {
+            (
+                StatusCode::CONFLICT,
+                format!("Extension '{}' already exists", extension_name),
+            )
+        } else {
+            (StatusCode::INTERNAL_SERVER_ERROR, error_msg)
+        }
+    })?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
