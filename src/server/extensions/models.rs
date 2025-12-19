@@ -19,6 +19,8 @@ pub struct Extension {
 /// Request to create an extension
 #[derive(Debug, Serialize, Deserialize)]
 pub struct CreateExtensionRequest {
+    /// Extension type (handler identifier, e.g., "aws-rds-provisioner", "oauth")
+    pub extension_type: String,
     pub spec: Value,
 }
 

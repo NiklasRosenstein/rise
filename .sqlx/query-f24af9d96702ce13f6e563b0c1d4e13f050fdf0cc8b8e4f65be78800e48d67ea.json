@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT project_id, extension,\n               spec as \"spec: Value\",\n               status as \"status: Value\",\n               created_at, updated_at, deleted_at\n        FROM project_extensions\n        WHERE project_id = $1 AND extension = $2\n        ",
+  "query": "\n        SELECT project_id, extension, extension_type,\n               spec as \"spec: Value\",\n               status as \"status: Value\",\n               created_at, updated_at, deleted_at\n        FROM project_extensions\n        WHERE project_id = $1\n        ORDER BY created_at ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -15,37 +15,42 @@
       },
       {
         "ordinal": 2,
+        "name": "extension_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
         "name": "spec: Value",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "status: Value",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "deleted_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -55,5 +60,5 @@
       true
     ]
   },
-  "hash": "a97fddae63565d81fda11f50892bb35171b740ca5ff7ca8aad0c6c2d20358ce8"
+  "hash": "f24af9d96702ce13f6e563b0c1d4e13f050fdf0cc8b8e4f65be78800e48d67ea"
 }

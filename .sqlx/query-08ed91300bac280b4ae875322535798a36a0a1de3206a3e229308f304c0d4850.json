@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE project_extensions\n        SET deleted_at = NOW()\n        WHERE project_id = $1 AND extension = $2 AND deleted_at IS NULL\n        RETURNING project_id, extension,\n                  spec as \"spec: Value\",\n                  status as \"status: Value\",\n                  created_at, updated_at, deleted_at\n        ",
+  "query": "\n        SELECT project_id, extension, extension_type,\n               spec as \"spec: Value\",\n               status as \"status: Value\",\n               created_at, updated_at, deleted_at\n        FROM project_extensions\n        WHERE project_id = $1 AND extension = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -15,26 +15,31 @@
       },
       {
         "ordinal": 2,
+        "name": "extension_type",
+        "type_info": "Varchar"
+      },
+      {
+        "ordinal": 3,
         "name": "spec: Value",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "status: Value",
         "type_info": "Jsonb"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 5,
+        "ordinal": 6,
         "name": "updated_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "deleted_at",
         "type_info": "Timestamptz"
       }
@@ -49,11 +54,12 @@
       false,
       false,
       false,
+      false,
       true,
       false,
       false,
       true
     ]
   },
-  "hash": "e6dafaea4d17fb76d87f050f8ab43ff675810965bdb7d616d1a06d31f6858add"
+  "hash": "08ed91300bac280b4ae875322535798a36a0a1de3206a3e229308f304c0d4850"
 }

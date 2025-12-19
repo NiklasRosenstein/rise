@@ -515,7 +515,7 @@ impl AppState {
 
                         let aws_rds_arc: Arc<dyn crate::server::extensions::Extension> =
                             Arc::new(aws_rds_provisioner);
-                        extension_registry.register(aws_rds_arc.clone());
+                        extension_registry.register_type(aws_rds_arc.clone());
 
                         // Start the extension's reconciliation loop
                         aws_rds_arc.start();
