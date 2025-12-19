@@ -656,7 +656,7 @@ app.get('/oauth/callback', async (req, res) => {
                         <div className="space-y-4">
                             <p className="text-sm text-gray-300">
                                 For local development, you can override the redirect URI to point to your local development server.
-                                Make sure to also register this localhost URL in your OAuth provider's settings.
+                                Rise always handles the OAuth provider callback, so you don't need to register localhost URLs with your OAuth provider.
                             </p>
 
                             <div>
@@ -666,7 +666,15 @@ app.get('/oauth/callback', async (req, res) => {
 const authUrl = '${authorizeUrl}?redirect_uri=' +
   encodeURIComponent('http://localhost:3000/callback');
 
-window.location.href = authUrl;`}
+window.location.href = authUrl;
+
+// Handle the callback in your local app
+function handleCallback() {
+  const fragment = window.location.hash.substring(1);
+  const params = new URLSearchParams(fragment);
+  const accessToken = params.get('access_token');
+  // ... use the token
+}`}
                                 </pre>
                             </div>
 
@@ -682,16 +690,17 @@ app.get('/login', (req, res) => {
 
 // Your local callback handler
 app.get('/oauth/callback', async (req, res) => {
+  const exchangeToken = req.query.exchange_token;
   // ... same exchange logic as production
 });`}
                                 </pre>
                             </div>
 
-                            <div className="bg-yellow-900/20 border border-yellow-700 rounded p-4">
-                                <p className="text-sm font-semibold text-yellow-300 mb-2">⚠️ Important</p>
-                                <p className="text-xs text-yellow-200">
-                                    Remember to add <code className="bg-gray-800 px-1 rounded">http://localhost:3000/callback</code> (or your local URL)
-                                    to your OAuth provider's allowed redirect URIs list.
+                            <div className="bg-blue-900/20 border border-blue-700 rounded p-4">
+                                <p className="text-sm font-semibold text-blue-300 mb-2">ℹ️ How it Works</p>
+                                <p className="text-xs text-blue-200">
+                                    The OAuth provider only redirects to <code className="bg-gray-800 px-1 rounded">{callbackUrl}</code> (Rise's callback URL).
+                                    Rise then redirects to your app's redirect_uri with the tokens. You don't need to configure localhost URLs in your OAuth provider.
                                 </p>
                             </div>
                         </div>
