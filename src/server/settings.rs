@@ -607,6 +607,33 @@ pub struct ExtensionsSettings {
     pub providers: Vec<ExtensionProviderConfig>,
 }
 
+/// Snowflake authentication configuration
+#[derive(Debug, Clone, Deserialize)]
+#[serde(tag = "auth_type", rename_all = "snake_case")]
+pub enum SnowflakeAuth {
+    Password {
+        password: String,
+    },
+    PrivateKey {
+        #[serde(flatten)]
+        key_source: PrivateKeySource,
+        #[serde(default)]
+        private_key_password: Option<String>,
+    },
+    Jwt {
+        #[allow(dead_code)]
+        jwt_token: String,
+    },
+}
+
+/// Private key source (path or inline PEM)
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+pub enum PrivateKeySource {
+    Path { private_key_path: String },
+    Inline { private_key: String },
+}
+
 /// Extension provider configuration
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -650,6 +677,29 @@ pub enum ExtensionProviderConfig {
         #[serde(default)]
         secret_access_key: Option<String>,
     },
+
+    #[cfg(feature = "snowflake")]
+    SnowflakeOAuthProvisioner {
+        /// Snowflake account identifier (e.g., "myorg.us-east-1")
+        account: String,
+        /// Snowflake user with CREATE INTEGRATION privilege
+        user: String,
+        /// Authentication configuration (password, private key, or JWT)
+        #[serde(flatten)]
+        auth: SnowflakeAuth,
+        /// Prefix for SECURITY INTEGRATION names (default: "rise")
+        #[serde(default = "default_integration_name_prefix")]
+        integration_name_prefix: String,
+        /// Default blocked roles for OAuth (default: ["ACCOUNTADMIN", "SECURITYADMIN"])
+        #[serde(default = "default_blocked_roles")]
+        default_blocked_roles: Vec<String>,
+        /// Default OAuth scopes (default: ["refresh_token"])
+        #[serde(default = "default_scopes")]
+        default_scopes: Vec<String>,
+        /// Refresh token validity in seconds (default: 7776000 = 90 days)
+        #[serde(default = "default_refresh_token_validity_seconds")]
+        refresh_token_validity_seconds: i64,
+    },
 }
 
 #[allow(dead_code)]
@@ -670,4 +720,24 @@ fn default_engine_version() -> String {
 #[allow(dead_code)]
 fn default_backup_retention_days() -> i32 {
     7 // 7 days of backup retention (reasonable default for production)
+}
+
+#[allow(dead_code)]
+fn default_integration_name_prefix() -> String {
+    "rise".to_string()
+}
+
+#[allow(dead_code)]
+fn default_blocked_roles() -> Vec<String> {
+    vec!["ACCOUNTADMIN".to_string(), "SECURITYADMIN".to_string()]
+}
+
+#[allow(dead_code)]
+fn default_scopes() -> Vec<String> {
+    vec!["refresh_token".to_string()]
+}
+
+#[allow(dead_code)]
+fn default_refresh_token_validity_seconds() -> i64 {
+    7776000 // 90 days
 }
