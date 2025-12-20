@@ -441,12 +441,17 @@ impl SnowflakeOAuthProvisioner {
         // Explicitly set warehouse if configured
         // The warehouse field in SnowflakeClientConfig might not automatically apply to sessions
         if let Some(ref warehouse) = self.warehouse {
+            debug!("Setting warehouse for session: {}", warehouse);
             let use_warehouse_sql =
                 format!("USE WAREHOUSE {}", Self::escape_identifier(warehouse)?);
+            debug!("Executing: {}", use_warehouse_sql);
             session
                 .query(use_warehouse_sql.as_str())
                 .await
                 .context("Failed to set warehouse for session")?;
+            debug!("Warehouse set successfully");
+        } else {
+            debug!("No warehouse configured - session will have no active warehouse");
         }
 
         let rows = session
