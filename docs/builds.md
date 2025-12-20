@@ -64,6 +64,49 @@ rise build myapp:latest
 rise build myapp:latest --backend railpack
 ```
 
+## Build-Time Environment Variables
+
+You can pass environment variables to your build process using the `-e` or `--env` flag. This works consistently across all build backends:
+
+```bash
+# Pass environment variable with explicit value
+rise build myapp:latest -e NODE_ENV=production
+
+# Pass environment variable from current environment
+export DATABASE_URL=postgres://localhost/mydb
+rise build myapp:latest -e DATABASE_URL
+
+# Multiple environment variables
+rise build myapp:latest -e NODE_ENV=production -e API_KEY=secret123
+
+# Works with all backends
+rise build myapp:latest --backend docker -e BUILD_VERSION=1.2.3
+rise build myapp:latest --backend pack -e BP_NODE_VERSION=20
+rise build myapp:latest --backend railpack -e CUSTOM_VAR=value
+```
+
+### Backend-Specific Behavior
+
+**Docker Backend:**
+- Environment variables are passed as `--build-arg` arguments to Docker build
+- Available in Dockerfile `ARG` declarations and `RUN` commands
+- Example Dockerfile usage:
+  ```dockerfile
+  ARG NODE_ENV
+  ARG BUILD_VERSION
+  RUN echo "Building version $BUILD_VERSION in $NODE_ENV mode"
+  ```
+
+**Pack Backend:**
+- Environment variables are passed as `--env` arguments to pack CLI
+- Buildpacks can read these during detection and build phases
+- Common uses: configuring buildpack versions, build flags
+
+**Railpack Backend:**
+- Environment variables are passed as BuildKit secrets
+- Available in all build steps defined in the Railpack plan
+- Railpack frontend exposes them as environment variables during build
+
 ## SSL Certificate Handling (Managed BuildKit Daemon)
 
 When building with BuildKit-based backends (`docker`, `railpack`) on macOS behind corporate proxies (Cloudflare, Zscaler, etc.) or environments with custom CA certificates, builds may fail with SSL certificate verification errors.

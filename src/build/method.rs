@@ -30,9 +30,10 @@ pub struct BuildArgs {
     #[arg(long = "buildpack", short = 'b')]
     pub buildpacks: Vec<String>,
 
-    /// Environment variables to pass to pack CLI (only for pack backend). Can be specified multiple times.
-    #[arg(long = "pack-env")]
-    pub pack_env: Vec<String>,
+    /// Environment variables to pass to the build. Can be specified multiple times.
+    /// Format: KEY=VALUE or KEY (to pass from environment)
+    #[arg(long = "env", short = 'e')]
+    pub env: Vec<String>,
 
     /// Container CLI to use (docker or podman)
     #[arg(long)]
@@ -45,11 +46,6 @@ pub struct BuildArgs {
     /// Embed SSL certificate into Railpack build plan for build-time RUN command support
     #[arg(long)]
     pub railpack_embed_ssl_cert: bool,
-
-    /// Build arguments to pass to Docker build (only for docker backend). Can be specified multiple times.
-    /// Format: KEY=VALUE or KEY (to pass from environment)
-    #[arg(long = "build-arg")]
-    pub docker_build_args: Vec<String>,
 }
 
 /// Options for building container images
@@ -60,11 +56,10 @@ pub(crate) struct BuildOptions {
     pub backend: Option<String>,
     pub builder: Option<String>,
     pub buildpacks: Vec<String>,
-    pub pack_env: Vec<String>,
+    pub env: Vec<String>,
     pub container_cli: Option<String>,
     pub managed_buildkit: bool,
     pub railpack_embed_ssl_cert: bool,
-    pub docker_build_args: Vec<String>,
     pub push: bool,
 }
 
@@ -82,11 +77,10 @@ impl BuildOptions {
             backend: build_args.backend.clone(),
             builder: build_args.builder.clone(),
             buildpacks: build_args.buildpacks.clone(),
-            pack_env: build_args.pack_env.clone(),
+            env: build_args.env.clone(),
             container_cli: build_args.container_cli.clone(),
             managed_buildkit: build_args.managed_buildkit,
             railpack_embed_ssl_cert: build_args.railpack_embed_ssl_cert,
-            docker_build_args: build_args.docker_build_args.clone(),
             push: false,
         }
     }
