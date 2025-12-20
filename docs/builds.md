@@ -75,7 +75,6 @@ You can create a `rise.toml` or `.rise.toml` file in your project directory to d
 backend = "pack"
 builder = "heroku/builder:24"
 buildpacks = ["heroku/nodejs", "heroku/procfile"]
-
 ```
 
 ### Configuration Precedence
@@ -148,6 +147,15 @@ CLI flags always take precedence over project config:
 ```bash
 # Uses docker backend despite project config specifying pack
 rise build myapp:latest --backend docker
+
+# Enable managed BuildKit (shorthand defaults to true)
+rise build myapp:latest --managed-buildkit
+
+# Disable managed BuildKit despite config enabling it
+rise build myapp:latest --managed-buildkit=false
+
+# Enable SSL certificate embedding (shorthand defaults to true)
+rise build myapp:latest --railpack-embed-ssl-cert
 ```
 
 ### File Naming
@@ -170,8 +178,13 @@ Rise CLI provides an opt-in managed BuildKit daemon feature that automatically c
 
 **Enable via CLI flag:**
 ```bash
+# Shorthand (defaults to true)
 rise build myapp:latest --backend railpack --managed-buildkit
 rise deployment create myproject --backend railpack --managed-buildkit
+
+# Explicit values
+rise build myapp:latest --backend railpack --managed-buildkit=true
+rise build myapp:latest --backend railpack --managed-buildkit=false
 ```
 
 **Or set environment variable:**
@@ -260,8 +273,12 @@ Both flags can be used together for comprehensive SSL support.
 ```bash
 export SSL_CERT_FILE=/path/to/ca-certificates.crt
 
-# Embed certificate for build-time use
+# Shorthand (defaults to true)
 rise build myapp:latest --backend railpack --railpack-embed-ssl-cert
+
+# Explicit values
+rise build myapp:latest --backend railpack --railpack-embed-ssl-cert=true
+rise build myapp:latest --backend railpack --railpack-embed-ssl-cert=false
 
 # Combine with managed BuildKit for comprehensive SSL support
 rise build myapp:latest --backend railpack --managed-buildkit --railpack-embed-ssl-cert
