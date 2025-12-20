@@ -561,6 +561,50 @@ impl AppState {
         oauth_provider_arc.start();
         tracing::info!("OAuth extension provider initialized and started");
 
+        // Register Snowflake OAuth provisioner (if configured)
+        #[cfg(feature = "snowflake")]
+        if let Some(ref extensions_config) = settings.extensions {
+            for provider_config in &extensions_config.providers {
+                if let crate::server::settings::ExtensionProviderConfig::SnowflakeOAuthProvisioner {
+                    account,
+                    user,
+                    auth,
+                    integration_name_prefix,
+                    default_blocked_roles,
+                    default_scopes,
+                    refresh_token_validity_seconds,
+                } = provider_config
+                {
+                    tracing::info!("Initializing Snowflake OAuth provisioner");
+
+                    let snowflake_oauth_provisioner =
+                        crate::server::extensions::providers::snowflake_oauth::SnowflakeOAuthProvisioner::new(
+                            crate::server::extensions::providers::snowflake_oauth::SnowflakeOAuthProvisionerConfig {
+                                db_pool: db_pool.clone(),
+                                encryption_provider: encryption_provider.clone()
+                                    .ok_or_else(|| anyhow::anyhow!("Encryption provider required for Snowflake OAuth provisioner"))?,
+                                http_client: reqwest::Client::new(),
+                                api_domain: public_url.clone(),
+                                oauth_provider: Some(oauth_provider_arc.clone()),
+                                account: account.clone(),
+                                user: user.clone(),
+                                auth: auth.clone(),
+                                integration_name_prefix: integration_name_prefix.clone(),
+                                default_blocked_roles: default_blocked_roles.clone(),
+                                default_scopes: default_scopes.clone(),
+                                refresh_token_validity_seconds: *refresh_token_validity_seconds,
+                            },
+                        );
+
+                    let snowflake_oauth_arc: Arc<dyn crate::server::extensions::Extension> =
+                        Arc::new(snowflake_oauth_provisioner);
+                    extension_registry.register_type(snowflake_oauth_arc.clone());
+                    snowflake_oauth_arc.start();
+                    tracing::info!("Snowflake OAuth provisioner initialized and started");
+                }
+            }
+        }
+
         let extension_registry = Arc::new(extension_registry);
 
         // Initialize OAuth state store for OAuth extension (10 minute TTL)
