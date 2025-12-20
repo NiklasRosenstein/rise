@@ -338,11 +338,16 @@ impl Extension for OAuthProvider {
             Err(_) => return "Invalid status".to_string(),
         };
 
+        debug!(
+            "format_status: auth_verified={}, configured_at={:?}, error={:?}",
+            status.auth_verified, status.configured_at, status.error
+        );
+
         if let Some(error) = &status.error {
             return format!("Error: {}", error);
         }
 
-        if let Some(configured_at) = status.configured_at {
+        let result = if let Some(configured_at) = status.configured_at {
             if status.auth_verified {
                 format!("Configured ({})", configured_at.format("%Y-%m-%d %H:%M:%S"))
             } else {
@@ -350,7 +355,10 @@ impl Extension for OAuthProvider {
             }
         } else {
             "Not configured".to_string()
-        }
+        };
+
+        debug!("format_status returning: '{}'", result);
+        result
     }
 
     fn description(&self) -> &str {
