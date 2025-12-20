@@ -911,11 +911,353 @@ function OAuthDetailView({ extension, projectName }) {
     );
 }
 
+// Snowflake OAuth Provisioner Extension UI Component
+function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
+    const [blockedRoles, setBlockedRoles] = useState(spec?.blocked_roles?.join(', ') || '');
+    const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
+
+    // Use a ref to store the latest onChange callback
+    const onChangeRef = React.useRef(onChange);
+    React.useEffect(() => {
+        onChangeRef.current = onChange;
+    }, [onChange]);
+
+    // Update parent when values change
+    useEffect(() => {
+        const newSpec = {
+            blocked_roles: blockedRoles.split(',').map(r => r.trim()).filter(r => r),
+            scopes: scopes.split(',').map(s => s.trim()).filter(s => s),
+        };
+
+        onChangeRef.current(newSpec);
+    }, [blockedRoles, scopes]);
+
+    return (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left column: Form */}
+            <div className="lg:col-span-2 space-y-4">
+                <FormField
+                    label="Additional Blocked Roles"
+                    id="snowflake-blocked-roles"
+                    type="textarea"
+                    value={blockedRoles}
+                    onChange={(e) => setBlockedRoles(e.target.value)}
+                    placeholder="SYSADMIN, USERADMIN"
+                    helperText="Comma-separated list of Snowflake roles to block. These will be ADDED to the backend-configured defaults (ACCOUNTADMIN, SECURITYADMIN). Users will not be able to select these roles when authenticating."
+                />
+
+                <FormField
+                    label="Additional OAuth Scopes"
+                    id="snowflake-scopes"
+                    type="textarea"
+                    value={scopes}
+                    onChange={(e) => setScopes(e.target.value)}
+                    placeholder="session:role:ANALYST, session:role:DEVELOPER"
+                    helperText="Comma-separated list of additional OAuth scopes. These will be ADDED to the backend-configured defaults (usually 'refresh_token'). Use 'session:role:ROLENAME' to allow users to select specific roles."
+                />
+
+                <div className="bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-gray-300 mb-2">How This Works</h4>
+                    <ol className="text-sm text-gray-400 space-y-2 list-decimal list-inside">
+                        <li>This extension provisions a Snowflake SECURITY INTEGRATION (OAuth provider)</li>
+                        <li>Automatically creates a Generic OAuth extension for end-user authentication</li>
+                        <li>OAuth credentials are retrieved from Snowflake and stored encrypted</li>
+                        <li>Users authenticate via Snowflake OAuth in your application</li>
+                    </ol>
+                </div>
+
+                <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
+                    <p className="text-sm text-yellow-200">
+                        Creating the Snowflake integration typically takes <strong>10-30 seconds</strong>.
+                        The extension will automatically create the OAuth integration in Snowflake and configure
+                        the corresponding OAuth extension for your project.
+                    </p>
+                </div>
+            </div>
+
+            {/* Right column: Guidance */}
+            <div className="space-y-4">
+                <section>
+                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Configuration Notes</h2>
+                    <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-3">
+                        <p className="text-sm text-blue-200 mb-2">
+                            <strong>Backend Configuration</strong>
+                        </p>
+                        <p className="text-xs text-blue-200">
+                            Snowflake credentials (account, user, password/key) are configured at the server level.
+                            You only need to specify additional blocked roles and scopes here.
+                        </p>
+                    </div>
+                </section>
+
+                <section>
+                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Common Scopes</h2>
+                    <div className="bg-gray-800 rounded-lg p-3">
+                        <ul className="text-xs text-gray-400 space-y-1">
+                            <li><code>refresh_token</code> - Enable refresh tokens (default)</li>
+                            <li><code>session:role:ANALYST</code> - Allow ANALYST role</li>
+                            <li><code>session:role:DEVELOPER</code> - Allow DEVELOPER role</li>
+                            <li><code>session:role:PUBLIC</code> - Allow PUBLIC role</li>
+                        </ul>
+                    </div>
+                </section>
+
+                <section>
+                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Security</h2>
+                    <div className="bg-gray-800 rounded-lg p-3">
+                        <p className="text-xs text-gray-400">
+                            Blocked roles prevent users from accessing sensitive roles.
+                            ACCOUNTADMIN and SECURITYADMIN are always blocked by default.
+                        </p>
+                    </div>
+                </section>
+            </div>
+        </div>
+    );
+}
+
+// Snowflake OAuth Provisioner Detail View Component
+function SnowflakeOAuthDetailView({ extension, projectName }) {
+    const status = extension.status || {};
+    const spec = extension.spec || {};
+
+    // Get state badge color
+    const getStateBadge = () => {
+        if (!status.state) return null;
+
+        let badgeColor;
+        const state = status.state;
+
+        switch (state) {
+            case 'Available':
+                badgeColor = 'bg-green-600';
+                break;
+            case 'Pending':
+            case 'CreatingIntegration':
+            case 'RetrievingCredentials':
+            case 'CreatingOAuthExtension':
+                badgeColor = 'bg-yellow-600';
+                break;
+            case 'Failed':
+                badgeColor = 'bg-red-600';
+                break;
+            case 'Deleting':
+            case 'Deleted':
+                badgeColor = 'bg-gray-600';
+                break;
+            default:
+                badgeColor = 'bg-gray-600';
+        }
+
+        return (
+            <span className={`${badgeColor} text-white text-xs font-semibold px-3 py-1 rounded-full uppercase`}>
+                {state}
+            </span>
+        );
+    };
+
+    return (
+        <>
+            <div className="mb-6">
+                <div className="flex items-center space-x-3">
+                    <h2 className="text-xl font-semibold text-gray-100">Snowflake OAuth Provisioner</h2>
+                    {getStateBadge()}
+                </div>
+                <p className="text-sm text-gray-400 mt-2">
+                    Automatically provisions Snowflake SECURITY INTEGRATIONs and configures OAuth extensions
+                </p>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                {/* Snowflake Integration Details */}
+                <section className="bg-gray-800 rounded-lg p-4">
+                    <h3 className="text-lg font-semibold text-gray-200 mb-4">Snowflake Integration</h3>
+
+                    <div className="space-y-3 text-sm">
+                        {status.integration_name && (
+                            <div>
+                                <span className="text-gray-500">Integration Name:</span>
+                                <span className="text-gray-300 ml-2 font-mono">{status.integration_name}</span>
+                            </div>
+                        )}
+
+                        {status.oauth_client_id && (
+                            <div>
+                                <span className="text-gray-500">OAuth Client ID:</span>
+                                <span className="text-gray-300 ml-2 font-mono text-xs">{status.oauth_client_id}</span>
+                            </div>
+                        )}
+
+                        {status.redirect_uri && (
+                            <div>
+                                <span className="text-gray-500">Redirect URI:</span>
+                                <span className="text-gray-300 ml-2 font-mono text-xs">{status.redirect_uri}</span>
+                            </div>
+                        )}
+
+                        {status.created_at && (
+                            <div>
+                                <span className="text-gray-500">Created:</span>
+                                <span className="text-gray-300 ml-2">{formatDate(status.created_at)}</span>
+                            </div>
+                        )}
+                    </div>
+
+                    {status.state === 'Available' && (
+                        <div className="mt-4 p-3 bg-green-900/20 border border-green-700 rounded">
+                            <p className="text-xs text-green-300">
+                                ✓ Snowflake integration is active and configured
+                            </p>
+                        </div>
+                    )}
+
+                    {status.error && (
+                        <div className="mt-4 p-3 bg-red-900/20 border border-red-700 rounded">
+                            <p className="text-xs text-red-300">
+                                <strong>Error:</strong> {status.error}
+                            </p>
+                        </div>
+                    )}
+                </section>
+
+                {/* OAuth Extension Details */}
+                <section className="bg-gray-800 rounded-lg p-4">
+                    <h3 className="text-lg font-semibold text-gray-200 mb-4">OAuth Extension</h3>
+
+                    {status.oauth_extension_name ? (
+                        <div className="space-y-3">
+                            <div className="text-sm">
+                                <span className="text-gray-500">Extension Name:</span>
+                                <span className="text-gray-300 ml-2 font-mono">{status.oauth_extension_name}</span>
+                            </div>
+
+                            {status.state === 'Available' && (
+                                <div className="mt-4">
+                                    <a
+                                        href={`/projects/${projectName}/extensions/${status.oauth_extension_name}`}
+                                        className="inline-block bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded transition"
+                                    >
+                                        View OAuth Extension →
+                                    </a>
+                                </div>
+                            )}
+
+                            <div className="mt-4 p-3 bg-blue-900/20 border border-blue-700 rounded">
+                                <p className="text-xs text-blue-200">
+                                    The OAuth extension is automatically created and managed by this provisioner.
+                                    Users can authenticate using their Snowflake credentials.
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        <div className="text-sm text-gray-400">
+                            OAuth extension will be created during provisioning
+                        </div>
+                    )}
+                </section>
+
+                {/* Configuration Summary */}
+                <section className="bg-gray-800 rounded-lg p-4 lg:col-span-2">
+                    <h3 className="text-lg font-semibold text-gray-200 mb-4">Configuration</h3>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-400 mb-2">Blocked Roles</h4>
+                            {spec.blocked_roles && spec.blocked_roles.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                    {spec.blocked_roles.map((role, idx) => (
+                                        <span key={idx} className="bg-red-900/30 text-red-300 text-xs px-2 py-1 rounded">
+                                            {role}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-xs text-gray-500">Using backend defaults only</p>
+                            )}
+                        </div>
+
+                        <div>
+                            <h4 className="text-sm font-semibold text-gray-400 mb-2">OAuth Scopes</h4>
+                            {spec.scopes && spec.scopes.length > 0 ? (
+                                <div className="flex flex-wrap gap-2">
+                                    {spec.scopes.map((scope, idx) => (
+                                        <span key={idx} className="bg-blue-900/30 text-blue-300 text-xs px-2 py-1 rounded font-mono">
+                                            {scope}
+                                        </span>
+                                    ))}
+                                </div>
+                            ) : (
+                                <p className="text-xs text-gray-500">Using backend defaults only</p>
+                            )}
+                        </div>
+                    </div>
+
+                    <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-700 rounded">
+                        <p className="text-xs text-yellow-200">
+                            <strong>Note:</strong> Additional roles and scopes are combined with backend defaults
+                            (not replaced). ACCOUNTADMIN and SECURITYADMIN are always blocked.
+                        </p>
+                    </div>
+                </section>
+            </div>
+        </>
+    );
+}
+
+const SnowflakeOAuthExtensionAPI = {
+    icon: '/assets/snowflake.svg',
+
+    renderStatusBadge(extension) {
+        const status = extension.status || {};
+        if (!status.state) return null;
+
+        let badgeColor;
+        const state = status.state;
+
+        switch (state) {
+            case 'Available':
+                badgeColor = 'bg-green-600';
+                break;
+            case 'Pending':
+            case 'CreatingIntegration':
+            case 'RetrievingCredentials':
+            case 'CreatingOAuthExtension':
+                badgeColor = 'bg-yellow-600';
+                break;
+            case 'Failed':
+                badgeColor = 'bg-red-600';
+                break;
+            case 'Deleting':
+            case 'Deleted':
+                badgeColor = 'bg-gray-600';
+                break;
+            default:
+                badgeColor = 'bg-gray-600';
+        }
+
+        return (
+            <span className={`${badgeColor} text-white text-xs font-semibold px-3 py-1 rounded-full uppercase`}>
+                {status.state}
+            </span>
+        );
+    },
+
+    renderOverviewTab(extension, projectName) {
+        return <SnowflakeOAuthDetailView extension={extension} projectName={projectName} />;
+    },
+
+    renderConfigureTab(spec, schema, onChange, projectName, instanceName, isEnabled) {
+        return <SnowflakeOAuthExtensionUI spec={spec} schema={schema} onChange={onChange} />;
+    },
+};
+
 // Extension UI Registry
 // Maps extension type identifiers to their UI API implementations
 const ExtensionUIRegistry = {
     'aws-rds-provisioner': AwsRdsExtensionAPI,
     'oauth': OAuthExtensionAPI,
+    'snowflake-oauth-provisioner': SnowflakeOAuthExtensionAPI,
     // Add more extension UIs here as needed
 };
 
