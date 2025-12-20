@@ -51,6 +51,14 @@ pub struct AppState {
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
     pub deployment_backend: Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
     pub extension_registry: Arc<crate::server::extensions::registry::ExtensionRegistry>,
+    pub oauth_state_store:
+        Arc<moka::future::Cache<String, crate::server::extensions::providers::oauth::OAuthState>>,
+    pub oauth_exchange_store: Arc<
+        moka::future::Cache<
+            String,
+            crate::server::extensions::providers::oauth::OAuthExchangeState,
+        >,
+    >,
 }
 
 /// Initialize encryption provider from settings
@@ -532,7 +540,46 @@ impl AppState {
             }
         }
 
+        // Register OAuth provider (always enabled)
+        tracing::info!("Initializing OAuth extension provider");
+        let encryption_provider_for_oauth = encryption_provider
+            .clone()
+            .ok_or_else(|| anyhow::anyhow!("Encryption provider required for OAuth extension"))?;
+
+        let oauth_provider = crate::server::extensions::providers::oauth::OAuthProvider::new(
+            crate::server::extensions::providers::oauth::OAuthProviderConfig {
+                db_pool: db_pool.clone(),
+                encryption_provider: encryption_provider_for_oauth,
+                http_client: reqwest::Client::new(),
+                api_domain: public_url.clone(),
+            },
+        );
+
+        let oauth_provider_arc: Arc<dyn crate::server::extensions::Extension> =
+            Arc::new(oauth_provider);
+        extension_registry.register_type(oauth_provider_arc.clone());
+        oauth_provider_arc.start();
+        tracing::info!("OAuth extension provider initialized and started");
+
         let extension_registry = Arc::new(extension_registry);
+
+        // Initialize OAuth state store for OAuth extension (10 minute TTL)
+        let oauth_state_store = Arc::new(
+            moka::future::Cache::builder()
+                .time_to_live(Duration::from_secs(600))
+                .max_capacity(10_000) // Prevent memory exhaustion
+                .build(),
+        );
+        tracing::info!("Initialized OAuth state store for OAuth extensions");
+
+        // Initialize OAuth exchange token store (5 minute TTL, single-use)
+        let oauth_exchange_store = Arc::new(
+            moka::future::Cache::builder()
+                .time_to_live(Duration::from_secs(300))
+                .max_capacity(10_000) // Prevent memory exhaustion
+                .build(),
+        );
+        tracing::info!("Initialized OAuth exchange token store for secure backend flow");
 
         Ok(Self {
             db_pool,
@@ -550,6 +597,8 @@ impl AppState {
             encryption_provider,
             deployment_backend,
             extension_registry,
+            oauth_state_store,
+            oauth_exchange_store,
         })
     }
 
@@ -708,6 +757,22 @@ impl AppState {
         let extension_registry =
             Arc::new(crate::server::extensions::registry::ExtensionRegistry::new());
 
+        // Initialize OAuth state store (dummy for controller, not used)
+        let oauth_state_store = Arc::new(
+            moka::future::Cache::builder()
+                .time_to_live(Duration::from_secs(600))
+                .max_capacity(10_000)
+                .build(),
+        );
+
+        // Initialize OAuth exchange token store (dummy for controller, not used)
+        let oauth_exchange_store = Arc::new(
+            moka::future::Cache::builder()
+                .time_to_live(Duration::from_secs(300))
+                .max_capacity(10_000)
+                .build(),
+        );
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -724,6 +789,8 @@ impl AppState {
             encryption_provider,
             deployment_backend,
             extension_registry,
+            oauth_state_store,
+            oauth_exchange_store,
         })
     }
 }

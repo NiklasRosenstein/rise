@@ -1335,6 +1335,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                         setFormData({ spec: specJson });
                         setOriginalSpec(specJson);
                         setUiSpec(enabled.spec);
+                        setInstanceName(enabled.extension); // Set instance name from enabled extension
                         setActiveTab('overview');
                     } else {
                         const defaultSpec = {};
@@ -1414,6 +1415,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                 setFormData({ spec: specJson });
                 setOriginalSpec(specJson);
                 setUiSpec(enabled.spec);
+                setInstanceName(enabled.extension); // Update instance name
                 // Only switch to overview tab when first enabling, not when updating
                 if (!wasEnabled) {
                     setActiveTab('overview');
@@ -1589,7 +1591,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
 
                 {/* Tab Content */}
                 {activeTab === 'overview' && isEnabled && CustomDetailView && (
-                    <CustomDetailView extension={enabledExtension} />
+                    <CustomDetailView extension={enabledExtension} projectName={projectName} />
                 )}
 
                 {activeTab === 'overview' && isEnabled && !CustomDetailView && (
@@ -1613,7 +1615,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                                 </p>
                             </div>
                         )}
-                        {extensionAPI.renderConfigureTab(uiSpec, extensionType.spec_schema, handleUiSpecChange)}
+                        {extensionAPI.renderConfigureTab(uiSpec, extensionType.spec_schema, handleUiSpecChange, projectName, instanceName, isEnabled)}
                         <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
                             <Button
                                 variant="primary"

@@ -66,7 +66,7 @@ pub async fn create_extension(
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid spec: {}", e)))?;
 
     // Create extension (will fail if already exists)
-    let ext_record = db_extensions::create(
+    let _ext_record = db_extensions::create(
         &state.db_pool,
         project.id,
         &extension_name,
@@ -86,6 +86,25 @@ pub async fn create_extension(
             (StatusCode::INTERNAL_SERVER_ERROR, error_msg)
         }
     })?;
+
+    // Call extension's spec update hook (with empty old_spec for new extensions)
+    extension
+        .on_spec_updated(
+            &serde_json::json!({}),
+            &payload.spec,
+            project.id,
+            &extension_name,
+            &state.db_pool,
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Fetch updated extension to get the latest status (may have been initialized by on_spec_updated)
+    let ext_record =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
@@ -145,7 +164,7 @@ pub async fn update_extension(
         .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid spec: {}", e)))?;
 
     // Update extension (upsert will update existing, keeping the extension_type)
-    let ext_record = db_extensions::upsert(
+    let _ext_record = db_extensions::upsert(
         &state.db_pool,
         project.id,
         &extension_name,
@@ -154,6 +173,25 @@ pub async fn update_extension(
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Call extension's spec update hook
+    extension
+        .on_spec_updated(
+            &existing.spec,
+            &payload.spec,
+            project.id,
+            &extension_name,
+            &state.db_pool,
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Fetch updated extension to get the latest status (may have been modified by on_spec_updated)
+    let ext_record =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
@@ -218,7 +256,7 @@ pub async fn patch_extension(
     })?;
 
     // Update extension with merged spec
-    let ext_record = db_extensions::upsert(
+    let _ext_record = db_extensions::upsert(
         &state.db_pool,
         project.id,
         &extension_name,
@@ -227,6 +265,25 @@ pub async fn patch_extension(
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Call extension's spec update hook
+    extension
+        .on_spec_updated(
+            &existing.spec,
+            &merged_spec,
+            project.id,
+            &extension_name,
+            &state.db_pool,
+        )
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Fetch updated extension to get the latest status (may have been modified by on_spec_updated)
+    let ext_record =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);

@@ -119,6 +119,16 @@ cargo build --all-features            # Full build with all capabilities
    - [x] Encryption providers: Local AES-GCM and AWS KMS (`--features aws`)
    - [x] OCI client for image digest resolution
    - [x] Frontend static web UI
+   - [x] Extensions system:
+     - [x] Multiple instances per extension type
+     - [x] Generic OAuth 2.0 provider for end-user authentication
+       - [x] Fragment flow (default) - tokens in URL fragment for SPAs
+       - [x] Exchange token flow - secure backend exchange for server-rendered apps
+       - [x] Session-based token caching with automatic refresh
+       - [x] Encrypted token storage (AES-GCM/KMS)
+       - [x] Support for any OAuth 2.0 provider (Snowflake, Google, GitHub, custom SSO)
+       - [x] Client secret stored as encrypted environment variables
+     - [x] AWS RDS extension for database provisioning
 
 3. **CLI Implementation** (`--features cli`, default) ✅
    - [x] OAuth2 authorization code flow with PKCE (browser-based, default)
@@ -169,6 +179,7 @@ For user-facing documentation, see the [`/docs`](./docs) directory. Key topics i
 - SSL certificate handling: [docs/builds.md](docs/builds.md)
 - Architecture and process design: [docs/development.md](docs/development.md)
 - Configuration: [docs/configuration.md](docs/configuration.md)
+- OAuth extension (end-user authentication): [docs/oauth.md](docs/oauth.md)
 
 ## Guidelines
 

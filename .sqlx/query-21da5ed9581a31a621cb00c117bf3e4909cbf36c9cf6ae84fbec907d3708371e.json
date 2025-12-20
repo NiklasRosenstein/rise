@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE user_oauth_tokens\n        SET last_accessed_at = NOW(), updated_at = NOW()\n        WHERE id = $1\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "21da5ed9581a31a621cb00c117bf3e4909cbf36c9cf6ae84fbec907d3708371e"
+}
