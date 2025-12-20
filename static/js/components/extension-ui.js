@@ -1136,7 +1136,7 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                             {status.state === 'Available' && (
                                 <div className="mt-4">
                                     <a
-                                        href={`/projects/${projectName}/extensions/${status.oauth_extension_name}`}
+                                        href={`#project/${projectName}/extensions/${status.oauth_extension_name}`}
                                         className="inline-block bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded transition"
                                     >
                                         View OAuth Extension →
