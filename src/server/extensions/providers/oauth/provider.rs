@@ -265,9 +265,20 @@ impl Extension for OAuthProvider {
             "scopes",
         ];
 
+        debug!(
+            "OAuth on_spec_updated for {}/{}: old_spec={:?}, new_spec={:?}",
+            project_id, extension_name, old_spec, new_spec
+        );
+
         let mut auth_changed = false;
         for field in &auth_sensitive_fields {
             if old_spec.get(field) != new_spec.get(field) {
+                debug!(
+                    "Auth-sensitive field '{}' changed: {:?} -> {:?}",
+                    field,
+                    old_spec.get(field),
+                    new_spec.get(field)
+                );
                 auth_changed = true;
                 break;
             }
@@ -275,12 +286,22 @@ impl Extension for OAuthProvider {
 
         // Reset auth_verified when critical fields change
         if auth_changed {
-            debug!(
+            info!(
                 "OAuth spec changed for {}/{}, resetting auth_verified",
                 project_id, extension_name
             );
             status.auth_verified = false;
+        } else {
+            debug!(
+                "No auth-sensitive fields changed for {}/{}",
+                project_id, extension_name
+            );
         }
+
+        debug!(
+            "Saving OAuth status for {}/{}: auth_verified={}, configured_at={:?}",
+            project_id, extension_name, status.auth_verified, status.configured_at
+        );
 
         // Save updated status
         db_extensions::update_status(
