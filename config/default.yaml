@@ -128,3 +128,10 @@ deployment_controller:
   #   - Controller will NOT create or manage this secret
   #   - Useful for static registries with externally-managed credentials
   # image_pull_secret_name: "my-registry-secret"
+  #
+  # To create the secret in each project namespace:
+  #   kubectl create secret docker-registry my-registry-secret \
+  #     --docker-server=registry.example.com \
+  #     --docker-username=myuser \
+  #     --docker-password=mypassword \
+  #     -n rise-my-project
