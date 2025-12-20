@@ -85,6 +85,23 @@ enum Commands {
         #[command(flatten)]
         build_args: build::BuildArgs,
     },
+    /// Build and run a container locally for development
+    Run {
+        /// Project name (optional, used to load environment variables)
+        #[arg(long, short)]
+        project: Option<String>,
+        /// Path to the directory containing the application
+        #[arg(default_value = ".")]
+        path: String,
+        /// HTTP port the application listens on (also sets PORT env var)
+        #[arg(long, default_value = "8080")]
+        http_port: u16,
+        /// Port to expose on the host (defaults to same as http-port)
+        #[arg(long)]
+        expose: Option<u16>,
+        #[command(flatten)]
+        build_args: build::BuildArgs,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -1034,6 +1051,28 @@ async fn main() -> Result<()> {
             .with_push(*push);
 
             build::build_image(options)?;
+        }
+        Commands::Run {
+            project,
+            path,
+            http_port,
+            expose,
+            build_args,
+        } => {
+            let expose_port = expose.unwrap_or(*http_port);
+
+            cli::run::run_locally(
+                &http_client,
+                &config,
+                cli::run::RunOptions {
+                    project_name: project.as_deref(),
+                    path,
+                    http_port: *http_port,
+                    expose: expose_port,
+                    build_args,
+                },
+            )
+            .await?;
         }
     }
 

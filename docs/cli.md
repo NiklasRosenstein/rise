@@ -22,6 +22,8 @@ CLI stores configuration in `~/.config/rise/config.json` (created automatically 
 | `rise project` | `p` | `create` (`c`), `list` (`ls`), `show` (`s`), `update` (`u`), `delete` (`del`, `rm`) |
 | `rise team` | `t` | `create` (`c`), `list` (`ls`), `show` (`s`), `update` (`u`), `delete` (`del`, `rm`) |
 | `rise deployment` | `d` | `create` (`c`), `list` (`ls`), `show` (`s`), `rollback`, `stop` |
+| `rise build` | - | - |
+| `rise run` | - | - |
 
 Use `rise --help` or `rise <command> --help` for details.
 
@@ -88,6 +90,41 @@ rise deployment stop my-app --group mr/123
 - `--expire <duration>`: Auto-delete after duration (e.g., `7d`, `24h`)
 - `--image <image>`: Use pre-built image (requires `--http-port`)
 - `--http-port <port>`: HTTP port application listens on (required with `--image`, defaults to 8080 for builds)
+
+### Local Development
+
+```bash
+# Build and run locally (defaults to port 8080)
+rise run
+
+# Specify directory
+rise run ./path/to/app
+
+# Custom port (sets PORT env var and exposes on host)
+rise run --http-port 3000
+
+# Expose on different host port
+rise run --http-port 8080 --expose 3000
+
+# Load environment variables from a project
+rise run --project my-app
+
+# With custom build backend
+rise run --backend pack
+```
+
+**Key options:**
+- `path` (positional): Application directory (defaults to current directory)
+- `--project <name>`: Project name to load non-secret environment variables from
+- `--http-port <port>`: HTTP port the application listens on (also sets PORT env var) [default: 8080]
+- `--expose <port>`: Port to expose on the host (defaults to same as http-port)
+- Build flags: `--backend`, `--builder`, `--buildpack`, `--container-cli`, etc.
+
+**Notes:**
+- Sets `PORT` environment variable automatically
+- Loads non-secret environment variables from the project if `--project` is specified
+- Secret environment variables are not loaded (their actual values are not retrievable)
+- Runs with `docker run --rm -it` (automatically removes container on exit)
 
 ### Team Management
 

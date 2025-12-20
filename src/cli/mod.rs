@@ -7,6 +7,7 @@ pub mod env;
 pub mod extension;
 pub mod login;
 pub mod project;
+pub mod run;
 pub mod service_account;
 pub mod team;
 pub mod version;
