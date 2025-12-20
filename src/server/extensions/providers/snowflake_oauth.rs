@@ -164,22 +164,20 @@ impl Clone for SnowflakeOAuthProvisioner {
 
 impl SnowflakeOAuthProvisioner {
     /// Escape a Snowflake identifier (table name, integration name, etc.)
-    /// Validates allowed characters and wraps in double quotes
+    /// Validates allowed characters, normalizes hyphens to underscores, and wraps in double quotes
     fn escape_identifier(identifier: &str) -> Result<String> {
         // Snowflake identifiers: alphanumeric, underscore, dollar sign
-        // We're more restrictive for security
-        if !identifier
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
-        {
+        // We're more restrictive for security and normalize hyphens to underscores
+        let normalized = identifier.replace('-', "_");
+        if !normalized.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return Err(anyhow!(
-                "Invalid identifier '{}': only alphanumeric, underscore, and hyphen allowed",
+                "Invalid identifier '{}': only alphanumeric and underscore characters are allowed",
                 identifier
             ));
         }
 
         // Escape internal double quotes and wrap in double quotes
-        let escaped = identifier.replace('"', "\"\"");
+        let escaped = normalized.replace('"', "\"\"");
         Ok(format!("\"{}\"", escaped))
     }
 
@@ -343,7 +341,7 @@ impl SnowflakeOAuthProvisioner {
                 let is_rsa_key = private_key_pem.contains("BEGIN RSA PRIVATE KEY");
 
                 // For unencrypted keys, we need to convert to encrypted PKCS#8 format
-                // because snowflake-connector-rs v0.4 only supports encrypted keys
+                // because the Snowflake connector library only supports encrypted keys
                 let password_bytes = if is_encrypted {
                     // Key is already encrypted, use provided password
                     private_key_password
@@ -354,7 +352,7 @@ impl SnowflakeOAuthProvisioner {
                     // Key is unencrypted - the library doesn't support this
                     // We need to return a clear error
                     return Err(anyhow!(
-                        "Unencrypted private keys are not supported by snowflake-connector-rs v0.4. \n\
+                        "Unencrypted private keys are not supported by the Snowflake connector. \n\
                          \n\
                          Please encrypt your private key using:\n\
                          openssl pkcs8 -topk8 -v2 aes256 -in unencrypted_key.pem -out encrypted_key.p8\n\
@@ -383,7 +381,7 @@ impl SnowflakeOAuthProvisioner {
             }
             SnowflakeAuth::Jwt { .. } => {
                 return Err(anyhow!(
-                    "JWT authentication is not supported by snowflake-connector-rs v0.4. Use password or private key authentication."
+                    "JWT authentication is not supported by the Snowflake connector. Use password or private key authentication."
                 ));
             }
         };
