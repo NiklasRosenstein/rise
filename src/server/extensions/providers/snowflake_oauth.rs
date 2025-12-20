@@ -912,11 +912,14 @@ impl SnowflakeOAuthProvisioner {
         Ok(())
     }
 
-    /// Verify integration is still available (health check)
+    /// Verify integration is still available and update if configuration changed
     async fn verify_integration_available(
         &self,
         status: &mut SnowflakeOAuthProvisionerStatus,
+        project_id: Uuid,
         project_name: &str,
+        extension_name: &str,
+        spec: &SnowflakeOAuthProvisionerSpec,
     ) -> Result<()> {
         let integration_name = status
             .integration_name
@@ -936,6 +939,7 @@ impl SnowflakeOAuthProvisioner {
                     );
                     status.state = SnowflakeOAuthState::Failed;
                     status.error = Some("Integration no longer exists in Snowflake".to_string());
+                    return Ok(());
                 }
             }
             Err(e) => {
@@ -944,6 +948,73 @@ impl SnowflakeOAuthProvisioner {
                     integration_name, project_name, e
                 );
                 // Don't mark as failed on verification errors, just log
+                return Ok(());
+            }
+        }
+
+        // Check if redirect URI or blocked roles need updating
+        let oauth_extension_name = status
+            .oauth_extension_name
+            .as_ref()
+            .ok_or_else(|| anyhow!("OAuth extension name not set"))?;
+
+        let expected_redirect_uri = format!(
+            "{}/api/v1/oauth/callback/{}/{}",
+            self.api_domain, project_name, oauth_extension_name
+        );
+
+        let current_redirect_uri = status.redirect_uri.as_deref().unwrap_or("");
+
+        // Check if redirect URI changed (e.g., api_domain config changed or bug fix)
+        if expected_redirect_uri != current_redirect_uri {
+            info!(
+                "Redirect URI changed for project {}: {} -> {}. Updating SECURITY INTEGRATION.",
+                project_name, current_redirect_uri, expected_redirect_uri
+            );
+
+            // Update the SECURITY INTEGRATION with new redirect URI
+            let integration_name_escaped = Self::escape_identifier(integration_name)?;
+            let redirect_uri_escaped = Self::escape_string_literal(&expected_redirect_uri);
+
+            let sql = format!(
+                "ALTER SECURITY INTEGRATION {} SET OAUTH_REDIRECT_URI = '{}'",
+                integration_name_escaped, redirect_uri_escaped
+            );
+
+            self.execute_sql(&sql)
+                .await
+                .context("Failed to update SECURITY INTEGRATION redirect URI")?;
+
+            // Update status with new redirect URI
+            status.redirect_uri = Some(expected_redirect_uri.clone());
+
+            info!(
+                "Updated redirect URI for integration {} in project {}",
+                integration_name, project_name
+            );
+
+            // Also notify the Generic OAuth extension to update its status
+            // This ensures the OAuth extension's status.redirect_uri is updated
+            if let Some(oauth_provider) = &self.oauth_provider {
+                // Read current OAuth extension spec to pass to on_spec_updated
+                let oauth_ext = db_extensions::find_by_project_and_name(
+                    &self.db_pool,
+                    project_id,
+                    oauth_extension_name,
+                )
+                .await?
+                .ok_or_else(|| anyhow!("OAuth extension not found"))?;
+
+                oauth_provider
+                    .on_spec_updated(
+                        &oauth_ext.spec,
+                        &oauth_ext.spec,
+                        project_id,
+                        oauth_extension_name,
+                        &self.db_pool,
+                    )
+                    .await
+                    .context("Failed to update OAuth extension after redirect URI change")?;
             }
         }
 
@@ -1126,8 +1197,14 @@ impl SnowflakeOAuthProvisioner {
                 .await?;
             }
             SnowflakeOAuthState::Available => {
-                self.verify_integration_available(&mut status, &project.name)
-                    .await?;
+                self.verify_integration_available(
+                    &mut status,
+                    project.id,
+                    &project.name,
+                    &project_extension.extension,
+                    &spec,
+                )
+                .await?;
             }
             SnowflakeOAuthState::Failed => {
                 // Stay in Failed state - don't retry automatically
