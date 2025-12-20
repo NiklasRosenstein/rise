@@ -196,14 +196,6 @@ pub async fn update_extension(
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
 
-    tracing::debug!(
-        "Returning update_extension response for {}/{}: status_summary='{}', status={:?}",
-        project.name,
-        extension_name,
-        status_summary,
-        ext_record.status
-    );
-
     Ok(Json(UpdateExtensionResponse {
         extension: Extension {
             extension: ext_record.extension,
@@ -295,14 +287,6 @@ pub async fn patch_extension(
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
-
-    tracing::debug!(
-        "Returning patch_extension response for {}/{}: status_summary='{}', status={:?}",
-        project.name,
-        extension_name,
-        status_summary,
-        ext_record.status
-    );
 
     Ok(Json(UpdateExtensionResponse {
         extension: Extension {

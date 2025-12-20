@@ -265,20 +265,9 @@ impl Extension for OAuthProvider {
             "scopes",
         ];
 
-        debug!(
-            "OAuth on_spec_updated for {}/{}: old_spec={:?}, new_spec={:?}",
-            project_id, extension_name, old_spec, new_spec
-        );
-
         let mut auth_changed = false;
         for field in &auth_sensitive_fields {
             if old_spec.get(field) != new_spec.get(field) {
-                debug!(
-                    "Auth-sensitive field '{}' changed: {:?} -> {:?}",
-                    field,
-                    old_spec.get(field),
-                    new_spec.get(field)
-                );
                 auth_changed = true;
                 break;
             }
@@ -286,22 +275,12 @@ impl Extension for OAuthProvider {
 
         // Reset auth_verified when critical fields change
         if auth_changed {
-            info!(
+            debug!(
                 "OAuth spec changed for {}/{}, resetting auth_verified",
                 project_id, extension_name
             );
             status.auth_verified = false;
-        } else {
-            debug!(
-                "No auth-sensitive fields changed for {}/{}",
-                project_id, extension_name
-            );
         }
-
-        debug!(
-            "Saving OAuth status for {}/{}: auth_verified={}, configured_at={:?}",
-            project_id, extension_name, status.auth_verified, status.configured_at
-        );
 
         // Save updated status
         db_extensions::update_status(
@@ -338,16 +317,11 @@ impl Extension for OAuthProvider {
             Err(_) => return "Invalid status".to_string(),
         };
 
-        debug!(
-            "format_status: auth_verified={}, configured_at={:?}, error={:?}",
-            status.auth_verified, status.configured_at, status.error
-        );
-
         if let Some(error) = &status.error {
             return format!("Error: {}", error);
         }
 
-        let result = if let Some(configured_at) = status.configured_at {
+        if let Some(configured_at) = status.configured_at {
             if status.auth_verified {
                 format!("Configured ({})", configured_at.format("%Y-%m-%d %H:%M:%S"))
             } else {
@@ -355,10 +329,7 @@ impl Extension for OAuthProvider {
             }
         } else {
             "Not configured".to_string()
-        };
-
-        debug!("format_status returning: '{}'", result);
-        result
+        }
     }
 
     fn description(&self) -> &str {
