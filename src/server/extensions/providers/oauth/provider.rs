@@ -42,7 +42,7 @@ impl OAuthProvider {
     #[allow(dead_code)]
     pub fn compute_redirect_uri(&self, project_name: &str, extension_name: &str) -> String {
         format!(
-            "https://{}/api/v1/oauth/callback/{}/{}",
+            "{}/api/v1/oauth/callback/{}/{}",
             self.api_domain, project_name, extension_name
         )
     }
