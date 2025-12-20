@@ -573,8 +573,10 @@ impl SnowflakeOAuthProvisioner {
   OAUTH_CLIENT = CUSTOM
   OAUTH_CLIENT_TYPE = 'CONFIDENTIAL'
   OAUTH_REDIRECT_URI = '{redirect_uri}'
+  OAUTH_ALLOW_NON_TLS_REDIRECT_URI = TRUE
   OAUTH_ISSUE_REFRESH_TOKENS = TRUE
   OAUTH_REFRESH_TOKEN_VALIDITY = {refresh_token_validity}
+  OAUTH_ENFORCE_PKCE = TRUE
   BLOCKED_ROLES_LIST = ({blocked_roles})"#,
             integration_name = integration_name,
             redirect_uri = redirect_uri,
