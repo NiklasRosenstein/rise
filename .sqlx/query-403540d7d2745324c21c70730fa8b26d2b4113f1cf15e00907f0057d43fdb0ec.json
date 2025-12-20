@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE projects\n        SET visibility = $2\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            COALESCE(finalizers, '{}') as \"finalizers!\",\n            created_at, updated_at\n        FROM projects\n        WHERE status NOT IN ('Deleting', 'Terminated')\n        ORDER BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -35,7 +35,7 @@
       },
       {
         "ordinal": 6,
-        "name": "finalizers",
+        "name": "finalizers!",
         "type_info": "TextArray"
       },
       {
@@ -50,10 +50,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid",
-        "Text"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -62,10 +59,10 @@
       false,
       true,
       true,
-      false,
+      null,
       false,
       false
     ]
   },
-  "hash": "768f60181b930c7b27bd1c258ce78b080704d7fd2885874ef8399f2af88a6c61"
+  "hash": "403540d7d2745324c21c70730fa8b26d2b4113f1cf15e00907f0057d43fdb0ec"
 }
