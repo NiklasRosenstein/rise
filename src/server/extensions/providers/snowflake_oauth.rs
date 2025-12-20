@@ -100,6 +100,7 @@ pub struct SnowflakeOAuthProvisionerConfig {
     pub account: String,
     pub user: String,
     pub role: Option<String>,
+    pub warehouse: Option<String>,
     pub auth: SnowflakeAuth,
     pub integration_name_prefix: String,
     pub default_blocked_roles: Vec<String>,
@@ -119,6 +120,7 @@ pub struct SnowflakeOAuthProvisioner {
     account: String,
     user: String,
     role: Option<String>,
+    warehouse: Option<String>,
     auth: SnowflakeAuth,
     integration_name_prefix: String,
     default_blocked_roles: Vec<String>,
@@ -137,6 +139,7 @@ impl Clone for SnowflakeOAuthProvisioner {
             account: self.account.clone(),
             user: self.user.clone(),
             role: self.role.clone(),
+            warehouse: self.warehouse.clone(),
             auth: self.auth.clone(),
             integration_name_prefix: self.integration_name_prefix.clone(),
             default_blocked_roles: self.default_blocked_roles.clone(),
@@ -183,6 +186,7 @@ impl SnowflakeOAuthProvisioner {
             account: config.account,
             user: config.user,
             role: config.role,
+            warehouse: config.warehouse,
             auth: config.auth,
             integration_name_prefix: config.integration_name_prefix,
             default_blocked_roles: config.default_blocked_roles,
@@ -195,14 +199,15 @@ impl SnowflakeOAuthProvisioner {
     /// Returns Ok(()) if credentials are valid, Err if connection fails
     pub async fn validate_credentials(&self) -> Result<()> {
         info!(
-            "Validating Snowflake credentials for account: {} (user: {}, role: {:?})",
-            self.account, self.user, self.role
+            "Validating Snowflake credentials for account: {} (user: {}, role: {:?}, warehouse: {:?})",
+            self.account, self.user, self.role, self.warehouse
         );
 
         // Test the connection and get session info
         let test_query = "SELECT CURRENT_VERSION() as version, CURRENT_ACCOUNT() as account, \
                           CURRENT_USER() as user, CURRENT_ROLE() as role, \
-                          CURRENT_SECONDARY_ROLES() as secondary_roles";
+                          CURRENT_SECONDARY_ROLES() as secondary_roles, \
+                          CURRENT_WAREHOUSE() as warehouse";
 
         match self.execute_sql(test_query).await {
             Ok(rows) => {
@@ -225,6 +230,9 @@ impl SnowflakeOAuthProvisioner {
                         .or_else(|| row.get("SECONDARY_ROLES"))
                     {
                         info!("Secondary roles: {}", secondary_roles);
+                    }
+                    if let Some(warehouse) = row.get("warehouse").or_else(|| row.get("WAREHOUSE")) {
+                        info!("Active warehouse: {}", warehouse);
                     }
                 } else {
                     info!("Successfully connected to Snowflake");
@@ -385,6 +393,11 @@ impl SnowflakeOAuthProvisioner {
             config.role = Some(role.clone());
         }
 
+        // Set warehouse if configured
+        if let Some(ref warehouse) = self.warehouse {
+            config.warehouse = Some(warehouse.clone());
+        }
+
         let client = SnowflakeClient::new(&self.user, auth_method, config).map_err(|e| {
             // Provide helpful error messages for common issues
             let error_str = format!("{:?}", e);
@@ -456,6 +469,8 @@ impl SnowflakeOAuthProvisioner {
                     "ROLE",
                     "secondary_roles",
                     "SECONDARY_ROLES",
+                    "warehouse",
+                    "WAREHOUSE",
                     "credentials",
                     "CREDENTIALS",
                     "client_id",
@@ -1105,7 +1120,7 @@ impl SnowflakeOAuthProvisioner {
             SnowflakeOAuthState::Failed => {
                 // Stay in Failed state - don't retry automatically
                 // User must fix the configuration and update the extension to retry
-                debug!(
+                error!(
                     "Snowflake OAuth provisioner for project {} is in failed state (error: {:?}). \
                      Update the extension spec to retry.",
                     project.name, status.error

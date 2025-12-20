@@ -689,6 +689,10 @@ pub enum ExtensionProviderConfig {
         /// Typically ACCOUNTADMIN or a custom role with appropriate grants
         #[serde(default)]
         role: Option<String>,
+        /// Snowflake warehouse to use for queries
+        /// Required for executing SQL statements
+        #[serde(default)]
+        warehouse: Option<String>,
         /// Authentication configuration (password, private key, or JWT)
         #[serde(flatten)]
         auth: SnowflakeAuth,
