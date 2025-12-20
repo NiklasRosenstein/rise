@@ -155,6 +155,24 @@ pub async fn update_extension(
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
+    // For OAuth extensions, reset auth_verified when spec changes
+    if existing.extension_type == "oauth" && spec_changed_for_oauth(&existing.spec, &payload.spec) {
+        reset_oauth_auth_verified(
+            &state.db_pool,
+            project.id,
+            &extension_name,
+            &ext_record.status,
+        )
+        .await?;
+    }
+
+    // Fetch updated extension to get the latest status
+    let ext_record =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
+
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
 
@@ -227,6 +245,24 @@ pub async fn patch_extension(
     )
     .await
     .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // For OAuth extensions, reset auth_verified when spec changes
+    if existing.extension_type == "oauth" && spec_changed_for_oauth(&existing.spec, &merged_spec) {
+        reset_oauth_auth_verified(
+            &state.db_pool,
+            project.id,
+            &extension_name,
+            &ext_record.status,
+        )
+        .await?;
+    }
+
+    // Fetch updated extension to get the latest status
+    let ext_record =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
@@ -399,4 +435,53 @@ fn merge_json_with_nulls(
             update.clone()
         }
     }
+}
+
+/// Check if OAuth spec changed in fields that affect auth flow
+fn spec_changed_for_oauth(old_spec: &serde_json::Value, new_spec: &serde_json::Value) -> bool {
+    // Fields that affect OAuth flow
+    let auth_sensitive_fields = [
+        "client_id",
+        "client_secret_ref",
+        "authorization_endpoint",
+        "token_endpoint",
+        "scopes",
+    ];
+
+    for field in &auth_sensitive_fields {
+        if old_spec.get(field) != new_spec.get(field) {
+            return true;
+        }
+    }
+
+    false
+}
+
+/// Reset auth_verified to false for OAuth extension
+async fn reset_oauth_auth_verified(
+    pool: &sqlx::PgPool,
+    project_id: uuid::Uuid,
+    extension_name: &str,
+    current_status: &serde_json::Value,
+) -> Result<(), (StatusCode, String)> {
+    use crate::server::extensions::providers::oauth::models::OAuthExtensionStatus;
+
+    // Parse current status
+    let mut status: OAuthExtensionStatus =
+        serde_json::from_value(current_status.clone()).unwrap_or_default();
+
+    // Reset auth_verified
+    status.auth_verified = false;
+
+    // Update status
+    db_extensions::update_status(
+        pool,
+        project_id,
+        extension_name,
+        &serde_json::to_value(&status).unwrap(),
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    Ok(())
 }

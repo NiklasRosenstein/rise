@@ -250,7 +250,11 @@ impl Extension for OAuthProvider {
         }
 
         if let Some(configured_at) = status.configured_at {
-            format!("Configured ({})", configured_at.format("%Y-%m-%d %H:%M:%S"))
+            if status.auth_verified {
+                format!("Configured ({})", configured_at.format("%Y-%m-%d %H:%M:%S"))
+            } else {
+                "Waiting For Auth".to_string()
+            }
         } else {
             "Not configured".to_string()
         }

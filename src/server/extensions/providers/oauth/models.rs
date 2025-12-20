@@ -31,6 +31,9 @@ pub struct OAuthExtensionStatus {
     /// When the extension was configured
     #[serde(skip_serializing_if = "Option::is_none")]
     pub configured_at: Option<DateTime<Utc>>,
+    /// Whether OAuth flow has been successfully tested
+    #[serde(default)]
+    pub auth_verified: bool,
     /// Configuration or validation errors
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,

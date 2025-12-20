@@ -710,6 +710,7 @@ pub async fn callback(
     let status = OAuthExtensionStatus {
         redirect_uri: Some(redirect_uri),
         configured_at: Some(Utc::now()),
+        auth_verified: true,
         error: None,
     };
 
