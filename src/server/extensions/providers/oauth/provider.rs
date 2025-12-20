@@ -230,7 +230,31 @@ impl Extension for OAuthProvider {
         extension_name: &str,
         db_pool: &sqlx::PgPool,
     ) -> Result<()> {
-        use crate::db::extensions as db_extensions;
+        use crate::db::{extensions as db_extensions, projects};
+        use chrono::Utc;
+
+        // Get project name for redirect URI
+        let project = projects::find_by_id(db_pool, project_id)
+            .await?
+            .ok_or_else(|| anyhow!("Project not found"))?;
+
+        // Get current extension to check status
+        let ext = db_extensions::find_by_project_and_name(db_pool, project_id, extension_name)
+            .await?
+            .ok_or_else(|| anyhow!("Extension not found"))?;
+
+        // Parse current status
+        let mut status: OAuthExtensionStatus =
+            serde_json::from_value(ext.status).unwrap_or_default();
+
+        // Always ensure redirect_uri is set/updated
+        let redirect_uri = self.compute_redirect_uri(&project.name, extension_name);
+        status.redirect_uri = Some(redirect_uri);
+
+        // Initialize configured_at if not already set
+        if status.configured_at.is_none() {
+            status.configured_at = Some(Utc::now());
+        }
 
         // Check if auth-sensitive fields changed
         let auth_sensitive_fields = [
@@ -241,33 +265,22 @@ impl Extension for OAuthProvider {
             "scopes",
         ];
 
-        let mut changed = false;
+        let mut auth_changed = false;
         for field in &auth_sensitive_fields {
             if old_spec.get(field) != new_spec.get(field) {
-                changed = true;
+                auth_changed = true;
                 break;
             }
         }
 
-        if !changed {
-            return Ok(());
-        }
-
         // Reset auth_verified when critical fields change
-        debug!(
-            "OAuth spec changed for {}/{}, resetting auth_verified",
-            project_id, extension_name
-        );
-
-        // Get current status
-        let ext = db_extensions::find_by_project_and_name(db_pool, project_id, extension_name)
-            .await?
-            .ok_or_else(|| anyhow!("Extension not found"))?;
-
-        // Parse and update status
-        let mut status: OAuthExtensionStatus =
-            serde_json::from_value(ext.status).unwrap_or_default();
-        status.auth_verified = false;
+        if auth_changed {
+            debug!(
+                "OAuth spec changed for {}/{}, resetting auth_verified",
+                project_id, extension_name
+            );
+            status.auth_verified = false;
+        }
 
         // Save updated status
         db_extensions::update_status(
