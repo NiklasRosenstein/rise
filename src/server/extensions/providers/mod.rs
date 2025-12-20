@@ -4,3 +4,6 @@
 pub mod aws_rds;
 
 pub mod oauth;
+
+#[cfg(feature = "snowflake")]
+pub mod snowflake_oauth;
