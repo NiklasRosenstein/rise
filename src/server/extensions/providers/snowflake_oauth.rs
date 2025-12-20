@@ -818,17 +818,28 @@ impl SnowflakeOAuthProvisioner {
             oauth_extension_name, project_name
         );
 
-        // Check if OAuth extension already exists
-        if let Ok(Some(_)) =
+        // Check if OAuth extension already exists (and is not marked for deletion)
+        if let Ok(Some(existing_ext)) =
             db_extensions::find_by_project_and_name(&self.db_pool, project_id, oauth_extension_name)
                 .await
         {
-            info!(
-                "OAuth extension {} already exists, skipping creation",
-                oauth_extension_name
-            );
-            status.state = SnowflakeOAuthState::Available;
-            return Ok(());
+            if existing_ext.deleted_at.is_none() {
+                info!(
+                    "OAuth extension {} already exists, skipping creation",
+                    oauth_extension_name
+                );
+                status.state = SnowflakeOAuthState::Available;
+                return Ok(());
+            } else {
+                // Extension exists but is marked for deletion
+                // Wait for it to be fully deleted before recreating
+                info!(
+                    "OAuth extension {} is marked for deletion, waiting for cleanup",
+                    oauth_extension_name
+                );
+                // Stay in CreatingOAuthExtension state and try again next reconciliation
+                return Ok(());
+            }
         }
 
         // Decrypt client secret from status
@@ -970,11 +981,31 @@ impl SnowflakeOAuthProvisioner {
             }
         }
 
-        // Check if redirect URI or blocked roles need updating
+        // Check if OAuth extension still exists (it might have been deleted by user)
         let oauth_extension_name = status
             .oauth_extension_name
             .as_ref()
             .ok_or_else(|| anyhow!("OAuth extension name not set"))?;
+
+        let oauth_ext = db_extensions::find_by_project_and_name(
+            &self.db_pool,
+            project_id,
+            oauth_extension_name,
+        )
+        .await?;
+
+        // If OAuth extension was deleted, recreate it
+        if oauth_ext.is_none() || oauth_ext.as_ref().unwrap().deleted_at.is_some() {
+            warn!(
+                "OAuth extension {} was deleted for project {}, recreating it",
+                oauth_extension_name, project_name
+            );
+
+            // Transition back to CreatingOAuthExtension state to recreate it
+            status.state = SnowflakeOAuthState::CreatingOAuthExtension;
+            status.error = None;
+            return Ok(());
+        }
 
         let expected_redirect_uri = format!(
             "{}/api/v1/oauth/callback/{}/{}",

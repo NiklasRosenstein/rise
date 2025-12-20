@@ -9,7 +9,7 @@ use async_trait::async_trait;
 use serde_json::{json, Value};
 use sqlx::PgPool;
 use std::sync::Arc;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 use url::Url;
 use uuid::Uuid;
 
@@ -26,6 +26,17 @@ pub struct OAuthProvider {
     encryption_provider: Arc<dyn EncryptionProvider>,
     http_client: reqwest::Client,
     api_domain: String,
+}
+
+impl Clone for OAuthProvider {
+    fn clone(&self) -> Self {
+        Self {
+            db_pool: self.db_pool.clone(),
+            encryption_provider: self.encryption_provider.clone(),
+            http_client: self.http_client.clone(),
+            api_domain: self.api_domain.clone(),
+        }
+    }
 }
 
 impl OAuthProvider {
@@ -181,6 +192,53 @@ impl OAuthProvider {
 
         Ok(token_response)
     }
+
+    /// Handle deletion of an OAuth extension
+    async fn reconcile_deletion(&self, ext: crate::db::models::ProjectExtension) -> Result<()> {
+        use crate::db::{env_vars as db_env_vars, extensions as db_extensions};
+
+        info!(
+            "Reconciling deletion for OAuth extension: project_id={}, extension={}",
+            ext.project_id, ext.extension
+        );
+
+        // Parse spec to get client_secret_ref
+        let spec: OAuthExtensionSpec =
+            serde_json::from_value(ext.spec).context("Failed to parse OAuth extension spec")?;
+
+        // Delete associated environment variable (client secret)
+        if !spec.client_secret_ref.is_empty() {
+            if let Err(e) = db_env_vars::delete_project_env_var(
+                &self.db_pool,
+                ext.project_id,
+                &spec.client_secret_ref,
+            )
+            .await
+            {
+                warn!(
+                    "Failed to delete environment variable {} for OAuth extension: {:?}",
+                    spec.client_secret_ref, e
+                );
+            } else {
+                info!(
+                    "Deleted environment variable {} for OAuth extension",
+                    spec.client_secret_ref
+                );
+            }
+        }
+
+        // Permanently delete the extension
+        db_extensions::delete_permanently(&self.db_pool, ext.project_id, &ext.extension)
+            .await
+            .context("Failed to permanently delete OAuth extension")?;
+
+        info!(
+            "Permanently deleted OAuth extension: project_id={}, extension={}",
+            ext.project_id, ext.extension
+        );
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -308,9 +366,33 @@ impl Extension for OAuthProvider {
     }
 
     fn start(&self) {
-        // OAuth extension doesn't need a reconciliation loop
-        // Token refresh and cleanup are handled by separate background jobs
-        info!("OAuth provider extension started (no reconciliation loop needed)");
+        let provider = self.clone();
+
+        tokio::spawn(async move {
+            info!("Starting OAuth provider reconciliation loop");
+
+            loop {
+                match crate::db::extensions::list_by_extension_type(&provider.db_pool, "oauth")
+                    .await
+                {
+                    Ok(extensions) => {
+                        for ext in extensions {
+                            // Handle deleted extensions
+                            if ext.deleted_at.is_some() {
+                                if let Err(e) = provider.reconcile_deletion(ext).await {
+                                    error!("Failed to reconcile OAuth extension deletion: {:?}", e);
+                                }
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to list OAuth extensions: {:?}", e);
+                    }
+                }
+
+                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            }
+        });
     }
 
     async fn before_deployment(
