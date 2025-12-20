@@ -53,6 +53,10 @@ k8s = [
     "dep:k8s-openapi",
     "dep:rustls",
 ]
+snowflake = [
+    "server",  # Snowflake extension requires server
+    "dep:snowflake-connector-rs",
+]
 
 [dependencies]
 # Common (always enabled - shared across features)
@@ -124,6 +128,9 @@ aws-sdk-sts = { version = "1.80", optional = true }
 kube = { version = "0.95", features = ["client", "runtime", "derive"], optional = true }
 k8s-openapi = { version = "0.23", features = ["v1_30"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
+
+# Snowflake feature dependencies
+snowflake-connector-rs = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"
