@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            COALESCE(finalizers, '{}') as \"finalizers!\",\n            created_at, updated_at\n        FROM projects\n        WHERE name = $1\n        ",
+  "query": "\n            SELECT\n                id, name,\n                status as \"status: ProjectStatus\",\n                visibility as \"visibility: ProjectVisibility\",\n                owner_user_id, owner_team_id,\n                finalizers,\n                created_at, updated_at\n            FROM projects\n            ORDER BY created_at DESC\n            ",
   "describe": {
     "columns": [
       {
@@ -35,7 +35,7 @@
       },
       {
         "ordinal": 6,
-        "name": "finalizers!",
+        "name": "finalizers",
         "type_info": "TextArray"
       },
       {
@@ -50,9 +50,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Text"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -61,10 +59,10 @@
       false,
       true,
       true,
-      null,
+      false,
       false,
       false
     ]
   },
-  "hash": "600b361ebb480ff1a8b6ada288cd38af26cd61ba17fcbb083635948297d64615"
+  "hash": "f03ba7a3db6bebe3b4c09269326a8740a8e452d4957023aef85bb7c87a4d006e"
 }

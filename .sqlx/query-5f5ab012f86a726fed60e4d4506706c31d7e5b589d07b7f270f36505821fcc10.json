@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO projects (name, status, visibility, owner_user_id, owner_team_id)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            COALESCE(finalizers, '{}') as \"finalizers!\",\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE name = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -35,7 +35,7 @@
       },
       {
         "ordinal": 6,
-        "name": "finalizers!",
+        "name": "finalizers",
         "type_info": "TextArray"
       },
       {
@@ -51,11 +51,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Text",
-        "Uuid",
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -65,10 +61,10 @@
       false,
       true,
       true,
-      null,
+      false,
       false,
       false
     ]
   },
-  "hash": "3e42fdc82b312c6a95d603e997d6f9a561a20ae0bdd58f59f753a91f2bab720c"
+  "hash": "5f5ab012f86a726fed60e4d4506706c31d7e5b589d07b7f270f36505821fcc10"
 }

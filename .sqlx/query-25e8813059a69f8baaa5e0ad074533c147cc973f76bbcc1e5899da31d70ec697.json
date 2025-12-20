@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT DISTINCT\n            p.id, p.name,\n            p.status as \"status: ProjectStatus\",\n            p.visibility as \"visibility: ProjectVisibility\",\n            p.owner_user_id, p.owner_team_id,\n            COALESCE(p.finalizers, '{}') as \"finalizers!\",\n            p.created_at, p.updated_at\n        FROM projects p\n        WHERE\n            p.owner_user_id = $1\n            OR EXISTS(\n                SELECT 1 FROM team_members tm\n                WHERE tm.team_id = p.owner_team_id\n                AND tm.user_id = $1\n            )\n            OR EXISTS(\n                SELECT 1 FROM service_accounts sa\n                WHERE sa.project_id = p.id\n                AND sa.user_id = $1\n                AND sa.deleted_at IS NULL\n            )\n        ORDER BY p.created_at DESC\n        ",
+  "query": "\n        UPDATE projects\n        SET status = $2\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -35,7 +35,7 @@
       },
       {
         "ordinal": 6,
-        "name": "finalizers!",
+        "name": "finalizers",
         "type_info": "TextArray"
       },
       {
@@ -51,7 +51,8 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -61,10 +62,10 @@
       false,
       true,
       true,
-      null,
+      false,
       false,
       false
     ]
   },
-  "hash": "2379e4896d44deffa2250ab6e623c14ced837acd8047229d671cd4939e5fb42a"
+  "hash": "25e8813059a69f8baaa5e0ad074533c147cc973f76bbcc1e5899da31d70ec697"
 }
