@@ -50,6 +50,9 @@ impl OAuthProvider {
     }
 
     /// Compute the redirect URI for this OAuth extension
+    ///
+    /// Note: api_domain must include the protocol (e.g., "https://example.com")
+    /// as it comes from the server's public_url configuration.
     #[allow(dead_code)]
     pub fn compute_redirect_uri(&self, project_name: &str, extension_name: &str) -> String {
         format!(

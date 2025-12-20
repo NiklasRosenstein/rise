@@ -167,19 +167,17 @@ impl SnowflakeOAuthProvisioner {
     /// Validates allowed characters and wraps in double quotes
     fn escape_identifier(identifier: &str) -> Result<String> {
         // Snowflake identifiers: alphanumeric, underscore, dollar sign
-        // We're more restrictive for security
-        if !identifier
-            .chars()
-            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
-        {
+        // We're more restrictive for security and normalize hyphens to underscores
+        let normalized = identifier.replace('-', "_");
+        if !normalized.chars().all(|c| c.is_alphanumeric() || c == '_') {
             return Err(anyhow!(
-                "Invalid identifier '{}': only alphanumeric, underscore, and hyphen allowed",
+                "Invalid identifier '{}': only alphanumeric and underscore characters are allowed",
                 identifier
             ));
         }
 
         // Escape internal double quotes and wrap in double quotes
-        let escaped = identifier.replace('"', "\"\"");
+        let escaped = normalized.replace('"', "\"\"");
         Ok(format!("\"{}\"", escaped))
     }
 
@@ -354,7 +352,7 @@ impl SnowflakeOAuthProvisioner {
                     // Key is unencrypted - the library doesn't support this
                     // We need to return a clear error
                     return Err(anyhow!(
-                        "Unencrypted private keys are not supported by snowflake-connector-rs v0.4. \n\
+                        "Unencrypted private keys are not supported by the configured Snowflake connector. \n\
                          \n\
                          Please encrypt your private key using:\n\
                          openssl pkcs8 -topk8 -v2 aes256 -in unencrypted_key.pem -out encrypted_key.p8\n\
@@ -383,7 +381,7 @@ impl SnowflakeOAuthProvisioner {
             }
             SnowflakeAuth::Jwt { .. } => {
                 return Err(anyhow!(
-                    "JWT authentication is not supported by snowflake-connector-rs v0.4. Use password or private key authentication."
+                    "JWT authentication is not supported by the configured Snowflake connector. Use password or private key authentication."
                 ));
             }
         };
@@ -479,46 +477,59 @@ impl SnowflakeOAuthProvisioner {
             .map(|row| {
                 let mut obj = serde_json::Map::new();
 
-                // SnowflakeRow has a get() method that returns Option<String>
-                // We need to iterate through all columns and build the JSON object
-                // The debug format shows: column_indices: {"COLUMN_NAME": index}
+                // The SnowflakeRow struct doesn't expose column_indices directly,
+                // but we can extract the debug representation to discover column names
+                let row_debug = format!("{:?}", row);
 
-                // For now, try to extract values by common column names
-                // A better approach would be to iterate column_indices, but we don't have direct access
+                // Try to parse column names from debug output: column_indices: {"COL1": 0, "COL2": 1, ...}
+                if let Some(start) = row_debug.find("column_indices: {") {
+                    let remainder = &row_debug[start + 17..]; // Skip "column_indices: {"
+                    if let Some(end) = remainder.find('}') {
+                        let indices_str = &remainder[..end];
 
-                // Try common column names (case-insensitive by trying both cases)
-                let common_columns = vec![
-                    "version",
-                    "VERSION",
-                    "account",
-                    "ACCOUNT",
-                    "user",
-                    "USER",
-                    "role",
-                    "ROLE",
-                    "secondary_roles",
-                    "SECONDARY_ROLES",
-                    "warehouse",
-                    "WAREHOUSE",
-                    "credentials",
-                    "CREDENTIALS",
-                    "client_id",
-                    "CLIENT_ID",
-                    "client_secret",
-                    "CLIENT_SECRET",
-                ];
+                        // Parse each "COLUMN_NAME": index pair
+                        for pair in indices_str.split(',') {
+                            let parts: Vec<&str> = pair.trim().split(':').collect();
+                            if parts.len() == 2 {
+                                // Extract column name (remove quotes)
+                                let col_name = parts[0].trim().trim_matches('"');
 
-                for col_name in common_columns {
-                    if let Ok(value) = row.get(col_name) {
-                        // Convert to lowercase for consistent key naming
-                        obj.insert(col_name.to_lowercase(), Value::String(value));
+                                // Try to get the value from the row
+                                if let Ok(value) = row.get(col_name) {
+                                    // Store with lowercase key for consistent naming
+                                    obj.insert(col_name.to_lowercase(), Value::String(value));
+                                }
+                            }
+                        }
                     }
                 }
 
+                // Fallback: if debug parsing failed, try common column names
                 if obj.is_empty() {
-                    // Debug log if we couldn't extract any values
-                    let row_debug = format!("{:?}", row);
-                    debug!("Could not extract columns from SnowflakeRow: {}", row_debug);
+                    let common_columns = vec![
+                        "VERSION",
+                        "ACCOUNT",
+                        "USER",
+                        "ROLE",
+                        "SECONDARY_ROLES",
+                        "WAREHOUSE",
+                        "CREDENTIALS",
+                        "CLIENT_ID",
+                        "CLIENT_SECRET",
+                    ];
+
+                    for col_name in common_columns {
+                        if let Ok(value) = row.get(col_name) {
+                            obj.insert(col_name.to_lowercase(), Value::String(value));
+                        }
+                    }
+
+                    if obj.is_empty() {
+                        debug!(
+                            "Could not extract any columns from SnowflakeRow: {}",
+                            row_debug
+                        );
+                    }
                 }
 
                 Value::Object(obj)
