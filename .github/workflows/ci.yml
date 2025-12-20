@@ -65,12 +65,6 @@ jobs:
   clippy:
     name: Lint with Clippy
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        features:
-          - "cli"
-          - "server,k8s"
-          - "server,k8s,aws"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -81,8 +75,14 @@ jobs:
           toolchain: "1.91.1"
           components: clippy
 
-      - name: Run Clippy (${{ matrix.features }})
-        run: cargo clippy --all-targets --features ${{ matrix.features }} -- -D warnings
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+          tools: cargo:cargo-all-features
+
+      - name: Run Clippy (all feature combinations)
+        run: cargo all-features clippy --all-targets -- -D warnings
         env:
           SQLX_OFFLINE: true
 
@@ -133,12 +133,6 @@ jobs:
   build:
     name: Build all targets
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        features:
-          - "cli"
-          - "server,k8s"
-          - "server,k8s,aws"
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -148,8 +142,14 @@ jobs:
         with:
           toolchain: "1.91.1"
 
-      - name: Build all targets (${{ matrix.features }})
-        run: cargo build --all-targets --features ${{ matrix.features }}
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+          tools: cargo:cargo-all-features
+
+      - name: Build all targets (all feature combinations)
+        run: cargo all-features build --all-targets
         env:
           SQLX_OFFLINE: true
 

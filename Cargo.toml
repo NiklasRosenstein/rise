@@ -6,6 +6,10 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/NiklasRosenstein/rise"
 description = "A simple and powerful CLI for deploying containerized applications"
 
+[package.metadata.cargo-all-features]
+# Always include the default cli feature to avoid testing empty feature set
+always_include_features = ["cli"]
+
 [[bin]]
 name = "rise"
 path = "src/main.rs"
@@ -21,6 +25,7 @@ cli = [
     "dep:webbrowser",
 ]
 server = [
+    "k8s",  # Server requires a deployment backend (currently k8s is the only one)
     "dep:config",
     "dep:oauth2",
     "dep:openssl",
@@ -40,7 +45,7 @@ server = [
     "dep:tera",
 ]
 aws = [
-    "server",  # AWS features require server
+    "server",  # AWS features require server (which includes k8s)
     "dep:aws-config",
     "dep:aws-sdk-ecr",
     "dep:aws-sdk-kms",
@@ -48,13 +53,12 @@ aws = [
     "dep:aws-sdk-sts",
 ]
 k8s = [
-    "server",  # Kubernetes controller requires server
     "dep:kube",
     "dep:k8s-openapi",
     "dep:rustls",
 ]
 snowflake = [
-    "server",  # Snowflake extension requires server
+    "server",  # Snowflake extension requires server (which includes k8s)
     "dep:snowflake-connector-rs",
 ]
 

@@ -565,6 +565,7 @@ impl AppState {
         #[cfg(feature = "snowflake")]
         if let Some(ref extensions_config) = settings.extensions {
             for provider_config in &extensions_config.providers {
+                #[allow(irrefutable_let_patterns)]
                 if let crate::server::settings::ExtensionProviderConfig::SnowflakeOAuthProvisioner {
                     account,
                     user,

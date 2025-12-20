@@ -806,7 +806,7 @@ impl SnowflakeOAuthProvisioner {
         status: &mut SnowflakeOAuthProvisionerStatus,
         project_id: Uuid,
         project_name: &str,
-        extension_name: &str,
+        _extension_name: &str,
     ) -> Result<()> {
         let oauth_extension_name = status
             .oauth_extension_name
@@ -947,8 +947,8 @@ impl SnowflakeOAuthProvisioner {
         status: &mut SnowflakeOAuthProvisionerStatus,
         project_id: Uuid,
         project_name: &str,
-        extension_name: &str,
-        spec: &SnowflakeOAuthProvisionerSpec,
+        _extension_name: &str,
+        _spec: &SnowflakeOAuthProvisionerSpec,
     ) -> Result<()> {
         let integration_name = status
             .integration_name

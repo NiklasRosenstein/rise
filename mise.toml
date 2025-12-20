@@ -3,6 +3,7 @@ minikube = "1.37.0"
 pack = "0.39.0"
 "ubi:railwayapp/railpack" = "0.15.1"
 "cargo:sqlx-cli" = "latest"
+"cargo:cargo-all-features" = "latest"
 mdbook = "latest"
 helm = "latest"
 rust = { version = "1.91.1", profile = "default" }
@@ -18,7 +19,8 @@ run = "cargo sqlx prepare --check -- --features server,aws,k8s,snowflake --all-t
 [tasks.lint]
 description = "Run all linting checks (clippy, formatting, sqlx, helm)."
 run = """
-SQLX_OFFLINE=true cargo clippy --all-targets --all-features -- -D warnings
+SQLX_OFFLINE=true cargo all-features check --all-targets
+SQLX_OFFLINE=true cargo all-features clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 mise sqlx:check
 helm lint helm/rise

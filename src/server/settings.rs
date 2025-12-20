@@ -608,6 +608,7 @@ pub struct ExtensionsSettings {
 }
 
 /// Snowflake authentication configuration
+#[cfg(feature = "snowflake")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "auth_type", rename_all = "snake_case")]
 pub enum SnowflakeAuth {
@@ -627,6 +628,7 @@ pub enum SnowflakeAuth {
 }
 
 /// Private key source (path or inline PEM)
+#[cfg(feature = "snowflake")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum PrivateKeySource {
