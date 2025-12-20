@@ -118,3 +118,13 @@ deployment_controller:
   # Optional: Node selector for pod placement
   # node_selector:
   #   kubernetes.io/arch: "amd64"
+
+  # Optional: Name of an existing imagePullSecret to use for deployments
+  # If not specified:
+  #   - With a registry provider (e.g., ECR): Controller creates and manages the secret
+  #   - Without a registry provider: No image pull secret is used
+  # If specified:
+  #   - The named secret must exist in each project namespace
+  #   - Controller will NOT create or manage this secret
+  #   - Useful for static registries with externally-managed credentials
+  # image_pull_secret_name: "my-registry-secret"

@@ -113,6 +113,7 @@ pub struct KubernetesControllerConfig {
     pub ingress_tls_secret_name: Option<String>,
     pub custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
     pub node_selector: std::collections::HashMap<String, String>,
+    pub image_pull_secret_name: Option<String>,
 }
 
 /// Kubernetes controller implementation
@@ -133,6 +134,7 @@ pub struct KubernetesController {
     ingress_tls_secret_name: Option<String>,
     custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
     node_selector: std::collections::HashMap<String, String>,
+    image_pull_secret_name: Option<String>,
 }
 
 impl KubernetesController {
@@ -159,6 +161,7 @@ impl KubernetesController {
             ingress_tls_secret_name: config.ingress_tls_secret_name,
             custom_domain_tls_mode: config.custom_domain_tls_mode,
             node_selector: config.node_selector,
+            image_pull_secret_name: config.image_pull_secret_name,
         })
     }
 
@@ -297,6 +300,12 @@ impl KubernetesController {
 
     /// Refresh image pull secrets for all projects with active deployments
     async fn refresh_image_pull_secrets(&self) -> Result<()> {
+        // Skip if using externally-managed secrets
+        if self.image_pull_secret_name.is_some() {
+            debug!("Using externally-managed imagePullSecret, skipping refresh");
+            return Ok(());
+        }
+
         // Get registry provider
         let Some(ref provider) = self.registry_provider else {
             // No registry provider configured, skip refresh
@@ -1011,9 +1020,25 @@ impl KubernetesController {
                         ..Default::default()
                     }),
                     spec: Some(PodSpec {
-                        image_pull_secrets: Some(vec![LocalObjectReference {
-                            name: IMAGE_PULL_SECRET_NAME.to_string(),
-                        }]),
+                        image_pull_secrets: {
+                            // Determine which secret to use (if any)
+                            let secret_name = self.image_pull_secret_name.as_deref().or_else(
+                                || {
+                                    // Use default name if registry provider is configured
+                                    if self.registry_provider.is_some() {
+                                        Some(IMAGE_PULL_SECRET_NAME)
+                                    } else {
+                                        None
+                                    }
+                                },
+                            );
+
+                            secret_name.map(|name| {
+                                vec![LocalObjectReference {
+                                    name: name.to_string(),
+                                }]
+                            })
+                        },
                         containers: vec![Container {
                             name: "app".to_string(),
                             image: Some(image),
@@ -1431,6 +1456,44 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    // Check if using an externally-managed image pull secret
+                    if let Some(ref external_secret_name) = self.image_pull_secret_name {
+                        // Using external secret - just verify it exists, don't manage it
+                        let secret_api: Api<Secret> =
+                            Api::namespaced(self.kube_client.clone(), namespace);
+
+                        match secret_api.get(external_secret_name).await {
+                            Ok(_) => {
+                                debug!(
+                                    "External imagePullSecret '{}' exists in namespace {}",
+                                    external_secret_name, namespace
+                                );
+                            }
+                            Err(kube::Error::Api(ae)) if ae.code == 404 => {
+                                warn!(
+                                    "External imagePullSecret '{}' not found in namespace {}. \
+                                     Secret must be created manually or deployment will fail to pull images.",
+                                    external_secret_name, namespace
+                                );
+                                // Continue anyway - deployment will fail with clear error if secret is truly missing
+                            }
+                            Err(e) if is_namespace_not_found_error(&e) => {
+                                warn!(
+                                    "Namespace missing during imagePullSecret check, resetting to CreatingNamespace"
+                                );
+                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                metadata.namespace = None;
+                                continue;
+                            }
+                            Err(e) => return Err(e.into()),
+                        }
+
+                        // Skip to next phase - we don't manage external secrets
+                        metadata.reconcile_phase = ReconcilePhase::CreatingService;
+                        continue;
+                    }
+
+                    // Using registry provider - create/update secret dynamically
                     if let Some(ref provider) = self.registry_provider {
                         let (username, password) = provider.get_pull_credentials().await?;
                         let secret_api: Api<Secret> =
@@ -1470,8 +1533,8 @@ impl DeploymentBackend for KubernetesController {
                             Err(e) => return Err(e.into()),
                         }
                     } else {
-                        // No registry provider, skip secret creation
-                        debug!("No registry provider, skipping secret creation");
+                        // No registry provider and no external secret - skip secret creation
+                        debug!("No registry provider or external secret configured, skipping image pull secret creation");
                     }
 
                     metadata.reconcile_phase = ReconcilePhase::CreatingService;
@@ -2668,6 +2731,7 @@ mod tests {
             ingress_tls_secret_name: None,
             custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
             node_selector: std::collections::HashMap::new(),
+            image_pull_secret_name: None,
         }
     }
 
