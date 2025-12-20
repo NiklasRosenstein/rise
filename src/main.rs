@@ -99,6 +99,9 @@ enum Commands {
         /// Port to expose on the host (defaults to same as http-port)
         #[arg(long)]
         expose: Option<u16>,
+        /// Runtime environment variables (format: KEY=VALUE, can be specified multiple times)
+        #[arg(long = "run-env", value_parser = parse_key_val::<String, String>)]
+        run_env: Vec<(String, String)>,
         #[command(flatten)]
         build_args: build::BuildArgs,
     },
@@ -1057,6 +1060,7 @@ async fn main() -> Result<()> {
             path,
             http_port,
             expose,
+            run_env,
             build_args,
         } => {
             let expose_port = expose.unwrap_or(*http_port);
@@ -1069,6 +1073,7 @@ async fn main() -> Result<()> {
                     path,
                     http_port: *http_port,
                     expose: expose_port,
+                    run_env,
                     build_args,
                 },
             )

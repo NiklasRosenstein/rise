@@ -109,6 +109,9 @@ rise run --http-port 8080 --expose 3000
 # Load environment variables from a project
 rise run --project my-app
 
+# Set runtime environment variables
+rise run --run-env DATABASE_URL=postgres://localhost/mydb --run-env DEBUG=true
+
 # With custom build backend
 rise run --backend pack
 ```
@@ -118,6 +121,7 @@ rise run --backend pack
 - `--project <name>`: Project name to load non-secret environment variables from
 - `--http-port <port>`: HTTP port the application listens on (also sets PORT env var) [default: 8080]
 - `--expose <port>`: Port to expose on the host (defaults to same as http-port)
+- `--run-env <KEY=VALUE>`: Runtime environment variables (can be specified multiple times)
 - Build flags: `--backend`, `--builder`, `--buildpack`, `--container-cli`, etc.
 
 **Notes:**

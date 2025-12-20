@@ -15,6 +15,7 @@ pub struct RunOptions<'a> {
     pub path: &'a str,
     pub http_port: u16,
     pub expose: u16,
+    pub run_env: &'a [(String, String)],
     pub build_args: &'a build::BuildArgs,
 }
 
@@ -97,6 +98,17 @@ pub async fn run_locally(
         } else {
             warn!("Not logged in - skipping project environment variables");
             warn!("Run 'rise login' to load environment variables from the project");
+        }
+    }
+
+    // Add user-specified runtime environment variables
+    if !options.run_env.is_empty() {
+        info!(
+            "Setting {} runtime environment variables",
+            options.run_env.len()
+        );
+        for (key, value) in options.run_env {
+            cmd.arg("-e").arg(format!("{}={}", key, value));
         }
     }
 

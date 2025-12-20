@@ -300,6 +300,23 @@ rise run --project my-app
 
 **Note:** Only non-secret environment variables are loaded. Secret values cannot be retrieved from the backend for security reasons.
 
+### Setting Runtime Environment Variables
+
+You can set custom runtime environment variables using the `--run-env` flag:
+
+```bash
+# Set a single environment variable
+rise run --run-env DATABASE_URL=postgres://localhost/mydb
+
+# Set multiple environment variables
+rise run --run-env DATABASE_URL=postgres://localhost/mydb --run-env DEBUG=true --run-env API_KEY=test123
+
+# Combine with project environment variables
+rise run --project my-app --run-env OVERRIDE_VAR=custom_value
+```
+
+Runtime environment variables set via `--run-env` take precedence and can override project environment variables if they have the same key.
+
 ### Build Backend Selection
 
 Use any build backend with `rise run`:
@@ -358,4 +375,9 @@ rise run --project my-app --http-port 3000
 # Application accessible at http://localhost:3000
 # PORT=3000 and DATABASE_URL=postgres://localhost/mydb are set
 # API_KEY is not loaded (secret values not retrievable)
+
+# Run with additional runtime environment variables
+rise run --project my-app --http-port 3000 --run-env DEBUG=true --run-env LOG_LEVEL=verbose
+
+# Application now has PORT, DATABASE_URL, DEBUG, and LOG_LEVEL environment variables set
 ```
