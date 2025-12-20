@@ -146,6 +146,7 @@ cargo build --all-features            # Full build with all capabilities
    - [x] Automatic build method detection
    - [x] BuildKit daemon management with SSL certificate handling
    - [x] `rise build` command for local image builds without deployment
+   - [x] `rise run` command for local development (build and run with docker/podman)
    - [x] Pre-built image deployment support (`--image` flag)
       - [x] Native Dex device authorization flow (via `--device` flag) ⚠️ **NOT COMPATIBLE WITH DEX**
         - Note: Dex's device flow implementation doesn't follow RFC 8628 properly
