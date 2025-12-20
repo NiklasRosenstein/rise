@@ -438,6 +438,17 @@ impl SnowflakeOAuthProvisioner {
             .await
             .context("Failed to create Snowflake session")?;
 
+        // Explicitly set warehouse if configured
+        // The warehouse field in SnowflakeClientConfig might not automatically apply to sessions
+        if let Some(ref warehouse) = self.warehouse {
+            let use_warehouse_sql =
+                format!("USE WAREHOUSE {}", Self::escape_identifier(warehouse)?);
+            session
+                .query(use_warehouse_sql.as_str())
+                .await
+                .context("Failed to set warehouse for session")?;
+        }
+
         let rows = session
             .query(sql)
             .await
