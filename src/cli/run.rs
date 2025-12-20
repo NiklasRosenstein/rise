@@ -109,9 +109,12 @@ pub async fn run_locally(
         .stderr(Stdio::inherit());
 
     info!(
-        "Running: {} run --rm -it -p {}:{} -e PORT={} {} [+ project env vars]",
-        container_cli, options.expose, options.http_port, options.http_port, image_tag
+        "Running container: {} (port {}:{}, PORT={})",
+        image_tag, options.expose, options.http_port, options.http_port
     );
+    if options.project_name.is_some() {
+        info!("Project environment variables loaded (non-secret only)");
+    }
     info!(
         "Application will be available at http://localhost:{}",
         options.expose
@@ -122,7 +125,11 @@ pub async fn run_locally(
     let status = cmd.status().context("Failed to run container")?;
 
     if !status.success() {
-        bail!("Container exited with status: {}", status);
+        if let Some(code) = status.code() {
+            bail!("Container exited with status code: {}", code);
+        } else {
+            bail!("Container was terminated by a signal");
+        }
     }
 
     Ok(())
