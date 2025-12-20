@@ -169,22 +169,36 @@ impl SnowflakeOAuthProvisioner {
     /// Returns Ok(()) if credentials are valid, Err if connection fails
     pub async fn validate_credentials(&self) -> Result<()> {
         info!(
-            "Validating Snowflake credentials for account: {} (user: {})",
-            self.account, self.user
+            "Validating Snowflake credentials for account: {} (user: {}, role: {:?})",
+            self.account, self.user, self.role
         );
 
-        // Test the connection with a simple query
-        let test_query = "SELECT CURRENT_VERSION() as version, CURRENT_ACCOUNT() as account";
+        // Test the connection and get session info
+        let test_query = "SELECT CURRENT_VERSION() as version, CURRENT_ACCOUNT() as account, \
+                          CURRENT_USER() as user, CURRENT_ROLE() as role, \
+                          CURRENT_SECONDARY_ROLES() as secondary_roles";
 
         match self.execute_sql(test_query).await {
             Ok(rows) => {
-                // Log Snowflake version info for debugging
+                // Log connection info for debugging
                 if let Some(row) = rows.first() {
                     if let Some(version) = row.get("version").or_else(|| row.get("VERSION")) {
-                        info!("Successfully connected to Snowflake version: {}", version);
+                        info!("Snowflake version: {}", version);
                     }
                     if let Some(account) = row.get("account").or_else(|| row.get("ACCOUNT")) {
                         info!("Snowflake account: {}", account);
+                    }
+                    if let Some(user) = row.get("user").or_else(|| row.get("USER")) {
+                        info!("Connected as user: {}", user);
+                    }
+                    if let Some(role) = row.get("role").or_else(|| row.get("ROLE")) {
+                        info!("Active role: {}", role);
+                    }
+                    if let Some(secondary_roles) = row
+                        .get("secondary_roles")
+                        .or_else(|| row.get("SECONDARY_ROLES"))
+                    {
+                        info!("Secondary roles: {}", secondary_roles);
                     }
                 } else {
                     info!("Successfully connected to Snowflake");
@@ -391,13 +405,22 @@ impl SnowflakeOAuthProvisioner {
             .context("Failed to execute SQL on Snowflake")?;
 
         // Convert SnowflakeRow to serde_json::Value
-        // For now, we'll construct a basic JSON representation
+        // Build JSON objects from row data manually
         let json_rows: Vec<Value> = rows
             .iter()
-            .map(|_row| {
-                // TODO: Implement proper row-to-JSON conversion using SnowflakeRow API
-                // For now, return empty objects as we primarily use this for DDL statements
-                json!({})
+            .map(|row| {
+                // Try to get column names and values from the row
+                // Note: SnowflakeRow doesn't implement Serialize
+                // For now, return the row as a debug string if we can't parse it properly
+                if let Some(json_str) = format!("{:?}", row).strip_prefix("SnowflakeRow ") {
+                    // Try to parse the debug output as JSON
+                    if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                        return parsed;
+                    }
+                }
+
+                // Fallback to empty object
+                Value::Object(serde_json::Map::new())
             })
             .collect();
 
