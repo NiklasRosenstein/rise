@@ -36,6 +36,35 @@ pub trait Extension: Send + Sync {
     /// Should check that the spec is valid JSONB and contains required fields.
     async fn validate_spec(&self, spec: &Value) -> Result<()>;
 
+    /// Callback invoked after spec update
+    ///
+    /// This hook is called after the spec has been successfully updated in the database.
+    /// Extensions can use this to:
+    /// - Reset verification states when critical fields change
+    /// - Update cached configuration
+    /// - Trigger reconciliation
+    ///
+    /// # Arguments
+    /// * `old_spec` - The previous spec value
+    /// * `new_spec` - The new spec value
+    /// * `project_id` - Project UUID
+    /// * `extension_name` - Extension instance name
+    /// * `db_pool` - Database pool for status updates
+    ///
+    /// # Returns
+    /// Ok(()) if successful, Err if the update should fail
+    async fn on_spec_updated(
+        &self,
+        _old_spec: &Value,
+        _new_spec: &Value,
+        _project_id: Uuid,
+        _extension_name: &str,
+        _db_pool: &sqlx::PgPool,
+    ) -> Result<()> {
+        // Default implementation: no-op
+        Ok(())
+    }
+
     /// Start the extension's background reconciliation loop(s)
     ///
     /// This method should spawn background tasks via `tokio::spawn` that run

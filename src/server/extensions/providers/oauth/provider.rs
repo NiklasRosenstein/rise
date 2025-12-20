@@ -222,6 +222,65 @@ impl Extension for OAuthProvider {
         Ok(())
     }
 
+    async fn on_spec_updated(
+        &self,
+        old_spec: &Value,
+        new_spec: &Value,
+        project_id: Uuid,
+        extension_name: &str,
+        db_pool: &sqlx::PgPool,
+    ) -> Result<()> {
+        use crate::db::extensions as db_extensions;
+
+        // Check if auth-sensitive fields changed
+        let auth_sensitive_fields = [
+            "client_id",
+            "client_secret_ref",
+            "authorization_endpoint",
+            "token_endpoint",
+            "scopes",
+        ];
+
+        let mut changed = false;
+        for field in &auth_sensitive_fields {
+            if old_spec.get(field) != new_spec.get(field) {
+                changed = true;
+                break;
+            }
+        }
+
+        if !changed {
+            return Ok(());
+        }
+
+        // Reset auth_verified when critical fields change
+        debug!(
+            "OAuth spec changed for {}/{}, resetting auth_verified",
+            project_id, extension_name
+        );
+
+        // Get current status
+        let ext = db_extensions::find_by_project_and_name(db_pool, project_id, extension_name)
+            .await?
+            .ok_or_else(|| anyhow!("Extension not found"))?;
+
+        // Parse and update status
+        let mut status: OAuthExtensionStatus =
+            serde_json::from_value(ext.status).unwrap_or_default();
+        status.auth_verified = false;
+
+        // Save updated status
+        db_extensions::update_status(
+            db_pool,
+            project_id,
+            extension_name,
+            &serde_json::to_value(&status)?,
+        )
+        .await?;
+
+        Ok(())
+    }
+
     fn start(&self) {
         // OAuth extension doesn't need a reconciliation loop
         // Token refresh and cleanup are handled by separate background jobs
