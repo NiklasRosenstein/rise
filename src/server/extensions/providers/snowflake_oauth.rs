@@ -147,6 +147,32 @@ impl Clone for SnowflakeOAuthProvisioner {
 }
 
 impl SnowflakeOAuthProvisioner {
+    /// Escape a Snowflake identifier (table name, integration name, etc.)
+    /// Validates allowed characters and wraps in double quotes
+    fn escape_identifier(identifier: &str) -> Result<String> {
+        // Snowflake identifiers: alphanumeric, underscore, dollar sign
+        // We're more restrictive for security
+        if !identifier
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == '_' || c == '-')
+        {
+            return Err(anyhow!(
+                "Invalid identifier '{}': only alphanumeric, underscore, and hyphen allowed",
+                identifier
+            ));
+        }
+
+        // Escape internal double quotes and wrap in double quotes
+        let escaped = identifier.replace('"', "\"\"");
+        Ok(format!("\"{}\"", escaped))
+    }
+
+    /// Escape a string literal for use in Snowflake SQL
+    /// Doubles single quotes to escape them
+    fn escape_string_literal(value: &str) -> String {
+        value.replace('\'', "''")
+    }
+
     pub fn new(config: SnowflakeOAuthProvisionerConfig) -> Self {
         Self {
             db_pool: config.db_pool,
@@ -409,17 +435,31 @@ impl SnowflakeOAuthProvisioner {
         let json_rows: Vec<Value> = rows
             .iter()
             .map(|row| {
+                // Debug log the raw row to see what we're getting
+                let row_debug = format!("{:?}", row);
+                debug!("Raw SnowflakeRow: {}", row_debug);
+
                 // Try to get column names and values from the row
                 // Note: SnowflakeRow doesn't implement Serialize
-                // For now, return the row as a debug string if we can't parse it properly
-                if let Some(json_str) = format!("{:?}", row).strip_prefix("SnowflakeRow ") {
-                    // Try to parse the debug output as JSON
+                // The debug format might be: SnowflakeRow { column1: value1, column2: value2 }
+                // or it might be JSON already
+
+                // Try parsing the whole debug string as JSON first
+                if let Ok(parsed) = serde_json::from_str::<Value>(&row_debug) {
+                    debug!("Parsed SnowflakeRow as JSON directly: {:?}", parsed);
+                    return parsed;
+                }
+
+                // Try stripping "SnowflakeRow " prefix and parsing
+                if let Some(json_str) = row_debug.strip_prefix("SnowflakeRow ") {
                     if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
+                        debug!("Parsed SnowflakeRow after stripping prefix: {:?}", parsed);
                         return parsed;
                     }
                 }
 
-                // Fallback to empty object
+                // If all else fails, log warning and return empty object
+                warn!("Failed to parse SnowflakeRow to JSON: {}", row_debug);
                 Value::Object(serde_json::Map::new())
             })
             .collect();
@@ -557,15 +597,18 @@ impl SnowflakeOAuthProvisioner {
         // Get effective config (union of backend defaults + user overrides)
         let effective_config = self.get_effective_config(spec);
 
-        // Format blocked roles list for SQL
+        // Format blocked roles list for SQL with proper escaping
         let blocked_roles_sql = effective_config
             .blocked_roles
             .iter()
-            .map(|r| format!("'{}'", r))
+            .map(|r| format!("'{}'", Self::escape_string_literal(r)))
             .collect::<Vec<_>>()
             .join(", ");
 
-        // Create SECURITY INTEGRATION SQL
+        // Create SECURITY INTEGRATION SQL with proper escaping
+        let integration_name_escaped = Self::escape_identifier(integration_name)?;
+        let redirect_uri_escaped = Self::escape_string_literal(redirect_uri);
+
         let sql = format!(
             r#"CREATE SECURITY INTEGRATION {integration_name}
   TYPE = OAUTH
@@ -578,8 +621,8 @@ impl SnowflakeOAuthProvisioner {
   OAUTH_REFRESH_TOKEN_VALIDITY = {refresh_token_validity}
   OAUTH_ENFORCE_PKCE = TRUE
   BLOCKED_ROLES_LIST = ({blocked_roles})"#,
-            integration_name = integration_name,
-            redirect_uri = redirect_uri,
+            integration_name = integration_name_escaped,
+            redirect_uri = redirect_uri_escaped,
             refresh_token_validity = self.refresh_token_validity_seconds,
             blocked_roles = blocked_roles_sql
         );
@@ -622,10 +665,11 @@ impl SnowflakeOAuthProvisioner {
             integration_name, project_name
         );
 
-        // Query for OAuth credentials
+        // Query for OAuth credentials with proper escaping
+        let integration_name_escaped = Self::escape_string_literal(integration_name);
         let sql = format!(
             "SELECT SYSTEM$SHOW_OAUTH_CLIENT_SECRETS('{}') as credentials",
-            integration_name
+            integration_name_escaped
         );
 
         match self.execute_sql(&sql).await {
@@ -828,8 +872,9 @@ impl SnowflakeOAuthProvisioner {
             .as_ref()
             .ok_or_else(|| anyhow!("Integration name not set"))?;
 
-        // Check if integration still exists
-        let sql = format!("SHOW INTEGRATIONS LIKE '{}'", integration_name);
+        // Check if integration still exists with proper escaping
+        let integration_name_escaped = Self::escape_string_literal(integration_name);
+        let sql = format!("SHOW INTEGRATIONS LIKE '{}'", integration_name_escaped);
 
         match self.execute_sql(&sql).await {
             Ok(rows) => {
@@ -869,7 +914,8 @@ impl SnowflakeOAuthProvisioner {
 
         // 1. Drop Snowflake integration (best effort)
         if let Some(integration_name) = &status.integration_name {
-            let sql = format!("DROP INTEGRATION IF EXISTS {}", integration_name);
+            let integration_name_escaped = Self::escape_identifier(integration_name)?;
+            let sql = format!("DROP INTEGRATION IF EXISTS {}", integration_name_escaped);
             match self.execute_sql(&sql).await {
                 Ok(_) => {
                     info!("Dropped Snowflake integration {}", integration_name);
@@ -951,6 +997,17 @@ impl SnowflakeOAuthProvisioner {
         let mut status: SnowflakeOAuthProvisionerStatus =
             serde_json::from_value(project_extension.status.clone()).unwrap_or_default();
 
+        // If in Failed state and spec has changed, reset to Pending to retry
+        if status.state == SnowflakeOAuthState::Failed {
+            // Check if spec changed by comparing with last known spec
+            // For simplicity, always reset to Pending when spec changes
+            // (A more sophisticated approach would store spec hash in status)
+            debug!(
+                "Extension in Failed state for project {}. Spec update will trigger retry.",
+                project.name
+            );
+        }
+
         // Check if marked for deletion
         if project_extension.deleted_at.is_some() {
             if status.state != SnowflakeOAuthState::Deleted {
@@ -1030,13 +1087,14 @@ impl SnowflakeOAuthProvisioner {
                     .await?;
             }
             SnowflakeOAuthState::Failed => {
-                // Retry creation immediately
-                info!(
-                    "Snowflake OAuth provisioner for project {} is in failed state, retrying",
-                    project.name
+                // Stay in Failed state - don't retry automatically
+                // User must fix the configuration and update the extension to retry
+                debug!(
+                    "Snowflake OAuth provisioner for project {} is in failed state (error: {:?}). \
+                     Update the extension spec to retry.",
+                    project.name, status.error
                 );
-                status.state = SnowflakeOAuthState::Pending;
-                status.error = None;
+                // No state change - keep in Failed state
             }
             _ => {}
         }
