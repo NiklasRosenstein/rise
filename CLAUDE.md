@@ -220,3 +220,5 @@ The project `visibility` field (Public/Private) is currently stored but not enfo
 - The admin user(s) should always have full access to perform any operation. When we work on a new API endpoint, we make sure admin users don't need to pass regular permission checks.
 - Any SQLX queries are to be wrapped by helper functions in the rise_deploy::db crate. No SQLX queries outside of this crate are allowed
 - When we log errors and don't handle them further, we should include a sensible amount of information on the error. Often logging the error with `{:?}` is good enough.
+- When capturing screenshots, the playwright tool will successfully install the driver even if you might think it's install step failed.\
+- Always use minimum 1280px and 800px height for the browser with in the playwright tool.
