@@ -1044,16 +1044,8 @@ impl SnowflakeOAuthProvisioner {
         let mut status: SnowflakeOAuthProvisionerStatus =
             serde_json::from_value(project_extension.status.clone()).unwrap_or_default();
 
-        // If in Failed state and spec has changed, reset to Pending to retry
-        if status.state == SnowflakeOAuthState::Failed {
-            // Check if spec changed by comparing with last known spec
-            // For simplicity, always reset to Pending when spec changes
-            // (A more sophisticated approach would store spec hash in status)
-            debug!(
-                "Extension in Failed state for project {}. Spec update will trigger retry.",
-                project.name
-            );
-        }
+        // TODO: Implement spec change detection to automatically retry failed extensions
+        // For now, user must delete and recreate the extension to retry after fixing issues
 
         // Check if marked for deletion
         if project_extension.deleted_at.is_some() {
@@ -1136,11 +1128,7 @@ impl SnowflakeOAuthProvisioner {
             SnowflakeOAuthState::Failed => {
                 // Stay in Failed state - don't retry automatically
                 // User must fix the configuration and update the extension to retry
-                error!(
-                    "Snowflake OAuth provisioner for project {} is in failed state (error: {:?}). \
-                     Update the extension spec to retry.",
-                    project.name, status.error
-                );
+                // Error was already logged when transitioning to Failed state
                 // No state change - keep in Failed state
             }
             _ => {}
