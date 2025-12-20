@@ -75,7 +75,7 @@ You can create a `rise.toml` or `.rise.toml` file in your project directory to d
 backend = "pack"
 builder = "heroku/builder:24"
 buildpacks = ["heroku/nodejs", "heroku/procfile"]
-managed_buildkit = true
+
 ```
 
 ### Configuration Precedence
