@@ -107,6 +107,100 @@ rise build myapp:latest --backend railpack -e CUSTOM_VAR=value
 - Available in all build steps defined in the Railpack plan
 - Railpack frontend exposes them as environment variables during build
 
+## Project Configuration (rise.toml)
+
+You can create a `rise.toml` or `.rise.toml` file in your project directory to define default build options. This allows you to avoid repeating CLI flags for every build.
+
+**Example `rise.toml`:**
+
+```toml
+[build]
+backend = "pack"
+builder = "heroku/builder:24"
+buildpacks = ["heroku/nodejs", "heroku/procfile"]
+env = ["BP_NODE_VERSION=20"]
+```
+
+### Configuration Precedence
+
+Build options are resolved in the following order (highest to lowest):
+
+1. **CLI flags** (e.g., `--backend pack`)
+2. **Project config file** (`rise.toml` or `.rise.toml`)
+3. **Environment variables** (e.g., `RISE_CONTAINER_CLI`, `RISE_MANAGED_BUILDKIT`)
+4. **Global config** (`~/.config/rise/config.json`)
+5. **Auto-detection/defaults**
+
+**Vector field behavior:**
+- **All vector fields** (`buildpacks`, `env`): CLI values are **appended** to config values (merged)
+
+This allows you to set common buildpacks and environment variables in the config file and add additional ones via CLI as needed.
+
+### Available Options
+
+All CLI build flags can be specified in the `[build]` section:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `backend` | String | Build backend: `docker`, `pack`, `railpack`, `railpack:buildctl` |
+| `builder` | String | Buildpack builder image (pack only) |
+| `buildpacks` | Array | List of buildpacks to use (pack only) |
+| `env` | Array | Environment variables for build (format: `KEY=VALUE` or `KEY`) |
+| `container_cli` | String | Container CLI: `docker` or `podman` |
+| `managed_buildkit` | Boolean | Enable managed BuildKit daemon |
+| `railpack_embed_ssl_cert` | Boolean | Embed SSL certificate in Railpack builds |
+
+### Examples
+
+**Heroku buildpacks:**
+```toml
+[build]
+backend = "pack"
+builder = "heroku/builder:24"
+buildpacks = ["heroku/nodejs", "heroku/procfile"]
+```
+
+**Railpack with SSL:**
+```toml
+[build]
+backend = "railpack"
+managed_buildkit = true
+railpack_embed_ssl_cert = true
+```
+
+**Docker with build args:**
+```toml
+[build]
+backend = "docker"
+env = ["VERSION=1.0.0", "NODE_ENV=production"]
+```
+
+**Pack with custom environment:**
+```toml
+[build]
+backend = "pack"
+builder = "paketobuildpacks/builder-jammy-base"
+env = ["BP_NODE_VERSION=20.*"]
+```
+
+### CLI Override
+
+CLI flags always take precedence over project config:
+
+```bash
+# Uses docker backend despite project config specifying pack
+rise build myapp:latest --backend docker
+
+# Adds to env variables from config
+# If config has env = ["NODE_ENV=production"]
+# This results in: env = ["NODE_ENV=production", "API_KEY=secret"]
+rise build myapp:latest -e API_KEY=secret
+```
+
+### File Naming
+
+Both `rise.toml` and `.rise.toml` are supported. If both exist in the same directory, `rise.toml` takes precedence (with a warning).
+
 ## SSL Certificate Handling (Managed BuildKit Daemon)
 
 When building with BuildKit-based backends (`docker`, `railpack`) on macOS behind corporate proxies (Cloudflare, Zscaler, etc.) or environments with custom CA certificates, builds may fail with SSL certificate verification errors.

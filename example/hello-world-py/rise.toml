@@ -1,0 +1,17 @@
+# Rise build configuration for hello-world-py example
+#
+# This configuration specifies the build backend and buildpack settings.
+# With this file, you can simply run:
+#   rise build hello-world-py:latest example/hello-world-py
+# without needing to specify --backend or --builder flags.
+
+[build]
+backend = "pack"
+builder = "paketobuildpacks/builder-jammy-base"
+
+# Specify Python buildpack explicitly
+buildpacks = ["paketo-buildpacks/python"]
+
+# Optional: Set Python version and other config via environment variables
+# Note: CLI -e flags will be appended to these (merged)
+env = ["BP_CPYTHON_VERSION=3.12", "BP_PIP_VERSION=latest"]
