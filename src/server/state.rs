@@ -596,6 +596,12 @@ impl AppState {
                             },
                         );
 
+                    // Validate credentials during startup - fail fast if invalid
+                    snowflake_oauth_provisioner
+                        .validate_credentials()
+                        .await
+                        .context("Failed to validate Snowflake credentials during startup")?;
+
                     let snowflake_oauth_arc: Arc<dyn crate::server::extensions::Extension> =
                         Arc::new(snowflake_oauth_provisioner);
                     extension_registry.register_type(snowflake_oauth_arc.clone());

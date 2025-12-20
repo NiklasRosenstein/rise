@@ -161,6 +161,50 @@ impl SnowflakeOAuthProvisioner {
         }
     }
 
+    /// Validate Snowflake credentials during startup
+    /// Returns Ok(()) if credentials are valid, Err if connection fails
+    pub async fn validate_credentials(&self) -> Result<()> {
+        info!(
+            "Validating Snowflake credentials for account: {} (user: {})",
+            self.account, self.user
+        );
+
+        // Test the connection with a simple query
+        let test_query = "SELECT CURRENT_VERSION() as version, CURRENT_ACCOUNT() as account";
+
+        match self.execute_sql(test_query).await {
+            Ok(rows) => {
+                // Log Snowflake version info for debugging
+                if let Some(row) = rows.first() {
+                    if let Some(version) = row.get("version").or_else(|| row.get("VERSION")) {
+                        info!("Successfully connected to Snowflake version: {}", version);
+                    }
+                    if let Some(account) = row.get("account").or_else(|| row.get("ACCOUNT")) {
+                        info!("Snowflake account: {}", account);
+                    }
+                } else {
+                    info!("Successfully connected to Snowflake");
+                }
+
+                Ok(())
+            }
+            Err(e) => {
+                error!(
+                    "Failed to validate Snowflake credentials for account {} (user: {}): {:?}",
+                    self.account, self.user, e
+                );
+                Err(anyhow!(
+                    "Snowflake credential validation failed for account '{}' (user: '{}'): {}. \
+                     Please verify your Snowflake configuration in config/default.yaml. \
+                     The user must have CREATE INTEGRATION privilege.",
+                    self.account,
+                    self.user,
+                    e
+                ))
+            }
+        }
+    }
+
     /// Merge user spec with backend defaults (union, not override)
     fn get_effective_config(&self, spec: &SnowflakeOAuthProvisionerSpec) -> EffectiveConfig {
         // Union blocked_roles: backend defaults + user additions (deduplicated)
