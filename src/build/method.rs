@@ -40,11 +40,11 @@ pub struct BuildArgs {
     pub container_cli: Option<String>,
 
     /// Enable managed BuildKit daemon with SSL certificate support
-    #[arg(long, action = clap::ArgAction::SetTrue)]
+    #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
     pub managed_buildkit: Option<bool>,
 
     /// Embed SSL certificate into Railpack build plan for build-time RUN command support
-    #[arg(long, action = clap::ArgAction::SetTrue)]
+    #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
     pub railpack_embed_ssl_cert: Option<bool>,
 }
 
