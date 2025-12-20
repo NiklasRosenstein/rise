@@ -147,6 +147,12 @@ CLI flags always take precedence over project config:
 ```bash
 # Uses docker backend despite project config specifying pack
 rise build myapp:latest --backend docker
+
+# Disable managed BuildKit despite config enabling it
+rise build myapp:latest --managed-buildkit=false
+
+# Enable SSL certificate embedding despite config disabling it
+rise build myapp:latest --railpack-embed-ssl-cert=true
 ```
 
 ### File Naming
@@ -171,6 +177,10 @@ Rise CLI provides an opt-in managed BuildKit daemon feature that automatically c
 ```bash
 rise build myapp:latest --backend railpack --managed-buildkit
 rise deployment create myproject --backend railpack --managed-buildkit
+
+# Or use explicit true/false values
+rise build myapp:latest --backend railpack --managed-buildkit=true
+rise build myapp:latest --backend railpack --managed-buildkit=false
 ```
 
 **Or set environment variable:**
@@ -261,6 +271,10 @@ export SSL_CERT_FILE=/path/to/ca-certificates.crt
 
 # Embed certificate for build-time use
 rise build myapp:latest --backend railpack --railpack-embed-ssl-cert
+
+# Or use explicit true/false values
+rise build myapp:latest --backend railpack --railpack-embed-ssl-cert=true
+rise build myapp:latest --backend railpack --railpack-embed-ssl-cert=false
 
 # Combine with managed BuildKit for comprehensive SSL support
 rise build myapp:latest --backend railpack --managed-buildkit --railpack-embed-ssl-cert
