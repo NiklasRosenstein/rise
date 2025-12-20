@@ -458,11 +458,19 @@ const OAuthExtensionAPI = {
         }
 
         if (status.configured_at) {
-            return (
-                <span className="bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
-                    Configured
-                </span>
-            );
+            if (status.auth_verified) {
+                return (
+                    <span className="bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
+                        Configured
+                    </span>
+                );
+            } else {
+                return (
+                    <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
+                        Waiting For Auth
+                    </span>
+                );
+            }
         }
 
         return (
@@ -841,14 +849,25 @@ function OAuthDetailView({ extension, projectName }) {
                                     </p>
                                 </div>
                             ) : status.configured_at ? (
-                                <div className="p-3 bg-green-900/20 border border-green-700 rounded">
-                                    <p className="text-sm text-green-300">
-                                        ✓ Configured
-                                    </p>
-                                    <p className="text-xs text-green-400 mt-1">
-                                        {formatDate(status.configured_at)}
-                                    </p>
-                                </div>
+                                status.auth_verified ? (
+                                    <div className="p-3 bg-green-900/20 border border-green-700 rounded">
+                                        <p className="text-sm text-green-300">
+                                            ✓ Configured
+                                        </p>
+                                        <p className="text-xs text-green-400 mt-1">
+                                            {formatDate(status.configured_at)}
+                                        </p>
+                                    </div>
+                                ) : (
+                                    <div className="p-3 bg-yellow-900/20 border border-yellow-700 rounded">
+                                        <p className="text-sm text-yellow-300">
+                                            ⚠ Waiting For Auth
+                                        </p>
+                                        <p className="text-xs text-yellow-400 mt-1">
+                                            Complete OAuth flow to verify configuration
+                                        </p>
+                                    </div>
+                                )
                             ) : (
                                 <div className="p-3 bg-gray-800 rounded">
                                     <p className="text-sm text-gray-400">
