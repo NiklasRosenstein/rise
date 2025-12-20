@@ -2,24 +2,12 @@
 
 use anyhow::{bail, Context, Result};
 use reqwest::Client;
-use serde::Deserialize;
 use std::process::{Command, Stdio};
 use tracing::{info, warn};
 
 use crate::build::{self, BuildOptions};
+use crate::cli::env;
 use crate::config::Config;
-
-#[derive(Debug, Deserialize)]
-struct EnvVarResponse {
-    key: String,
-    value: String, // Will be masked ("••••••••") for secrets
-    is_secret: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct EnvVarsResponse {
-    env_vars: Vec<EnvVarResponse>,
-}
 
 /// Options for running a container locally
 pub struct RunOptions<'a> {
@@ -28,57 +16,6 @@ pub struct RunOptions<'a> {
     pub http_port: u16,
     pub expose: u16,
     pub build_args: &'a build::BuildArgs,
-}
-
-/// Fetch non-secret environment variables from a project
-async fn fetch_project_env_vars(
-    http_client: &Client,
-    backend_url: &str,
-    token: &str,
-    project: &str,
-) -> Result<Vec<(String, String)>> {
-    let url = format!("{}/api/v1/projects/{}/env", backend_url, project);
-
-    let response = http_client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .await
-        .context("Failed to fetch environment variables")?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        bail!(
-            "Failed to fetch environment variables (status {}): {}",
-            status,
-            error_text
-        );
-    }
-
-    let env_response: EnvVarsResponse = response
-        .json()
-        .await
-        .context("Failed to parse environment variables response")?;
-
-    // Filter out secret variables (they'll have masked values)
-    let env_vars: Vec<(String, String)> = env_response
-        .env_vars
-        .into_iter()
-        .filter_map(|var| {
-            if var.is_secret {
-                // Skip secrets as we cannot retrieve their actual values
-                None
-            } else {
-                Some((var.key, var.value))
-            }
-        })
-        .collect();
-
-    Ok(env_vars)
 }
 
 /// Build and run a container image locally for development
@@ -134,7 +71,9 @@ pub async fn run_locally(
     // Fetch and set project environment variables if project is specified
     if let Some(project_name) = options.project_name {
         if let Some(token) = config.get_token() {
-            match fetch_project_env_vars(http_client, &backend_url, &token, project_name).await {
+            match env::fetch_non_secret_env_vars(http_client, &backend_url, &token, project_name)
+                .await
+            {
                 Ok(env_vars) => {
                     if !env_vars.is_empty() {
                         info!(
