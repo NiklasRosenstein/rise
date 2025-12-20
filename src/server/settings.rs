@@ -685,6 +685,10 @@ pub enum ExtensionProviderConfig {
         account: String,
         /// Snowflake user with CREATE INTEGRATION privilege
         user: String,
+        /// Snowflake role to use (must have CREATE INTEGRATION ON ACCOUNT privilege)
+        /// Typically ACCOUNTADMIN or a custom role with appropriate grants
+        #[serde(default)]
+        role: Option<String>,
         /// Authentication configuration (password, private key, or JWT)
         #[serde(flatten)]
         auth: SnowflakeAuth,

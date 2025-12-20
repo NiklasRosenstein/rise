@@ -568,6 +568,7 @@ impl AppState {
                 if let crate::server::settings::ExtensionProviderConfig::SnowflakeOAuthProvisioner {
                     account,
                     user,
+                    role,
                     auth,
                     integration_name_prefix,
                     default_blocked_roles,
@@ -588,6 +589,7 @@ impl AppState {
                                 oauth_provider: Some(oauth_provider_arc.clone()),
                                 account: account.clone(),
                                 user: user.clone(),
+                                role: role.clone(),
                                 auth: auth.clone(),
                                 integration_name_prefix: integration_name_prefix.clone(),
                                 default_blocked_roles: default_blocked_roles.clone(),

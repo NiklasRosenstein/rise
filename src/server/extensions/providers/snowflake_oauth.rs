@@ -99,6 +99,7 @@ pub struct SnowflakeOAuthProvisionerConfig {
     // Backend configuration (from config/default.yaml)
     pub account: String,
     pub user: String,
+    pub role: Option<String>,
     pub auth: SnowflakeAuth,
     pub integration_name_prefix: String,
     pub default_blocked_roles: Vec<String>,
@@ -117,6 +118,7 @@ pub struct SnowflakeOAuthProvisioner {
     // Backend configuration
     account: String,
     user: String,
+    role: Option<String>,
     auth: SnowflakeAuth,
     integration_name_prefix: String,
     default_blocked_roles: Vec<String>,
@@ -134,6 +136,7 @@ impl Clone for SnowflakeOAuthProvisioner {
             oauth_provider: self.oauth_provider.clone(),
             account: self.account.clone(),
             user: self.user.clone(),
+            role: self.role.clone(),
             auth: self.auth.clone(),
             integration_name_prefix: self.integration_name_prefix.clone(),
             default_blocked_roles: self.default_blocked_roles.clone(),
@@ -153,6 +156,7 @@ impl SnowflakeOAuthProvisioner {
             oauth_provider: config.oauth_provider,
             account: config.account,
             user: config.user,
+            role: config.role,
             auth: config.auth,
             integration_name_prefix: config.integration_name_prefix,
             default_blocked_roles: config.default_blocked_roles,
@@ -331,10 +335,15 @@ impl SnowflakeOAuthProvisioner {
             .ok_or_else(|| anyhow!("Invalid account format"))?
             .to_string();
 
-        let config = SnowflakeClientConfig {
+        let mut config = SnowflakeClientConfig {
             account: account_identifier,
             ..Default::default()
         };
+
+        // Set role if configured
+        if let Some(ref role) = self.role {
+            config.role = Some(role.clone());
+        }
 
         let client = SnowflakeClient::new(&self.user, auth_method, config).map_err(|e| {
             // Provide helpful error messages for common issues
