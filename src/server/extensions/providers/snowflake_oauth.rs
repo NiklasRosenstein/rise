@@ -272,11 +272,44 @@ impl SnowflakeOAuthProvisioner {
                     PrivateKeySource::Inline { private_key } => private_key.clone(),
                 };
 
-                // Convert password to Vec<u8>
-                let password_bytes = private_key_password
-                    .as_ref()
-                    .map(|p| p.as_bytes().to_vec())
-                    .unwrap_or_default();
+                // Detect if key is encrypted or unencrypted based on PEM header
+                let is_encrypted = private_key_pem.contains("BEGIN ENCRYPTED PRIVATE KEY");
+                let is_unencrypted_pkcs8 = private_key_pem.contains("BEGIN PRIVATE KEY");
+                let is_rsa_key = private_key_pem.contains("BEGIN RSA PRIVATE KEY");
+
+                // For unencrypted keys, we need to convert to encrypted PKCS#8 format
+                // because snowflake-connector-rs v0.4 only supports encrypted keys
+                let password_bytes = if is_encrypted {
+                    // Key is already encrypted, use provided password
+                    private_key_password
+                        .as_ref()
+                        .map(|p| p.as_bytes().to_vec())
+                        .unwrap_or_default()
+                } else if is_unencrypted_pkcs8 || is_rsa_key {
+                    // Key is unencrypted - the library doesn't support this
+                    // We need to return a clear error
+                    return Err(anyhow!(
+                        "Unencrypted private keys are not supported by snowflake-connector-rs v0.4. \n\
+                         \n\
+                         Please encrypt your private key using:\n\
+                         openssl pkcs8 -topk8 -v2 aes256 -in unencrypted_key.pem -out encrypted_key.p8\n\
+                         \n\
+                         Then update your config/default.yaml:\n\
+                         auth_type: private_key\n\
+                         private_key: \"$${{SNOWFLAKE_PRIVATE_KEY}}\"  # encrypted key\n\
+                         private_key_password: \"$${{SNOWFLAKE_PRIVATE_KEY_PASSWORD}}\"\n\
+                         \n\
+                         Alternatively, use password authentication instead of private key."
+                    ));
+                } else {
+                    // Unknown key format
+                    return Err(anyhow!(
+                        "Unsupported private key format. Expected PEM format with one of:\n\
+                         - BEGIN ENCRYPTED PRIVATE KEY (PKCS#8 encrypted)\n\
+                         - BEGIN PRIVATE KEY (PKCS#8 unencrypted - not supported, must be encrypted)\n\
+                         - BEGIN RSA PRIVATE KEY (PKCS#1 - not supported, must be PKCS#8 encrypted)"
+                    ));
+                };
 
                 SnowflakeAuthMethod::KeyPair {
                     encrypted_pem: private_key_pem,
@@ -293,16 +326,43 @@ impl SnowflakeOAuthProvisioner {
         // Parse account to extract account locator and cloud region
         // Account format: "account_locator.region" or just "account_locator"
         let account_parts: Vec<&str> = self.account.split('.').collect();
-        let account_identifier = account_parts.first()
-            .ok_or_else(|| anyhow!("Invalid account format"))?.to_string();
+        let account_identifier = account_parts
+            .first()
+            .ok_or_else(|| anyhow!("Invalid account format"))?
+            .to_string();
 
         let config = SnowflakeClientConfig {
             account: account_identifier,
             ..Default::default()
         };
 
-        let client = SnowflakeClient::new(&self.user, auth_method, config)
-            .context("Failed to create Snowflake client")?;
+        let client = SnowflakeClient::new(&self.user, auth_method, config).map_err(|e| {
+            // Provide helpful error messages for common issues
+            let error_str = format!("{:?}", e);
+            if error_str.contains("ENCRYPTED PRIVATE KEY") {
+                anyhow!(
+                    "Failed to create Snowflake client: {}. \n\
+                     \n\
+                     The snowflake-connector-rs library expects private keys in PKCS#8 encrypted format.\n\
+                     \n\
+                     If you have an unencrypted private key, you can encrypt it with:\n\
+                     openssl pkcs8 -topk8 -v2 aes256 -in rsa_key.p8 -out rsa_key_encrypted.p8\n\
+                     \n\
+                     Or generate a new encrypted key pair:\n\
+                     openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 aes256 -out rsa_key.p8\n\
+                     \n\
+                     Then configure the encrypted key and password in config/default.yaml:\n\
+                     auth_type: private_key\n\
+                     private_key: \"$${{SNOWFLAKE_PRIVATE_KEY}}\"\n\
+                     private_key_password: \"$${{SNOWFLAKE_PRIVATE_KEY_PASSWORD}}\"\n\
+                     \n\
+                     Alternatively, use password authentication instead.",
+                    e
+                )
+            } else {
+                anyhow!("Failed to create Snowflake client: {}", e)
+            }
+        })?;
 
         Ok(client)
     }
@@ -617,12 +677,9 @@ impl SnowflakeOAuthProvisioner {
         );
 
         // Check if OAuth extension already exists
-        if let Ok(Some(_)) = db_extensions::find_by_project_and_name(
-            &self.db_pool,
-            project_id,
-            oauth_extension_name,
-        )
-        .await
+        if let Ok(Some(_)) =
+            db_extensions::find_by_project_and_name(&self.db_pool, project_id, oauth_extension_name)
+                .await
         {
             info!(
                 "OAuth extension {} already exists, skipping creation",
