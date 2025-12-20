@@ -915,6 +915,7 @@ function OAuthDetailView({ extension, projectName }) {
 function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
     const [blockedRoles, setBlockedRoles] = useState(spec?.blocked_roles?.join(', ') || '');
     const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
+    const [clientSecretEnvVar, setClientSecretEnvVar] = useState(spec?.client_secret_env_var || 'SNOWFLAKE_CLIENT_SECRET');
 
     // Use a ref to store the latest onChange callback
     const onChangeRef = React.useRef(onChange);
@@ -927,10 +928,11 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
         const newSpec = {
             blocked_roles: blockedRoles.split(',').map(r => r.trim()).filter(r => r),
             scopes: scopes.split(',').map(s => s.trim()).filter(s => s),
+            client_secret_env_var: clientSecretEnvVar.trim() || 'SNOWFLAKE_CLIENT_SECRET',
         };
 
         onChangeRef.current(newSpec);
-    }, [blockedRoles, scopes]);
+    }, [blockedRoles, scopes, clientSecretEnvVar]);
 
     return (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -954,6 +956,15 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     onChange={(e) => setScopes(e.target.value)}
                     placeholder="session:role:ANALYST, session:role:DEVELOPER"
                     helperText="Comma-separated list of additional OAuth scopes. These will be ADDED to the backend-configured defaults (usually 'refresh_token'). Use 'session:role:ROLENAME' to allow users to select specific roles."
+                />
+
+                <FormField
+                    label="Client Secret Environment Variable"
+                    id="snowflake-client-secret-env-var"
+                    value={clientSecretEnvVar}
+                    onChange={(e) => setClientSecretEnvVar(e.target.value)}
+                    placeholder="SNOWFLAKE_CLIENT_SECRET"
+                    helperText="Name of the environment variable where the OAuth client secret will be stored. Defaults to 'SNOWFLAKE_CLIENT_SECRET'."
                 />
 
                 <div className="bg-gray-800 rounded-lg p-4">

@@ -28,6 +28,15 @@ pub struct SnowflakeOAuthProvisionerSpec {
     /// Additional OAuth scopes (unioned with backend defaults)
     #[serde(default)]
     pub scopes: Vec<String>,
+
+    /// Environment variable name for storing the OAuth client secret
+    /// Defaults to "SNOWFLAKE_CLIENT_SECRET"
+    #[serde(default = "default_client_secret_env_var")]
+    pub client_secret_env_var: String,
+}
+
+fn default_client_secret_env_var() -> String {
+    "SNOWFLAKE_CLIENT_SECRET".to_string()
 }
 
 /// Extension status tracking Snowflake integration state
@@ -55,6 +64,10 @@ pub struct SnowflakeOAuthProvisionerStatus {
     /// Redirect URI configured in the integration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redirect_uri: Option<String>,
+
+    /// Environment variable name used to store the client secret
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub client_secret_env_var: Option<String>,
 
     /// Last error message
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -831,10 +844,12 @@ impl SnowflakeOAuthProvisioner {
             .context("Failed to decrypt client secret")?;
 
         // Create encrypted environment variable for OAuth extension to use
-        let env_var_name = format!(
-            "SNOWFLAKE_OAUTH_{}_SECRET",
-            extension_name.to_uppercase().replace('-', "_")
-        );
+        // Use configured env var name or default
+        let env_var_name = if spec.client_secret_env_var.is_empty() {
+            default_client_secret_env_var()
+        } else {
+            spec.client_secret_env_var.clone()
+        };
 
         let client_secret_encrypted = self
             .encryption_provider
@@ -856,6 +871,9 @@ impl SnowflakeOAuthProvisioner {
             "Created environment variable {} for project {}",
             env_var_name, project_name
         );
+
+        // Store the env var name in status for later use during deletion
+        status.client_secret_env_var = Some(env_var_name.clone());
 
         // Get effective config for scopes
         let effective_config = self.get_effective_config(spec);
@@ -1063,19 +1081,30 @@ impl SnowflakeOAuthProvisioner {
         }
 
         // 3. Delete environment variable
-        let env_var_name = format!(
-            "SNOWFLAKE_OAUTH_{}_SECRET",
-            extension_name.to_uppercase().replace('-', "_")
-        );
-        if let Err(e) =
-            db_env_vars::delete_project_env_var(&self.db_pool, project_id, &env_var_name).await
-        {
-            warn!(
-                "Failed to delete environment variable {}: {:?}",
-                env_var_name, e
-            );
+        if let Some(env_var_name) = &status.client_secret_env_var {
+            if let Err(e) =
+                db_env_vars::delete_project_env_var(&self.db_pool, project_id, env_var_name).await
+            {
+                warn!(
+                    "Failed to delete environment variable {}: {:?}",
+                    env_var_name, e
+                );
+            } else {
+                info!("Deleted environment variable {}", env_var_name);
+            }
         } else {
-            info!("Deleted environment variable {}", env_var_name);
+            // Fallback for extensions created before this field was added
+            let env_var_name = default_client_secret_env_var();
+            if let Err(e) =
+                db_env_vars::delete_project_env_var(&self.db_pool, project_id, &env_var_name).await
+            {
+                warn!(
+                    "Failed to delete environment variable {} (fallback): {:?}",
+                    env_var_name, e
+                );
+            } else {
+                info!("Deleted environment variable {} (fallback)", env_var_name);
+            }
         }
 
         // 4. Remove finalizer
@@ -1270,13 +1299,14 @@ extensions:
 
 ## User Spec
 
-Users can optionally configure additional blocked roles and scopes (unioned with backend defaults):
+Users can optionally configure additional blocked roles, scopes, and the environment variable name:
 
 ```yaml
 blocked_roles:
   - SYSADMIN
 scopes:
   - session:role:ANALYST
+client_secret_env_var: SNOWFLAKE_CLIENT_SECRET  # Default if not specified
 ```
 
 ## Lifecycle
@@ -1310,6 +1340,11 @@ Deletion removes all resources: Snowflake integration, OAuth extension, and envi
                     "items": {"type": "string"},
                     "description": "Additional OAuth scopes (unioned with backend defaults)",
                     "default": []
+                },
+                "client_secret_env_var": {
+                    "type": "string",
+                    "description": "Environment variable name for storing the OAuth client secret",
+                    "default": "SNOWFLAKE_CLIENT_SECRET"
                 }
             },
             "additionalProperties": false
