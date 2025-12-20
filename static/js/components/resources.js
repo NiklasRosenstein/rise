@@ -1255,6 +1255,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
         // Map extension types to friendly default names
         const defaults = {
             'aws-rds-provisioner': 'rds',
+            'snowflake-oauth-provisioner': 'snowflake',
         };
 
         return defaults[extensionType] || extensionType;

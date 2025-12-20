@@ -3,22 +3,24 @@ minikube = "1.37.0"
 pack = "0.39.0"
 "ubi:railwayapp/railpack" = "0.15.1"
 "cargo:sqlx-cli" = "latest"
+"cargo:cargo-all-features" = "latest"
 mdbook = "latest"
 helm = "latest"
 rust = { version = "1.91.1", profile = "default" }
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
-run = "cargo sqlx prepare -- --features server,aws,k8s --all-targets"
+run = "cargo sqlx prepare -- --features server,aws,k8s,snowflake --all-targets"
 
 [tasks."sqlx:check"]
 description = "Check that all SQLX queries are valid."
-run = "cargo sqlx prepare --check -- --features server,aws,k8s --all-targets"
+run = "cargo sqlx prepare --check -- --features server,aws,k8s,snowflake --all-targets"
 
 [tasks.lint]
 description = "Run all linting checks (clippy, formatting, sqlx, helm)."
 run = """
-SQLX_OFFLINE=true cargo clippy --all-targets --all-features -- -D warnings
+SQLX_OFFLINE=true cargo all-features check --all-targets
+SQLX_OFFLINE=true cargo all-features clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 mise sqlx:check
 helm lint helm/rise
@@ -47,7 +49,7 @@ run = "docker compose up -d"
 [tasks."backend:run"]
 description = "Run the backend server."
 depends = ["backend:deps", "db:migrate"]
-run = "cargo run --features server,k8s,aws -- backend server"
+run = "cargo run --features server,k8s,aws,snowflake -- backend server"
 alias = "br"
 
 [tasks."minikube:launch"]
