@@ -488,17 +488,15 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
 // ==================== Finalizer Operations ====================
 
 /// Add a finalizer to a project (idempotent - won't add if already exists)
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(any(feature = "k8s", feature = "aws", feature = "snowflake"))]
 pub async fn add_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<()> {
     sqlx::query!(
         r#"
         UPDATE projects
-        SET finalizers = array_append(
-            CASE WHEN $2 = ANY(finalizers) THEN finalizers
-            ELSE finalizers END,
-            CASE WHEN $2 = ANY(finalizers) THEN NULL
-            ELSE $2 END
-        )
+        SET finalizers = CASE
+            WHEN $2 = ANY(finalizers) THEN finalizers
+            ELSE array_append(finalizers, $2)
+        END
         WHERE id = $1
         "#,
         id,
@@ -512,7 +510,7 @@ pub async fn add_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<(
 }
 
 /// Remove a finalizer from a project
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(any(feature = "k8s", feature = "aws", feature = "snowflake"))]
 pub async fn remove_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<()> {
     sqlx::query!(
         r#"
@@ -531,7 +529,7 @@ pub async fn remove_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Resul
 }
 
 /// Find projects in Deleting status that have a specific finalizer
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(any(feature = "k8s", feature = "aws", feature = "snowflake"))]
 pub async fn find_deleting_with_finalizer(
     pool: &PgPool,
     finalizer: &str,
