@@ -64,6 +64,49 @@ rise build myapp:latest
 rise build myapp:latest --backend railpack
 ```
 
+## Build-Time Environment Variables
+
+You can pass environment variables to your build process using the `-e` or `--env` flag. This works consistently across all build backends:
+
+```bash
+# Pass environment variable with explicit value
+rise build myapp:latest -e NODE_ENV=production
+
+# Pass environment variable from current environment
+export DATABASE_URL=postgres://localhost/mydb
+rise build myapp:latest -e DATABASE_URL
+
+# Multiple environment variables
+rise build myapp:latest -e NODE_ENV=production -e API_KEY=secret123
+
+# Works with all backends
+rise build myapp:latest --backend docker -e BUILD_VERSION=1.2.3
+rise build myapp:latest --backend pack -e BP_NODE_VERSION=20
+rise build myapp:latest --backend railpack -e CUSTOM_VAR=value
+```
+
+### Backend-Specific Behavior
+
+**Docker Backend:**
+- Environment variables are passed as `--build-arg` arguments to Docker build
+- Available in Dockerfile `ARG` declarations and `RUN` commands
+- Example Dockerfile usage:
+  ```dockerfile
+  ARG NODE_ENV
+  ARG BUILD_VERSION
+  RUN echo "Building version $BUILD_VERSION in $NODE_ENV mode"
+  ```
+
+**Pack Backend:**
+- Environment variables are passed as `--env` arguments to pack CLI
+- Buildpacks can read these during detection and build phases
+- Common uses: configuring buildpack versions, build flags
+
+**Railpack Backend:**
+- Environment variables are passed as BuildKit secrets
+- Available in all build steps defined in the Railpack plan
+- Railpack frontend exposes them as environment variables during build
+
 ## Project Configuration (rise.toml)
 
 You can create a `rise.toml` or `.rise.toml` file in your project directory to define default build options. This allows you to avoid repeating CLI flags for every build.
@@ -75,6 +118,7 @@ You can create a `rise.toml` or `.rise.toml` file in your project directory to d
 backend = "pack"
 builder = "heroku/builder:24"
 buildpacks = ["heroku/nodejs", "heroku/procfile"]
+env = ["BP_NODE_VERSION=20"]
 ```
 
 ### Configuration Precedence
@@ -88,9 +132,9 @@ Build options are resolved in the following order (highest to lowest):
 5. **Auto-detection/defaults**
 
 **Vector field behavior:**
-- **All vector fields** (`buildpacks`, `pack_env`, `build_args`): CLI values are **appended** to config values (merged)
+- **All vector fields** (`buildpacks`, `env`): CLI values are **appended** to config values (merged)
 
-This allows you to set common buildpacks, environment variables, or build arguments in the config file and add additional ones via CLI as needed.
+This allows you to set common buildpacks and environment variables in the config file and add additional ones via CLI as needed.
 
 ### Available Options
 
@@ -101,11 +145,10 @@ All CLI build flags can be specified in the `[build]` section:
 | `backend` | String | Build backend: `docker`, `pack`, `railpack`, `railpack:buildctl` |
 | `builder` | String | Buildpack builder image (pack only) |
 | `buildpacks` | Array | List of buildpacks to use (pack only) |
-| `pack_env` | Array | Environment variables for pack CLI (pack only) |
+| `env` | Array | Environment variables for build (format: `KEY=VALUE` or `KEY`) |
 | `container_cli` | String | Container CLI: `docker` or `podman` |
 | `managed_buildkit` | Boolean | Enable managed BuildKit daemon |
 | `railpack_embed_ssl_cert` | Boolean | Embed SSL certificate in Railpack builds |
-| `build_args` | Array | Docker build arguments (docker only, format: `KEY=VALUE` or `KEY`) |
 
 ### Examples
 
@@ -129,7 +172,7 @@ railpack_embed_ssl_cert = true
 ```toml
 [build]
 backend = "docker"
-build_args = ["VERSION=1.0.0", "NODE_ENV=production"]
+env = ["VERSION=1.0.0", "NODE_ENV=production"]
 ```
 
 **Pack with custom environment:**
@@ -137,7 +180,7 @@ build_args = ["VERSION=1.0.0", "NODE_ENV=production"]
 [build]
 backend = "pack"
 builder = "paketobuildpacks/builder-jammy-base"
-pack_env = ["BP_NODE_VERSION=20.*"]
+env = ["BP_NODE_VERSION=20.*"]
 ```
 
 ### CLI Override
@@ -147,6 +190,11 @@ CLI flags always take precedence over project config:
 ```bash
 # Uses docker backend despite project config specifying pack
 rise build myapp:latest --backend docker
+
+# Adds to env variables from config
+# If config has env = ["NODE_ENV=production"]
+# This results in: env = ["NODE_ENV=production", "API_KEY=secret"]
+rise build myapp:latest -e API_KEY=secret
 
 # Enable managed BuildKit (shorthand defaults to true)
 rise build myapp:latest --managed-buildkit

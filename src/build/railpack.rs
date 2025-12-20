@@ -10,6 +10,43 @@ use tracing::{debug, info, warn};
 use super::buildkit::ensure_buildx_builder;
 use super::ssl::embed_ssl_cert_in_plan;
 
+/// Options for building with Railpacks
+pub(crate) struct RailpackBuildOptions<'a> {
+    pub app_path: &'a str,
+    pub image_tag: &'a str,
+    pub container_cli: &'a str,
+    pub use_buildctl: bool,
+    pub push: bool,
+    pub buildkit_host: Option<&'a str>,
+    pub embed_ssl_cert: bool,
+    pub env: &'a [String],
+}
+
+/// Parse environment variables from CLI format to HashMap
+/// Supports both KEY=VALUE and KEY (reads from current environment)
+fn parse_env_vars(env: &[String]) -> Result<HashMap<String, String>> {
+    let mut result = HashMap::new();
+
+    for env_var in env {
+        if let Some((key, value)) = env_var.split_once('=') {
+            // KEY=VALUE format
+            result.insert(key.to_string(), value.to_string());
+        } else {
+            // KEY format - read from environment
+            if let Ok(value) = std::env::var(env_var) {
+                result.insert(env_var.to_string(), value);
+            } else {
+                bail!(
+                    "Environment variable '{}' is not set in current environment",
+                    env_var
+                );
+            }
+        }
+    }
+
+    Ok(result)
+}
+
 /// RAII guard for cleaning up temp files and directories
 struct CleanupGuard {
     path: std::path::PathBuf,
@@ -31,15 +68,7 @@ impl Drop for CleanupGuard {
 }
 
 /// Build image with Railpacks
-pub(crate) fn build_image_with_railpacks(
-    app_path: &str,
-    image_tag: &str,
-    container_cli: &str,
-    use_buildctl: bool,
-    push: bool,
-    buildkit_host: Option<&str>,
-    embed_ssl_cert: bool,
-) -> Result<()> {
+pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Result<()> {
     // Check railpack CLI availability
     let railpack_check = Command::new("railpack").arg("--version").output();
     if railpack_check.is_err() {
@@ -50,7 +79,7 @@ pub(crate) fn build_image_with_railpacks(
     }
 
     // Create .railpack-build directory in app_path
-    let build_dir = Path::new(app_path).join(".railpack-build");
+    let build_dir = Path::new(options.app_path).join(".railpack-build");
     let dir_existed = build_dir.exists();
 
     if !dir_existed {
@@ -88,12 +117,12 @@ pub(crate) fn build_image_with_railpacks(
         None
     };
 
-    info!("Running railpack prepare for: {}", app_path);
+    info!("Running railpack prepare for: {}", options.app_path);
 
     // Run railpack prepare
     let mut cmd = Command::new("railpack");
     cmd.arg("prepare")
-        .arg(app_path)
+        .arg(options.app_path)
         .arg("--plan-out")
         .arg(&plan_file)
         .arg("--info-out")
@@ -118,7 +147,7 @@ pub(crate) fn build_image_with_railpacks(
     info!("✓ Railpack prepare completed");
 
     // Embed SSL certificate if requested
-    if embed_ssl_cert {
+    if options.embed_ssl_cert {
         if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
             let cert_path = Path::new(&ssl_cert_file);
             if cert_path.exists() {
@@ -144,9 +173,17 @@ pub(crate) fn build_image_with_railpacks(
     }
 
     let proxy_vars = super::proxy::read_and_transform_proxy_vars();
-    if !proxy_vars.is_empty() {
-        info!("Adding proxy variable references to railpack plan");
-        super::proxy::add_secret_refs_to_plan(&plan_file, &proxy_vars)?;
+
+    // Parse user-provided environment variables into HashMap
+    let user_env_vars = parse_env_vars(options.env)?;
+
+    // Combine proxy vars and user env vars for secrets
+    let mut all_secrets = proxy_vars.clone();
+    all_secrets.extend(user_env_vars);
+
+    if !all_secrets.is_empty() {
+        info!("Adding environment variable references to railpack plan");
+        super::proxy::add_secret_refs_to_plan(&plan_file, &all_secrets)?;
     }
 
     // Debug log plan contents
@@ -155,24 +192,24 @@ pub(crate) fn build_image_with_railpacks(
     }
 
     // Build with buildx or buildctl
-    if use_buildctl {
+    if options.use_buildctl {
         build_with_buildctl(
-            app_path,
+            options.app_path,
             &plan_file,
-            image_tag,
-            push,
-            buildkit_host,
-            &proxy_vars,
+            options.image_tag,
+            options.push,
+            options.buildkit_host,
+            &all_secrets,
         )?;
     } else {
         build_with_buildx(
-            app_path,
+            options.app_path,
             &plan_file,
-            image_tag,
-            container_cli,
-            push,
-            buildkit_host,
-            &proxy_vars,
+            options.image_tag,
+            options.container_cli,
+            options.push,
+            options.buildkit_host,
+            &all_secrets,
         )?;
     }
 

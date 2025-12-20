@@ -30,9 +30,10 @@ pub struct BuildArgs {
     #[arg(long = "buildpack", short = 'b')]
     pub buildpacks: Vec<String>,
 
-    /// Environment variables to pass to pack CLI (only for pack backend). Can be specified multiple times.
-    #[arg(long = "pack-env")]
-    pub pack_env: Vec<String>,
+    /// Environment variables to pass to the build. Can be specified multiple times.
+    /// Format: KEY=VALUE or KEY (to pass from environment)
+    #[arg(long = "env", short = 'e')]
+    pub env: Vec<String>,
 
     /// Container CLI to use (docker or podman)
     #[arg(long)]
@@ -45,11 +46,6 @@ pub struct BuildArgs {
     /// Embed SSL certificate into Railpack build plan for build-time RUN command support
     #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
     pub railpack_embed_ssl_cert: Option<bool>,
-
-    /// Build arguments to pass to Docker build (only for docker backend). Can be specified multiple times.
-    /// Format: KEY=VALUE or KEY (to pass from environment)
-    #[arg(long = "build-arg")]
-    pub docker_build_args: Vec<String>,
 }
 
 /// Options for building container images
@@ -60,11 +56,10 @@ pub(crate) struct BuildOptions {
     pub backend: Option<String>,
     pub builder: Option<String>,
     pub buildpacks: Vec<String>,
-    pub pack_env: Vec<String>,
+    pub env: Vec<String>,
     pub container_cli: Option<String>,
     pub managed_buildkit: bool,
     pub railpack_embed_ssl_cert: bool,
-    pub docker_build_args: Vec<String>,
     pub push: bool,
 }
 
@@ -133,22 +128,13 @@ impl BuildOptions {
                 packs
             },
 
-            pack_env: {
+            env: {
                 let mut env = project_config
                     .as_ref()
-                    .and_then(|c| c.pack_env.clone())
+                    .and_then(|c| c.env.clone())
                     .unwrap_or_default();
-                env.extend(build_args.pack_env.clone());
+                env.extend(build_args.env.clone());
                 env
-            },
-
-            docker_build_args: {
-                let mut args = project_config
-                    .as_ref()
-                    .and_then(|c| c.build_args.clone())
-                    .unwrap_or_default();
-                args.extend(build_args.docker_build_args.clone());
-                args
             },
 
             // Boolean options - use Option chaining with Config getters as final fallback

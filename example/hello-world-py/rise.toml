@@ -13,5 +13,5 @@ builder = "paketobuildpacks/builder-jammy-base"
 buildpacks = ["paketo-buildpacks/python"]
 
 # Optional: Set Python version and other config via environment variables
-# Note: CLI --pack-env flags will be appended to these (merged)
-pack_env = ["BP_CPYTHON_VERSION=3.12", "BP_PIP_VERSION=latest"]
+# Note: CLI -e flags will be appended to these (merged)
+env = ["BP_CPYTHON_VERSION=3.12", "BP_PIP_VERSION=latest"]

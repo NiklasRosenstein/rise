@@ -16,6 +16,7 @@ mod ssl;
 
 pub use method::BuildArgs;
 pub(crate) use method::{BuildMethod, BuildOptions};
+pub(crate) use railpack::RailpackBuildOptions;
 pub(crate) use registry::docker_login;
 
 use anyhow::{bail, Result};
@@ -92,7 +93,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 false, // use_buildx: always false for docker backend (use railpack:buildx for buildx)
                 options.push,
                 buildkit_host.as_deref(),
-                &options.docker_build_args,
+                &options.env,
             )?;
         }
         BuildMethod::Pack => {
@@ -111,7 +112,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 &options.image_tag,
                 options.builder.as_deref(),
                 &options.buildpacks,
-                &options.pack_env,
+                &options.env,
             )?;
 
             // Pack doesn't support push during build, so push separately if requested
@@ -130,15 +131,16 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 warn!("--container-cli flag is ignored when using railpack:buildctl build method");
             }
 
-            build_image_with_railpacks(
-                &options.app_path,
-                &options.image_tag,
+            build_image_with_railpacks(RailpackBuildOptions {
+                app_path: &options.app_path,
+                image_tag: &options.image_tag,
                 container_cli,
                 use_buildctl,
-                options.push,
-                buildkit_host.as_deref(),
-                options.railpack_embed_ssl_cert,
-            )?;
+                push: options.push,
+                buildkit_host: buildkit_host.as_deref(),
+                embed_ssl_cert: options.railpack_embed_ssl_cert,
+                env: &options.env,
+            })?;
         }
     }
 

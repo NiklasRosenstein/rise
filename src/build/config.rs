@@ -25,8 +25,9 @@ pub struct BuildConfig {
     /// Buildpack(s) to use (only for pack backend)
     pub buildpacks: Option<Vec<String>>,
 
-    /// Environment variables to pass to pack CLI (only for pack backend)
-    pub pack_env: Option<Vec<String>>,
+    /// Environment variables to pass to the build
+    /// Format: KEY=VALUE or KEY (to pass from environment)
+    pub env: Option<Vec<String>>,
 
     /// Container CLI to use (docker or podman)
     pub container_cli: Option<String>,
@@ -36,10 +37,6 @@ pub struct BuildConfig {
 
     /// Embed SSL certificate into Railpack build plan
     pub railpack_embed_ssl_cert: Option<bool>,
-
-    /// Build arguments to pass to Docker build (only for docker backend)
-    /// Format: KEY=VALUE or KEY (to pass from environment)
-    pub build_args: Option<Vec<String>>,
 }
 
 /// Load project-level build configuration from rise.toml or .rise.toml
