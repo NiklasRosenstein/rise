@@ -39,12 +39,12 @@ pub struct BuildArgs {
     pub container_cli: Option<String>,
 
     /// Enable managed BuildKit daemon with SSL certificate support
-    #[arg(long)]
-    pub managed_buildkit: bool,
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub managed_buildkit: Option<bool>,
 
     /// Embed SSL certificate into Railpack build plan for build-time RUN command support
-    #[arg(long)]
-    pub railpack_embed_ssl_cert: bool,
+    #[arg(long, action = clap::ArgAction::SetTrue)]
+    pub railpack_embed_ssl_cert: Option<bool>,
 
     /// Build arguments to pass to Docker build (only for docker backend). Can be specified multiple times.
     /// Format: KEY=VALUE or KEY (to pass from environment)
@@ -70,23 +70,102 @@ pub(crate) struct BuildOptions {
 
 impl BuildOptions {
     /// Create BuildOptions from BuildArgs and Config
+    ///
+    /// Configuration precedence (highest to lowest):
+    /// 1. CLI flags (BuildArgs)
+    /// 2. Project config file (rise.toml / .rise.toml)
+    /// 3. Environment variables (via Config getters)
+    /// 4. Global config file (via Config getters)
+    /// 5. Auto-detection/defaults (via Config getters)
     pub(crate) fn from_build_args(
-        _config: &Config,
+        config: &Config,
         image_tag: String,
         app_path: String,
         build_args: &BuildArgs,
     ) -> Self {
+        use tracing::warn;
+
+        // Load project-level config from app_path with error handling
+        let project_config = match crate::build::config::load_project_config(&app_path) {
+            Ok(cfg) => cfg,
+            Err(e) => {
+                warn!(
+                    "Failed to load project config: {:#}. Continuing without it.",
+                    e
+                );
+                None
+            }
+        };
+
+        // Merge: CLI > Project > Environment (via Config) > Global (via Config) > Defaults
         Self {
             image_tag,
             app_path,
-            backend: build_args.backend.clone(),
-            builder: build_args.builder.clone(),
-            buildpacks: build_args.buildpacks.clone(),
-            pack_env: build_args.pack_env.clone(),
-            container_cli: build_args.container_cli.clone(),
-            managed_buildkit: build_args.managed_buildkit,
-            railpack_embed_ssl_cert: build_args.railpack_embed_ssl_cert,
-            docker_build_args: build_args.docker_build_args.clone(),
+
+            // String options - use first non-None value
+            backend: build_args
+                .backend
+                .clone()
+                .or_else(|| project_config.as_ref().and_then(|c| c.backend.clone())),
+
+            builder: build_args
+                .builder
+                .clone()
+                .or_else(|| project_config.as_ref().and_then(|c| c.builder.clone())),
+
+            container_cli: build_args
+                .container_cli
+                .clone()
+                .or_else(|| {
+                    project_config
+                        .as_ref()
+                        .and_then(|c| c.container_cli.clone())
+                })
+                .or_else(|| Some(config.get_container_cli())),
+
+            // Vector options - replace entirely if CLI provided, otherwise use project config
+            buildpacks: if !build_args.buildpacks.is_empty() {
+                build_args.buildpacks.clone()
+            } else {
+                project_config
+                    .as_ref()
+                    .and_then(|c| c.buildpacks.clone())
+                    .unwrap_or_default()
+            },
+
+            pack_env: if !build_args.pack_env.is_empty() {
+                build_args.pack_env.clone()
+            } else {
+                project_config
+                    .as_ref()
+                    .and_then(|c| c.pack_env.clone())
+                    .unwrap_or_default()
+            },
+
+            docker_build_args: if !build_args.docker_build_args.is_empty() {
+                build_args.docker_build_args.clone()
+            } else {
+                project_config
+                    .as_ref()
+                    .and_then(|c| c.build_args.clone())
+                    .unwrap_or_default()
+            },
+
+            // Boolean options - use Option chaining with Config getters as final fallback
+            managed_buildkit: build_args
+                .managed_buildkit
+                .or_else(|| project_config.as_ref().and_then(|c| c.managed_buildkit))
+                .unwrap_or_else(|| config.get_managed_buildkit()),
+
+            railpack_embed_ssl_cert: build_args
+                .railpack_embed_ssl_cert
+                .or_else(|| {
+                    project_config
+                        .as_ref()
+                        .and_then(|c| c.railpack_embed_ssl_cert)
+                })
+                .unwrap_or_else(|| config.get_railpack_embed_ssl_cert()),
+
             push: false,
         }
     }
