@@ -23,6 +23,69 @@ struct SetEnvVarRequest {
     is_secret: bool,
 }
 
+/// Fetch environment variables from a project (internal helper)
+async fn fetch_env_vars_response(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+) -> Result<EnvVarsResponse> {
+    let url = format!("{}/api/v1/projects/{}/env", backend_url, project);
+
+    let response = http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .context("Failed to fetch environment variables")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to fetch environment variables (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    let env_vars_response: EnvVarsResponse = response
+        .json()
+        .await
+        .context("Failed to parse environment variables response")?;
+
+    Ok(env_vars_response)
+}
+
+/// Fetch non-secret environment variables from a project (for use by other modules)
+pub async fn fetch_non_secret_env_vars(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+) -> Result<Vec<(String, String)>> {
+    let env_response = fetch_env_vars_response(http_client, backend_url, token, project).await?;
+
+    // Filter out secret variables (they'll have masked values)
+    let env_vars: Vec<(String, String)> = env_response
+        .env_vars
+        .into_iter()
+        .filter_map(|var| {
+            if var.is_secret {
+                // Skip secrets as we cannot retrieve their actual values
+                None
+            } else {
+                Some((var.key, var.value))
+            }
+        })
+        .collect();
+
+    Ok(env_vars)
+}
+
 /// Set an environment variable for a project
 pub async fn set_env(
     http_client: &Client,
@@ -77,32 +140,8 @@ pub async fn list_env(
     token: &str,
     project: &str,
 ) -> Result<()> {
-    let url = format!("{}/api/v1/projects/{}/env", backend_url, project);
-
-    let response = http_client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .await
-        .context("Failed to list environment variables")?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!(
-            "Failed to list environment variables (status {}): {}",
-            status,
-            error_text
-        );
-    }
-
-    let env_vars_response: EnvVarsResponse = response
-        .json()
-        .await
-        .context("Failed to parse environment variables response")?;
+    let env_vars_response =
+        fetch_env_vars_response(http_client, backend_url, token, project).await?;
 
     if env_vars_response.env_vars.is_empty() {
         println!(

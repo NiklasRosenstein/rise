@@ -78,6 +78,9 @@ cargo build --bin rise
 rise login
 rise project create my-app
 rise deployment create my-app --image nginx:latest
+
+# Local development
+rise run --project my-app  # Build and run locally with project env vars
 ```
 
 ### Install from crates.io

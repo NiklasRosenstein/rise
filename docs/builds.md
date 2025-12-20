@@ -423,3 +423,116 @@ rise build myapp:latest --backend docker
 ### No Configuration Required
 
 Proxy support is completely automatic - no CLI flags or configuration needed. Rise CLI respects the standard proxy environment variables already set in your shell or CI/CD environment.
+
+## Local Development with `rise run`
+
+The `rise run` command builds and immediately runs your application locally for development purposes. This is useful for testing your application before deploying it to the Rise platform.
+
+### Basic Usage
+
+```bash
+# Build and run from current directory (defaults to port 8080)
+rise run
+
+# Specify directory
+rise run ./path/to/app
+
+# Custom port
+rise run --http-port 3000
+
+# Expose on different host port
+rise run --http-port 8080 --expose 3000
+```
+
+### With Project Environment Variables
+
+When authenticated, you can load non-secret environment variables from a project:
+
+```bash
+# Load environment variables from project
+rise run --project my-app
+```
+
+**Note:** Only non-secret environment variables are loaded. Secret values cannot be retrieved from the backend for security reasons.
+
+### Setting Runtime Environment Variables
+
+You can set custom runtime environment variables using the `--run-env` flag:
+
+```bash
+# Set a single environment variable
+rise run --run-env DATABASE_URL=postgres://localhost/mydb
+
+# Set multiple environment variables
+rise run --run-env DATABASE_URL=postgres://localhost/mydb --run-env DEBUG=true --run-env API_KEY=test123
+
+# Combine with project environment variables
+rise run --project my-app --run-env OVERRIDE_VAR=custom_value
+```
+
+Runtime environment variables set via `--run-env` take precedence and can override project environment variables if they have the same key.
+
+### Build Backend Selection
+
+Use any build backend with `rise run`:
+
+```bash
+# Use pack backend
+rise run --backend pack
+
+# Use docker backend
+rise run --backend docker
+
+# With custom builder
+rise run --backend pack --builder paketobuildpacks/builder-jammy-base
+```
+
+### How It Works
+
+1. **Build**: Builds the container image locally using the selected backend
+2. **Tag**: Tags the image as `rise-local-{project-name}` (or `rise-local-app` if no project specified)
+3. **Run**: Executes `docker run --rm -it -p {expose}:{http-port} -e PORT={http-port} {image}`
+4. **Environment**: Automatically sets `PORT` environment variable
+5. **Project Variables**: Loads non-secret environment variables from the project if `--project` is specified
+6. **Cleanup**: Container is automatically removed when stopped (`--rm` flag)
+
+### Port Configuration
+
+- `--http-port`: The port your application listens on inside the container (sets `PORT` env var)
+- `--expose`: The port exposed on your host machine (defaults to same as `--http-port`)
+
+Example:
+```bash
+# Application listens on port 8080, accessible at http://localhost:3000
+rise run --http-port 8080 --expose 3000
+```
+
+### Interactive Mode
+
+`rise run` uses interactive mode (`-it`) so you can:
+- See real-time logs from your application
+- Press Ctrl+C to stop the container
+- Interact with your application if it accepts input
+
+### Complete Example
+
+```bash
+# Create a project
+rise project create my-app
+
+# Set some environment variables
+rise env set my-app DATABASE_URL postgres://localhost/mydb
+rise env set my-app API_KEY secret123 --secret
+
+# Run locally with project environment variables
+rise run --project my-app --http-port 3000
+
+# Application accessible at http://localhost:3000
+# PORT=3000 and DATABASE_URL=postgres://localhost/mydb are set
+# API_KEY is not loaded (secret values not retrievable)
+
+# Run with additional runtime environment variables
+rise run --project my-app --http-port 3000 --run-env DEBUG=true --run-env LOG_LEVEL=verbose
+
+# Application now has PORT, DATABASE_URL, DEBUG, and LOG_LEVEL environment variables set
+```
