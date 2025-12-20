@@ -88,7 +88,10 @@ Build options are resolved in the following order (highest to lowest):
 4. **Global config** (`~/.config/rise/config.json`)
 5. **Auto-detection/defaults**
 
-**Important:** Vector fields (buildpacks, pack_env, build_args) are replaced entirely, not merged. If you provide any values via CLI, the project config values are ignored completely.
+**Vector field behavior:**
+- **All vector fields** (`buildpacks`, `pack_env`, `build_args`): CLI values are **appended** to config values (merged)
+
+This allows you to set common buildpacks, environment variables, or build arguments in the config file and add additional ones via CLI as needed.
 
 ### Available Options
 

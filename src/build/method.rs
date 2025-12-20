@@ -123,32 +123,32 @@ impl BuildOptions {
                 })
                 .or_else(|| Some(config.get_container_cli())),
 
-            // Vector options - replace entirely if CLI provided, otherwise use project config
-            buildpacks: if !build_args.buildpacks.is_empty() {
-                build_args.buildpacks.clone()
-            } else {
-                project_config
+            // Vector options - all vectors merge config + CLI values (append)
+            buildpacks: {
+                let mut packs = project_config
                     .as_ref()
                     .and_then(|c| c.buildpacks.clone())
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                packs.extend(build_args.buildpacks.clone());
+                packs
             },
 
-            pack_env: if !build_args.pack_env.is_empty() {
-                build_args.pack_env.clone()
-            } else {
-                project_config
+            pack_env: {
+                let mut env = project_config
                     .as_ref()
                     .and_then(|c| c.pack_env.clone())
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                env.extend(build_args.pack_env.clone());
+                env
             },
 
-            docker_build_args: if !build_args.docker_build_args.is_empty() {
-                build_args.docker_build_args.clone()
-            } else {
-                project_config
+            docker_build_args: {
+                let mut args = project_config
                     .as_ref()
                     .and_then(|c| c.build_args.clone())
-                    .unwrap_or_default()
+                    .unwrap_or_default();
+                args.extend(build_args.docker_build_args.clone());
+                args
             },
 
             // Boolean options - use Option chaining with Config getters as final fallback
