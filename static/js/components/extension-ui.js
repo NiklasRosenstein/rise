@@ -1034,6 +1034,7 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                 badgeColor = 'bg-green-600';
                 break;
             case 'Pending':
+            case 'TestingConnection':
             case 'CreatingIntegration':
             case 'RetrievingCredentials':
             case 'CreatingOAuthExtension':
@@ -1220,6 +1221,7 @@ const SnowflakeOAuthExtensionAPI = {
                 badgeColor = 'bg-green-600';
                 break;
             case 'Pending':
+            case 'TestingConnection':
             case 'CreatingIntegration':
             case 'RetrievingCredentials':
             case 'CreatingOAuthExtension':

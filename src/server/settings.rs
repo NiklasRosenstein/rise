@@ -679,6 +679,7 @@ pub enum ExtensionProviderConfig {
     },
 
     #[cfg(feature = "snowflake")]
+    #[serde(rename = "snowflake-oauth-provisioner")]
     SnowflakeOAuthProvisioner {
         /// Snowflake account identifier (e.g., "myorg.us-east-1")
         account: String,

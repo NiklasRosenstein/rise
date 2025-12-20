@@ -71,6 +71,7 @@ pub struct SnowflakeOAuthProvisionerStatus {
 pub enum SnowflakeOAuthState {
     #[default]
     Pending,
+    TestingConnection,
     CreatingIntegration,
     RetrievingCredentials,
     CreatingOAuthExtension,
@@ -330,7 +331,7 @@ impl SnowflakeOAuthProvisioner {
         status.oauth_extension_name = Some(oauth_extension_name);
         status.redirect_uri = Some(redirect_uri);
         status.created_at = Some(Utc::now());
-        status.state = SnowflakeOAuthState::CreatingIntegration;
+        status.state = SnowflakeOAuthState::TestingConnection;
 
         // Add finalizer to prevent project deletion during provisioning
         let finalizer = self.finalizer_name(extension_name);
@@ -344,6 +345,53 @@ impl SnowflakeOAuthProvisioner {
                 "Added finalizer '{}' to project {}",
                 finalizer, project_name
             );
+        }
+
+        Ok(())
+    }
+
+    /// Handle TestingConnection state: verify Snowflake credentials
+    async fn handle_testing_connection(
+        &self,
+        status: &mut SnowflakeOAuthProvisionerStatus,
+        project_name: &str,
+    ) -> Result<()> {
+        info!(
+            "Testing Snowflake connection for project {} (account: {})",
+            project_name, self.account
+        );
+
+        // Test the connection with a simple query
+        let test_query = "SELECT CURRENT_VERSION() as version, CURRENT_ACCOUNT() as account";
+
+        match self.execute_sql(test_query).await {
+            Ok(rows) => {
+                info!(
+                    "Successfully connected to Snowflake for project {}",
+                    project_name
+                );
+
+                // Log Snowflake version info if available (for debugging)
+                if let Some(row) = rows.first() {
+                    if let Some(version) = row.get("version").or_else(|| row.get("VERSION")) {
+                        debug!("Snowflake version: {}", version);
+                    }
+                }
+
+                status.state = SnowflakeOAuthState::CreatingIntegration;
+                status.error = None;
+            }
+            Err(e) => {
+                error!(
+                    "Failed to connect to Snowflake for project {}: {:?}",
+                    project_name, e
+                );
+                status.state = SnowflakeOAuthState::Failed;
+                status.error = Some(format!(
+                    "Connection test failed: {:?}. Please verify Snowflake credentials in backend configuration.",
+                    e
+                ));
+            }
         }
 
         Ok(())
@@ -820,6 +868,10 @@ impl SnowflakeOAuthProvisioner {
                 )
                 .await?;
             }
+            SnowflakeOAuthState::TestingConnection => {
+                self.handle_testing_connection(&mut status, &project.name)
+                    .await?;
+            }
             SnowflakeOAuthState::CreatingIntegration => {
                 self.handle_creating_integration(&spec, &mut status, &project.name)
                     .await?;
@@ -920,10 +972,15 @@ scopes:
 
 ## Lifecycle
 
-1. Pending → CreatingIntegration (CREATE SECURITY INTEGRATION)
-2. CreatingIntegration → RetrievingCredentials (fetch OAuth credentials)
-3. RetrievingCredentials → CreatingOAuthExtension (create OAuth extension)
-4. CreatingOAuthExtension → Available (ready for use)
+1. Pending → TestingConnection (verify Snowflake credentials)
+2. TestingConnection → CreatingIntegration (CREATE SECURITY INTEGRATION)
+3. CreatingIntegration → RetrievingCredentials (fetch OAuth credentials)
+4. RetrievingCredentials → CreatingOAuthExtension (create OAuth extension)
+5. CreatingOAuthExtension → Available (ready for use)
+
+The provisioner tests the Snowflake connection before creating the integration to catch
+credential issues early. If the test fails, the extension will transition to Failed state
+with an error message.
 
 Deletion removes all resources: Snowflake integration, OAuth extension, and environment variables.
 "#
