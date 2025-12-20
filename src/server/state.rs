@@ -172,6 +172,7 @@ async fn init_kubernetes_backend(
         ingress_tls_secret_name,
         custom_domain_tls_mode,
         node_selector,
+        image_pull_secret_name,
         ..
     }) = &settings.deployment_controller
     {
@@ -212,6 +213,7 @@ async fn init_kubernetes_backend(
                 ingress_tls_secret_name: ingress_tls_secret_name.clone(),
                 custom_domain_tls_mode: custom_domain_tls_mode.clone(),
                 node_selector: node_selector.clone(),
+                image_pull_secret_name: image_pull_secret_name.clone(),
             },
         )?;
 

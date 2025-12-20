@@ -285,6 +285,21 @@ pub enum DeploymentControllerSettings {
         /// Example: {"kubernetes.io/arch": "amd64", "node-type": "compute"}
         #[serde(default = "default_node_selector")]
         node_selector: std::collections::HashMap<String, String>,
+
+        /// Optional name of an existing imagePullSecret to use for deployments
+        ///
+        /// If not specified:
+        ///   - With a registry provider (e.g., ECR): The controller creates and manages the secret
+        ///   - Without a registry provider: No image pull secret is used
+        ///
+        /// If specified:
+        ///   - The named secret must exist in each project namespace
+        ///   - The controller will NOT create or manage the secret
+        ///   - Useful for static registries where credentials are managed externally
+        ///
+        /// Example: "my-registry-secret"
+        #[serde(default)]
+        image_pull_secret_name: Option<String>,
     },
 }
 

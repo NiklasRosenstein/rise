@@ -406,6 +406,78 @@ data:
 
 **Auto-refresh**: Secrets are automatically refreshed every hour to handle short-lived credentials (e.g., ECR tokens expire after 12 hours).
 
+#### Configuring Image Pull Secrets
+
+The Kubernetes controller supports three modes for managing image pull secrets:
+
+**1. Automatic Management (with registry provider)**
+- When a registry provider is configured (e.g., AWS ECR), the controller automatically creates and refreshes the `rise-registry-creds` secret in each project namespace
+- Credentials are fetched from the registry provider on-demand
+- Secrets are automatically refreshed every hour
+- No additional configuration needed
+
+**2. External Secret Reference**
+- For static Docker registries where credentials are managed externally (e.g., manually created secrets, sealed-secrets, external-secrets operator)
+- Configure the secret name in the deployment controller settings:
+
+```yaml
+deployment_controller:
+  type: kubernetes
+  # ... other settings ...
+  image_pull_secret_name: "my-registry-secret"
+```
+
+- The controller will reference this secret name in all Deployments
+- The secret must exist in each project namespace before deployments can succeed
+- The controller will NOT create or manage this secret
+- Useful when:
+  - Using a static registry that doesn't support dynamic credential generation
+  - Managing secrets through GitOps tools like sealed-secrets or external-secrets operator
+  - Using a cluster-wide image pull secret that's pre-configured in all namespaces
+
+**3. No Image Pull Secret**
+- When no registry provider is configured and no `image_pull_secret_name` is set
+- Deployments will not include any `imagePullSecrets` field
+- Only works with public container images or when using Kubernetes cluster defaults
+
+**Example configurations:**
+
+Using AWS ECR (automatic):
+```yaml
+registry:
+  type: ecr
+  region: us-east-1
+  account_id: "123456789012"
+  # ... other ECR settings ...
+
+deployment_controller:
+  type: kubernetes
+  # No image_pull_secret_name needed - automatically managed
+```
+
+Using external secret:
+```yaml
+registry:
+  type: oci-client-auth
+  registry_url: "registry.example.com"
+  # ... other registry settings ...
+
+deployment_controller:
+  type: kubernetes
+  # ... other settings ...
+  image_pull_secret_name: "my-registry-secret"
+```
+
+For external secrets, ensure the secret exists in each namespace:
+```bash
+# Create secret in namespace
+kubectl create secret docker-registry my-registry-secret \
+  --docker-server=registry.example.com \
+  --docker-username=myuser \
+  --docker-password=mypassword \
+  -n rise-my-app
+```
+
 ### Deployment
 
 One per deployment:
