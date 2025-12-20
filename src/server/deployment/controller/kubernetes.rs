@@ -1022,16 +1022,15 @@ impl KubernetesController {
                     spec: Some(PodSpec {
                         image_pull_secrets: {
                             // Determine which secret to use (if any)
-                            let secret_name = self.image_pull_secret_name.as_deref().or_else(
-                                || {
+                            let secret_name =
+                                self.image_pull_secret_name.as_deref().or_else(|| {
                                     // Use default name if registry provider is configured
                                     if self.registry_provider.is_some() {
                                         Some(IMAGE_PULL_SECRET_NAME)
                                     } else {
                                         None
                                     }
-                                },
-                            );
+                                });
 
                             secret_name.map(|name| {
                                 vec![LocalObjectReference {
