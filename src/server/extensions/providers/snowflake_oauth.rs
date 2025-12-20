@@ -431,36 +431,53 @@ impl SnowflakeOAuthProvisioner {
             .context("Failed to execute SQL on Snowflake")?;
 
         // Convert SnowflakeRow to serde_json::Value
-        // Build JSON objects from row data manually
+        // Build JSON objects from row data by extracting column values
         let json_rows: Vec<Value> = rows
             .iter()
             .map(|row| {
-                // Debug log the raw row to see what we're getting
-                let row_debug = format!("{:?}", row);
-                debug!("Raw SnowflakeRow: {}", row_debug);
+                let mut obj = serde_json::Map::new();
 
-                // Try to get column names and values from the row
-                // Note: SnowflakeRow doesn't implement Serialize
-                // The debug format might be: SnowflakeRow { column1: value1, column2: value2 }
-                // or it might be JSON already
+                // SnowflakeRow has a get() method that returns Option<String>
+                // We need to iterate through all columns and build the JSON object
+                // The debug format shows: column_indices: {"COLUMN_NAME": index}
 
-                // Try parsing the whole debug string as JSON first
-                if let Ok(parsed) = serde_json::from_str::<Value>(&row_debug) {
-                    debug!("Parsed SnowflakeRow as JSON directly: {:?}", parsed);
-                    return parsed;
-                }
+                // For now, try to extract values by common column names
+                // A better approach would be to iterate column_indices, but we don't have direct access
 
-                // Try stripping "SnowflakeRow " prefix and parsing
-                if let Some(json_str) = row_debug.strip_prefix("SnowflakeRow ") {
-                    if let Ok(parsed) = serde_json::from_str::<Value>(json_str) {
-                        debug!("Parsed SnowflakeRow after stripping prefix: {:?}", parsed);
-                        return parsed;
+                // Try common column names (case-insensitive by trying both cases)
+                let common_columns = vec![
+                    "version",
+                    "VERSION",
+                    "account",
+                    "ACCOUNT",
+                    "user",
+                    "USER",
+                    "role",
+                    "ROLE",
+                    "secondary_roles",
+                    "SECONDARY_ROLES",
+                    "credentials",
+                    "CREDENTIALS",
+                    "client_id",
+                    "CLIENT_ID",
+                    "client_secret",
+                    "CLIENT_SECRET",
+                ];
+
+                for col_name in common_columns {
+                    if let Ok(value) = row.get(col_name) {
+                        // Convert to lowercase for consistent key naming
+                        obj.insert(col_name.to_lowercase(), Value::String(value));
                     }
                 }
 
-                // If all else fails, log warning and return empty object
-                warn!("Failed to parse SnowflakeRow to JSON: {}", row_debug);
-                Value::Object(serde_json::Map::new())
+                if obj.is_empty() {
+                    // Debug log if we couldn't extract any values
+                    let row_debug = format!("{:?}", row);
+                    debug!("Could not extract columns from SnowflakeRow: {}", row_debug);
+                }
+
+                Value::Object(obj)
             })
             .collect();
 
@@ -666,36 +683,30 @@ impl SnowflakeOAuthProvisioner {
         );
 
         // Query for OAuth credentials with proper escaping
+        // Extract specific fields directly in SQL using JSON_EXTRACT_PATH_TEXT
         let integration_name_escaped = Self::escape_string_literal(integration_name);
         let sql = format!(
-            "SELECT SYSTEM$SHOW_OAUTH_CLIENT_SECRETS('{}') as credentials",
-            integration_name_escaped
+            r#"SELECT
+                JSON_EXTRACT_PATH_TEXT(SYSTEM$SHOW_OAUTH_CLIENT_SECRETS('{}'), 'OAUTH_CLIENT_ID') as client_id,
+                JSON_EXTRACT_PATH_TEXT(SYSTEM$SHOW_OAUTH_CLIENT_SECRETS('{}'), 'OAUTH_CLIENT_SECRET') as client_secret"#,
+            integration_name_escaped, integration_name_escaped
         );
 
         match self.execute_sql(&sql).await {
             Ok(rows) => {
                 if let Some(row) = rows.first() {
-                    // Parse the JSON response
-                    let credentials_json = row
-                        .get("credentials")
-                        .or_else(|| row.get("CREDENTIALS"))
-                        .ok_or_else(|| anyhow!("Credentials field not found in response"))?;
-
-                    let credentials_str = credentials_json
-                        .as_str()
-                        .ok_or_else(|| anyhow!("Credentials is not a string"))?;
-
-                    let credentials: Value = serde_json::from_str(credentials_str)
-                        .context("Failed to parse credentials JSON")?;
-
-                    let client_id = credentials["OAUTH_CLIENT_ID"]
-                        .as_str()
-                        .ok_or_else(|| anyhow!("OAUTH_CLIENT_ID not found"))?
+                    // Extract client_id and client_secret directly from the row
+                    // Our execute_sql() returns JSON Values with lowercase column names
+                    let client_id = row
+                        .get("client_id")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow!("client_id field not found in response"))?
                         .to_string();
 
-                    let client_secret = credentials["OAUTH_CLIENT_SECRET"]
-                        .as_str()
-                        .ok_or_else(|| anyhow!("OAUTH_CLIENT_SECRET not found"))?
+                    let client_secret = row
+                        .get("client_secret")
+                        .and_then(|v| v.as_str())
+                        .ok_or_else(|| anyhow!("client_secret field not found in response"))?
                         .to_string();
 
                     // Encrypt client secret
@@ -704,6 +715,11 @@ impl SnowflakeOAuthProvisioner {
                         .encrypt(&client_secret)
                         .await
                         .context("Failed to encrypt client secret")?;
+
+                    info!(
+                        "Successfully retrieved OAuth credentials for integration {}",
+                        integration_name
+                    );
 
                     // Update status
                     status.oauth_client_id = Some(client_id);
