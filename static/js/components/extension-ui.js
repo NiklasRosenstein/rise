@@ -1207,7 +1207,7 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
 }
 
 const SnowflakeOAuthExtensionAPI = {
-    icon: '/assets/snowflake.svg',
+    icon: '/assets/snowflake.jpg',
 
     renderStatusBadge(extension) {
         const status = extension.status || {};
