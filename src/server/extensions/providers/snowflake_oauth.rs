@@ -890,15 +890,25 @@ impl SnowflakeOAuthProvisioner {
         let effective_config = self.get_effective_config(spec);
 
         // Create OAuth extension spec
-        let oauth_spec = json!({
-            "provider_name": format!("Snowflake ({})", project_name),
-            "description": format!("Auto-provisioned Snowflake OAuth for {}", project_name),
-            "client_id": status.oauth_client_id.as_ref().ok_or_else(|| anyhow!("Client ID not set"))?,
-            "client_secret_ref": env_var_name,
-            "authorization_endpoint": format!("https://{}.snowflakecomputing.com/oauth/authorize", self.account),
-            "token_endpoint": format!("https://{}.snowflakecomputing.com/oauth/token-request", self.account),
-            "scopes": effective_config.scopes,
-        });
+        let oauth_spec = crate::server::extensions::providers::oauth::models::OAuthExtensionSpec {
+            provider_name: format!("Snowflake ({})", project_name),
+            description: format!("Auto-provisioned Snowflake OAuth for {}", project_name),
+            client_id: status
+                .oauth_client_id
+                .as_ref()
+                .ok_or_else(|| anyhow!("Client ID not set"))?
+                .clone(),
+            client_secret_ref: env_var_name,
+            authorization_endpoint: format!(
+                "https://{}.snowflakecomputing.com/oauth/authorize",
+                self.account
+            ),
+            token_endpoint: format!(
+                "https://{}.snowflakecomputing.com/oauth/token-request",
+                self.account
+            ),
+            scopes: effective_config.scopes,
+        };
 
         // Create OAuth extension
         db_extensions::create(
@@ -906,7 +916,7 @@ impl SnowflakeOAuthProvisioner {
             project_id,
             oauth_extension_name,
             "oauth",
-            &oauth_spec,
+            &serde_json::to_value(&oauth_spec).context("Failed to serialize OAuth spec")?,
         )
         .await
         .context("Failed to create OAuth extension")?;
@@ -918,10 +928,12 @@ impl SnowflakeOAuthProvisioner {
 
         // Initialize OAuth provider if available
         if let Some(oauth_provider) = &self.oauth_provider {
+            let oauth_spec_value =
+                serde_json::to_value(&oauth_spec).context("Failed to serialize OAuth spec")?;
             oauth_provider
                 .on_spec_updated(
-                    &json!({}),
-                    &oauth_spec,
+                    &serde_json::json!({}),
+                    &oauth_spec_value,
                     project_id,
                     oauth_extension_name,
                     &self.db_pool,
