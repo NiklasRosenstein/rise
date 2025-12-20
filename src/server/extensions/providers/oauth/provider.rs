@@ -273,13 +273,26 @@ impl Extension for OAuthProvider {
             }
         }
 
-        // Reset auth_verified when critical fields change
+        // Reset auth_verified and invalidate cached tokens when critical fields change
         if auth_changed {
             debug!(
-                "OAuth spec changed for {}/{}, resetting auth_verified",
+                "OAuth spec changed for {}/{}, resetting auth_verified and invalidating cached tokens",
                 project_id, extension_name
             );
             status.auth_verified = false;
+
+            // Delete all cached user OAuth tokens for this extension
+            // Tokens were obtained with old credentials and are no longer valid
+            use crate::db::user_oauth_tokens;
+            let deleted_count =
+                user_oauth_tokens::delete_by_extension(db_pool, project_id, extension_name).await?;
+
+            if deleted_count > 0 {
+                info!(
+                    "Invalidated {} cached OAuth token(s) for {}/{}",
+                    deleted_count, project_id, extension_name
+                );
+            }
         }
 
         // Save updated status
