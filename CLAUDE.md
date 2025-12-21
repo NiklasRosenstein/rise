@@ -196,6 +196,7 @@ For user-facing documentation, see the [`/docs`](./docs) directory. Key topics i
 - Axum capture groups are formatted as `{capture}`
 - Keep the documentation updated. Don't be overly verbose when documenting the project. People can read the code, but things that are not obvious or help getting started and context are usually helpful in documentation, as well as well-placed and lean examples.
 - Your todo lists should always include tasks for ensuring formatting and linting are addressed and creating commits of reasonable size (related changes in one commit)
+- **We don't maintain in-codebase backwards compatibility.** When making breaking changes, update the code without compatibility shims. Clean breaks are preferred over maintaining legacy code paths.
 
 ## Future Enhancements
 
