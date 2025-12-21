@@ -1,16 +1,13 @@
+use crate::api::project::{
+    CreateProjectResponse, DomainsResponse, EnvVarsResponse, MeResponse, OwnerInfo, Project,
+    ProjectErrorResponse, ProjectStatus, ProjectVisibility, ProjectWithOwnerInfo,
+    UpdateProjectResponse,
+};
 use crate::config::Config;
 use anyhow::{Context, Result};
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, Table};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Deserialize)]
-struct MeResponse {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
-    email: String,
-}
+use serde::Serialize;
 
 // Helper function to get current user info
 async fn get_current_user(
@@ -48,135 +45,6 @@ async fn get_current_user(
     Ok(me_response)
 }
 
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(rename_all = "PascalCase")]
-pub enum ProjectVisibility {
-    Public,
-    Private,
-}
-
-impl std::str::FromStr for ProjectVisibility {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s.to_lowercase().as_str() {
-            "public" => Ok(ProjectVisibility::Public),
-            "private" => Ok(ProjectVisibility::Private),
-            _ => Err(anyhow::anyhow!(
-                "Invalid visibility: {}. Must be 'public' or 'private'",
-                s
-            )),
-        }
-    }
-}
-
-impl std::fmt::Display for ProjectVisibility {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProjectVisibility::Public => write!(f, "Public"),
-            ProjectVisibility::Private => write!(f, "Private"),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-#[serde(rename_all = "PascalCase")]
-enum ProjectStatus {
-    Running,
-    Stopped,
-    Deploying,
-    Failed,
-    Deleting,
-}
-
-impl std::fmt::Display for ProjectStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProjectStatus::Running => write!(f, "Running"),
-            ProjectStatus::Stopped => write!(f, "Stopped"),
-            ProjectStatus::Deploying => write!(f, "Deploying"),
-            ProjectStatus::Failed => write!(f, "Failed"),
-            ProjectStatus::Deleting => write!(f, "Deleting"),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Project {
-    id: String,
-    name: String,
-    status: ProjectStatus,
-    visibility: ProjectVisibility,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_user: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_team: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_user_email: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_team_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    active_deployment_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    primary_url: Option<String>,
-    #[serde(default)]
-    custom_domain_urls: Vec<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct UserInfo {
-    id: String,
-    email: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct TeamInfo {
-    id: String,
-    name: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(untagged)]
-enum OwnerInfo {
-    User(UserInfo),
-    Team(TeamInfo),
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectWithOwnerInfo {
-    id: String,
-    name: String,
-    status: ProjectStatus,
-    #[allow(dead_code)]
-    visibility: ProjectVisibility,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner: Option<OwnerInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    primary_url: Option<String>,
-    #[serde(default)]
-    custom_domain_urls: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    deployment_groups: Option<Vec<String>>,
-    #[serde(default)]
-    finalizers: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectErrorResponse {
-    error: String,
-    suggestions: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateProjectResponse {
-    project: Project,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateProjectResponse {
-    project: Project,
-}
-
 // Parse owner string (format: "user:email" or "team:name")
 fn parse_owner(owner: &str) -> Result<(String, String)> {
     let parts: Vec<&str> = owner.splitn(2, ':').collect();
@@ -202,6 +70,7 @@ pub async fn create_project(
     name: &str,
     visibility: ProjectVisibility,
     owner: Option<String>,
+    path: &str,
 ) -> Result<()> {
     let token = config
         .get_token()
@@ -247,7 +116,7 @@ pub async fn create_project(
 
     let request = CreateRequest {
         name: name.to_string(),
-        visibility,
+        visibility: visibility.clone(),
         owner: owner_payload,
     };
 
@@ -272,6 +141,26 @@ pub async fn create_project(
         );
         println!("  ID: {}", create_response.project.id);
         println!("  Status: {}", create_response.project.status);
+
+        // Generate rise.toml
+        use crate::build::config::{write_project_config, ProjectBuildConfig, ProjectConfig};
+        use std::collections::HashMap;
+
+        let project_config = ProjectConfig {
+            name: name.to_string(),
+            visibility: visibility.to_string().to_lowercase(),
+            custom_domains: Vec::new(),
+            env: HashMap::new(),
+        };
+
+        let config_to_write = ProjectBuildConfig {
+            version: Some(1),
+            project: Some(project_config),
+            build: None,
+        };
+
+        write_project_config(path, &config_to_write)?;
+        println!("  Created rise.toml at {}/rise.toml", path);
     } else {
         let status = response.status();
         let error_text = response
@@ -377,7 +266,6 @@ pub async fn show_project(
     backend_url: &str,
     config: &Config,
     project_identifier: &str,
-    by_id: bool,
 ) -> Result<()> {
     let token = config
         .get_token()
@@ -385,8 +273,8 @@ pub async fn show_project(
 
     // Always request expanded data with owner info
     let url = format!(
-        "{}/api/v1/projects/{}?expand=owner&by_id={}",
-        backend_url, project_identifier, by_id
+        "{}/api/v1/projects/{}?expand=owner",
+        backend_url, project_identifier
     );
     let response = http_client
         .get(&url)
@@ -485,14 +373,103 @@ pub async fn update_project(
     backend_url: &str,
     config: &Config,
     project_identifier: &str,
-    by_id: bool,
     name: Option<String>,
     visibility: Option<ProjectVisibility>,
     owner: Option<String>,
+    sync: bool,
+    path: &str,
 ) -> Result<()> {
     let token = config
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
+
+    // Sync mode: Load rise.toml and push everything to backend
+    if sync {
+        use crate::build::config::load_full_project_config;
+        use tracing::info;
+
+        let full_config = load_full_project_config(path)?
+            .ok_or_else(|| anyhow::anyhow!("No rise.toml found at {}", path))?;
+
+        let project_config = full_config
+            .project
+            .ok_or_else(|| anyhow::anyhow!("No [project] section found in rise.toml"))?;
+
+        // Parse visibility
+        let visibility_enum: ProjectVisibility = project_config.visibility.parse()?;
+
+        info!("Syncing project metadata from rise.toml to backend...");
+
+        // Update project name and visibility
+        #[derive(Serialize)]
+        struct SyncUpdateRequest {
+            name: String,
+            visibility: ProjectVisibility,
+        }
+
+        let request = SyncUpdateRequest {
+            name: project_config.name.clone(),
+            visibility: visibility_enum,
+        };
+
+        let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
+        let response = http_client
+            .put(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send update project request")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!(
+                "Failed to update project (status {}): {}",
+                status,
+                error_text
+            );
+        }
+
+        let update_response: UpdateProjectResponse = response
+            .json()
+            .await
+            .context("Failed to parse update project response")?;
+
+        println!(
+            "✓ Project '{}' updated successfully!",
+            update_response.project.name
+        );
+
+        // Sync custom domains
+        if !project_config.custom_domains.is_empty() {
+            sync_custom_domains(
+                http_client,
+                backend_url,
+                &token,
+                &update_response.project.name,
+                &project_config.custom_domains,
+            )
+            .await?;
+        }
+
+        // Sync environment variables
+        if !project_config.env.is_empty() {
+            sync_env_vars(
+                http_client,
+                backend_url,
+                &token,
+                &update_response.project.name,
+                &project_config.env,
+            )
+            .await?;
+        }
+
+        return Ok(());
+    }
 
     #[derive(Serialize)]
     #[serde(rename_all = "snake_case")]
@@ -523,15 +500,12 @@ pub async fn update_project(
     }
 
     let request = UpdateRequest {
-        name,
-        visibility,
+        name: name.clone(),
+        visibility: visibility.clone(),
         owner: owner_payload,
     };
 
-    let url = format!(
-        "{}/api/v1/projects/{}?by_id={}",
-        backend_url, project_identifier, by_id
-    );
+    let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
     let response = http_client
         .put(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -551,6 +525,31 @@ pub async fn update_project(
             update_response.project.name
         );
         println!("  Status: {}", update_response.project.status);
+
+        // Update local rise.toml if it exists
+        use crate::build::config::{load_full_project_config, write_project_config};
+        if let Some(mut full_config) = load_full_project_config(path)? {
+            if let Some(ref mut project_config) = full_config.project {
+                let mut updated = false;
+
+                // Update name in rise.toml if provided
+                if let Some(ref new_name) = name {
+                    project_config.name = new_name.clone();
+                    updated = true;
+                }
+
+                // Update visibility in rise.toml if provided
+                if let Some(ref new_visibility) = visibility {
+                    project_config.visibility = new_visibility.to_string().to_lowercase();
+                    updated = true;
+                }
+
+                if updated {
+                    write_project_config(path, &full_config)?;
+                    println!("  Updated rise.toml");
+                }
+            }
+        }
     } else if response.status() == reqwest::StatusCode::NOT_FOUND {
         let error: ProjectErrorResponse = response
             .json()
@@ -587,16 +586,12 @@ pub async fn delete_project(
     backend_url: &str,
     config: &Config,
     project_identifier: &str,
-    by_id: bool,
 ) -> Result<()> {
     let token = config
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    let url = format!(
-        "{}/api/v1/projects/{}?by_id={}",
-        backend_url, project_identifier, by_id
-    );
+    let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
     let response = http_client
         .delete(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -631,6 +626,120 @@ pub async fn delete_project(
             status,
             error_text
         );
+    }
+
+    Ok(())
+}
+
+/// Sync custom domains from rise.toml to backend
+pub async fn sync_custom_domains(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    desired_domains: &[String],
+) -> Result<()> {
+    use crate::cli::domain;
+    use tracing::warn;
+
+    // Fetch current domains from backend
+    let url = format!("{}/api/v1/projects/{}/domains", backend_url, project);
+    let response = http_client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .context("Failed to fetch current domains")?;
+
+    let current_domains_response: DomainsResponse = if response.status().is_success() {
+        response.json().await.context("Failed to parse domains")?
+    } else {
+        DomainsResponse {
+            domains: Vec::new(),
+        }
+    };
+
+    let current_domains: Vec<String> = current_domains_response
+        .domains
+        .into_iter()
+        .map(|d| d.domain)
+        .collect();
+
+    // Add missing domains
+    for domain in desired_domains {
+        if !current_domains.contains(domain) {
+            println!("Adding domain '{}' from rise.toml", domain);
+            domain::add_domain(http_client, backend_url, token, project, domain).await?;
+        }
+    }
+
+    // Warn about unmanaged domains
+    for domain in &current_domains {
+        if !desired_domains.contains(domain) {
+            warn!(
+                "Domain '{}' exists in backend but not in rise.toml. \
+                 This domain is not managed by rise.toml. \
+                 Run 'rise domain remove {} {}' to remove it.",
+                domain, project, domain
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Sync environment variables from rise.toml to backend
+pub async fn sync_env_vars(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    desired_env: &std::collections::HashMap<String, String>,
+) -> Result<()> {
+    use crate::cli::env;
+    use tracing::warn;
+
+    // Fetch current env vars from backend
+    let url = format!("{}/api/v1/projects/{}/env", backend_url, project);
+    let response = http_client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .context("Failed to fetch current environment variables")?;
+
+    let current_env_response: EnvVarsResponse = if response.status().is_success() {
+        response.json().await.context("Failed to parse env vars")?
+    } else {
+        EnvVarsResponse {
+            env_vars: Vec::new(),
+        }
+    };
+
+    // Filter to only non-secret vars (rise.toml only manages plain-text vars)
+    let current_non_secret_vars: Vec<String> = current_env_response
+        .env_vars
+        .into_iter()
+        .filter(|v| !v.is_secret)
+        .map(|v| v.key)
+        .collect();
+
+    // Set/update vars from rise.toml (always non-secret)
+    for (key, value) in desired_env {
+        println!("Setting env var '{}' from rise.toml", key);
+        env::set_env(http_client, backend_url, token, project, key, value, false).await?;
+    }
+
+    // Warn about unmanaged non-secret vars
+    for key in &current_non_secret_vars {
+        if !desired_env.contains_key(key) {
+            warn!(
+                "Env var '{}' exists in backend but not in rise.toml. \
+                 This variable is not managed by rise.toml. \
+                 Run 'rise env delete {} {}' to remove it.",
+                key, project, key
+            );
+        }
     }
 
     Ok(())

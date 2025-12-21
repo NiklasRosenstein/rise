@@ -12,6 +12,9 @@ mod build;
 #[cfg(feature = "cli")]
 mod cli;
 
+#[cfg(feature = "cli")]
+use api::project::ProjectVisibility;
+
 #[cfg(feature = "server")]
 mod db;
 #[cfg(feature = "server")]
@@ -20,6 +23,22 @@ mod server;
 // Re-export for convenience (CLI modules)
 #[cfg(feature = "cli")]
 use cli::*;
+
+/// Resolve project name from explicit argument or rise.toml fallback
+#[cfg(feature = "cli")]
+fn resolve_project_name(explicit_project: Option<String>, path: &str) -> Result<String> {
+    if let Some(project) = explicit_project {
+        Ok(project)
+    } else if let Some(config) = build::config::load_full_project_config(path)? {
+        if let Some(project_config) = config.project {
+            Ok(project_config.name)
+        } else {
+            anyhow::bail!("No project name specified and rise.toml has no [project] section")
+        }
+    } else {
+        anyhow::bail!("No project name specified and no rise.toml found")
+    }
+}
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -31,8 +50,9 @@ pub struct Cli {
 /// Shared arguments for deployment creation
 #[derive(Debug, Clone, clap::Args)]
 struct DeployArgs {
-    /// Project name to deploy to
-    project: String,
+    /// Project name (optional if rise.toml contains [project] section)
+    #[arg(long, short = 'p')]
+    project: Option<String>,
     /// Path to the directory containing the application (defaults to current directory)
     #[arg(default_value = ".")]
     path: String,
@@ -151,6 +171,9 @@ enum ProjectCommands {
         /// Owner (format: "user:email" or "team:name", defaults to current user)
         #[arg(long)]
         owner: Option<String>,
+        /// Path where to create rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
     },
     /// List all projects
     #[command(visible_alias = "ls")]
@@ -159,21 +182,15 @@ enum ProjectCommands {
     /// Show project details
     #[command(visible_alias = "s")]
     Show {
-        /// Project name or ID
+        /// Project name
         project: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
     },
     /// Update project
     #[command(visible_alias = "u")]
     #[command(visible_alias = "edit")]
     Update {
-        /// Project name or ID
+        /// Project name
         project: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
         /// New project name
         #[arg(long)]
         name: Option<String>,
@@ -183,16 +200,19 @@ enum ProjectCommands {
         /// Transfer ownership (format: "user:email" or "team:name")
         #[arg(long)]
         owner: Option<String>,
+        /// Sync from rise.toml to backend (ignores other flags)
+        #[arg(long)]
+        sync: bool,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
     },
     /// Delete a project
     #[command(visible_alias = "del")]
     #[command(visible_alias = "rm")]
     Delete {
-        /// Project name or ID
+        /// Project name
         project: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
     },
 }
 
@@ -218,21 +238,15 @@ enum TeamCommands {
     /// Show team details
     #[command(visible_alias = "s")]
     Show {
-        /// Team name or ID
+        /// Team name
         team: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
     },
     /// Update team
     #[command(visible_alias = "u")]
     #[command(visible_alias = "edit")]
     Update {
-        /// Team name or ID
+        /// Team name
         team: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
         /// New team name
         #[arg(long)]
         name: Option<String>,
@@ -253,11 +267,8 @@ enum TeamCommands {
     #[command(visible_alias = "del")]
     #[command(visible_alias = "rm")]
     Delete {
-        /// Team name or ID
+        /// Team name
         team: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
     },
 }
 
@@ -274,8 +285,12 @@ enum DeploymentCommands {
     #[command(visible_alias = "ls")]
     #[command(visible_alias = "l")]
     List {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Filter by deployment group
         #[arg(long, short)]
         group: Option<String>,
@@ -286,8 +301,12 @@ enum DeploymentCommands {
     /// Show deployment details
     #[command(visible_alias = "s")]
     Show {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Deployment ID
         deployment_id: String,
         /// Follow deployment until completion
@@ -299,23 +318,35 @@ enum DeploymentCommands {
     },
     /// Rollback to a previous deployment
     Rollback {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Deployment ID to rollback to
         deployment_id: String,
     },
     /// Stop all deployments in a group
     Stop {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Deployment group to stop
         #[arg(long, short)]
         group: String,
     },
     /// Show logs from a deployment
     Logs {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Deployment ID (YYYYMMDD-HHMMSS format)
         deployment_id: String,
         /// Follow log output (stream continuously)
@@ -339,8 +370,12 @@ enum ServiceAccountCommands {
     #[command(visible_alias = "c")]
     #[command(visible_alias = "new")]
     Create {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// OIDC issuer URL (e.g., https://gitlab.com)
         #[arg(long)]
         issuer: String,
@@ -352,15 +387,23 @@ enum ServiceAccountCommands {
     #[command(visible_alias = "ls")]
     #[command(visible_alias = "l")]
     List {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
     },
     /// Show service account details
     #[command(visible_alias = "s")]
     #[command(visible_alias = "get")]
     Show {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Service account ID
         id: String,
     },
@@ -368,8 +411,12 @@ enum ServiceAccountCommands {
     #[command(visible_alias = "del")]
     #[command(visible_alias = "rm")]
     Delete {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Service account ID
         id: String,
     },
@@ -380,8 +427,12 @@ enum EnvCommands {
     /// Set an environment variable for a project
     #[command(visible_alias = "s")]
     Set {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Variable name (e.g., DATABASE_URL)
         key: String,
         /// Variable value
@@ -394,24 +445,36 @@ enum EnvCommands {
     #[command(visible_alias = "ls")]
     #[command(visible_alias = "l")]
     List {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
     },
     /// Delete an environment variable from a project
     #[command(visible_alias = "unset")]
     #[command(visible_alias = "rm")]
     #[command(visible_alias = "del")]
     Delete {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Variable name
         key: String,
     },
     /// Import environment variables from a file
     #[command(visible_alias = "i")]
     Import {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Path to file containing environment variables
         /// Format: KEY=value or KEY=secret:value (for secrets)
         /// Lines starting with # are comments
@@ -419,8 +482,12 @@ enum EnvCommands {
     },
     /// Show environment variables for a deployment (read-only)
     ShowDeployment {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Deployment ID
         deployment_id: String,
     },
@@ -431,8 +498,12 @@ enum DomainCommands {
     /// Add a custom domain to a project
     #[command(visible_alias = "a")]
     Add {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Domain name (e.g., example.com)
         domain: String,
     },
@@ -440,15 +511,23 @@ enum DomainCommands {
     #[command(visible_alias = "ls")]
     #[command(visible_alias = "l")]
     List {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
     },
     /// Remove a custom domain from a project
     #[command(visible_alias = "rm")]
     #[command(visible_alias = "del")]
     Remove {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Domain name
         domain: String,
     },
@@ -460,8 +539,12 @@ enum ExtensionCommands {
     #[command(visible_alias = "c")]
     #[command(visible_alias = "new")]
     Create {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Extension name
         extension: String,
         /// Extension type (handler identifier, e.g., "aws-rds-provisioner", "oauth")
@@ -474,8 +557,12 @@ enum ExtensionCommands {
     /// Update an extension (full replace)
     #[command(visible_alias = "u")]
     Update {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Extension name
         extension: String,
         /// Extension spec as JSON string
@@ -485,8 +572,12 @@ enum ExtensionCommands {
     /// Patch an extension (partial update, null values unset fields)
     #[command(visible_alias = "p")]
     Patch {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Extension name
         extension: String,
         /// Extension spec patch as JSON string
@@ -497,14 +588,22 @@ enum ExtensionCommands {
     #[command(visible_alias = "ls")]
     #[command(visible_alias = "l")]
     List {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
     },
     /// Show extension details
     #[command(visible_alias = "s")]
     Show {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Extension name
         extension: String,
     },
@@ -512,8 +611,12 @@ enum ExtensionCommands {
     #[command(visible_alias = "rm")]
     #[command(visible_alias = "del")]
     Delete {
-        /// Project name
-        project: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
         /// Extension name
         extension: String,
     },
@@ -604,12 +707,12 @@ async fn main() -> Result<()> {
                 name,
                 visibility,
                 owner,
+                path,
             } => {
-                let visibility_enum: project::ProjectVisibility =
-                    visibility.parse().unwrap_or_else(|e| {
-                        eprintln!("Error: {}", e);
-                        std::process::exit(1);
-                    });
+                let visibility_enum: ProjectVisibility = visibility.parse().unwrap_or_else(|e| {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                });
 
                 project::create_project(
                     &http_client,
@@ -618,21 +721,23 @@ async fn main() -> Result<()> {
                     name,
                     visibility_enum,
                     owner.clone(),
+                    path,
                 )
                 .await?;
             }
             ProjectCommands::List {} => {
                 project::list_projects(&http_client, &backend_url, &config).await?;
             }
-            ProjectCommands::Show { project, by_id } => {
-                project::show_project(&http_client, &backend_url, &config, project, *by_id).await?;
+            ProjectCommands::Show { project } => {
+                project::show_project(&http_client, &backend_url, &config, project).await?;
             }
             ProjectCommands::Update {
                 project,
-                by_id,
                 name,
                 visibility,
                 owner,
+                sync,
+                path,
             } => {
                 let visibility_enum = visibility.as_ref().map(|v| {
                     v.parse().unwrap_or_else(|e: anyhow::Error| {
@@ -646,16 +751,16 @@ async fn main() -> Result<()> {
                     &backend_url,
                     &config,
                     project,
-                    *by_id,
                     name.clone(),
                     visibility_enum,
                     owner.clone(),
+                    *sync,
+                    path,
                 )
                 .await?;
             }
-            ProjectCommands::Delete { project, by_id } => {
-                project::delete_project(&http_client, &backend_url, &config, project, *by_id)
-                    .await?;
+            ProjectCommands::Delete { project } => {
+                project::delete_project(&http_client, &backend_url, &config, project).await?;
             }
         },
         Commands::Team(team_cmd) => match team_cmd {
@@ -689,12 +794,11 @@ async fn main() -> Result<()> {
             TeamCommands::List {} => {
                 team::list_teams(&http_client, &backend_url, &config).await?;
             }
-            TeamCommands::Show { team, by_id } => {
-                team::show_team(&http_client, &backend_url, &config, team, *by_id).await?;
+            TeamCommands::Show { team } => {
+                team::show_team(&http_client, &backend_url, &config, team).await?;
             }
             TeamCommands::Update {
                 team,
-                by_id,
                 name,
                 add_owners,
                 remove_owners,
@@ -743,7 +847,6 @@ async fn main() -> Result<()> {
                     &backend_url,
                     &config,
                     team,
-                    *by_id,
                     name.clone(),
                     add_owners_vec,
                     remove_owners_vec,
@@ -752,12 +855,13 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             }
-            TeamCommands::Delete { team, by_id } => {
-                team::delete_team(&http_client, &backend_url, &config, team, *by_id).await?;
+            TeamCommands::Delete { team } => {
+                team::delete_team(&http_client, &backend_url, &config, team).await?;
             }
         },
         Commands::Deployment(deployment_cmd) => match deployment_cmd {
             DeploymentCommands::Create { args } => {
+                let project_name = resolve_project_name(args.project.clone(), &args.path)?;
                 // Validate http_port requirements
                 let port = match (args.image.as_ref(), args.http_port) {
                     // If using pre-built image, http_port is required
@@ -765,7 +869,7 @@ async fn main() -> Result<()> {
                         eprintln!("Error: --http-port is required when using --image");
                         eprintln!(
                             "Example: rise deployment create {} --image {} --http-port 80",
-                            args.project,
+                            project_name,
                             args.image.as_ref().unwrap()
                         );
                         std::process::exit(1);
@@ -788,7 +892,7 @@ async fn main() -> Result<()> {
                     &backend_url,
                     &config,
                     deployment::DeploymentOptions {
-                        project_name: &args.project,
+                        project_name: &project_name,
                         path: &args.path,
                         image: args.image.as_deref(),
                         group: args.group.as_deref(),
@@ -801,14 +905,16 @@ async fn main() -> Result<()> {
             }
             DeploymentCommands::List {
                 project,
+                path,
                 group,
                 limit,
             } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 deployment::list_deployments(
                     &http_client,
                     &backend_url,
                     &config,
-                    project,
+                    &project_name,
                     group.as_deref(),
                     *limit,
                 )
@@ -816,15 +922,17 @@ async fn main() -> Result<()> {
             }
             DeploymentCommands::Show {
                 project,
+                path,
                 deployment_id,
                 follow,
                 timeout,
             } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 deployment::show_deployment(
                     &http_client,
                     &backend_url,
                     &config,
-                    project,
+                    &project_name,
                     deployment_id,
                     *follow,
                     timeout,
@@ -833,35 +941,44 @@ async fn main() -> Result<()> {
             }
             DeploymentCommands::Rollback {
                 project,
+                path,
                 deployment_id,
             } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 deployment::rollback_deployment(
                     &http_client,
                     &backend_url,
                     &config,
-                    project,
+                    &project_name,
                     deployment_id,
                 )
                 .await?;
             }
-            DeploymentCommands::Stop { project, group } => {
+            DeploymentCommands::Stop {
+                project,
+                path,
+                group,
+            } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 deployment::stop_deployments_by_group(
                     &http_client,
                     &backend_url,
                     &config,
-                    project,
+                    &project_name,
                     group,
                 )
                 .await?;
             }
             DeploymentCommands::Logs {
                 project,
+                path,
                 deployment_id,
                 follow,
                 tail,
                 timestamps,
                 since,
             } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let token = config.get_token().ok_or_else(|| {
                     anyhow::anyhow!("Not logged in. Please run 'rise login' first.")
                 })?;
@@ -870,7 +987,7 @@ async fn main() -> Result<()> {
                     &backend_url,
                     &token,
                     deployment::GetLogsParams {
-                        project,
+                        project: &project_name,
                         deployment_id,
                         follow: *follow,
                         tail: *tail,
@@ -884,9 +1001,11 @@ async fn main() -> Result<()> {
         Commands::ServiceAccount(sa_cmd) => match sa_cmd {
             ServiceAccountCommands::Create {
                 project,
+                path,
                 issuer,
                 claims,
             } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let claims_map: std::collections::HashMap<String, String> =
                     claims.iter().cloned().collect();
 
@@ -896,7 +1015,7 @@ async fn main() -> Result<()> {
                         "Error: The 'aud' (audience) claim is required for service accounts."
                     );
                     eprintln!("       Recommended format: rise-project-{{project-name}}");
-                    eprintln!("       Example: --claim aud=rise-project-{}", project);
+                    eprintln!("       Example: --claim aud=rise-project-{}", project_name);
                     std::process::exit(1);
                 }
 
@@ -911,37 +1030,40 @@ async fn main() -> Result<()> {
                     &http_client,
                     &backend_url,
                     &config,
-                    project,
+                    &project_name,
                     issuer,
                     claims_map,
                 )
                 .await?;
             }
-            ServiceAccountCommands::List { project } => {
+            ServiceAccountCommands::List { project, path } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 service_account::list_service_accounts(
                     &http_client,
                     &backend_url,
                     &config,
-                    project,
+                    &project_name,
                 )
                 .await?;
             }
-            ServiceAccountCommands::Show { project, id } => {
+            ServiceAccountCommands::Show { project, path, id } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 service_account::show_service_account(
                     &http_client,
                     &backend_url,
                     &config,
-                    project,
+                    &project_name,
                     id,
                 )
                 .await?;
             }
-            ServiceAccountCommands::Delete { project, id } => {
+            ServiceAccountCommands::Delete { project, path, id } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 service_account::delete_service_account(
                     &http_client,
                     &backend_url,
                     &config,
-                    project,
+                    &project_name,
                     id,
                 )
                 .await?;
@@ -954,39 +1076,51 @@ async fn main() -> Result<()> {
             match env_cmd {
                 EnvCommands::Set {
                     project,
+                    path,
                     key,
                     value,
                     secret,
                 } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     env::set_env(
                         &http_client,
                         &backend_url,
                         &token,
-                        project,
+                        &project_name,
                         key,
                         value,
                         *secret,
                     )
                     .await?;
                 }
-                EnvCommands::List { project } => {
-                    env::list_env(&http_client, &backend_url, &token, project).await?;
+                EnvCommands::List { project, path } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
+                    env::list_env(&http_client, &backend_url, &token, &project_name).await?;
                 }
-                EnvCommands::Delete { project, key } => {
-                    env::unset_env(&http_client, &backend_url, &token, project, key).await?;
+                EnvCommands::Delete { project, path, key } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
+                    env::unset_env(&http_client, &backend_url, &token, &project_name, key).await?;
                 }
-                EnvCommands::Import { project, file } => {
-                    env::import_env(&http_client, &backend_url, &token, project, file).await?;
+                EnvCommands::Import {
+                    project,
+                    path,
+                    file,
+                } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
+                    env::import_env(&http_client, &backend_url, &token, &project_name, file)
+                        .await?;
                 }
                 EnvCommands::ShowDeployment {
                     project,
+                    path,
                     deployment_id,
                 } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
                     env::list_deployment_env(
                         &http_client,
                         &backend_url,
                         &token,
-                        project,
+                        &project_name,
                         deployment_id,
                     )
                     .await?;
@@ -998,55 +1132,90 @@ async fn main() -> Result<()> {
                 anyhow::anyhow!("Not authenticated. Please run 'rise login' first")
             })?;
             match domain_cmd {
-                DomainCommands::Add { project, domain } => {
-                    domain::add_domain(&http_client, &backend_url, &token, project, domain).await?;
-                }
-                DomainCommands::List { project } => {
-                    domain::list_domains(&http_client, &backend_url, &token, project).await?;
-                }
-                DomainCommands::Remove { project, domain } => {
-                    domain::remove_domain(&http_client, &backend_url, &token, project, domain)
+                DomainCommands::Add {
+                    project,
+                    path,
+                    domain,
+                } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
+                    domain::add_domain(&http_client, &backend_url, &token, &project_name, domain)
                         .await?;
+                }
+                DomainCommands::List { project, path } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
+                    domain::list_domains(&http_client, &backend_url, &token, &project_name).await?;
+                }
+                DomainCommands::Remove {
+                    project,
+                    path,
+                    domain,
+                } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
+                    domain::remove_domain(
+                        &http_client,
+                        &backend_url,
+                        &token,
+                        &project_name,
+                        domain,
+                    )
+                    .await?;
                 }
             }
         }
         Commands::Extension(extension_cmd) => match extension_cmd {
             ExtensionCommands::Create {
                 project,
+                path,
                 extension,
                 r#type,
                 spec,
             } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let spec: serde_json::Value =
                     serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
-                extension::create_extension(project, extension, r#type, spec).await?;
+                extension::create_extension(&project_name, extension, r#type, spec).await?;
             }
             ExtensionCommands::Update {
                 project,
+                path,
                 extension,
                 spec,
             } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let spec: serde_json::Value =
                     serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
-                extension::update_extension(project, extension, spec).await?;
+                extension::update_extension(&project_name, extension, spec).await?;
             }
             ExtensionCommands::Patch {
                 project,
+                path,
                 extension,
                 spec,
             } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
                 let spec: serde_json::Value =
                     serde_json::from_str(spec).context("Failed to parse spec as JSON")?;
-                extension::patch_extension(project, extension, spec).await?;
+                extension::patch_extension(&project_name, extension, spec).await?;
             }
-            ExtensionCommands::List { project } => {
-                extension::list_extensions(project).await?;
+            ExtensionCommands::List { project, path } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
+                extension::list_extensions(&project_name).await?;
             }
-            ExtensionCommands::Show { project, extension } => {
-                extension::show_extension(project, extension).await?;
+            ExtensionCommands::Show {
+                project,
+                path,
+                extension,
+            } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
+                extension::show_extension(&project_name, extension).await?;
             }
-            ExtensionCommands::Delete { project, extension } => {
-                extension::delete_extension(project, extension).await?;
+            ExtensionCommands::Delete {
+                project,
+                path,
+                extension,
+            } => {
+                let project_name = resolve_project_name(project.clone(), path)?;
+                extension::delete_extension(&project_name, extension).await?;
             }
         },
         Commands::Build {

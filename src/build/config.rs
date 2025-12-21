@@ -1,20 +1,51 @@
 // Project-level build configuration (rise.toml / .rise.toml)
 
 use anyhow::Result;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use std::path::Path;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 /// Root structure for rise.toml / .rise.toml configuration file
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct ProjectBuildConfig {
-    /// Build configuration section
+    /// Optional version (must be 1 if present)
+    pub version: Option<u32>,
+
+    /// Project metadata (optional)
     #[serde(default)]
-    pub build: BuildConfig,
+    pub project: Option<ProjectConfig>,
+
+    /// Build configuration (optional)
+    #[serde(default)]
+    pub build: Option<BuildConfig>,
+}
+
+/// Project metadata configuration
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ProjectConfig {
+    /// Project name
+    pub name: String,
+
+    /// Visibility (Public or Private)
+    #[serde(default = "default_visibility")]
+    pub visibility: String,
+
+    /// Custom domains
+    #[serde(default)]
+    pub custom_domains: Vec<String>,
+
+    /// Plain-text environment variables (non-secret)
+    #[serde(default)]
+    pub env: HashMap<String, String>,
+}
+
+fn default_visibility() -> String {
+    "private".to_string()
 }
 
 /// Build configuration options for a project
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize, Serialize, Default)]
 pub struct BuildConfig {
     /// Build backend (docker, pack, railpack[:buildx], railpack:buildctl)
     pub backend: Option<String>,
@@ -39,12 +70,12 @@ pub struct BuildConfig {
     pub railpack_embed_ssl_cert: Option<bool>,
 }
 
-/// Load project-level build configuration from rise.toml or .rise.toml
+/// Load full project configuration from rise.toml or .rise.toml
 ///
 /// Searches for rise.toml first, then .rise.toml in the given directory.
 /// Returns Ok(None) if no config file is found.
-/// Returns Err if file exists but cannot be read or parsed.
-pub(crate) fn load_project_config(app_path: &str) -> Result<Option<BuildConfig>> {
+/// Returns Err if file exists but cannot be read or parsed, or if version is unsupported.
+pub fn load_full_project_config(app_path: &str) -> Result<Option<ProjectBuildConfig>> {
     let rise_toml = Path::new(app_path).join("rise.toml");
     let dot_rise_toml = Path::new(app_path).join(".rise.toml");
 
@@ -67,8 +98,32 @@ pub(crate) fn load_project_config(app_path: &str) -> Result<Option<BuildConfig>>
         info!("Loading project config from {}", path.display());
         let content = std::fs::read_to_string(&path)?;
         let config: ProjectBuildConfig = toml::from_str(&content)?;
-        Ok(Some(config.build))
+
+        // Validate version
+        if let Some(version) = config.version {
+            if version != 1 {
+                anyhow::bail!(
+                    "Unsupported rise.toml version: {}. This CLI supports version 1.",
+                    version
+                );
+            }
+        } else {
+            debug!("No version specified in rise.toml, using latest");
+        }
+
+        Ok(Some(config))
     } else {
         Ok(None)
     }
+}
+
+/// Write project configuration to rise.toml
+///
+/// Creates or overwrites rise.toml in the specified directory.
+pub fn write_project_config(app_path: &str, config: &ProjectBuildConfig) -> Result<()> {
+    let rise_toml_path = Path::new(app_path).join("rise.toml");
+    let toml_string = toml::to_string_pretty(config)?;
+    std::fs::write(&rise_toml_path, toml_string)?;
+    info!("Wrote project config to {}", rise_toml_path.display());
+    Ok(())
 }
