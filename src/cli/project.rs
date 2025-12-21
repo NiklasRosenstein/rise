@@ -398,7 +398,6 @@ pub async fn show_project(
     backend_url: &str,
     config: &Config,
     project_identifier: &str,
-    by_id: bool,
 ) -> Result<()> {
     let token = config
         .get_token()
@@ -406,8 +405,8 @@ pub async fn show_project(
 
     // Always request expanded data with owner info
     let url = format!(
-        "{}/api/v1/projects/{}?expand=owner&by_id={}",
-        backend_url, project_identifier, by_id
+        "{}/api/v1/projects/{}?expand=owner",
+        backend_url, project_identifier
     );
     let response = http_client
         .get(&url)
@@ -506,7 +505,6 @@ pub async fn update_project(
     backend_url: &str,
     config: &Config,
     project_identifier: &str,
-    by_id: bool,
     name: Option<String>,
     visibility: Option<ProjectVisibility>,
     owner: Option<String>,
@@ -546,10 +544,7 @@ pub async fn update_project(
             visibility: visibility_enum,
         };
 
-        let url = format!(
-            "{}/api/v1/projects/{}?by_id={}",
-            backend_url, project_identifier, by_id
-        );
+        let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
         let response = http_client
             .put(&url)
             .header("Authorization", format!("Bearer {}", token))
@@ -642,10 +637,7 @@ pub async fn update_project(
         owner: owner_payload,
     };
 
-    let url = format!(
-        "{}/api/v1/projects/{}?by_id={}",
-        backend_url, project_identifier, by_id
-    );
+    let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
     let response = http_client
         .put(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -726,16 +718,12 @@ pub async fn delete_project(
     backend_url: &str,
     config: &Config,
     project_identifier: &str,
-    by_id: bool,
 ) -> Result<()> {
     let token = config
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    let url = format!(
-        "{}/api/v1/projects/{}?by_id={}",
-        backend_url, project_identifier, by_id
-    );
+    let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
     let response = http_client
         .delete(&url)
         .header("Authorization", format!("Bearer {}", token))

@@ -148,21 +148,15 @@ enum ProjectCommands {
     /// Show project details
     #[command(visible_alias = "s")]
     Show {
-        /// Project name or ID
+        /// Project name
         project: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
     },
     /// Update project
     #[command(visible_alias = "u")]
     #[command(visible_alias = "edit")]
     Update {
-        /// Project name or ID
+        /// Project name
         project: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
         /// New project name
         #[arg(long)]
         name: Option<String>,
@@ -183,11 +177,8 @@ enum ProjectCommands {
     #[command(visible_alias = "del")]
     #[command(visible_alias = "rm")]
     Delete {
-        /// Project name or ID
+        /// Project name
         project: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
     },
 }
 
@@ -213,21 +204,15 @@ enum TeamCommands {
     /// Show team details
     #[command(visible_alias = "s")]
     Show {
-        /// Team name or ID
+        /// Team name
         team: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
     },
     /// Update team
     #[command(visible_alias = "u")]
     #[command(visible_alias = "edit")]
     Update {
-        /// Team name or ID
+        /// Team name
         team: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
         /// New team name
         #[arg(long)]
         name: Option<String>,
@@ -248,11 +233,8 @@ enum TeamCommands {
     #[command(visible_alias = "del")]
     #[command(visible_alias = "rm")]
     Delete {
-        /// Team name or ID
+        /// Team name
         team: String,
-        /// Force lookup by ID instead of name
-        #[arg(long)]
-        by_id: bool,
     },
 }
 
@@ -726,12 +708,11 @@ async fn main() -> Result<()> {
             ProjectCommands::List {} => {
                 project::list_projects(&http_client, &backend_url, &config).await?;
             }
-            ProjectCommands::Show { project, by_id } => {
-                project::show_project(&http_client, &backend_url, &config, project, *by_id).await?;
+            ProjectCommands::Show { project } => {
+                project::show_project(&http_client, &backend_url, &config, project).await?;
             }
             ProjectCommands::Update {
                 project,
-                by_id,
                 name,
                 visibility,
                 owner,
@@ -750,7 +731,6 @@ async fn main() -> Result<()> {
                     &backend_url,
                     &config,
                     project,
-                    *by_id,
                     name.clone(),
                     visibility_enum,
                     owner.clone(),
@@ -759,9 +739,8 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             }
-            ProjectCommands::Delete { project, by_id } => {
-                project::delete_project(&http_client, &backend_url, &config, project, *by_id)
-                    .await?;
+            ProjectCommands::Delete { project } => {
+                project::delete_project(&http_client, &backend_url, &config, project).await?;
             }
         },
         Commands::Team(team_cmd) => match team_cmd {
@@ -795,12 +774,11 @@ async fn main() -> Result<()> {
             TeamCommands::List {} => {
                 team::list_teams(&http_client, &backend_url, &config).await?;
             }
-            TeamCommands::Show { team, by_id } => {
-                team::show_team(&http_client, &backend_url, &config, team, *by_id).await?;
+            TeamCommands::Show { team } => {
+                team::show_team(&http_client, &backend_url, &config, team).await?;
             }
             TeamCommands::Update {
                 team,
-                by_id,
                 name,
                 add_owners,
                 remove_owners,
@@ -849,7 +827,6 @@ async fn main() -> Result<()> {
                     &backend_url,
                     &config,
                     team,
-                    *by_id,
                     name.clone(),
                     add_owners_vec,
                     remove_owners_vec,
@@ -858,8 +835,8 @@ async fn main() -> Result<()> {
                 )
                 .await?;
             }
-            TeamCommands::Delete { team, by_id } => {
-                team::delete_team(&http_client, &backend_url, &config, team, *by_id).await?;
+            TeamCommands::Delete { team } => {
+                team::delete_team(&http_client, &backend_url, &config, team).await?;
             }
         },
         Commands::Deployment(deployment_cmd) => match deployment_cmd {
