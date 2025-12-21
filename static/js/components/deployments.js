@@ -500,6 +500,8 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
     const [streaming, setStreaming] = useState(false);
     const [error, setError] = useState(null);
     const [autoScroll, setAutoScroll] = useState(true);
+    const [tailLines, setTailLines] = useState(1000);
+    const [tailInputValue, setTailInputValue] = useState('1000');
     const logsEndRef = useRef(null);
     const abortControllerRef = useRef(null);
 
@@ -532,7 +534,7 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
 
         const token = localStorage.getItem('rise_token');
         const baseUrl = window.API_BASE_URL || '';
-        const url = `${baseUrl}/api/v1/projects/${projectName}/deployments/${deploymentId}/logs?follow=true`;
+        const url = `${baseUrl}/api/v1/projects/${projectName}/deployments/${deploymentId}/logs?follow=true&tail=${tailLines}`;
 
         // Create new AbortController for this stream
         const abortController = new AbortController();
@@ -598,7 +600,7 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
             setError(err.message);
             setStreaming(false);
         });
-    }, [projectName, deploymentId]);
+    }, [projectName, deploymentId, tailLines]);
 
     const stopStreaming = useCallback(() => {
         if (abortControllerRef.current) {
@@ -611,7 +613,7 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
     const loadInitialLogs = useCallback(async () => {
         const token = localStorage.getItem('rise_token');
         const baseUrl = window.API_BASE_URL || '';
-        const url = `${baseUrl}/api/v1/projects/${projectName}/deployments/${deploymentId}/logs`;
+        const url = `${baseUrl}/api/v1/projects/${projectName}/deployments/${deploymentId}/logs?tail=${tailLines}`;
 
         try {
             const response = await fetch(url, {
@@ -653,11 +655,39 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
             console.error('Failed to load logs:', err);
             setError(err.message);
         }
-    }, [projectName, deploymentId]);
+    }, [projectName, deploymentId, tailLines]);
 
     const clearLogs = () => {
         setLogs([]);
     };
+
+    const handleTailLinesChange = (e) => {
+        setTailInputValue(e.target.value);
+    };
+
+    const handleTailLinesBlur = () => {
+        const newTail = parseInt(tailInputValue, 10);
+        if (!isNaN(newTail) && newTail > 0) {
+            setTailLines(newTail);
+        } else {
+            // Reset to current value if invalid
+            setTailInputValue(tailLines.toString());
+        }
+    };
+
+    const handleTailLinesKeyPress = (e) => {
+        if (e.key === 'Enter') {
+            e.target.blur(); // Trigger blur which will handle the update
+        }
+    };
+
+    // Effect to restart streaming when tailLines changes and we're currently streaming
+    useEffect(() => {
+        if (streaming) {
+            console.log('Tail lines changed to', tailLines, ', restarting stream...');
+            startStreaming();
+        }
+    }, [tailLines]); // Only depend on tailLines, not streaming or startStreaming to avoid loops
 
     useEffect(() => {
         return () => {
@@ -673,7 +703,19 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
         <div className="mb-6">
             <div className="flex justify-between items-center mb-3">
                 <h3 className="text-xl font-bold">Runtime Logs</h3>
-                <div className="flex gap-2">
+                <div className="flex gap-2 items-center">
+                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                        <span>Tail lines:</span>
+                        <input
+                            type="number"
+                            value={tailInputValue}
+                            onChange={handleTailLinesChange}
+                            onBlur={handleTailLinesBlur}
+                            onKeyPress={handleTailLinesKeyPress}
+                            min="1"
+                            className="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                        />
+                    </label>
                     <label className="flex items-center gap-2 text-sm text-gray-400">
                         <input
                             type="checkbox"
