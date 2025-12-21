@@ -1,16 +1,15 @@
+use crate::api::project::{
+    CreateProjectResponse, DomainsResponse, EnvVarsResponse, MeResponse, OwnerInfo, Project,
+    ProjectErrorResponse, ProjectStatus, ProjectWithOwnerInfo, UpdateProjectResponse,
+};
+
+// Re-export for backwards compatibility with main.rs
+pub use crate::api::project::ProjectVisibility;
 use crate::config::Config;
 use anyhow::{Context, Result};
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, Table};
 use reqwest::Client;
-use serde::{Deserialize, Serialize};
-
-#[derive(Debug, Deserialize)]
-struct MeResponse {
-    #[allow(dead_code)]
-    id: String,
-    #[allow(dead_code)]
-    email: String,
-}
+use serde::Serialize;
 
 // Helper function to get current user info
 async fn get_current_user(
@@ -46,135 +45,6 @@ async fn get_current_user(
         .context("Failed to parse me response")?;
 
     Ok(me_response)
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(rename_all = "PascalCase")]
-pub enum ProjectVisibility {
-    Public,
-    Private,
-}
-
-impl std::str::FromStr for ProjectVisibility {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self> {
-        match s.to_lowercase().as_str() {
-            "public" => Ok(ProjectVisibility::Public),
-            "private" => Ok(ProjectVisibility::Private),
-            _ => Err(anyhow::anyhow!(
-                "Invalid visibility: {}. Must be 'public' or 'private'",
-                s
-            )),
-        }
-    }
-}
-
-impl std::fmt::Display for ProjectVisibility {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProjectVisibility::Public => write!(f, "Public"),
-            ProjectVisibility::Private => write!(f, "Private"),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
-#[serde(rename_all = "PascalCase")]
-enum ProjectStatus {
-    Running,
-    Stopped,
-    Deploying,
-    Failed,
-    Deleting,
-}
-
-impl std::fmt::Display for ProjectStatus {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProjectStatus::Running => write!(f, "Running"),
-            ProjectStatus::Stopped => write!(f, "Stopped"),
-            ProjectStatus::Deploying => write!(f, "Deploying"),
-            ProjectStatus::Failed => write!(f, "Failed"),
-            ProjectStatus::Deleting => write!(f, "Deleting"),
-        }
-    }
-}
-
-#[derive(Debug, Deserialize, Serialize)]
-struct Project {
-    id: String,
-    name: String,
-    status: ProjectStatus,
-    visibility: ProjectVisibility,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_user: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_team: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_user_email: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner_team_name: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    active_deployment_status: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    primary_url: Option<String>,
-    #[serde(default)]
-    custom_domain_urls: Vec<String>,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct UserInfo {
-    id: String,
-    email: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-struct TeamInfo {
-    id: String,
-    name: String,
-}
-
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(untagged)]
-enum OwnerInfo {
-    User(UserInfo),
-    Team(TeamInfo),
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectWithOwnerInfo {
-    id: String,
-    name: String,
-    status: ProjectStatus,
-    #[allow(dead_code)]
-    visibility: ProjectVisibility,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    owner: Option<OwnerInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    primary_url: Option<String>,
-    #[serde(default)]
-    custom_domain_urls: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    deployment_groups: Option<Vec<String>>,
-    #[serde(default)]
-    finalizers: Vec<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct ProjectErrorResponse {
-    error: String,
-    suggestions: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct CreateProjectResponse {
-    project: Project,
-}
-
-#[derive(Debug, Deserialize)]
-struct UpdateProjectResponse {
-    project: Project,
 }
 
 // Parse owner string (format: "user:email" or "team:name")
@@ -783,16 +653,6 @@ pub async fn sync_custom_domains(
         .await
         .context("Failed to fetch current domains")?;
 
-    #[derive(serde::Deserialize)]
-    struct DomainItem {
-        domain: String,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct DomainsResponse {
-        domains: Vec<DomainItem>,
-    }
-
     let current_domains_response: DomainsResponse = if response.status().is_success() {
         response.json().await.context("Failed to parse domains")?
     } else {
@@ -849,17 +709,6 @@ pub async fn sync_env_vars(
         .send()
         .await
         .context("Failed to fetch current environment variables")?;
-
-    #[derive(serde::Deserialize)]
-    struct EnvVarItem {
-        key: String,
-        is_secret: bool,
-    }
-
-    #[derive(serde::Deserialize)]
-    struct EnvVarsResponse {
-        env_vars: Vec<EnvVarItem>,
-    }
 
     let current_env_response: EnvVarsResponse = if response.status().is_success() {
         response.json().await.context("Failed to parse env vars")?
