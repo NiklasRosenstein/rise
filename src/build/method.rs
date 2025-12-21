@@ -80,9 +80,9 @@ impl BuildOptions {
     ) -> Self {
         use tracing::warn;
 
-        // Load project-level config from app_path with error handling
-        let project_config = match crate::build::config::load_project_config(&app_path) {
-            Ok(cfg) => cfg,
+        // Load project-level build config from app_path with error handling
+        let project_config = match crate::build::config::load_full_project_config(&app_path) {
+            Ok(cfg) => cfg.and_then(|c| c.build),
             Err(e) => {
                 warn!(
                     "Failed to load project config: {:#}. Continuing without it.",

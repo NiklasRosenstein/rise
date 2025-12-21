@@ -117,16 +117,6 @@ pub fn load_full_project_config(app_path: &str) -> Result<Option<ProjectBuildCon
     }
 }
 
-/// Load project-level build configuration from rise.toml or .rise.toml
-///
-/// This is a convenience wrapper around load_full_project_config that only returns the build section.
-/// Returns Ok(None) if no config file is found.
-/// Returns Err if file exists but cannot be read or parsed.
-pub(crate) fn load_project_config(app_path: &str) -> Result<Option<BuildConfig>> {
-    let full_config = load_full_project_config(app_path)?;
-    Ok(full_config.and_then(|c| c.build))
-}
-
 /// Write project configuration to rise.toml
 ///
 /// Creates or overwrites rise.toml in the specified directory.
