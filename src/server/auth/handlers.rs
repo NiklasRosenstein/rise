@@ -452,6 +452,8 @@ pub struct SigninQuery {
     pub rd: Option<String>,
     /// Optional project name for ingress authentication flow
     pub project: Option<String>,
+    /// Skip cookie configuration warnings
+    pub skip_warning: Option<bool>,
 }
 
 /// Pre-authentication page for ingress auth
@@ -538,6 +540,98 @@ pub async fn signin_page(
     Ok(Html(html).into_response())
 }
 
+/// Checks if a hostname is covered by a cookie domain according to RFC 6265.
+///
+/// This handles both exact matches and subdomain matches. The cookie_domain
+/// is normalized by stripping a leading dot if present.
+///
+/// # Examples
+/// - `host_matches_cookie_domain("rise.local", ".rise.local")` -> `true`
+/// - `host_matches_cookie_domain("test.rise.local", ".rise.local")` -> `true`
+/// - `host_matches_cookie_domain("rise.local", "rise.local")` -> `true`
+/// - `host_matches_cookie_domain("other.com", ".rise.local")` -> `false`
+///
+/// # Note
+/// Assumes cookie_domain is non-empty. Empty cookie domains mean "current host only"
+/// and require special handling depending on context.
+fn host_matches_cookie_domain(hostname: &str, cookie_domain: &str) -> bool {
+    let cookie_domain_normalized = cookie_domain.trim_start_matches('.');
+    hostname == cookie_domain_normalized
+        || hostname.ends_with(&format!(".{}", cookie_domain_normalized))
+}
+
+/// Render warning page for cookie configuration issues
+fn render_warning_page(
+    state: &AppState,
+    params: &SigninQuery,
+    warnings: Vec<String>,
+    request_host: &str,
+) -> Html<String> {
+    // Load template
+    let template_content = StaticAssets::get("auth-warning.html.tera")
+        .expect("auth-warning.html.tera template not found")
+        .data;
+
+    let template_str = std::str::from_utf8(&template_content).expect("Template encoding error");
+
+    // Create Tera instance
+    let mut tera = Tera::default();
+    tera.add_raw_template("auth-warning.html.tera", template_str)
+        .expect("Template parse error");
+
+    // Extract redirect host
+    let redirect_url = params.redirect.as_ref().or(params.rd.as_ref());
+    let redirect_host = redirect_url.and_then(|url| {
+        url::Url::parse(url)
+            .ok()
+            .and_then(|u| u.host_str().map(|h| h.to_string()))
+    });
+
+    // Build continue URL (proceed with OAuth despite warning)
+    let mut continue_params = vec![];
+    if let Some(ref project) = params.project {
+        continue_params.push(format!("project={}", urlencoding::encode(project)));
+    }
+    if let Some(ref redirect) = params.redirect {
+        continue_params.push(format!("redirect={}", urlencoding::encode(redirect)));
+    } else if let Some(ref rd) = params.rd {
+        continue_params.push(format!("rd={}", urlencoding::encode(rd)));
+    }
+    continue_params.push("skip_warning=true".to_string());
+
+    let continue_url = format!(
+        "{}/api/v1/auth/signin/start?{}",
+        state.public_url.trim_end_matches('/'),
+        continue_params.join("&")
+    );
+
+    // Render template
+    let mut context = tera::Context::new();
+    context.insert("warnings", &warnings);
+    context.insert(
+        "project_name",
+        &params.project.as_deref().unwrap_or("Unknown"),
+    );
+    context.insert("request_host", request_host);
+    context.insert(
+        "cookie_domain",
+        &if state.cookie_settings.domain.is_empty() {
+            "(empty - current host only)"
+        } else {
+            &state.cookie_settings.domain
+        },
+    );
+    context.insert("redirect_host", &redirect_host);
+    context.insert("redirect_url", &redirect_url);
+    context.insert("continue_url", &continue_url);
+
+    let html = tera
+        .render("auth-warning.html.tera", &context)
+        .expect("Template rendering error");
+
+    Html(html)
+}
+
 /// Initiate OAuth2 login flow for ingress auth (start of OAuth flow)
 ///
 /// This handler starts the OAuth2 authorization code flow with PKCE.
@@ -546,15 +640,101 @@ pub async fn signin_page(
 #[instrument(skip(state, params))]
 pub async fn oauth_signin_start(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Query(params): Query<SigninQuery>,
-) -> Result<Redirect, (StatusCode, String)> {
+) -> Result<Response, (StatusCode, String)> {
     // Prefer rd (full URL) over redirect (path only)
-    let redirect_url = params.rd.or(params.redirect);
+    let redirect_url = params.rd.as_ref().or(params.redirect.as_ref());
     tracing::info!(
         project = ?params.project,
         has_redirect = redirect_url.is_some(),
         "OAuth signin initiated"
     );
+
+    // Extract request host for validation
+    let request_host = headers
+        .get("host")
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("");
+
+    // Skip validation if skip_warning is set
+    if !params.skip_warning.unwrap_or(false) {
+        // Extract redirect URL host (if provided)
+        let redirect_host = redirect_url.and_then(|url| {
+            url::Url::parse(url)
+                .ok()
+                .and_then(|u| u.host_str().map(|h| h.to_string()))
+        });
+
+        let cookie_domain = &state.cookie_settings.domain;
+
+        // Strip port from request_host for cookie domain comparisons
+        // (ports are irrelevant for cookie domain matching)
+        let request_host_without_port = request_host.split(':').next().unwrap_or(request_host);
+
+        // Detect potential misconfigurations
+        let mut warnings = Vec::new();
+
+        // Scenario 1: Cookie won't be accessible on redirect domain
+        if let Some(ref redirect_host_str) = redirect_host {
+            let cookie_will_match_redirect = if cookie_domain.is_empty() {
+                // Empty domain = current host only (ports irrelevant for cookies)
+                redirect_host_str == request_host_without_port
+            } else {
+                // Check if redirect host is covered by cookie domain
+                host_matches_cookie_domain(redirect_host_str, cookie_domain)
+            };
+
+            if !cookie_will_match_redirect {
+                warnings.push(format!(
+                    "Authentication cookies may not work correctly. The redirect target '{}' does not match the configured cookie domain '{}'.",
+                    redirect_host_str,
+                    if cookie_domain.is_empty() {
+                        request_host_without_port
+                    } else {
+                        cookie_domain
+                    }
+                ));
+            }
+        }
+
+        // Scenario 2: Cookie domain doesn't match request host
+        if !cookie_domain.is_empty()
+            && !request_host_without_port.is_empty()
+            && !host_matches_cookie_domain(request_host_without_port, cookie_domain)
+        {
+            warnings.push(format!(
+                "Authentication configuration issue detected. The sign-in page is accessed from '{}' but cookies are configured for domain '{}'.",
+                request_host_without_port,
+                cookie_domain
+            ));
+        }
+
+        // Scenario 3: Custom domain without proper cookie configuration
+        if let Some(ref redirect_host_str) = redirect_host {
+            if request_host_without_port == redirect_host_str.as_str()
+                && !cookie_domain.is_empty()
+                && !host_matches_cookie_domain(request_host_without_port, cookie_domain)
+            {
+                warnings.push(format!(
+                    "This application ('{}') is not covered by the configured cookie domain '{}'.",
+                    request_host_without_port, cookie_domain
+                ));
+            }
+        }
+
+        // Log warnings for troubleshooting
+        if !warnings.is_empty() {
+            tracing::warn!(
+                "Cookie configuration warnings detected for project {:?}: {}",
+                params.project,
+                warnings.join(" | ")
+            );
+
+            // Show warning page to user
+            return Ok(render_warning_page(&state, &params, warnings, request_host).into_response());
+        }
+    }
 
     // Generate PKCE parameters
     let code_verifier = generate_code_verifier();
@@ -564,7 +744,7 @@ pub async fn oauth_signin_start(
     // Store PKCE state with redirect URL and project name for later retrieval
     let oauth_state = OAuth2State {
         code_verifier: code_verifier.clone(),
-        redirect_url,
+        redirect_url: redirect_url.cloned(),
         project_name: params.project.clone(), // For ingress auth flow
     };
     state.token_store.save(state_token.clone(), oauth_state);
@@ -588,7 +768,7 @@ pub async fn oauth_signin_start(
     let auth_url = state.oauth_client.build_authorize_url(&params);
 
     tracing::debug!("Redirecting to OIDC provider for authentication");
-    Ok(Redirect::to(&auth_url))
+    Ok(Redirect::to(&auth_url).into_response())
 }
 
 #[derive(Debug, Deserialize)]

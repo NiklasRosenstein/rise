@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Authentication Configuration Warning - Rise</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-950 text-gray-100">
+    <div class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-black">
+        <div class="w-full max-w-2xl p-8 bg-gray-900 rounded-lg border border-yellow-700 shadow-2xl">
+            <div class="text-center mb-6">
+                <div class="text-6xl text-yellow-500 mb-4">⚠</div>
+                <h2 class="text-2xl font-bold text-white mb-2">Authentication Configuration Warning</h2>
+            </div>
+
+            <div class="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4 mb-6">
+                <p class="text-yellow-200 text-sm mb-3">
+                    Authentication may not work correctly due to a configuration issue:
+                </p>
+
+                <ul class="list-disc list-inside space-y-2 text-yellow-100 text-sm">
+                    {% for warning in warnings %}
+                    <li>{{ warning }}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+
+            {% if project_name %}
+            <div class="mb-6">
+                <p class="text-gray-400 text-sm mb-2">Project:</p>
+                <p class="font-mono text-white bg-gray-800 px-3 py-2 rounded">{{ project_name }}</p>
+            </div>
+            {% endif %}
+
+            <div class="mb-6">
+                <p class="text-gray-400 text-sm mb-2">Current Configuration:</p>
+                <div class="bg-gray-800 rounded px-3 py-2 space-y-1 text-sm font-mono">
+                    <div><span class="text-gray-500">Request from:</span> <span class="text-white">{{ request_host }}</span></div>
+                    <div><span class="text-gray-500">Cookie domain:</span> <span class="text-white">{{ cookie_domain }}</span></div>
+                    {% if redirect_host %}
+                    <div><span class="text-gray-500">Redirect to:</span> <span class="text-white">{{ redirect_host }}</span></div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div class="bg-gray-800 rounded-lg p-4 mb-6">
+                <h3 class="font-semibold text-white mb-2">What does this mean?</h3>
+                <p class="text-gray-300 text-sm">
+                    This is a configuration issue with how authentication is set up for this application.
+                    You may be able to continue and sign in, but authentication might fail or you may be
+                    redirected to sign in again after logging in successfully.
+                </p>
+                <p class="text-gray-400 text-sm mt-3">
+                    If you continue to experience issues, please contact your administrator.
+                </p>
+            </div>
+
+            <div class="flex gap-3">
+                <a href="{{ continue_url }}"
+                   class="flex-1 bg-yellow-600 hover:bg-yellow-700 text-white font-semibold py-3 px-4 rounded-lg text-center transition-colors">
+                    Continue Anyway
+                </a>
+                <a href="/"
+                   class="flex-1 bg-gray-700 hover:bg-gray-600 text-white font-semibold py-3 px-4 rounded-lg text-center transition-colors">
+                    Go Back
+                </a>
+            </div>
+
+            <p class="text-xs text-gray-500 mt-4 text-center">
+                This warning appears when cookie domain settings don't match the application domain.
+            </p>
+        </div>
+    </div>
+</body>
+</html>
