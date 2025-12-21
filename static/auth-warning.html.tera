@@ -16,7 +16,7 @@
 
             <div class="bg-yellow-900/30 border border-yellow-600 rounded-lg p-4 mb-6">
                 <p class="text-yellow-200 text-sm mb-3">
-                    The authentication flow may not work correctly due to cookie configuration issues:
+                    Authentication may not work correctly due to a configuration issue:
                 </p>
 
                 <ul class="list-disc list-inside space-y-2 text-yellow-100 text-sm">
@@ -45,12 +45,15 @@
             </div>
 
             <div class="bg-gray-800 rounded-lg p-4 mb-6">
-                <h3 class="font-semibold text-white mb-2">How to Fix:</h3>
-                <ul class="list-decimal list-inside space-y-2 text-gray-300 text-sm">
-                    <li>For subdomains (*.rise.local): Set <code class="bg-gray-700 px-1 rounded">cookie_domain: ".rise.local"</code> in config</li>
-                    <li>For custom domains (mycustomapp.com): Set up Ingress routing (see INGRESS_MAGIC_PLAN.md)</li>
-                    <li>Ensure <code class="bg-gray-700 px-1 rounded">auth_signin_url</code> matches your cookie domain</li>
-                </ul>
+                <h3 class="font-semibold text-white mb-2">What does this mean?</h3>
+                <p class="text-gray-300 text-sm">
+                    This is a configuration issue with how authentication is set up for this application.
+                    You may be able to continue and sign in, but authentication might fail or you may be
+                    redirected to sign in again after logging in successfully.
+                </p>
+                <p class="text-gray-400 text-sm mt-3">
+                    If you continue to experience issues, please contact your administrator.
+                </p>
             </div>
 
             <div class="flex gap-3">
@@ -65,7 +68,7 @@
             </div>
 
             <p class="text-xs text-gray-500 mt-4 text-center">
-                This warning can be suppressed by fixing the configuration issue.
+                This warning appears when cookie domain settings don't match the application domain.
             </p>
         </div>
     </div>

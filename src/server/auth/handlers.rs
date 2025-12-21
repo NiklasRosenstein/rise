@@ -687,8 +687,7 @@ pub async fn oauth_signin_start(
 
             if !cookie_will_match_redirect {
                 warnings.push(format!(
-                    "Cookie may not be accessible after login: redirect target '{}' does not match cookie domain '{}'. \
-                     You may need to configure cookie_domain or use Ingress routing for custom domains.",
+                    "Authentication cookies may not work correctly. The redirect target '{}' does not match the configured cookie domain '{}'.",
                     redirect_host_str,
                     if cookie_domain.is_empty() {
                         request_host_without_port
@@ -705,23 +704,20 @@ pub async fn oauth_signin_start(
             && !host_matches_cookie_domain(request_host_without_port, cookie_domain)
         {
             warnings.push(format!(
-                "Cookie domain mismatch: configured domain is '{}' but sign-in request is from '{}'. \
-                 Ensure your auth_signin_url uses a domain that matches cookie_domain.",
-                cookie_domain,
-                request_host_without_port
+                "Authentication configuration issue detected. The sign-in page is accessed from '{}' but cookies are configured for domain '{}'.",
+                request_host_without_port,
+                cookie_domain
             ));
         }
 
-        // Scenario 3: Custom domain without Ingress routing
+        // Scenario 3: Custom domain without proper cookie configuration
         if let Some(ref redirect_host_str) = redirect_host {
             if request_host_without_port == redirect_host_str.as_str()
                 && !cookie_domain.is_empty()
                 && !host_matches_cookie_domain(request_host_without_port, cookie_domain)
             {
                 warnings.push(format!(
-                    "Custom domain detected: '{}' is not covered by cookie domain '{}'. \
-                     Consider using Ingress routing to route /.rise/auth/* to the Rise backend. \
-                     See INGRESS_MAGIC_PLAN.md for details.",
+                    "This application ('{}') is not covered by the configured cookie domain '{}'.",
                     request_host_without_port, cookie_domain
                 ));
             }
