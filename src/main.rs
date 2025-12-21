@@ -12,6 +12,9 @@ mod build;
 #[cfg(feature = "cli")]
 mod cli;
 
+#[cfg(feature = "cli")]
+use api::project::ProjectVisibility;
+
 #[cfg(feature = "server")]
 mod db;
 #[cfg(feature = "server")]
@@ -688,11 +691,10 @@ async fn main() -> Result<()> {
                 owner,
                 path,
             } => {
-                let visibility_enum: project::ProjectVisibility =
-                    visibility.parse().unwrap_or_else(|e| {
-                        eprintln!("Error: {}", e);
-                        std::process::exit(1);
-                    });
+                let visibility_enum: ProjectVisibility = visibility.parse().unwrap_or_else(|e| {
+                    eprintln!("Error: {}", e);
+                    std::process::exit(1);
+                });
 
                 project::create_project(
                     &http_client,

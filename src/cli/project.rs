@@ -1,10 +1,8 @@
 use crate::api::project::{
     CreateProjectResponse, DomainsResponse, EnvVarsResponse, MeResponse, OwnerInfo, Project,
-    ProjectErrorResponse, ProjectStatus, ProjectWithOwnerInfo, UpdateProjectResponse,
+    ProjectErrorResponse, ProjectStatus, ProjectVisibility, ProjectWithOwnerInfo,
+    UpdateProjectResponse,
 };
-
-// Re-export for backwards compatibility with main.rs
-pub use crate::api::project::ProjectVisibility;
 use crate::config::Config;
 use anyhow::{Context, Result};
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, Table};
