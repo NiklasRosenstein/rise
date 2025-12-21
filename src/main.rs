@@ -47,6 +47,32 @@ pub struct Cli {
     command: Commands,
 }
 
+/// Shared arguments for deployment creation
+#[derive(Debug, Clone, clap::Args)]
+struct DeployArgs {
+    /// Project name (optional if rise.toml contains [project] section)
+    #[arg(long, short = 'p')]
+    project: Option<String>,
+    /// Path to the directory containing the application (defaults to current directory)
+    #[arg(default_value = ".")]
+    path: String,
+    /// Pre-built image to deploy (e.g., nginx:latest). Skips build if provided.
+    #[arg(long, short)]
+    image: Option<String>,
+    /// Deployment group (e.g., 'default', 'mr/27'). Defaults to 'default' if not specified.
+    #[arg(long, short)]
+    group: Option<String>,
+    /// Expiration duration (e.g., '7d', '2h', '30m'). Deployment will be automatically cleaned up after this period.
+    #[arg(long)]
+    expire: Option<String>,
+    /// HTTP port the application listens on (e.g., 3000, 8080, 5000).
+    /// Required when using --image. Defaults to 8080 for buildpack builds.
+    #[arg(long)]
+    http_port: Option<u16>,
+    #[command(flatten)]
+    build_args: build::BuildArgs,
+}
+
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Authenticate with the Rise backend
@@ -92,6 +118,11 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "ext")]
     Extension(ExtensionCommands),
+    /// Deploy an application (shortcut for 'deployment create')
+    Deploy {
+        #[command(flatten)]
+        args: DeployArgs,
+    },
     /// Build a container image locally without deploying
     Build {
         /// Tag for the built image (e.g., myapp:latest, registry.io/org/app:v1.0)
@@ -247,27 +278,8 @@ enum DeploymentCommands {
     #[command(visible_alias = "c")]
     #[command(visible_alias = "new")]
     Create {
-        /// Project name (optional if rise.toml contains [project] section)
-        #[arg(long, short = 'p')]
-        project: Option<String>,
-        /// Path to the directory containing the application (defaults to current directory)
-        #[arg(default_value = ".")]
-        path: String,
-        /// Pre-built image to deploy (e.g., nginx:latest). Skips build if provided.
-        #[arg(long, short)]
-        image: Option<String>,
-        /// Deployment group (e.g., 'default', 'mr/27'). Defaults to 'default' if not specified.
-        #[arg(long, short)]
-        group: Option<String>,
-        /// Expiration duration (e.g., '7d', '2h', '30m'). Deployment will be automatically cleaned up after this period.
-        #[arg(long)]
-        expire: Option<String>,
-        /// HTTP port the application listens on (e.g., 3000, 8080, 5000).
-        /// Required when using --image. Defaults to 8080 for buildpack builds.
-        #[arg(long)]
-        http_port: Option<u16>,
         #[command(flatten)]
-        build_args: build::BuildArgs,
+        args: DeployArgs,
     },
     /// List deployments for a project
     #[command(visible_alias = "ls")]
@@ -638,9 +650,15 @@ async fn main() -> Result<()> {
 
     let cli = Cli::parse();
 
+    // Transform Deploy command to Deployment::Create for zero-duplication aliasing
+    let cli_command = match cli.command {
+        Commands::Deploy { args } => Commands::Deployment(DeploymentCommands::Create { args }),
+        other => other,
+    };
+
     // Backend commands don't need CLI config (they use Settings from TOML/env vars)
     // Only client commands (login, project, team, deployment, service-account) need it
-    if let Commands::Backend(backend_cmd) = &cli.command {
+    if let Commands::Backend(backend_cmd) = &cli_command {
         return backend::handle_backend_command(backend_cmd.clone()).await;
     }
 
@@ -651,12 +669,12 @@ async fn main() -> Result<()> {
 
     // Check version compatibility for all commands except Backend
     // (Backend commands don't use the HTTP API)
-    if !matches!(&cli.command, Commands::Backend(_)) {
+    if !matches!(&cli_command, Commands::Backend(_)) {
         // Non-fatal version check - just warns user
         let _ = version::check_version_compatibility(&http_client, &backend_url).await;
     }
 
-    match &cli.command {
+    match &cli_command {
         Commands::Login {
             url,
             browser: _,
@@ -842,31 +860,22 @@ async fn main() -> Result<()> {
             }
         },
         Commands::Deployment(deployment_cmd) => match deployment_cmd {
-            DeploymentCommands::Create {
-                project,
-                path,
-                image,
-                group,
-                expire,
-                http_port,
-                build_args,
-            } => {
-                let project_name = resolve_project_name(project.clone(), path)?;
-
+            DeploymentCommands::Create { args } => {
+                let project_name = resolve_project_name(args.project.clone(), &args.path)?;
                 // Validate http_port requirements
-                let port = match (image.as_ref(), http_port) {
+                let port = match (args.image.as_ref(), args.http_port) {
                     // If using pre-built image, http_port is required
                     (Some(_), None) => {
                         eprintln!("Error: --http-port is required when using --image");
                         eprintln!(
                             "Example: rise deployment create {} --image {} --http-port 80",
                             project_name,
-                            image.as_ref().unwrap()
+                            args.image.as_ref().unwrap()
                         );
                         std::process::exit(1);
                     }
                     // If using pre-built image with port specified, use it
-                    (Some(_), Some(p)) => *p,
+                    (Some(_), Some(p)) => p,
                     // If building from source without port specified, default to 8080 (Paketo buildpack default)
                     (None, None) => {
                         info!(
@@ -875,7 +884,7 @@ async fn main() -> Result<()> {
                         8080
                     }
                     // If building from source with port specified, use it
-                    (None, Some(p)) => *p,
+                    (None, Some(p)) => p,
                 };
 
                 deployment::create_deployment(
@@ -884,12 +893,12 @@ async fn main() -> Result<()> {
                     &config,
                     deployment::DeploymentOptions {
                         project_name: &project_name,
-                        path,
-                        image: image.as_deref(),
-                        group: group.as_deref(),
-                        expires_in: expire.as_deref(),
+                        path: &args.path,
+                        image: args.image.as_deref(),
+                        group: args.group.as_deref(),
+                        expires_in: args.expire.as_deref(),
                         http_port: port,
-                        build_args,
+                        build_args: &args.build_args,
                     },
                 )
                 .await?;
@@ -1248,6 +1257,10 @@ async fn main() -> Result<()> {
                 },
             )
             .await?;
+        }
+        Commands::Deploy { .. } => {
+            // Already transformed to Deployment(Create) above
+            unreachable!("Deploy command should have been transformed to Deployment(Create)")
         }
     }
 
