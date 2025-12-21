@@ -171,22 +171,8 @@ function LoginPage() {
     const [status, setStatus] = useState('');
     const [loading, setLoading] = useState(false);
 
-    // Handle OAuth callback on component mount
-    useEffect(() => {
-        const params = new URLSearchParams(window.location.search);
-        if (params.has('code')) {
-            setStatus('Processing authentication...');
-            setLoading(true);
-            handleOAuthCallback()
-                .catch((error) => {
-                    setStatus(`Error: ${error.message}`);
-                    setLoading(false);
-                });
-        }
-    }, []);
-
     const handleLogin = async () => {
-        setStatus('Initializing authentication...');
+        setStatus('Redirecting to login...');
         setLoading(true);
         try {
             await login();
@@ -291,14 +277,6 @@ function App() {
 
             // Continue with normal auth check - don't skip it!
             // This ensures the user stays logged in after OAuth extension callback
-        }
-
-        // Check if we're handling main app OAuth callback
-        const params = new URLSearchParams(window.location.search);
-        if (params.has('code')) {
-            // Let LoginPage handle the callback
-            setAuthChecked(true);
-            return;
         }
 
         if (!isAuthenticated()) {
