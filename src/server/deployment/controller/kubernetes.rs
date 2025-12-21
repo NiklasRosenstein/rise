@@ -1103,7 +1103,7 @@ impl KubernetesController {
                 self.auth_backend_url, project.name
             );
             let signin_url = format!(
-                "{}/api/v1/auth/signin?project={}&redirect=$escaped_request_uri",
+                "{}/api/v1/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
                 self.auth_signin_url,
                 urlencoding::encode(&project.name)
             );
