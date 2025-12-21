@@ -3,6 +3,37 @@
 
 const { useState, useEffect, useCallback } = React;
 
+// Icon components for visibility
+function LockIcon({ className = "w-4 h-4" }) {
+    return (
+        <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+        </svg>
+    );
+}
+
+function GlobeIcon({ className = "w-4 h-4" }) {
+    return (
+        <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3.055 11H5a2 2 0 012 2v1a2 2 0 002 2 2 2 0 012 2v2.945M8 3.935V5.5A2.5 2.5 0 0010.5 8h.5a2 2 0 012 2 2 2 0 104 0 2 2 0 012-2h1.064M15 20.488V18a2 2 0 012-2h3.064M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+        </svg>
+    );
+}
+
+// Visibility Badge Component
+function VisibilityBadge({ visibility }) {
+    return (
+        <span className="inline-flex items-center gap-1.5 text-sm">
+            {visibility === 'Private' ? (
+                <LockIcon className="w-4 h-4 text-gray-400" />
+            ) : (
+                <GlobeIcon className="w-4 h-4 text-gray-400" />
+            )}
+            <span className="text-gray-300">{visibility}</span>
+        </span>
+    );
+}
+
 // Projects List Component
 function ProjectsList() {
     const [projects, setProjects] = useState([]);
@@ -140,7 +171,7 @@ function ProjectsList() {
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-100">{p.name}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge status={p.status} /></td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{owner}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{p.visibility}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><VisibilityBadge visibility={p.visibility} /></td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                                         {p.primary_url ? (
                                             <a
@@ -236,6 +267,9 @@ function ProjectDetail({ projectName, initialTab }) {
     const [activeTab, setActiveTab] = useState(initialTab || 'overview');
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [editingVisibility, setEditingVisibility] = useState(false);
+    const [newVisibility, setNewVisibility] = useState(null);
+    const [updatingVisibility, setUpdatingVisibility] = useState(false);
     const { showToast } = useToast();
 
     useEffect(() => {
@@ -286,6 +320,37 @@ function ProjectDetail({ projectName, initialTab }) {
         }
     };
 
+    const handleEditVisibility = () => {
+        setNewVisibility(project.visibility);
+        setEditingVisibility(true);
+    };
+
+    const handleCancelEditVisibility = () => {
+        setEditingVisibility(false);
+        setNewVisibility(null);
+    };
+
+    const handleSaveVisibility = async () => {
+        if (!project || !newVisibility || newVisibility === project.visibility) {
+            setEditingVisibility(false);
+            return;
+        }
+
+        setUpdatingVisibility(true);
+        try {
+            await api.updateProject(project.name, { visibility: newVisibility });
+            showToast(`Project visibility updated to ${newVisibility}`, 'success');
+            // Reload project to get updated data
+            const updatedProject = await api.getProject(projectName, { expand: 'owner' });
+            setProject(updatedProject);
+            setEditingVisibility(false);
+        } catch (err) {
+            showToast(`Failed to update visibility: ${err.message}`, 'error');
+        } finally {
+            setUpdatingVisibility(false);
+        }
+    };
+
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-400">Error loading project: {error}</p>;
     if (!project) return <p className="text-gray-400">Project not found.</p>;
@@ -313,8 +378,50 @@ function ProjectDetail({ projectName, initialTab }) {
                         <dd className="mt-1"><StatusBadge status={project.status} /></dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">Visibility</dt>
-                        <dd className="mt-1 text-gray-200">{project.visibility}</dd>
+                        <dt className="text-gray-400 mb-1">Visibility</dt>
+                        <dd className="mt-1">
+                            {!editingVisibility ? (
+                                <div className="flex items-center gap-2">
+                                    <VisibilityBadge visibility={project.visibility} />
+                                    <button
+                                        onClick={handleEditVisibility}
+                                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                                    >
+                                        Edit
+                                    </button>
+                                </div>
+                            ) : (
+                                <div className="flex items-center gap-2">
+                                    <select
+                                        value={newVisibility}
+                                        onChange={(e) => setNewVisibility(e.target.value)}
+                                        className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        disabled={updatingVisibility}
+                                    >
+                                        <option value="Public">Public</option>
+                                        <option value="Private">Private</option>
+                                    </select>
+                                    <Button
+                                        variant="primary"
+                                        size="sm"
+                                        onClick={handleSaveVisibility}
+                                        loading={updatingVisibility}
+                                        className="!py-1 !px-2 !text-xs"
+                                    >
+                                        Save
+                                    </Button>
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        onClick={handleCancelEditVisibility}
+                                        disabled={updatingVisibility}
+                                        className="!py-1 !px-2 !text-xs"
+                                    >
+                                        Cancel
+                                    </Button>
+                                </div>
+                            )}
+                        </dd>
                     </div>
                     <div>
                         <dt className="text-gray-400">URLs</dt>

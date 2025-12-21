@@ -101,6 +101,13 @@ class RiseAPI {
         });
     }
 
+    async updateProject(nameOrId, updates) {
+        return this.request(`/projects/${nameOrId}`, {
+            method: 'PUT',
+            body: JSON.stringify(updates)
+        });
+    }
+
     async deleteProject(nameOrId) {
         return this.request(`/projects/${nameOrId}`, {
             method: 'DELETE'
