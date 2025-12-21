@@ -426,6 +426,45 @@ impl AppState {
             cookie_settings.secure
         );
 
+        // Validate cookie configuration at startup
+        if !cookie_settings.domain.is_empty() {
+            #[cfg(feature = "k8s")]
+            if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
+                auth_signin_url: signin_url,
+                ..
+            }) = &settings.deployment_controller
+            {
+                if let Ok(parsed) = url::Url::parse(signin_url) {
+                    if let Some(host) = parsed.host_str() {
+                        let cookie_domain_normalized =
+                            cookie_settings.domain.trim_start_matches('.');
+
+                        if !host.ends_with(cookie_domain_normalized)
+                            && host != cookie_domain_normalized
+                        {
+                            tracing::warn!(
+                                "⚠ Cookie domain mismatch: cookie_domain='{}' but auth_signin_url host='{}'. \
+                                 Cookies may not work correctly. Consider setting cookie_domain to '.{}' or \
+                                 ensure signin URL uses a matching domain.",
+                                cookie_settings.domain,
+                                host,
+                                host.split('.').skip(1).collect::<Vec<_>>().join(".")
+                            );
+                        }
+                    }
+                }
+
+                // Warn if using localhost with cookie domain
+                if signin_url.contains("localhost") || signin_url.contains("127.0.0.1") {
+                    tracing::warn!(
+                        "⚠ Cookie domain '{}' set but auth_signin_url uses localhost. \
+                         Use a proper domain name (e.g., rise.local) instead of localhost for cookie sharing.",
+                        cookie_settings.domain
+                    );
+                }
+            }
+        }
+
         let public_url = settings.server.public_url.clone();
         tracing::info!("Public URL: {}", public_url);
 
