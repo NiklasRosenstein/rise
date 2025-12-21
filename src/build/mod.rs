@@ -5,7 +5,7 @@
 // daemon management, SSL certificate handling, and registry operations.
 
 mod buildkit;
-mod config;
+pub mod config;
 mod docker;
 mod method;
 mod pack;
