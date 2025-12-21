@@ -649,14 +649,18 @@ pub async fn oauth_signin_start(
         let cookie_domain = &state.cookie_settings.domain;
         let cookie_domain_normalized = cookie_domain.trim_start_matches('.');
 
+        // Strip port from request_host for cookie domain comparisons
+        // (ports are irrelevant for cookie domain matching)
+        let request_host_without_port = request_host.split(':').next().unwrap_or(request_host);
+
         // Detect potential misconfigurations
         let mut warnings = Vec::new();
 
         // Scenario 1: Cookie won't be accessible on redirect domain
         if let Some(ref redirect_host_str) = redirect_host {
             let cookie_will_match_redirect = if cookie_domain.is_empty() {
-                // Empty domain = current host only
-                redirect_host_str == request_host
+                // Empty domain = current host only (ports irrelevant for cookies)
+                redirect_host_str == request_host_without_port
             } else {
                 // Check if redirect host is covered by cookie domain
                 redirect_host_str == cookie_domain_normalized
@@ -669,7 +673,7 @@ pub async fn oauth_signin_start(
                      You may need to configure cookie_domain or use Ingress routing for custom domains.",
                     redirect_host_str,
                     if cookie_domain.is_empty() {
-                        request_host
+                        request_host_without_port
                     } else {
                         cookie_domain
                     }
@@ -679,30 +683,30 @@ pub async fn oauth_signin_start(
 
         // Scenario 2: Cookie domain doesn't match request host
         if !cookie_domain.is_empty()
-            && !request_host.is_empty()
-            && request_host != cookie_domain_normalized
-            && !request_host.ends_with(&format!(".{}", cookie_domain_normalized))
+            && !request_host_without_port.is_empty()
+            && request_host_without_port != cookie_domain_normalized
+            && !request_host_without_port.ends_with(&format!(".{}", cookie_domain_normalized))
         {
             warnings.push(format!(
                 "Cookie domain mismatch: configured domain is '{}' but sign-in request is from '{}'. \
                  Ensure your auth_signin_url uses a domain that matches cookie_domain.",
                 cookie_domain,
-                request_host
+                request_host_without_port
             ));
         }
 
         // Scenario 3: Custom domain without Ingress routing
         if let Some(ref redirect_host_str) = redirect_host {
-            if request_host == redirect_host_str.as_str()
+            if request_host_without_port == redirect_host_str.as_str()
                 && !cookie_domain.is_empty()
-                && request_host != cookie_domain_normalized
-                && !request_host.ends_with(&format!(".{}", cookie_domain_normalized))
+                && request_host_without_port != cookie_domain_normalized
+                && !request_host_without_port.ends_with(&format!(".{}", cookie_domain_normalized))
             {
                 warnings.push(format!(
                     "Custom domain detected: '{}' is not covered by cookie domain '{}'. \
                      Consider using Ingress routing to route /.rise/auth/* to the Rise backend. \
                      See INGRESS_MAGIC_PLAN.md for details.",
-                    request_host, cookie_domain
+                    request_host_without_port, cookie_domain
                 ));
             }
         }
