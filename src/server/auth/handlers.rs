@@ -540,6 +540,26 @@ pub async fn signin_page(
     Ok(Html(html).into_response())
 }
 
+/// Checks if a hostname is covered by a cookie domain according to RFC 6265.
+///
+/// This handles both exact matches and subdomain matches. The cookie_domain
+/// is normalized by stripping a leading dot if present.
+///
+/// # Examples
+/// - `host_matches_cookie_domain("rise.local", ".rise.local")` -> `true`
+/// - `host_matches_cookie_domain("test.rise.local", ".rise.local")` -> `true`
+/// - `host_matches_cookie_domain("rise.local", "rise.local")` -> `true`
+/// - `host_matches_cookie_domain("other.com", ".rise.local")` -> `false`
+///
+/// # Note
+/// Assumes cookie_domain is non-empty. Empty cookie domains mean "current host only"
+/// and require special handling depending on context.
+fn host_matches_cookie_domain(hostname: &str, cookie_domain: &str) -> bool {
+    let cookie_domain_normalized = cookie_domain.trim_start_matches('.');
+    hostname == cookie_domain_normalized
+        || hostname.ends_with(&format!(".{}", cookie_domain_normalized))
+}
+
 /// Render warning page for cookie configuration issues
 fn render_warning_page(
     state: &AppState,
@@ -647,7 +667,6 @@ pub async fn oauth_signin_start(
         });
 
         let cookie_domain = &state.cookie_settings.domain;
-        let cookie_domain_normalized = cookie_domain.trim_start_matches('.');
 
         // Strip port from request_host for cookie domain comparisons
         // (ports are irrelevant for cookie domain matching)
@@ -663,8 +682,7 @@ pub async fn oauth_signin_start(
                 redirect_host_str == request_host_without_port
             } else {
                 // Check if redirect host is covered by cookie domain
-                redirect_host_str == cookie_domain_normalized
-                    || redirect_host_str.ends_with(&format!(".{}", cookie_domain_normalized))
+                host_matches_cookie_domain(redirect_host_str, cookie_domain)
             };
 
             if !cookie_will_match_redirect {
@@ -684,8 +702,7 @@ pub async fn oauth_signin_start(
         // Scenario 2: Cookie domain doesn't match request host
         if !cookie_domain.is_empty()
             && !request_host_without_port.is_empty()
-            && request_host_without_port != cookie_domain_normalized
-            && !request_host_without_port.ends_with(&format!(".{}", cookie_domain_normalized))
+            && !host_matches_cookie_domain(request_host_without_port, cookie_domain)
         {
             warnings.push(format!(
                 "Cookie domain mismatch: configured domain is '{}' but sign-in request is from '{}'. \
@@ -699,8 +716,7 @@ pub async fn oauth_signin_start(
         if let Some(ref redirect_host_str) = redirect_host {
             if request_host_without_port == redirect_host_str.as_str()
                 && !cookie_domain.is_empty()
-                && request_host_without_port != cookie_domain_normalized
-                && !request_host_without_port.ends_with(&format!(".{}", cookie_domain_normalized))
+                && !host_matches_cookie_domain(request_host_without_port, cookie_domain)
             {
                 warnings.push(format!(
                     "Custom domain detected: '{}' is not covered by cookie domain '{}'. \
