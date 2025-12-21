@@ -1441,12 +1441,8 @@ pub async fn stream_deployment_logs(
     }
 
     // Get log stream from deployment backend
-    // Default to last 1000 lines if tail not specified and not following
-    let tail = if params.tail.is_none() && !params.follow {
-        Some(1000)
-    } else {
-        params.tail
-    };
+    // Default to last 1000 lines if tail not specified
+    let tail = params.tail.or(Some(1000));
 
     let log_stream = state
         .deployment_backend
