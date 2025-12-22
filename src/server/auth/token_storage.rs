@@ -12,6 +12,25 @@ pub struct OAuth2State {
     pub redirect_url: Option<String>,
     /// Project name for ingress authentication flow
     pub project_name: Option<String>,
+    /// Custom domain callback URL for custom domain auth routing
+    /// When set, after IdP callback completes on the main domain,
+    /// we redirect to this URL on the custom domain to set cookies there
+    pub custom_domain_callback_url: Option<String>,
+}
+
+/// Completed auth session data for custom domain token exchange
+/// After IdP callback on main domain, this data is stored temporarily
+/// and retrieved by the custom domain to set cookies
+#[derive(Debug, Clone)]
+pub struct CompletedAuthSession {
+    /// The signed Rise JWT to set as cookie
+    pub rise_jwt: String,
+    /// Max age for the cookie in seconds
+    pub max_age: u64,
+    /// Final redirect URL after setting cookie
+    pub redirect_url: String,
+    /// Project name for display
+    pub project_name: String,
 }
 
 /// Trait for storing and retrieving OAuth2 state tokens
@@ -21,11 +40,18 @@ pub trait TokenStore: Send + Sync {
 
     /// Retrieve OAuth2 state by state token
     fn get(&self, state: &str) -> Option<OAuth2State>;
+
+    /// Save completed auth session for custom domain token exchange
+    fn save_completed_session(&self, token: String, session: CompletedAuthSession);
+
+    /// Retrieve and consume completed auth session by token
+    fn get_completed_session(&self, token: &str) -> Option<CompletedAuthSession>;
 }
 
 /// In-memory implementation of TokenStore using Moka cache
 pub struct InMemoryTokenStore {
     cache: Arc<Cache<String, OAuth2State>>,
+    completed_sessions: Arc<Cache<String, CompletedAuthSession>>,
 }
 
 impl InMemoryTokenStore {
@@ -36,8 +62,15 @@ impl InMemoryTokenStore {
             .max_capacity(10_000) // Prevent memory exhaustion from attacks
             .build();
 
+        // Completed sessions have a shorter TTL (5 minutes) since they should be used immediately
+        let completed_sessions = Cache::builder()
+            .time_to_live(Duration::from_secs(300))
+            .max_capacity(10_000)
+            .build();
+
         Self {
             cache: Arc::new(cache),
+            completed_sessions: Arc::new(completed_sessions),
         }
     }
 }
@@ -49,6 +82,15 @@ impl TokenStore for InMemoryTokenStore {
 
     fn get(&self, state: &str) -> Option<OAuth2State> {
         self.cache.get(state)
+    }
+
+    fn save_completed_session(&self, token: String, session: CompletedAuthSession) {
+        self.completed_sessions.insert(token, session);
+    }
+
+    fn get_completed_session(&self, token: &str) -> Option<CompletedAuthSession> {
+        // Remove and return (one-time use)
+        self.completed_sessions.remove(token)
     }
 }
 
@@ -137,6 +179,7 @@ mod tests {
             code_verifier: "test_verifier".to_string(),
             redirect_url: Some("https://example.com".to_string()),
             project_name: None,
+            custom_domain_callback_url: None,
         };
 
         store.save(state.to_string(), data.clone());
@@ -163,6 +206,7 @@ mod tests {
             code_verifier: "test_verifier".to_string(),
             redirect_url: None,
             project_name: None,
+            custom_domain_callback_url: None,
         };
 
         store.save(state.to_string(), data);

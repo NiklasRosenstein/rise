@@ -24,6 +24,12 @@ pub fn public_routes() -> Router<AppState> {
 /// custom domains to route auth requests through their Ingress to the Rise backend.
 /// This enables cookie-based authentication for custom domains where cookie sharing
 /// with the Rise backend domain is not possible due to browser security restrictions.
+///
+/// Flow:
+/// 1. User visits custom domain → signin page at /.rise/auth/signin
+/// 2. Signin start redirects to IdP with callback URL on main Rise domain
+/// 3. After IdP callback on main domain, redirect to /.rise/auth/complete with one-time token
+/// 4. Complete handler sets cookie on custom domain and shows success page
 pub fn rise_auth_routes() -> Router<AppState> {
     Router::new()
         .route("/.rise/auth/signin", get(handlers::signin_page))
@@ -31,7 +37,7 @@ pub fn rise_auth_routes() -> Router<AppState> {
             "/.rise/auth/signin/start",
             get(handlers::oauth_signin_start),
         )
-        .route("/.rise/auth/callback", get(handlers::oauth_callback))
+        .route("/.rise/auth/complete", get(handlers::oauth_complete))
 }
 
 /// Protected routes that require authentication
