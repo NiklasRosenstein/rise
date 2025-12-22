@@ -28,9 +28,8 @@ pub fn public_routes() -> Router<AppState> {
 /// Flow:
 /// 1. User visits custom domain → signin page at /.rise/auth/signin
 /// 2. Signin start redirects to IdP with callback URL on main Rise domain
-/// 3. After IdP callback on main domain, redirect to /.rise/auth/complete#token=xxx
-/// 4. Landing page (GET) extracts token from fragment and POSTs it securely
-/// 5. Complete handler (POST) sets cookie on custom domain and returns success page
+/// 3. After IdP callback on main domain, redirect to /.rise/auth/complete with one-time token
+/// 4. Complete handler sets cookie on custom domain and shows success page
 pub fn rise_auth_routes() -> Router<AppState> {
     Router::new()
         .route("/.rise/auth/signin", get(handlers::signin_page))
@@ -38,12 +37,7 @@ pub fn rise_auth_routes() -> Router<AppState> {
             "/.rise/auth/signin/start",
             get(handlers::oauth_signin_start),
         )
-        // GET serves landing page that extracts token from fragment
-        // POST receives token in body and completes auth flow
-        .route(
-            "/.rise/auth/complete",
-            get(handlers::oauth_complete_landing).post(handlers::oauth_complete),
-        )
+        .route("/.rise/auth/complete", get(handlers::oauth_complete))
 }
 
 /// Protected routes that require authentication
