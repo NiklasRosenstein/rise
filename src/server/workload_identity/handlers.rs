@@ -30,7 +30,7 @@ async fn verify_oidc_issuer(issuer_url: &str) -> Result<()> {
     let response = reqwest::get(&discovery_url)
         .await
         .map_err(|e| {
-            tracing::warn!("Failed to reach OIDC issuer {}: {}", issuer_url, e);
+            tracing::warn!("Failed to reach OIDC issuer {}: {:?}", issuer_url, e);
             (
                 StatusCode::BAD_REQUEST,
                 format!("Failed to reach OIDC issuer: {}. Please verify the issuer URL is correct and accessible.", e),
@@ -55,7 +55,7 @@ async fn verify_oidc_issuer(issuer_url: &str) -> Result<()> {
 
     // Try to parse the response as JSON to verify it's valid OIDC configuration
     let config: serde_json::Value = response.json().await.map_err(|e| {
-        tracing::warn!("Failed to parse OIDC configuration from {}: {}", issuer_url, e);
+        tracing::warn!("Failed to parse OIDC configuration from {}: {:?}", issuer_url, e);
         (
             StatusCode::BAD_REQUEST,
             format!("Invalid OIDC configuration: {}. The issuer URL does not return valid OIDC discovery metadata.", e),
@@ -174,7 +174,7 @@ pub async fn create_workload_identity(
     // Convert JSONB claims to HashMap for response
     let claims: std::collections::HashMap<String, String> = serde_json::from_value(sa.claims)
         .map_err(|e| {
-            tracing::error!("Failed to deserialize claims: {}", e);
+            tracing::error!("Failed to deserialize claims: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to deserialize claims".to_string(),
@@ -232,7 +232,7 @@ pub async fn list_workload_identities(
         // Convert JSONB claims to HashMap
         let claims: std::collections::HashMap<String, String> =
             serde_json::from_value(sa.claims.clone()).map_err(|e| {
-                tracing::error!("Failed to deserialize claims: {}", e);
+                tracing::error!("Failed to deserialize claims: {:?}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to deserialize claims".to_string(),
@@ -315,7 +315,7 @@ pub async fn get_workload_identity(
     // Convert JSONB claims to HashMap
     let claims: std::collections::HashMap<String, String> = serde_json::from_value(sa.claims)
         .map_err(|e| {
-            tracing::error!("Failed to deserialize claims: {}", e);
+            tracing::error!("Failed to deserialize claims: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to deserialize claims".to_string(),
@@ -458,7 +458,7 @@ pub async fn update_workload_identity(
     // Convert JSONB claims to HashMap for response
     let claims: std::collections::HashMap<String, String> =
         serde_json::from_value(updated_sa.claims).map_err(|e| {
-            tracing::error!("Failed to deserialize claims: {}", e);
+            tracing::error!("Failed to deserialize claims: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to deserialize claims".to_string(),

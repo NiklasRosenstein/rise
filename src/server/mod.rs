@@ -40,7 +40,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         #[cfg(feature = "k8s")]
         {
             if let Err(e) = run_kubernetes_controller_loop(settings_clone).await {
-                tracing::error!("Deployment controller error: {}", e);
+                tracing::error!("Deployment controller error: {:?}", e);
             }
         }
         #[cfg(not(feature = "k8s"))]
@@ -58,7 +58,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let settings_clone = settings.clone();
     let handle = tokio::spawn(async move {
         if let Err(e) = run_project_controller_loop(settings_clone).await {
-            tracing::error!("Project controller error: {}", e);
+            tracing::error!("Project controller error: {:?}", e);
         }
     });
     controller_handles.push(handle);
@@ -70,7 +70,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         let settings_clone = settings.clone();
         let handle = tokio::spawn(async move {
             if let Err(e) = run_ecr_controller_loop(settings_clone).await {
-                tracing::error!("ECR controller error: {}", e);
+                tracing::error!("ECR controller error: {:?}", e);
             }
         });
         controller_handles.push(handle);
