@@ -12,10 +12,10 @@ pub struct OAuth2State {
     pub redirect_url: Option<String>,
     /// Project name for ingress authentication flow
     pub project_name: Option<String>,
-    /// Custom domain callback URL for custom domain auth routing
+    /// Custom domain base URL for custom domain auth routing
     /// When set, after IdP callback completes on the main domain,
-    /// we redirect to this URL on the custom domain to set cookies there
-    pub custom_domain_callback_url: Option<String>,
+    /// we redirect to `{base_url}/.rise/auth/complete` to set cookies there
+    pub custom_domain_base_url: Option<String>,
 }
 
 /// Completed auth session data for custom domain token exchange
@@ -179,7 +179,7 @@ mod tests {
             code_verifier: "test_verifier".to_string(),
             redirect_url: Some("https://example.com".to_string()),
             project_name: None,
-            custom_domain_callback_url: None,
+            custom_domain_base_url: None,
         };
 
         store.save(state.to_string(), data.clone());
@@ -206,7 +206,7 @@ mod tests {
             code_verifier: "test_verifier".to_string(),
             redirect_url: None,
             project_name: None,
-            custom_domain_callback_url: None,
+            custom_domain_base_url: None,
         };
 
         store.save(state.to_string(), data);

@@ -791,22 +791,19 @@ pub async fn oauth_signin_start(
 
     // For custom domain auth routing via /.rise/auth path:
     // - IdP callback always goes to the main Rise domain (only one redirect URI needed)
-    // - After callback, we redirect to the custom domain to set cookies there
-    let custom_domain_callback_url = if is_rise_path {
-        Some(format!(
-            "{}/.rise/auth/callback",
-            extract_request_base_url(&headers, &state)
-        ))
+    // - After callback, we redirect to the custom domain's /.rise/auth/complete endpoint
+    let custom_domain_base_url = if is_rise_path {
+        Some(extract_request_base_url(&headers, &state))
     } else {
         None
     };
 
-    // Store PKCE state with redirect URL, project name, and custom domain callback URL
+    // Store PKCE state with redirect URL, project name, and custom domain base URL
     let oauth_state = OAuth2State {
         code_verifier: code_verifier.clone(),
         redirect_url: redirect_url.cloned(),
         project_name: params.project.clone(), // For ingress auth flow
-        custom_domain_callback_url,
+        custom_domain_base_url,
     };
     state.token_store.save(state_token.clone(), oauth_state);
 
@@ -1027,7 +1024,7 @@ pub async fn oauth_callback(
             })?;
 
         // Check if this is a custom domain auth flow that needs redirect
-        if let Some(custom_callback_url) = oauth_state.custom_domain_callback_url {
+        if let Some(custom_domain_base_url) = oauth_state.custom_domain_base_url {
             // Generate a one-time token for the custom domain callback
             let completion_token = generate_state_token();
 
@@ -1042,11 +1039,11 @@ pub async fn oauth_callback(
                 .token_store
                 .save_completed_session(completion_token.clone(), completed_session);
 
-            // Parse the custom callback URL and replace the path with /complete
-            // e.g., https://mycustomapp.com/.rise/auth/callback -> https://mycustomapp.com/.rise/auth/complete
-            let complete_url = custom_callback_url.replace(
-                "/.rise/auth/callback",
-                &format!("/.rise/auth/complete?token={}", completion_token),
+            // Construct the complete URL by appending the path to the base URL
+            let complete_url = format!(
+                "{}/.rise/auth/complete?token={}",
+                custom_domain_base_url.trim_end_matches('/'),
+                completion_token
             );
 
             tracing::info!(
