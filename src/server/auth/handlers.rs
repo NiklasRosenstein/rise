@@ -470,8 +470,9 @@ pub async fn signin_page(
     let project_name = params.project.as_deref().unwrap_or("Unknown");
     let redirect_url = params
         .redirect
-        .clone()
-        .or(params.rd.clone())
+        .as_ref()
+        .or(params.rd.as_ref())
+        .cloned()
         .unwrap_or_else(|| "/".to_string());
 
     tracing::info!(

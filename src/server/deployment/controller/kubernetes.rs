@@ -134,11 +134,15 @@ pub struct KubernetesController {
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     auth_backend_url: String,
     auth_signin_url: String,
-    /// Kubernetes service name for the Rise backend (for routing /.rise/auth/* via Ingress)
+    /// Kubernetes service name for the Rise backend (reserved for future use)
+    /// Note: Cross-namespace routing requires a global Ingress in the Rise namespace
+    #[allow(dead_code)]
     backend_service_name: Option<String>,
-    /// Kubernetes service port for the Rise backend (for routing /.rise/auth/* via Ingress)
+    /// Kubernetes service port for the Rise backend (reserved for future use)
+    #[allow(dead_code)]
     backend_service_port: Option<u16>,
-    /// Kubernetes namespace where the Rise backend service is deployed
+    /// Kubernetes namespace where the Rise backend service is deployed (reserved for future use)
+    #[allow(dead_code)]
     backend_service_namespace: String,
     namespace_labels: std::collections::HashMap<String, String>,
     namespace_annotations: std::collections::HashMap<String, String>,
@@ -1191,7 +1195,7 @@ impl KubernetesController {
 
         // Add custom domain rules (always from root, no path prefix)
         for domain in custom_domains {
-            let mut paths = vec![HTTPIngressPath {
+            let paths = vec![HTTPIngressPath {
                 path: Some("/".to_string()),
                 path_type: "Prefix".to_string(),
                 backend: IngressBackend {
@@ -1206,36 +1210,10 @@ impl KubernetesController {
                 },
             }];
 
-            // Add /.rise/auth path rule to route auth endpoints to Rise backend
-            // This enables cookie-based auth on custom domains where cookie sharing is not possible
-            if let (Some(ref backend_svc_name), Some(backend_svc_port)) =
-                (&self.backend_service_name, self.backend_service_port)
-            {
-                // ExternalName service reference for cross-namespace routing
-                // Uses the format: {service}.{namespace}.svc.cluster.local
-                let backend_svc_fqdn = format!(
-                    "{}.{}.svc.cluster.local",
-                    backend_svc_name, self.backend_service_namespace
-                );
-
-                paths.insert(
-                    0, // Insert at beginning so it takes precedence over the catch-all "/" path
-                    HTTPIngressPath {
-                        path: Some("/.rise/auth".to_string()),
-                        path_type: "Prefix".to_string(),
-                        backend: IngressBackend {
-                            service: Some(IngressServiceBackend {
-                                name: backend_svc_fqdn,
-                                port: Some(ServiceBackendPort {
-                                    number: Some(backend_svc_port.into()),
-                                    ..Default::default()
-                                }),
-                            }),
-                            ..Default::default()
-                        },
-                    },
-                );
-            }
+            // Note: For custom domain auth routing to work, a global Ingress must be deployed
+            // in the Rise backend namespace that catches /.rise/auth/* paths for all hosts.
+            // This cannot be added to each app's Ingress due to Kubernetes cross-namespace
+            // service routing limitations. See the Rise Helm chart for the global auth Ingress.
 
             rules.push(IngressRule {
                 host: Some(domain.domain.clone()),
