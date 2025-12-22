@@ -54,7 +54,7 @@ async fn authenticate_service_account(
     let service_accounts = service_accounts::find_by_issuer(&state.db_pool, issuer)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to find service accounts by issuer: {}", e);
+            tracing::error!("Failed to find service accounts by issuer: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Database error".to_string(),
@@ -76,7 +76,7 @@ async fn authenticate_service_account(
         // Convert JSONB claims to HashMap
         let claims: HashMap<String, String> =
             serde_json::from_value(sa.claims.clone()).map_err(|e| {
-                tracing::error!("Failed to deserialize service account claims: {}", e);
+                tracing::error!("Failed to deserialize service account claims: {:#}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Invalid service account configuration".to_string(),
@@ -133,7 +133,7 @@ async fn authenticate_service_account(
     let user = users::find_by_id(&state.db_pool, sa.user_id)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to find user for service account: {}", e);
+            tracing::error!("Failed to find user for service account: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Database error".to_string(),
@@ -174,7 +174,7 @@ pub async fn auth_middleware(
     let issuer = {
         // Decode header to check if JWT is well-formed
         decode_header(&token).map_err(|e| {
-            tracing::warn!("Failed to decode JWT header: {}", e);
+            tracing::warn!("Failed to decode JWT header: {:#}", e);
             (
                 StatusCode::UNAUTHORIZED,
                 format!("Invalid token format: {}", e),
@@ -191,7 +191,7 @@ pub async fn auth_middleware(
         let decoded = general_purpose::URL_SAFE_NO_PAD
             .decode(payload)
             .map_err(|e| {
-                tracing::warn!("Failed to decode JWT payload: {}", e);
+                tracing::warn!("Failed to decode JWT payload: {:#}", e);
                 (
                     StatusCode::UNAUTHORIZED,
                     "Invalid token encoding".to_string(),
@@ -199,7 +199,7 @@ pub async fn auth_middleware(
             })?;
 
         let claims: MinimalClaims = serde_json::from_slice(&decoded).map_err(|e| {
-            tracing::warn!("Failed to parse JWT claims: {}", e);
+            tracing::warn!("Failed to parse JWT claims: {:#}", e);
             (StatusCode::UNAUTHORIZED, "Invalid token claims".to_string())
         })?;
 
@@ -231,7 +231,7 @@ pub async fn auth_middleware(
             .validate(&token, &state.auth_settings.issuer, &expected_claims)
             .await
             .map_err(|e| {
-                tracing::warn!("Auth middleware: JWT validation failed: {}", e);
+                tracing::warn!("Auth middleware: JWT validation failed: {:#}", e);
                 (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
             })?;
 
@@ -240,7 +240,7 @@ pub async fn auth_middleware(
         // Deserialize to typed Claims to get email
         let claims: crate::server::auth::jwt::Claims = serde_json::from_value(claims_value)
             .map_err(|e| {
-                tracing::warn!("Failed to parse user claims: {}", e);
+                tracing::warn!("Failed to parse user claims: {:#}", e);
                 (
                     StatusCode::UNAUTHORIZED,
                     format!("Invalid token claims: {}", e),
@@ -252,7 +252,7 @@ pub async fn auth_middleware(
         users::find_or_create(&state.db_pool, &claims.email)
             .await
             .map_err(|e| {
-                tracing::error!("Failed to find/create user: {}", e);
+                tracing::error!("Failed to find/create user: {:#}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Database error".to_string(),

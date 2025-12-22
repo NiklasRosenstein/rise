@@ -46,14 +46,14 @@ async fn sync_groups_after_login(
         .validate(id_token, &state.auth_settings.issuer, &expected_claims)
         .await
         .map_err(|e| {
-            tracing::warn!("Failed to validate token for group sync: {}", e);
+            tracing::warn!("Failed to validate token for group sync: {:#}", e);
             (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
         })?;
 
     // Parse claims
     let claims: crate::server::auth::jwt::Claims =
         serde_json::from_value(claims_value).map_err(|e| {
-            tracing::warn!("Failed to parse claims for group sync: {}", e);
+            tracing::warn!("Failed to parse claims for group sync: {:#}", e);
             (
                 StatusCode::UNAUTHORIZED,
                 format!("Invalid token claims: {}", e),
@@ -64,7 +64,7 @@ async fn sync_groups_after_login(
     let user = users::find_or_create(&state.db_pool, &claims.email)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to find/create user for group sync: {}", e);
+            tracing::error!("Failed to find/create user for group sync: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Database error".to_string(),
@@ -86,7 +86,7 @@ async fn sync_groups_after_login(
             {
                 // Log error but don't fail login
                 tracing::error!(
-                    "Failed to sync IdP groups during login for user {}: {}",
+                    "Failed to sync IdP groups during login for user {}: {:#}",
                     user.email,
                     e
                 );
@@ -223,7 +223,7 @@ pub async fn authorize(
         "device" => {
             // Device authorization flow
             let device_response = state.oauth_client.device_flow_start().await.map_err(|e| {
-                tracing::error!("Failed to start device flow: {}", e);
+                tracing::error!("Failed to start device flow: {:#}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     format!("Failed to start device flow: {}", e),
@@ -264,7 +264,7 @@ pub async fn code_exchange(
         .exchange_code_pkce(&payload.code, &payload.code_verifier, &payload.redirect_uri)
         .await
         .map_err(|e| {
-            tracing::warn!("OAuth2 code exchange failed: {}", e);
+            tracing::warn!("OAuth2 code exchange failed: {:#}", e);
             (
                 StatusCode::UNAUTHORIZED,
                 format!("Code exchange failed: {}", e),
@@ -418,7 +418,7 @@ pub async fn users_lookup(
         let user = users::find_by_email(&state.db_pool, &email)
             .await
             .map_err(|e| {
-                tracing::error!("Database error looking up user {}: {}", email, e);
+                tracing::error!("Database error looking up user {}: {:#}", email, e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Database error".to_string(),
@@ -494,7 +494,7 @@ pub async fn signin_page(
         .data;
 
     let template_str = std::str::from_utf8(&template_content).map_err(|e| {
-        tracing::error!("Failed to parse template as UTF-8: {}", e);
+        tracing::error!("Failed to parse template as UTF-8: {:#}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "Template encoding error".to_string(),
@@ -505,7 +505,7 @@ pub async fn signin_page(
     let mut tera = Tera::default();
     tera.add_raw_template("auth-signin.html.tera", template_str)
         .map_err(|e| {
-            tracing::error!("Failed to parse template: {}", e);
+            tracing::error!("Failed to parse template: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Template error".to_string(),
@@ -548,7 +548,7 @@ pub async fn signin_page(
     let html = tera
         .render("auth-signin.html.tera", &context)
         .map_err(|e| {
-            tracing::error!("Failed to render template: {}", e);
+            tracing::error!("Failed to render template: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Template rendering error".to_string(),
@@ -876,7 +876,7 @@ pub async fn oauth_callback(
         .exchange_code_pkce(&params.code, &oauth_state.code_verifier, &callback_url)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to exchange code: {}", e);
+            tracing::error!("Failed to exchange code: {:#}", e);
             (
                 StatusCode::UNAUTHORIZED,
                 format!("Code exchange failed: {}", e),
@@ -904,7 +904,7 @@ pub async fn oauth_callback(
         )
         .await
         .map_err(|e| {
-            tracing::error!("Failed to validate JWT: {}", e);
+            tracing::error!("Failed to validate JWT: {:#}", e);
             (StatusCode::UNAUTHORIZED, "Invalid token".to_string())
         })?;
 
@@ -1003,7 +1003,7 @@ pub async fn oauth_callback(
         let user = users::find_or_create(&state.db_pool, user_email)
             .await
             .map_err(|e| {
-                tracing::error!("Failed to find/create user: {}", e);
+                tracing::error!("Failed to find/create user: {:#}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Database error".to_string(),
@@ -1016,7 +1016,7 @@ pub async fn oauth_callback(
             .sign_ingress_jwt(&claims, user.id, &state.db_pool, Some(exp))
             .await
             .map_err(|e| {
-                tracing::error!("Failed to sign Rise JWT: {}", e);
+                tracing::error!("Failed to sign Rise JWT: {:#}", e);
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Failed to create authentication token".to_string(),
@@ -1103,7 +1103,7 @@ fn render_success_page(
         .data;
 
     let template_str = std::str::from_utf8(&template_content).map_err(|e| {
-        tracing::error!("Failed to parse template as UTF-8: {}", e);
+        tracing::error!("Failed to parse template as UTF-8: {:#}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             "Template encoding error".to_string(),
@@ -1114,7 +1114,7 @@ fn render_success_page(
     let mut tera = Tera::default();
     tera.add_raw_template("auth-success.html.tera", template_str)
         .map_err(|e| {
-            tracing::error!("Failed to parse template: {}", e);
+            tracing::error!("Failed to parse template: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Template error".to_string(),
@@ -1130,7 +1130,7 @@ fn render_success_page(
     let html = tera
         .render("auth-success.html.tera", &context)
         .map_err(|e| {
-            tracing::error!("Failed to render template: {}", e);
+            tracing::error!("Failed to render template: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Template rendering error".to_string(),
@@ -1235,7 +1235,7 @@ pub async fn ingress_auth(
         .jwt_signer
         .verify_ingress_jwt(&rise_jwt)
         .map_err(|e| {
-            tracing::warn!("Invalid or expired ingress JWT: {}", e);
+            tracing::warn!("Invalid or expired ingress JWT: {:#}", e);
             (
                 StatusCode::UNAUTHORIZED,
                 "Invalid or expired session".to_string(),
@@ -1248,7 +1248,7 @@ pub async fn ingress_auth(
     let user = users::find_or_create(&state.db_pool, &email)
         .await
         .map_err(|e| {
-            tracing::error!("Database error finding/creating user: {}", e);
+            tracing::error!("Database error finding/creating user: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Database error".to_string(),
@@ -1266,7 +1266,7 @@ pub async fn ingress_auth(
     let project = projects::find_by_name(&state.db_pool, &params.project)
         .await
         .map_err(|e| {
-            tracing::error!("Database error finding project: {}", e);
+            tracing::error!("Database error finding project: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Database error".to_string(),
@@ -1299,7 +1299,7 @@ pub async fn ingress_auth(
     let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
         .await
         .map_err(|e| {
-            tracing::error!("Database error checking access: {}", e);
+            tracing::error!("Database error checking access: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Database error".to_string(),

@@ -348,7 +348,7 @@ impl AppState {
                             Some(Arc::new(provider))
                         }
                         Err(e) => {
-                            tracing::error!("Failed to initialize ECR provider: {}", e);
+                            tracing::error!("Failed to initialize ECR provider: {:#}", e);
                             None
                         }
                     }
@@ -381,7 +381,10 @@ impl AppState {
                             Some(Arc::new(provider))
                         }
                         Err(e) => {
-                            tracing::error!("Failed to initialize OCI client-auth provider: {}", e);
+                            tracing::error!(
+                                "Failed to initialize OCI client-auth provider: {:#}",
+                                e
+                            );
                             None
                         }
                     }
@@ -751,7 +754,7 @@ impl AppState {
                             Some(Arc::new(provider))
                         }
                         Err(e) => {
-                            tracing::error!("Failed to initialize ECR provider: {}", e);
+                            tracing::error!("Failed to initialize ECR provider: {:#}", e);
                             None
                         }
                     }
@@ -784,7 +787,10 @@ impl AppState {
                             Some(Arc::new(provider))
                         }
                         Err(e) => {
-                            tracing::error!("Failed to initialize OCI client-auth provider: {}", e);
+                            tracing::error!(
+                                "Failed to initialize OCI client-auth provider: {:#}",
+                                e
+                            );
                             None
                         }
                     }
