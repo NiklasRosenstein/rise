@@ -104,6 +104,8 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 
     let app = Router::new()
         .nest("/api/v1", api_routes)
+        // Root-level auth routes for custom domain support via Ingress routing
+        .merge(auth::routes::rise_auth_routes())
         .merge(frontend::routes::frontend_routes())
         .with_state(state.clone())
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
@@ -208,6 +210,9 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
         ingress_schema,
         auth_backend_url,
         auth_signin_url,
+        backend_service_name,
+        backend_service_port,
+        backend_service_namespace,
         _namespace_format,
         namespace_labels,
         namespace_annotations,
@@ -226,6 +231,9 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             ingress_schema,
             auth_backend_url,
             auth_signin_url,
+            backend_service_name,
+            backend_service_port,
+            backend_service_namespace,
             namespace_format,
             namespace_labels,
             namespace_annotations,
@@ -243,6 +251,9 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             ingress_schema,
             auth_backend_url,
             auth_signin_url,
+            backend_service_name,
+            backend_service_port,
+            backend_service_namespace,
             namespace_format,
             namespace_labels,
             namespace_annotations,
@@ -292,6 +303,9 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             registry_provider,
             auth_backend_url,
             auth_signin_url,
+            backend_service_name,
+            backend_service_port,
+            backend_service_namespace,
             namespace_labels,
             namespace_annotations,
             ingress_annotations,

@@ -18,6 +18,22 @@ pub fn public_routes() -> Router<AppState> {
         .route("/auth/logout", get(handlers::oauth_logout))
 }
 
+/// Routes for `/.rise/auth/*` path (for custom domain support via Ingress routing)
+///
+/// These routes are mounted at the root level (not under `/api/v1`) to allow
+/// custom domains to route auth requests through their Ingress to the Rise backend.
+/// This enables cookie-based authentication for custom domains where cookie sharing
+/// with the Rise backend domain is not possible due to browser security restrictions.
+pub fn rise_auth_routes() -> Router<AppState> {
+    Router::new()
+        .route("/.rise/auth/signin", get(handlers::signin_page))
+        .route(
+            "/.rise/auth/signin/start",
+            get(handlers::oauth_signin_start),
+        )
+        .route("/.rise/auth/callback", get(handlers::oauth_callback))
+}
+
 /// Protected routes that require authentication
 pub fn protected_routes() -> Router<AppState> {
     Router::new()

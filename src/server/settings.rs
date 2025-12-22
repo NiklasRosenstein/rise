@@ -167,6 +167,10 @@ fn default_namespace_format() -> String {
     "rise-{project_name}".to_string()
 }
 
+fn default_backend_service_namespace() -> String {
+    "default".to_string()
+}
+
 fn default_node_selector() -> std::collections::HashMap<String, String> {
     let mut selector = std::collections::HashMap::new();
     selector.insert("kubernetes.io/arch".to_string(), "amd64".to_string());
@@ -243,6 +247,26 @@ pub enum DeploymentControllerSettings {
         /// This must be the public URL where the backend is accessible via Ingress.
         /// The domain should share a parent with app domains for cookie sharing (see struct docs).
         auth_signin_url: String,
+
+        /// Kubernetes service name for the Rise backend (for routing /.rise/auth/* via Ingress)
+        /// Example: "rise-backend"
+        /// Required for custom domain support - enables OAuth flow through custom domain's Ingress.
+        /// If not set, custom domain auth routing will not be enabled.
+        #[serde(default)]
+        backend_service_name: Option<String>,
+
+        /// Kubernetes service port for the Rise backend (for routing /.rise/auth/* via Ingress)
+        /// Example: 3000
+        /// Required along with backend_service_name for custom domain auth routing.
+        #[serde(default)]
+        backend_service_port: Option<u16>,
+
+        /// Kubernetes namespace where the Rise backend service is deployed
+        /// Example: "default" or "rise-system"
+        /// Required along with backend_service_name for custom domain auth routing.
+        /// If not set, defaults to "default".
+        #[serde(default = "default_backend_service_namespace")]
+        backend_service_namespace: String,
 
         /// Namespace format template for deployed applications
         /// Template variables: {project_name}

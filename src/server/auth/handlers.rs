@@ -3,7 +3,7 @@ use crate::db::{
     projects, users,
 };
 use crate::server::auth::{
-    cookie_helpers,
+    cookie_helpers::{self, CookieSettings},
     token_storage::{
         generate_code_challenge, generate_code_verifier, generate_state_token, OAuth2State,
     },
@@ -12,7 +12,7 @@ use crate::server::frontend::StaticAssets;
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Query, State},
-    http::{HeaderMap, StatusCode},
+    http::{uri::Uri, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     Json,
 };
@@ -460,15 +460,18 @@ pub struct SigninQuery {
 ///
 /// Shows the user which project they're about to authenticate for before
 /// starting the OAuth flow. This provides better UX by explaining what's happening.
-#[instrument(skip(state, params))]
+#[instrument(skip(state, params, headers, uri))]
 pub async fn signin_page(
     State(state): State<AppState>,
+    headers: HeaderMap,
+    uri: Uri,
     Query(params): Query<SigninQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     let project_name = params.project.as_deref().unwrap_or("Unknown");
     let redirect_url = params
         .redirect
-        .or(params.rd)
+        .clone()
+        .or(params.rd.clone())
         .unwrap_or_else(|| "/".to_string());
 
     tracing::info!(
@@ -507,6 +510,9 @@ pub async fn signin_page(
             )
         })?;
 
+    // Determine if this is via `/.rise/auth` path (custom domain Ingress routing)
+    let is_rise_path = uri.path().starts_with("/.rise/auth");
+
     // Build continue URL (to oauth_signin_start)
     let mut continue_params = vec![];
     if let Some(ref project) = params.project {
@@ -515,11 +521,21 @@ pub async fn signin_page(
     if !redirect_url.is_empty() {
         continue_params.push(format!("redirect={}", urlencoding::encode(&redirect_url)));
     }
-    let continue_url = format!(
-        "{}/api/v1/auth/signin/start?{}",
-        state.public_url.trim_end_matches('/'),
-        continue_params.join("&")
-    );
+
+    // Use request base URL for continue link when accessed via /.rise/auth path
+    let continue_url = if is_rise_path {
+        format!(
+            "{}/.rise/auth/signin/start?{}",
+            extract_request_base_url(&headers, &state),
+            continue_params.join("&")
+        )
+    } else {
+        format!(
+            "{}/api/v1/auth/signin/start?{}",
+            state.public_url.trim_end_matches('/'),
+            continue_params.join("&")
+        )
+    };
 
     // Render template
     let mut context = tera::Context::new();
@@ -558,6 +574,31 @@ fn host_matches_cookie_domain(hostname: &str, cookie_domain: &str) -> bool {
     let cookie_domain_normalized = cookie_domain.trim_start_matches('.');
     hostname == cookie_domain_normalized
         || hostname.ends_with(&format!(".{}", cookie_domain_normalized))
+}
+
+/// Extract base URL (scheme + host) from request headers.
+///
+/// Used for OAuth callback URL when handling requests via Ingress routing.
+/// This allows the OAuth flow to use the actual request host (e.g., custom domain)
+/// instead of the configured public_url.
+///
+/// Falls back to the configured public_url if no valid host header is present.
+fn extract_request_base_url(headers: &HeaderMap, state: &AppState) -> String {
+    // Get Host header
+    if let Some(host) = headers.get("host") {
+        if let Ok(host_str) = host.to_str() {
+            // Get X-Forwarded-Proto header (set by Nginx ingress)
+            let scheme = headers
+                .get("x-forwarded-proto")
+                .and_then(|v| v.to_str().ok())
+                .unwrap_or("http");
+
+            return format!("{}://{}", scheme, host_str);
+        }
+    }
+
+    // Fallback to configured public URL
+    state.public_url.trim_end_matches('/').to_string()
 }
 
 /// Render warning page for cookie configuration issues
@@ -637,10 +678,11 @@ fn render_warning_page(
 /// This handler starts the OAuth2 authorization code flow with PKCE.
 /// It generates a PKCE verifier/challenge pair, stores the state, and
 /// redirects the user to the OIDC provider for authentication.
-#[instrument(skip(state, params))]
+#[instrument(skip(state, params, uri))]
 pub async fn oauth_signin_start(
     State(state): State<AppState>,
     headers: HeaderMap,
+    uri: Uri,
     Query(params): Query<SigninQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     // Prefer rd (full URL) over redirect (path only)
@@ -651,14 +693,18 @@ pub async fn oauth_signin_start(
         "OAuth signin initiated"
     );
 
+    // Determine if this is via `/.rise/auth` path (custom domain Ingress routing)
+    let is_rise_path = uri.path().starts_with("/.rise/auth");
+
     // Extract request host for validation
     let request_host = headers
         .get("host")
         .and_then(|h| h.to_str().ok())
         .unwrap_or("");
 
-    // Skip validation if skip_warning is set
-    if !params.skip_warning.unwrap_or(false) {
+    // Skip validation if skip_warning is set OR if this is via /.rise/auth path
+    // (custom domain routing handles cookies differently - always uses current host)
+    if !params.skip_warning.unwrap_or(false) && !is_rise_path {
         // Extract redirect URL host (if provided)
         let redirect_host = redirect_url.and_then(|url| {
             url::Url::parse(url)
@@ -750,10 +796,18 @@ pub async fn oauth_signin_start(
     state.token_store.save(state_token.clone(), oauth_state);
 
     // Build OAuth2 authorization URL
-    let callback_url = format!(
-        "{}/api/v1/auth/callback",
-        state.public_url.trim_end_matches('/')
-    );
+    // Use request base URL for callback when accessed via /.rise/auth path
+    let callback_url = if is_rise_path {
+        format!(
+            "{}/.rise/auth/callback",
+            extract_request_base_url(&headers, &state)
+        )
+    } else {
+        format!(
+            "{}/api/v1/auth/callback",
+            state.public_url.trim_end_matches('/')
+        )
+    };
 
     let params = crate::server::auth::oauth::AuthorizeParams {
         client_id: &state.auth_settings.client_id,
@@ -781,12 +835,17 @@ pub struct CallbackQuery {
 ///
 /// This handler receives the authorization code from the OIDC provider, exchanges it for tokens,
 /// sets a session cookie, and redirects the user back to their original URL.
-#[instrument(skip(state, params))]
+#[instrument(skip(state, params, headers, uri))]
 pub async fn oauth_callback(
     State(state): State<AppState>,
+    headers: HeaderMap,
+    uri: Uri,
     Query(params): Query<CallbackQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     tracing::info!("OAuth callback received");
+
+    // Determine if this is via `/.rise/auth` path (custom domain Ingress routing)
+    let is_rise_path = uri.path().starts_with("/.rise/auth");
 
     // Retrieve PKCE state from token store
     let oauth_state = state.token_store.get(&params.state).ok_or_else(|| {
@@ -798,10 +857,18 @@ pub async fn oauth_callback(
     })?;
 
     // Build callback URL (must match the one used in signin)
-    let callback_url = format!(
-        "{}/api/v1/auth/callback",
-        state.public_url.trim_end_matches('/')
-    );
+    // Use request base URL when accessed via /.rise/auth path
+    let callback_url = if is_rise_path {
+        format!(
+            "{}/.rise/auth/callback",
+            extract_request_base_url(&headers, &state)
+        )
+    } else {
+        format!(
+            "{}/api/v1/auth/callback",
+            state.public_url.trim_end_matches('/')
+        )
+    };
 
     // Exchange authorization code for tokens
     let token_info = state
@@ -893,6 +960,41 @@ pub async fn oauth_callback(
         return Ok(Html(html).into_response());
     }
 
+    // Determine cookie domain based on request host
+    // For custom domains via /.rise/auth path, use empty domain (current host only)
+    // For Rise subdomains, use the configured cookie domain for subdomain sharing
+    let cookie_settings_for_response = if is_rise_path {
+        // Request is on custom domain via Ingress routing - use current host only
+        // Empty domain means the cookie is only valid for the exact host
+        tracing::debug!(
+            "Custom domain auth flow detected, using empty cookie domain for current host only"
+        );
+        CookieSettings {
+            domain: String::new(),
+            secure: state.cookie_settings.secure,
+        }
+    } else {
+        // Check if request host matches configured cookie domain
+        let request_host = headers
+            .get("host")
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("");
+        let request_host_without_port = request_host.split(':').next().unwrap_or(request_host);
+
+        if !state.cookie_settings.domain.is_empty()
+            && host_matches_cookie_domain(request_host_without_port, &state.cookie_settings.domain)
+        {
+            // Request is on a Rise subdomain - use configured domain for cookie sharing
+            state.cookie_settings.clone()
+        } else {
+            // Request host doesn't match configured domain - use current host only
+            CookieSettings {
+                domain: String::new(),
+                secure: state.cookie_settings.secure,
+            }
+        }
+    };
+
     // For ingress auth flow (with project), issue Rise JWT and set cookie
     let (cookie, is_ingress_auth) = if let Some(ref project) = oauth_state.project_name {
         tracing::info!(
@@ -918,7 +1020,7 @@ pub async fn oauth_callback(
             })?;
 
         // Issue Rise JWT with user's team memberships
-        // (NOT project-scoped - the cookie is shared across all *.rise.dev subdomains)
+        // Cookie domain determined above based on request context
         let rise_jwt = state
             .jwt_signer
             .sign_ingress_jwt(&claims, user.id, &state.db_pool, Some(exp))
@@ -931,8 +1033,11 @@ pub async fn oauth_callback(
                 )
             })?;
 
-        let cookie =
-            cookie_helpers::create_ingress_jwt_cookie(&rise_jwt, &state.cookie_settings, max_age);
+        let cookie = cookie_helpers::create_ingress_jwt_cookie(
+            &rise_jwt,
+            &cookie_settings_for_response,
+            max_age,
+        );
 
         (cookie, true)
     } else {
@@ -941,7 +1046,7 @@ pub async fn oauth_callback(
         // Regular OAuth flow (not ingress auth)
         let cookie = cookie_helpers::create_session_cookie(
             &token_info.id_token,
-            &state.cookie_settings,
+            &cookie_settings_for_response,
             max_age,
         );
 
