@@ -107,6 +107,12 @@ pub struct KubernetesControllerConfig {
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub auth_backend_url: String,
     pub auth_signin_url: String,
+    /// Kubernetes service name for the Rise backend (for routing /.rise/auth/* via Ingress)
+    pub backend_service_name: Option<String>,
+    /// Kubernetes service port for the Rise backend (for routing /.rise/auth/* via Ingress)
+    pub backend_service_port: Option<u16>,
+    /// Kubernetes namespace where the Rise backend service is deployed
+    pub backend_service_namespace: String,
     pub namespace_labels: std::collections::HashMap<String, String>,
     pub namespace_annotations: std::collections::HashMap<String, String>,
     pub ingress_annotations: std::collections::HashMap<String, String>,
@@ -128,6 +134,16 @@ pub struct KubernetesController {
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     auth_backend_url: String,
     auth_signin_url: String,
+    /// Kubernetes service name for the Rise backend (reserved for future use)
+    /// Note: Cross-namespace routing requires a global Ingress in the Rise namespace
+    #[allow(dead_code)]
+    backend_service_name: Option<String>,
+    /// Kubernetes service port for the Rise backend (reserved for future use)
+    #[allow(dead_code)]
+    backend_service_port: Option<u16>,
+    /// Kubernetes namespace where the Rise backend service is deployed (reserved for future use)
+    #[allow(dead_code)]
+    backend_service_namespace: String,
     namespace_labels: std::collections::HashMap<String, String>,
     namespace_annotations: std::collections::HashMap<String, String>,
     ingress_annotations: std::collections::HashMap<String, String>,
@@ -155,6 +171,9 @@ impl KubernetesController {
             registry_provider: config.registry_provider,
             auth_backend_url: config.auth_backend_url,
             auth_signin_url: config.auth_signin_url,
+            backend_service_name: config.backend_service_name,
+            backend_service_port: config.backend_service_port,
+            backend_service_namespace: config.backend_service_namespace,
             namespace_labels: config.namespace_labels,
             namespace_annotations: config.namespace_annotations,
             ingress_annotations: config.ingress_annotations,
@@ -1095,6 +1114,10 @@ impl KubernetesController {
             );
         }
 
+        // Check if we have backend service config for custom domain auth routing
+        let has_backend_service =
+            self.backend_service_name.is_some() && self.backend_service_port.is_some();
+
         if matches!(project.visibility, ProjectVisibility::Private) {
             // Add Nginx auth annotations for private projects
             // Note: All API routes are nested under /api/v1 prefix
@@ -1102,11 +1125,24 @@ impl KubernetesController {
                 "{}/api/v1/auth/ingress?project={}",
                 self.auth_backend_url, project.name
             );
-            let signin_url = format!(
-                "{}/api/v1/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
-                self.auth_signin_url,
-                urlencoding::encode(&project.name)
-            );
+
+            // For custom domains with backend service config, use $http_host/.rise/auth/signin
+            // This routes auth through the app's Ingress for proper cookie domain handling
+            // For primary domain, use the configured auth_signin_url
+            let signin_url = if has_backend_service && !custom_domains.is_empty() {
+                // Use dynamic host routing - browser will go to /.rise/auth/signin on current domain
+                format!(
+                    "$scheme://$http_host/.rise/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
+                    urlencoding::encode(&project.name)
+                )
+            } else {
+                // Fall back to configured auth_signin_url for deployments without custom domains
+                format!(
+                    "{}/api/v1/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
+                    self.auth_signin_url,
+                    urlencoding::encode(&project.name)
+                )
+            };
 
             // Nginx auth subrequest - returns 2xx for allowed, 401/403 for denied
             // If auth-url is unreachable or returns 5xx, nginx defaults to DENY (fail-closed)
@@ -1159,24 +1195,29 @@ impl KubernetesController {
 
         // Add custom domain rules (always from root, no path prefix)
         for domain in custom_domains {
+            let paths = vec![HTTPIngressPath {
+                path: Some("/".to_string()),
+                path_type: "Prefix".to_string(),
+                backend: IngressBackend {
+                    service: Some(IngressServiceBackend {
+                        name: service_name.clone(),
+                        port: Some(ServiceBackendPort {
+                            name: Some("http".to_string()),
+                            ..Default::default()
+                        }),
+                    }),
+                    ..Default::default()
+                },
+            }];
+
+            // Note: For custom domain auth routing to work, a global Ingress must be deployed
+            // in the Rise backend namespace that catches /.rise/auth/* paths for all hosts.
+            // This cannot be added to each app's Ingress due to Kubernetes cross-namespace
+            // service routing limitations. See the Rise Helm chart for the global auth Ingress.
+
             rules.push(IngressRule {
                 host: Some(domain.domain.clone()),
-                http: Some(HTTPIngressRuleValue {
-                    paths: vec![HTTPIngressPath {
-                        path: Some("/".to_string()),
-                        path_type: "Prefix".to_string(),
-                        backend: IngressBackend {
-                            service: Some(IngressServiceBackend {
-                                name: service_name.clone(),
-                                port: Some(ServiceBackendPort {
-                                    name: Some("http".to_string()),
-                                    ..Default::default()
-                                }),
-                            }),
-                            ..Default::default()
-                        },
-                    }],
-                }),
+                http: Some(HTTPIngressRuleValue { paths }),
             });
         }
 
@@ -2724,6 +2765,9 @@ mod tests {
             registry_provider: None,
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
+            backend_service_name: None,
+            backend_service_port: None,
+            backend_service_namespace: "default".to_string(),
             namespace_labels: std::collections::HashMap::new(),
             namespace_annotations: std::collections::HashMap::new(),
             ingress_annotations: std::collections::HashMap::new(),

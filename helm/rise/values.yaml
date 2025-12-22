@@ -67,6 +67,19 @@ ingress:
   #    hosts:
   #      - rise.example.com
 
+  # Global auth catch-all Ingress for custom domain support
+  # When enabled, creates a separate Ingress that catches /.rise/auth/* paths from all hosts
+  # This enables OAuth authentication on custom domains where cookie sharing is not possible
+  authCatchAll:
+    enabled: false
+    annotations: {}
+      # Add any additional annotations needed for the auth catch-all Ingress
+    tls: []
+    # If custom domains use wildcard TLS certificates, configure them here:
+    #  - secretName: wildcard-tls
+    #    hosts:
+    #      - "*.custom-domain.com"
+
 # Server container resources
 server:
   resources:
