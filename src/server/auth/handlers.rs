@@ -1039,17 +1039,16 @@ pub async fn oauth_callback(
                 .token_store
                 .save_completed_session(completion_token.clone(), completed_session);
 
-            // Construct the complete URL by appending the path to the base URL
+            // Construct the complete URL using a URL fragment instead of query parameter
+            // URL fragments are never sent to the server, avoiding logging in access logs
+            // The client-side JavaScript will extract the token and POST it securely
             let complete_url = format!(
-                "{}/.rise/auth/complete?token={}",
+                "{}/.rise/auth/complete#token={}",
                 custom_domain_base_url.trim_end_matches('/'),
                 completion_token
             );
 
-            tracing::info!(
-                "Redirecting to custom domain for cookie setting: {}",
-                complete_url
-            );
+            tracing::info!("Redirecting to custom domain for cookie setting (token in fragment)");
 
             return Ok(Redirect::to(&complete_url).into_response());
         }
@@ -1149,26 +1148,137 @@ fn render_success_page(
 }
 
 #[derive(Debug, Deserialize)]
-pub struct CompleteQuery {
+pub struct CompleteTokenBody {
     pub token: String,
 }
 
-/// Complete OAuth flow on custom domain
+/// Landing page for custom domain auth completion (GET request)
 ///
-/// This handler is called on the custom domain after the IdP callback completes on the main domain.
-/// It receives a one-time token, retrieves the stored auth session, sets the cookie on the
-/// custom domain, and shows the success page.
-#[instrument(skip(state, params))]
+/// This serves a minimal HTML page that extracts the token from the URL fragment
+/// and POSTs it to complete the auth flow. The token is in the fragment to avoid
+/// logging it in server access logs (fragments are never sent to the server).
+#[instrument(skip(_state))]
+pub async fn oauth_complete_landing(
+    State(_state): State<AppState>,
+) -> Result<Response, (StatusCode, String)> {
+    tracing::info!("Custom domain auth complete landing page");
+
+    // Serve a minimal HTML page that extracts token from fragment and POSTs it
+    let html = r#"<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Completing Authentication...</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            background: #f5f5f5;
+        }
+        .container {
+            text-align: center;
+            padding: 2rem;
+        }
+        .spinner {
+            border: 3px solid #e0e0e0;
+            border-top: 3px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .error {
+            color: #e74c3c;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="spinner" id="spinner"></div>
+        <p id="status">Completing authentication...</p>
+        <p class="error" id="error"></p>
+    </div>
+    <script>
+        (function() {
+            // Extract token from URL fragment
+            const hash = window.location.hash;
+            const params = new URLSearchParams(hash.slice(1));
+            const token = params.get('token');
+            
+            if (!token) {
+                document.getElementById('spinner').style.display = 'none';
+                document.getElementById('status').style.display = 'none';
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error').textContent = 'Missing authentication token. Please try logging in again.';
+                return;
+            }
+            
+            // Clear the fragment from URL for security
+            history.replaceState(null, '', window.location.pathname);
+            
+            // POST the token to complete authentication
+            fetch(window.location.pathname, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ token: token }),
+                credentials: 'same-origin'
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        throw new Error(text || 'Authentication failed');
+                    });
+                }
+                return response.text();
+            })
+            .then(html => {
+                // Replace the page content with the success page
+                document.open();
+                document.write(html);
+                document.close();
+            })
+            .catch(error => {
+                document.getElementById('spinner').style.display = 'none';
+                document.getElementById('status').style.display = 'none';
+                document.getElementById('error').style.display = 'block';
+                document.getElementById('error').textContent = error.message || 'Authentication failed. Please try again.';
+            });
+        })();
+    </script>
+</body>
+</html>"#;
+
+    Ok(Html(html).into_response())
+}
+
+/// Complete OAuth flow on custom domain (POST request with token in body)
+///
+/// This handler is called on the custom domain after the landing page extracts the token
+/// from the URL fragment and POSTs it. This approach avoids logging the token in server
+/// access logs since the token is never in the URL path or query string.
+#[instrument(skip(state, body))]
 pub async fn oauth_complete(
     State(state): State<AppState>,
-    Query(params): Query<CompleteQuery>,
+    Json(body): Json<CompleteTokenBody>,
 ) -> Result<Response, (StatusCode, String)> {
-    tracing::info!("Custom domain auth complete received");
+    tracing::info!("Custom domain auth complete received (POST)");
 
     // Retrieve and consume the completed session
     let session = state
         .token_store
-        .get_completed_session(&params.token)
+        .get_completed_session(&body.token)
         .ok_or_else(|| {
             tracing::warn!("Invalid or expired completion token");
             (
