@@ -14,7 +14,7 @@
         <div class="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl">
             <div class="text-center mb-6">
                 <div class="flex justify-center mb-4">
-                    <img src="/assets/rise-light.svg" alt="Rise Logo" class="w-16 h-16" />
+                    <div class="w-16 h-16 svg-mask text-white" style="mask-image: url(/assets/logo.svg); -webkit-mask-image: url(/assets/logo.svg);"></div>
                 </div>
                 <h1 class="text-3xl font-bold text-white mb-2">Rise</h1>
                 <span class="inline-block bg-indigo-600 text-white text-sm font-semibold px-3 py-1 rounded-full mb-4">🔒 Private Project</span>

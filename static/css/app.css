@@ -352,3 +352,14 @@
     vertical-align: baseline;
     padding: 0.75rem;
 }
+
+/* SVG Icon Masking - allows SVG images to inherit currentColor */
+.svg-mask {
+    background-color: currentColor;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+    mask-position: center;
+    -webkit-mask-size: contain;
+    -webkit-mask-repeat: no-repeat;
+    -webkit-mask-position: center;
+}

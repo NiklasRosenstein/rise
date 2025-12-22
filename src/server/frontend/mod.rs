@@ -54,12 +54,8 @@ mod tests {
             "assets/favicon-32x32.png should be embedded"
         );
         assert!(
-            StaticAssets::get("assets/rise-light.svg").is_some(),
-            "assets/rise-light.svg should be embedded"
-        );
-        assert!(
-            StaticAssets::get("assets/rise-dark.svg").is_some(),
-            "assets/rise-dark.svg should be embedded"
+            StaticAssets::get("assets/logo.svg").is_some(),
+            "assets/logo.svg should be embedded"
         );
         assert!(
             StaticAssets::get("assets/theme-system.svg").is_some(),

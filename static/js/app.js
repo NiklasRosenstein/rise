@@ -44,17 +44,6 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
         setIsProfileOpen(false);
     };
 
-    // Get current effective theme (light or dark)
-    const getEffectiveTheme = () => {
-        if (theme === 'system') {
-            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-        }
-        return theme;
-    };
-
-    // Get appropriate logo based on effective theme
-    const logoSrc = getEffectiveTheme() === 'dark' ? '/assets/rise-light.svg' : '/assets/rise-dark.svg';
-
     // Close dropdown when clicking outside
     useEffect(() => {
         function handleClickOutside(event) {
@@ -87,7 +76,10 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <a href="#projects" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                            <img src={logoSrc} alt="Rise Logo" className="w-5 h-5" />
+                            <div className="w-5 h-5 svg-mask" style={{
+                                maskImage: 'url(/assets/logo.svg)',
+                                WebkitMaskImage: 'url(/assets/logo.svg)'
+                            }}></div>
                             <strong className="text-lg font-bold">Rise Dashboard</strong>
                         </a>
                         <button
@@ -156,15 +148,9 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                                         theme === 'system' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
                                                     }`}
                                                 >
-                                                    <div className="w-4 h-4 bg-current" style={{
+                                                    <div className="w-4 h-4 svg-mask" style={{
                                                         maskImage: 'url(/assets/theme-system.svg)',
-                                                        maskSize: 'contain',
-                                                        maskRepeat: 'no-repeat',
-                                                        maskPosition: 'center',
-                                                        WebkitMaskImage: 'url(/assets/theme-system.svg)',
-                                                        WebkitMaskSize: 'contain',
-                                                        WebkitMaskRepeat: 'no-repeat',
-                                                        WebkitMaskPosition: 'center'
+                                                        WebkitMaskImage: 'url(/assets/theme-system.svg)'
                                                     }}></div>
                                                     System
                                                 </button>
@@ -174,15 +160,9 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                                         theme === 'light' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
                                                     }`}
                                                 >
-                                                    <div className="w-4 h-4 bg-current" style={{
+                                                    <div className="w-4 h-4 svg-mask" style={{
                                                         maskImage: 'url(/assets/theme-light.svg)',
-                                                        maskSize: 'contain',
-                                                        maskRepeat: 'no-repeat',
-                                                        maskPosition: 'center',
-                                                        WebkitMaskImage: 'url(/assets/theme-light.svg)',
-                                                        WebkitMaskSize: 'contain',
-                                                        WebkitMaskRepeat: 'no-repeat',
-                                                        WebkitMaskPosition: 'center'
+                                                        WebkitMaskImage: 'url(/assets/theme-light.svg)'
                                                     }}></div>
                                                     Light
                                                 </button>
@@ -192,15 +172,9 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                                         theme === 'dark' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
                                                     }`}
                                                 >
-                                                    <div className="w-4 h-4 bg-current" style={{
+                                                    <div className="w-4 h-4 svg-mask" style={{
                                                         maskImage: 'url(/assets/theme-dark.svg)',
-                                                        maskSize: 'contain',
-                                                        maskRepeat: 'no-repeat',
-                                                        maskPosition: 'center',
-                                                        WebkitMaskImage: 'url(/assets/theme-dark.svg)',
-                                                        WebkitMaskSize: 'contain',
-                                                        WebkitMaskRepeat: 'no-repeat',
-                                                        WebkitMaskPosition: 'center'
+                                                        WebkitMaskImage: 'url(/assets/theme-dark.svg)'
                                                     }}></div>
                                                     Dark
                                                 </button>
