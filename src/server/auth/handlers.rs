@@ -45,14 +45,14 @@ async fn sync_groups_after_login(
         .validate(id_token, &state.auth_settings.issuer, &expected_claims)
         .await
         .map_err(|e| {
-            tracing::warn!("Failed to validate token for group sync: {}", e);
+            tracing::warn!("Failed to validate token for group sync: {:?}", e);
             (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
         })?;
 
     // Parse claims
     let claims: crate::server::auth::jwt::Claims =
         serde_json::from_value(claims_value).map_err(|e| {
-            tracing::warn!("Failed to parse claims for group sync: {}", e);
+            tracing::warn!("Failed to parse claims for group sync: {:?}", e);
             (
                 StatusCode::UNAUTHORIZED,
                 format!("Invalid token claims: {}", e),
@@ -263,7 +263,7 @@ pub async fn code_exchange(
         .exchange_code_pkce(&payload.code, &payload.code_verifier, &payload.redirect_uri)
         .await
         .map_err(|e| {
-            tracing::warn!("OAuth2 code exchange failed: {}", e);
+            tracing::warn!("OAuth2 code exchange failed: {:?}", e);
             (
                 StatusCode::UNAUTHORIZED,
                 format!("Code exchange failed: {}", e),
@@ -1066,7 +1066,7 @@ pub async fn ingress_auth(
         .jwt_signer
         .verify_ingress_jwt(&rise_jwt)
         .map_err(|e| {
-            tracing::warn!("Invalid or expired ingress JWT: {}", e);
+            tracing::warn!("Invalid or expired ingress JWT: {:?}", e);
             (
                 StatusCode::UNAUTHORIZED,
                 "Invalid or expired session".to_string(),
