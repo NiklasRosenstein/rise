@@ -839,9 +839,10 @@ function ExtensionsList({ projectName }) {
                         <div className="flex items-center gap-2">
                             {/* Plus icon indicator (non-clickable) */}
                             <div className="w-8 h-8 flex items-center justify-center text-gray-500">
-                                <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                    <path d="M12 5V19M5 12H19" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                </svg>
+                                <div className="w-5 h-5 svg-mask" style={{
+                                    maskImage: 'url(/assets/plus.svg)',
+                                    WebkitMaskImage: 'url(/assets/plus.svg)'
+                                }}></div>
                             </div>
                             {/* Extension add icons */}
                             {availableExtensions
@@ -1463,9 +1464,10 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                         onClick={() => window.location.hash = `#project/${projectName}/extensions`}
                         className="text-indigo-400 hover:text-indigo-300 flex items-center gap-2"
                     >
-                        <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
+                        <div className="w-5 h-5 svg-mask" style={{
+                            maskImage: 'url(/assets/arrow-left.svg)',
+                            WebkitMaskImage: 'url(/assets/arrow-left.svg)'
+                        }}></div>
                         Back to Extensions
                     </button>
                 </div>
@@ -1486,9 +1488,10 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                     onClick={() => window.location.hash = `#project/${projectName}/extensions`}
                     className="text-indigo-400 hover:text-indigo-300 flex items-center gap-2"
                 >
-                    <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M19 12H5M5 12L12 19M5 12L12 5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
+                    <div className="w-5 h-5 svg-mask" style={{
+                        maskImage: 'url(/assets/arrow-left.svg)',
+                        WebkitMaskImage: 'url(/assets/arrow-left.svg)'
+                    }}></div>
                     Back to Extensions
                 </button>
                 <div className="flex items-center gap-2 text-sm text-gray-400">

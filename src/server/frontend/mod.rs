@@ -69,5 +69,49 @@ mod tests {
             StaticAssets::get("assets/theme-dark.svg").is_some(),
             "assets/theme-dark.svg should be embedded"
         );
+        assert!(
+            StaticAssets::get("assets/close-x.svg").is_some(),
+            "assets/close-x.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/check.svg").is_some(),
+            "assets/check.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/info.svg").is_some(),
+            "assets/info.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/lock.svg").is_some(),
+            "assets/lock.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/globe.svg").is_some(),
+            "assets/globe.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/plus.svg").is_some(),
+            "assets/plus.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/lightning.svg").is_some(),
+            "assets/lightning.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/user.svg").is_some(),
+            "assets/user.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/copy.svg").is_some(),
+            "assets/copy.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/logout.svg").is_some(),
+            "assets/logout.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/arrow-left.svg").is_some(),
+            "assets/arrow-left.svg should be embedded"
+        );
     }
 }

@@ -103,9 +103,10 @@ function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
                 <div className="modal-header">
                     <h3 className="modal-title">{title}</h3>
                     <button onClick={onClose} className="modal-close-button">
-                        <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                        </svg>
+                        <div className="w-6 h-6 svg-mask" style={{
+                            maskImage: 'url(/assets/close-x.svg)',
+                            WebkitMaskImage: 'url(/assets/close-x.svg)'
+                        }}></div>
                     </button>
                 </div>
                 <div className="modal-body">

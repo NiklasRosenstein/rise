@@ -86,9 +86,10 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                             onClick={onShowGettingStarted}
                             className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors"
                         >
-                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
+                            <div className="w-4 h-4 svg-mask" style={{
+                                maskImage: 'url(/assets/lightning.svg)',
+                                WebkitMaskImage: 'url(/assets/lightning.svg)'
+                            }}></div>
                             Getting Started
                         </button>
                     </div>
@@ -113,10 +114,10 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                 className="flex items-center gap-2 hover:opacity-80 transition-opacity"
                             >
                                 <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center border-2 border-indigo-500">
-                                    <svg className="w-5 h-5 text-white" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                        <circle cx="12" cy="7" r="4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                    </svg>
+                                    <div className="w-5 h-5 svg-mask text-white" style={{
+                                        maskImage: 'url(/assets/user.svg)',
+                                        WebkitMaskImage: 'url(/assets/user.svg)'
+                                    }}></div>
                                 </div>
                             </button>
 
@@ -131,10 +132,10 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                             onClick={handleCopyJWT}
                                             className="w-full flex items-center gap-2 px-3 py-2 text-left text-gray-300 hover:bg-gray-700 rounded transition-colors"
                                         >
-                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                <rect x="9" y="9" width="13" height="13" rx="2" ry="2" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                                <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                            </svg>
+                                            <div className="w-4 h-4 svg-mask" style={{
+                                                maskImage: 'url(/assets/copy.svg)',
+                                                WebkitMaskImage: 'url(/assets/copy.svg)'
+                                            }}></div>
                                             Copy JWT Token
                                         </button>
                                     </div>
@@ -186,11 +187,10 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                             onClick={() => { setIsProfileOpen(false); onLogout(); }}
                                             className="w-full flex items-center gap-2 px-3 py-2 text-left text-red-400 hover:bg-gray-700 rounded transition-colors"
                                         >
-                                            <svg className="w-4 h-4" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                                <polyline points="16 17 21 12 16 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                                <line x1="21" y1="12" x2="9" y2="12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                            </svg>
+                                            <div className="w-4 h-4 svg-mask" style={{
+                                                maskImage: 'url(/assets/logout.svg)',
+                                                WebkitMaskImage: 'url(/assets/logout.svg)'
+                                            }}></div>
                                             Logout
                                         </button>
                                     </div>
@@ -262,11 +262,10 @@ function LoginPage() {
             <div className="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl">
                 <div className="text-center mb-8">
                     <div className="flex justify-center mb-4">
-                        <svg className="w-16 h-16 text-indigo-500" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                        </svg>
+                        <div className="w-16 h-16 svg-mask text-indigo-500" style={{
+                            maskImage: 'url(/assets/logo.svg)',
+                            WebkitMaskImage: 'url(/assets/logo.svg)'
+                        }}></div>
                     </div>
                     <h1 className="text-3xl font-bold text-white mb-2">Rise</h1>
                     <p className="text-gray-400">Container Deployment Platform</p>

@@ -46,26 +46,30 @@ function Toast({ toast, onClose }) {
         <div className={`toast ${typeClasses[toast.type] || 'toast-info'}`}>
             <div className="toast-content">
                 {toast.type === 'success' && (
-                    <svg className="toast-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                    </svg>
+                    <div className="toast-icon svg-mask" style={{
+                        maskImage: 'url(/assets/check.svg)',
+                        WebkitMaskImage: 'url(/assets/check.svg)'
+                    }}></div>
                 )}
                 {toast.type === 'error' && (
-                    <svg className="toast-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                    </svg>
+                    <div className="toast-icon svg-mask" style={{
+                        maskImage: 'url(/assets/close-x.svg)',
+                        WebkitMaskImage: 'url(/assets/close-x.svg)'
+                    }}></div>
                 )}
                 {toast.type === 'info' && (
-                    <svg className="toast-icon" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-                    </svg>
+                    <div className="toast-icon svg-mask" style={{
+                        maskImage: 'url(/assets/info.svg)',
+                        WebkitMaskImage: 'url(/assets/info.svg)'
+                    }}></div>
                 )}
                 <span className="toast-message">{toast.message}</span>
             </div>
             <button onClick={onClose} className="toast-close">
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-                </svg>
+                <div className="w-4 h-4 svg-mask" style={{
+                    maskImage: 'url(/assets/close-x.svg)',
+                    WebkitMaskImage: 'url(/assets/close-x.svg)'
+                }}></div>
             </button>
         </div>
     );
