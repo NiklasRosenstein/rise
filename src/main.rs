@@ -75,54 +75,9 @@ struct DeployArgs {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Authenticate with the Rise backend
-    Login {
-        /// Backend URL to authenticate with
-        #[arg(long)]
-        url: Option<String>,
-        /// Use browser-based OAuth2 authorization code flow (default)
-        #[arg(long, conflicts_with = "device")]
-        browser: bool,
-        /// Use device authorization flow
-        #[arg(long, conflicts_with = "browser")]
-        device: bool,
-    },
     /// Backend server and controller commands
     #[command(subcommand)]
     Backend(backend::BackendCommands),
-    /// Project management commands
-    #[command(subcommand)]
-    #[command(visible_alias = "p")]
-    Project(ProjectCommands),
-    /// Team management commands
-    #[command(subcommand)]
-    #[command(visible_alias = "t")]
-    Team(TeamCommands),
-    /// Deployment management commands
-    #[command(subcommand)]
-    #[command(visible_alias = "d")]
-    Deployment(DeploymentCommands),
-    /// Service account (workload identity) management commands
-    #[command(subcommand)]
-    #[command(visible_alias = "sa")]
-    ServiceAccount(ServiceAccountCommands),
-    /// Environment variable management commands
-    #[command(subcommand)]
-    #[command(visible_alias = "e")]
-    Env(EnvCommands),
-    /// Custom domain management commands
-    #[command(subcommand)]
-    #[command(visible_alias = "dom")]
-    Domain(DomainCommands),
-    /// Extension management commands
-    #[command(subcommand)]
-    #[command(visible_alias = "ext")]
-    Extension(ExtensionCommands),
-    /// Deploy an application (shortcut for 'deployment create')
-    Deploy {
-        #[command(flatten)]
-        args: DeployArgs,
-    },
     /// Build a container image locally without deploying
     Build {
         /// Tag for the built image (e.g., myapp:latest, registry.io/org/app:v1.0)
@@ -135,6 +90,43 @@ enum Commands {
         #[command(flatten)]
         build_args: build::BuildArgs,
     },
+    /// Deploy an application (shortcut for 'deployment create')
+    Deploy {
+        #[command(flatten)]
+        args: DeployArgs,
+    },
+    /// Deployment management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "d")]
+    Deployment(DeploymentCommands),
+    /// Custom domain management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "dom")]
+    Domain(DomainCommands),
+    /// Environment variable management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "e")]
+    Env(EnvCommands),
+    /// Extension management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "ext")]
+    Extension(ExtensionCommands),
+    /// Authenticate with the Rise backend
+    Login {
+        /// Backend URL to authenticate with
+        #[arg(long)]
+        url: Option<String>,
+        /// Use browser-based OAuth2 authorization code flow (default)
+        #[arg(long, conflicts_with = "device")]
+        browser: bool,
+        /// Use device authorization flow
+        #[arg(long, conflicts_with = "browser")]
+        device: bool,
+    },
+    /// Project management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "p")]
+    Project(ProjectCommands),
     /// Build and run a container locally for development
     Run {
         /// Project name (optional, used to load environment variables)
@@ -155,6 +147,14 @@ enum Commands {
         #[command(flatten)]
         build_args: build::BuildArgs,
     },
+    /// Service account (workload identity) management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "sa")]
+    ServiceAccount(ServiceAccountCommands),
+    /// Team management commands
+    #[command(subcommand)]
+    #[command(visible_alias = "t")]
+    Team(TeamCommands),
 }
 
 #[derive(Subcommand, Debug)]
