@@ -6,12 +6,54 @@ const { useState, useEffect } = React;
 // Header Component
 function Header({ user, onLogout, currentView, onShowGettingStarted }) {
     const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const [theme, setTheme] = useState('system');
     const profileRef = React.useRef(null);
     const { showToast } = useToast();
 
     // Determine which section is active (projects or teams)
     const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail' || currentView === 'extension-detail';
     const isTeamsActive = currentView === 'teams' || currentView === 'team-detail';
+
+    // Initialize theme from localStorage or default to system
+    useEffect(() => {
+        const savedTheme = localStorage.getItem('rise_theme') || 'system';
+        setTheme(savedTheme);
+        applyTheme(savedTheme);
+    }, []);
+
+    // Apply theme to document
+    const applyTheme = (selectedTheme) => {
+        const root = document.documentElement;
+
+        if (selectedTheme === 'system') {
+            // Use system preference
+            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            root.classList.toggle('dark', systemPrefersDark);
+        } else if (selectedTheme === 'dark') {
+            root.classList.add('dark');
+        } else {
+            root.classList.remove('dark');
+        }
+    };
+
+    // Handle theme change
+    const handleThemeChange = (newTheme) => {
+        setTheme(newTheme);
+        localStorage.setItem('rise_theme', newTheme);
+        applyTheme(newTheme);
+        setIsProfileOpen(false);
+    };
+
+    // Get current effective theme (light or dark)
+    const getEffectiveTheme = () => {
+        if (theme === 'system') {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+        }
+        return theme;
+    };
+
+    // Get appropriate logo based on effective theme
+    const logoSrc = getEffectiveTheme() === 'dark' ? '/assets/rise-light.svg' : '/assets/rise-dark.svg';
 
     // Close dropdown when clicking outside
     useEffect(() => {
@@ -45,7 +87,7 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <a href="#projects" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                            <img src="/assets/rise-light.svg" alt="Rise Logo" className="w-5 h-5" />
+                            <img src={logoSrc} alt="Rise Logo" className="w-5 h-5" />
                             <strong className="text-lg font-bold">Rise Dashboard</strong>
                         </a>
                         <button
@@ -103,6 +145,69 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                             </svg>
                                             Copy JWT Token
                                         </button>
+                                    </div>
+                                    <div className="p-2 border-t border-gray-700">
+                                        <div className="px-3 py-2">
+                                            <p className="text-xs text-gray-400 mb-2">Theme</p>
+                                            <div className="space-y-1">
+                                                <button
+                                                    onClick={() => handleThemeChange('system')}
+                                                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm rounded transition-colors ${
+                                                        theme === 'system' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                                                    }`}
+                                                >
+                                                    <div className="w-4 h-4 bg-current" style={{
+                                                        maskImage: 'url(/assets/theme-system.svg)',
+                                                        maskSize: 'contain',
+                                                        maskRepeat: 'no-repeat',
+                                                        maskPosition: 'center',
+                                                        WebkitMaskImage: 'url(/assets/theme-system.svg)',
+                                                        WebkitMaskSize: 'contain',
+                                                        WebkitMaskRepeat: 'no-repeat',
+                                                        WebkitMaskPosition: 'center'
+                                                    }}></div>
+                                                    System
+                                                </button>
+                                                <button
+                                                    onClick={() => handleThemeChange('light')}
+                                                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm rounded transition-colors ${
+                                                        theme === 'light' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                                                    }`}
+                                                >
+                                                    <div className="w-4 h-4 bg-current" style={{
+                                                        maskImage: 'url(/assets/theme-light.svg)',
+                                                        maskSize: 'contain',
+                                                        maskRepeat: 'no-repeat',
+                                                        maskPosition: 'center',
+                                                        WebkitMaskImage: 'url(/assets/theme-light.svg)',
+                                                        WebkitMaskSize: 'contain',
+                                                        WebkitMaskRepeat: 'no-repeat',
+                                                        WebkitMaskPosition: 'center'
+                                                    }}></div>
+                                                    Light
+                                                </button>
+                                                <button
+                                                    onClick={() => handleThemeChange('dark')}
+                                                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm rounded transition-colors ${
+                                                        theme === 'dark' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                                                    }`}
+                                                >
+                                                    <div className="w-4 h-4 bg-current" style={{
+                                                        maskImage: 'url(/assets/theme-dark.svg)',
+                                                        maskSize: 'contain',
+                                                        maskRepeat: 'no-repeat',
+                                                        maskPosition: 'center',
+                                                        WebkitMaskImage: 'url(/assets/theme-dark.svg)',
+                                                        WebkitMaskSize: 'contain',
+                                                        WebkitMaskRepeat: 'no-repeat',
+                                                        WebkitMaskPosition: 'center'
+                                                    }}></div>
+                                                    Dark
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div className="p-2 border-t border-gray-700">
                                         <button
                                             onClick={() => { setIsProfileOpen(false); onLogout(); }}
                                             className="w-full flex items-center gap-2 px-3 py-2 text-left text-red-400 hover:bg-gray-700 rounded transition-colors"

@@ -61,5 +61,17 @@ mod tests {
             StaticAssets::get("assets/rise-dark.svg").is_some(),
             "assets/rise-dark.svg should be embedded"
         );
+        assert!(
+            StaticAssets::get("assets/theme-system.svg").is_some(),
+            "assets/theme-system.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/theme-light.svg").is_some(),
+            "assets/theme-light.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/theme-dark.svg").is_some(),
+            "assets/theme-dark.svg should be embedded"
+        );
     }
 }
