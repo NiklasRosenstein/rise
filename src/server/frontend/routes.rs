@@ -52,7 +52,7 @@ fn render_index(state: &AppState) -> Response {
         Some(content) => match std::str::from_utf8(&content.data) {
             Ok(s) => s.to_string(),
             Err(e) => {
-                tracing::error!("Failed to parse index.html.tera as UTF-8: {}", e);
+                tracing::error!("Failed to parse index.html.tera as UTF-8: {:#}", e);
                 return (StatusCode::INTERNAL_SERVER_ERROR, "Template encoding error")
                     .into_response();
             }
@@ -66,7 +66,7 @@ fn render_index(state: &AppState) -> Response {
     // Create Tera instance and add template
     let mut tera = Tera::default();
     if let Err(e) = tera.add_raw_template("index.html.tera", &template_content) {
-        tracing::error!("Failed to parse index.html.tera template: {}", e);
+        tracing::error!("Failed to parse index.html.tera template: {:#}", e);
         return (StatusCode::INTERNAL_SERVER_ERROR, "Template error").into_response();
     }
 
@@ -86,7 +86,7 @@ fn render_index(state: &AppState) -> Response {
     match tera.render("index.html.tera", &context) {
         Ok(html) => Html(html).into_response(),
         Err(e) => {
-            tracing::error!("Failed to render index.html template: {}", e);
+            tracing::error!("Failed to render index.html template: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Template rendering error",
