@@ -41,5 +41,25 @@ mod tests {
             StaticAssets::get("js/app.js").is_some(),
             "js/app.js should be embedded"
         );
+        assert!(
+            StaticAssets::get("assets/favicon.ico").is_some(),
+            "assets/favicon.ico should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/favicon-16x16.png").is_some(),
+            "assets/favicon-16x16.png should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/favicon-32x32.png").is_some(),
+            "assets/favicon-32x32.png should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/rise-light.svg").is_some(),
+            "assets/rise-light.svg should be embedded"
+        );
+        assert!(
+            StaticAssets::get("assets/rise-dark.svg").is_some(),
+            "assets/rise-dark.svg should be embedded"
+        );
     }
 }
