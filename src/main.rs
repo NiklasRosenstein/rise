@@ -82,7 +82,8 @@ enum Commands {
     Build {
         /// Tag for the built image (e.g., myapp:latest, registry.io/org/app:v1.0)
         tag: String,
-        /// Path to the directory containing the application (REQUIRED)
+        /// Path to the directory containing the application
+        #[arg(default_value = ".")]
         path: String,
         /// Push image to registry after building
         #[arg(long)]
