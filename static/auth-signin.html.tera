@@ -14,11 +14,7 @@
         <div class="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl">
             <div class="text-center mb-6">
                 <div class="flex justify-center mb-4">
-                    <svg class="w-16 h-16 text-indigo-500" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                        <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M2 17L12 22L22 17" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <path d="M2 12L12 17L22 12" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                    </svg>
+                    <img src="/assets/rise-light.svg" alt="Rise Logo" class="w-16 h-16" />
                 </div>
                 <h1 class="text-3xl font-bold text-white mb-2">Rise</h1>
                 <span class="inline-block bg-indigo-600 text-white text-sm font-semibold px-3 py-1 rounded-full mb-4">🔒 Private Project</span>

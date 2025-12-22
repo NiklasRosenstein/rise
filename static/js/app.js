@@ -45,11 +45,7 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
                         <a href="#projects" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                            <svg className="w-5 h-5" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                                <path d="M12 2L2 7L12 12L22 7L12 2Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                <path d="M2 17L12 22L22 17" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                                <path d="M2 12L12 17L22 12" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
-                            </svg>
+                            <img src="/assets/rise-light.svg" alt="Rise Logo" className="w-5 h-5" />
                             <strong className="text-lg font-bold">Rise Dashboard</strong>
                         </a>
                         <button
