@@ -1,0 +1,8 @@
+version = 1
+
+[project]
+name = "test"
+visibility = "private"
+custom_domains = []
+
+[project.env]

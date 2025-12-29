@@ -60,9 +60,11 @@ struct KubernetesMetadata {
 
 /// Reconciliation phases for Kubernetes deployments
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
 enum ReconcilePhase {
     #[default]
     NotStarted,
+    // Old phases - kept temporarily until reconciliation loop is refactored
     CreatingNamespace,
     CreatingImagePullSecret,
     CreatingBackendService,
@@ -140,6 +142,11 @@ pub struct KubernetesController {
     custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
     node_selector: std::collections::HashMap<String, String>,
     image_pull_secret_name: Option<String>,
+    /// In-memory cache of resource versions for drift detection
+    /// Key: "deployment-{id}-{resource_type}" (e.g., "deployment-123-service")
+    /// Value: last observed resourceVersion from Kubernetes API
+    /// Lost on controller restart → causes one re-apply, then cached again
+    resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
 }
 
 impl KubernetesController {
@@ -168,7 +175,51 @@ impl KubernetesController {
             custom_domain_tls_mode: config.custom_domain_tls_mode,
             node_selector: config.node_selector,
             image_pull_secret_name: config.image_pull_secret_name,
+            resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         })
+    }
+
+    /// Get cache key for a deployment's resource
+    fn resource_cache_key(deployment_id: uuid::Uuid, resource_type: &str) -> String {
+        format!("deployment-{}-{}", deployment_id, resource_type)
+    }
+
+    /// Check if resource needs apply based on version cache
+    /// Returns true if: no cached version OR current version != cached version
+    fn needs_apply(
+        &self,
+        deployment_id: uuid::Uuid,
+        resource_type: &str,
+        current_version: Option<&str>,
+    ) -> bool {
+        let key = Self::resource_cache_key(deployment_id, resource_type);
+        let cache = self.resource_versions.read().unwrap();
+
+        match (cache.get(&key), current_version) {
+            (None, _) => true,                                  // Never seen before
+            (Some(_), None) => true, // Resource exists but has no version?
+            (Some(cached), Some(current)) => cached != current, // Version changed
+        }
+    }
+
+    /// Update cached resource version
+    fn update_version_cache(
+        &self,
+        deployment_id: uuid::Uuid,
+        resource_type: &str,
+        version: Option<String>,
+    ) {
+        if let Some(version) = version {
+            let key = Self::resource_cache_key(deployment_id, resource_type);
+            let mut cache = self.resource_versions.write().unwrap();
+            cache.insert(key, version);
+        }
+    }
+
+    /// Clear all cached versions for a deployment (on termination/deletion)
+    fn clear_deployment_cache(&self, deployment_id: uuid::Uuid) {
+        let mut cache = self.resource_versions.write().unwrap();
+        cache.retain(|k, _| !k.starts_with(&format!("deployment-{}-", deployment_id)));
     }
 
     /// Test connection to Kubernetes API
@@ -834,6 +885,438 @@ impl KubernetesController {
             deployment.deployment_id.clone(),
         );
         labels
+    }
+
+    /// Apply all supporting resources for a deployment (idempotent)
+    /// - Namespace
+    /// - ImagePullSecret (if needed)
+    /// - BackendService (if configured)
+    /// - Service
+    /// - Ingress
+    ///
+    /// Uses in-memory version cache to skip unnecessary applies
+    async fn apply_supporting_resources(
+        &self,
+        deployment: &Deployment,
+        project: &Project,
+        metadata: &mut KubernetesMetadata,
+    ) -> Result<()> {
+        let namespace = Self::namespace_name(project);
+
+        // 1. Apply Namespace
+        self.apply_namespace(deployment.id, project, &namespace)
+            .await?;
+
+        // 2. Apply ImagePullSecret (if needed)
+        if let Some(ref registry_provider) = self.registry_provider {
+            if self.image_pull_secret_name.is_none() {
+                self.apply_image_pull_secret(deployment.id, project, &namespace, registry_provider)
+                    .await?;
+            }
+        }
+
+        // 3. Apply BackendService (if configured)
+        if let Some(ref backend_address) = self.backend_address {
+            self.apply_backend_service(deployment.id, project, &namespace, backend_address)
+                .await?;
+        }
+
+        // 4. Apply Service
+        self.apply_service(deployment.id, project, deployment, &namespace, metadata)
+            .await?;
+
+        // 5. Apply Ingress
+        self.apply_ingress(deployment.id, project, deployment, &namespace, metadata)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Apply namespace with drift detection
+    async fn apply_namespace(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        namespace_name: &str,
+    ) -> Result<()> {
+        let ns_api: Api<Namespace> = Api::all(self.kube_client.clone());
+
+        match ns_api.get(namespace_name).await {
+            Ok(existing_ns) => {
+                let current_version = existing_ns.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "namespace", current_version) {
+                    let ns = self.create_namespace(project);
+                    let result = ns_api
+                        .patch(
+                            namespace_name,
+                            &PatchParams::apply("rise-controller"),
+                            &Patch::Apply(&ns),
+                        )
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "namespace",
+                        result.metadata.resource_version,
+                    );
+                    info!("Applied namespace '{}' (drift detected)", namespace_name);
+                } else {
+                    debug!("Namespace '{}' is up-to-date", namespace_name);
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                let ns = self.create_namespace(project);
+                let result = ns_api.create(&PostParams::default(), &ns).await?;
+                self.update_version_cache(
+                    deployment_id,
+                    "namespace",
+                    result.metadata.resource_version,
+                );
+
+                // Add finalizer to project
+                use crate::db::projects as db_projects;
+                db_projects::add_finalizer(
+                    &self.state.db_pool,
+                    project.id,
+                    KUBERNETES_NAMESPACE_FINALIZER,
+                )
+                .await?;
+
+                info!("Created namespace '{}'", namespace_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        Ok(())
+    }
+
+    /// Apply image pull secret with drift detection
+    async fn apply_image_pull_secret(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        namespace: &str,
+        registry_provider: &Arc<dyn RegistryProvider>,
+    ) -> Result<()> {
+        let secret_name = IMAGE_PULL_SECRET_NAME;
+        let secret_api: Api<Secret> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        match secret_api.get(secret_name).await {
+            Ok(existing_secret) => {
+                let current_version = existing_secret.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "image-pull-secret", current_version) {
+                    let (username, password) = registry_provider.get_pull_credentials().await?;
+                    let secret = self.create_dockerconfigjson_secret(
+                        secret_name,
+                        registry_provider.registry_host(),
+                        &username,
+                        &password,
+                    )?;
+                    let result = secret_api
+                        .patch(
+                            secret_name,
+                            &PatchParams::apply("rise-controller").force(),
+                            &Patch::Apply(&secret),
+                        )
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "image-pull-secret",
+                        result.metadata.resource_version,
+                    );
+                    info!(
+                        project = project.name,
+                        namespace = namespace,
+                        "Applied image pull secret (drift detected)"
+                    );
+                } else {
+                    debug!("Image pull secret is up-to-date");
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                let (username, password) = registry_provider.get_pull_credentials().await?;
+                let secret = self.create_dockerconfigjson_secret(
+                    secret_name,
+                    registry_provider.registry_host(),
+                    &username,
+                    &password,
+                )?;
+                let result = secret_api.create(&PostParams::default(), &secret).await?;
+                self.update_version_cache(
+                    deployment_id,
+                    "image-pull-secret",
+                    result.metadata.resource_version,
+                );
+                info!(
+                    project = project.name,
+                    namespace = namespace,
+                    "Created image pull secret"
+                );
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        Ok(())
+    }
+
+    /// Apply backend service with drift detection
+    async fn apply_backend_service(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        namespace: &str,
+        backend_address: &crate::server::settings::BackendAddress,
+    ) -> Result<()> {
+        let service_name = "rise-backend";
+        let service_api: Api<Service> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        match service_api.get(service_name).await {
+            Ok(existing_svc) => {
+                let current_version = existing_svc.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "backend-service", current_version) {
+                    if backend_address.is_ip_address() {
+                        // ClusterIP with Endpoints
+                        let svc = self.create_backend_service_clusterip(
+                            project,
+                            namespace,
+                            backend_address.port,
+                        );
+                        let result = service_api
+                            .patch(
+                                service_name,
+                                &PatchParams::apply("rise").force(),
+                                &Patch::Apply(&svc),
+                            )
+                            .await?;
+                        self.update_version_cache(
+                            deployment_id,
+                            "backend-service",
+                            result.metadata.resource_version,
+                        );
+
+                        // Apply Endpoints
+                        let endpoints = self.create_backend_endpoints(
+                            project,
+                            namespace,
+                            &backend_address.host,
+                            backend_address.port,
+                        );
+                        let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                            Api::namespaced(self.kube_client.clone(), namespace);
+                        endpoints_api
+                            .patch(
+                                service_name,
+                                &PatchParams::apply("rise").force(),
+                                &Patch::Apply(&endpoints),
+                            )
+                            .await?;
+
+                        info!(
+                            project = project.name,
+                            backend_ip = backend_address.host,
+                            backend_port = backend_address.port,
+                            "Applied backend service (ClusterIP+Endpoints, drift detected)"
+                        );
+                    } else {
+                        // ExternalName
+                        let svc = self.create_backend_service_externalname(
+                            project,
+                            namespace,
+                            &backend_address.host,
+                        );
+                        let result = service_api
+                            .patch(
+                                service_name,
+                                &PatchParams::apply("rise").force(),
+                                &Patch::Apply(&svc),
+                            )
+                            .await?;
+                        self.update_version_cache(
+                            deployment_id,
+                            "backend-service",
+                            result.metadata.resource_version,
+                        );
+                        info!(
+                            project = project.name,
+                            backend_dns = backend_address.host,
+                            backend_port = backend_address.port,
+                            "Applied backend service (ExternalName, drift detected)"
+                        );
+                    }
+                } else {
+                    debug!("Backend service is up-to-date");
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                // Create new service
+                if backend_address.is_ip_address() {
+                    let svc = self.create_backend_service_clusterip(
+                        project,
+                        namespace,
+                        backend_address.port,
+                    );
+                    let result = service_api.create(&PostParams::default(), &svc).await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "backend-service",
+                        result.metadata.resource_version,
+                    );
+
+                    let endpoints = self.create_backend_endpoints(
+                        project,
+                        namespace,
+                        &backend_address.host,
+                        backend_address.port,
+                    );
+                    let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+                    endpoints_api
+                        .create(&PostParams::default(), &endpoints)
+                        .await?;
+
+                    info!(
+                        project = project.name,
+                        backend_ip = backend_address.host,
+                        backend_port = backend_address.port,
+                        "Created backend service (ClusterIP+Endpoints)"
+                    );
+                } else {
+                    let svc = self.create_backend_service_externalname(
+                        project,
+                        namespace,
+                        &backend_address.host,
+                    );
+                    let result = service_api.create(&PostParams::default(), &svc).await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "backend-service",
+                        result.metadata.resource_version,
+                    );
+                    info!(
+                        project = project.name,
+                        backend_dns = backend_address.host,
+                        backend_port = backend_address.port,
+                        "Created backend service (ExternalName)"
+                    );
+                }
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        Ok(())
+    }
+
+    /// Apply service with drift detection
+    async fn apply_service(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        deployment: &Deployment,
+        namespace: &str,
+        metadata: &mut KubernetesMetadata,
+    ) -> Result<()> {
+        let service_name = Self::service_name(project, deployment);
+        let service_api: Api<Service> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        match service_api.get(&service_name).await {
+            Ok(existing_svc) => {
+                let current_version = existing_svc.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "service", current_version) {
+                    let svc = self.create_service(project, deployment, metadata);
+                    let result = service_api
+                        .patch(
+                            &service_name,
+                            &PatchParams::apply("rise").force(),
+                            &Patch::Apply(&svc),
+                        )
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "service",
+                        result.metadata.resource_version,
+                    );
+                    info!("Applied Service '{}' (drift detected)", service_name);
+                } else {
+                    debug!("Service '{}' is up-to-date", service_name);
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                let svc = self.create_service(project, deployment, metadata);
+                let result = service_api.create(&PostParams::default(), &svc).await?;
+                self.update_version_cache(
+                    deployment_id,
+                    "service",
+                    result.metadata.resource_version,
+                );
+                info!("Created Service '{}'", service_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        metadata.service_name = Some(service_name);
+        Ok(())
+    }
+
+    /// Apply ingress with drift detection
+    async fn apply_ingress(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        deployment: &Deployment,
+        namespace: &str,
+        metadata: &mut KubernetesMetadata,
+    ) -> Result<()> {
+        let ingress_name = Self::ingress_name(project, deployment);
+
+        // Fetch custom domains
+        use crate::db::custom_domains as db_custom_domains;
+        let custom_domains =
+            db_custom_domains::list_project_custom_domains(&self.state.db_pool, project.id)
+                .await?;
+
+        let ingress_api: Api<Ingress> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        match ingress_api.get(&ingress_name).await {
+            Ok(existing_ingress) => {
+                let current_version = existing_ingress.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "ingress", current_version) {
+                    let ingress = self.create_ingress(project, deployment, metadata, &custom_domains);
+                    let result = ingress_api
+                        .patch(
+                            &ingress_name,
+                            &PatchParams::apply("rise").force(),
+                            &Patch::Apply(&ingress),
+                        )
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "ingress",
+                        result.metadata.resource_version,
+                    );
+                    info!("Applied Ingress '{}' (drift detected)", ingress_name);
+                } else {
+                    debug!("Ingress '{}' is up-to-date", ingress_name);
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                let ingress = self.create_ingress(project, deployment, metadata, &custom_domains);
+                let result = ingress_api.create(&PostParams::default(), &ingress).await?;
+                self.update_version_cache(
+                    deployment_id,
+                    "ingress",
+                    result.metadata.resource_version,
+                );
+                info!("Created Ingress '{}'", ingress_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        metadata.ingress_name = Some(ingress_name);
+        Ok(())
     }
 
     /// Create Namespace resource
@@ -2607,6 +3090,9 @@ impl DeploymentBackend for KubernetesController {
             deployment.deployment_id
         );
 
+        // Clear cached resource versions for this deployment
+        self.clear_deployment_cache(deployment.id);
+
         // Parse metadata, but don't fail if it's missing or incomplete
         let metadata: Option<KubernetesMetadata> =
             serde_json::from_value(deployment.controller_metadata.clone()).ok();
@@ -3028,6 +3514,7 @@ mod tests {
             custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
             node_selector: std::collections::HashMap::new(),
             image_pull_secret_name: None,
+            resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
 
