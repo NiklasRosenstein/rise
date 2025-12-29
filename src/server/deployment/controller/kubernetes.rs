@@ -1750,6 +1750,12 @@ impl KubernetesController {
                 "nginx.ingress.kubernetes.io/auth-response-headers".to_string(),
                 "X-Auth-Request-Email,X-Auth-Request-User".to_string(),
             );
+            // Skip auth for /.rise/* paths (login page, static assets)
+            // This prevents redirect loops when users try to access the signin page
+            annotations.insert(
+                "nginx.ingress.kubernetes.io/auth-snippet".to_string(),
+                "if ($request_uri ~* \"^/.rise/\") { return 200; }".to_string(),
+            );
         }
         // Public projects have no auth annotations
 
