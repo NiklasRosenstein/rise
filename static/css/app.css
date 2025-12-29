@@ -1,5 +1,12 @@
 /* Custom styles for Rise frontend with Tailwind CSS */
 
+@theme {
+    --default-transition-duration: 150ms;
+    --default-transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+@variant dark (&:where(.dark, .dark *));
+
 :root {
     --rise-primary: #4f46e5;
     --rise-success: #10b981;
