@@ -1120,7 +1120,27 @@ impl KubernetesController {
                             "Applied backend service (ClusterIP+Endpoints, drift detected)"
                         );
                     } else {
-                        // ExternalName
+                        // ExternalName - clean up Endpoints if they exist from previous IP-based config
+                        let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                            Api::namespaced(self.kube_client.clone(), namespace);
+                        if let Err(e) = endpoints_api
+                            .delete(service_name, &DeleteParams::default())
+                            .await
+                        {
+                            // Ignore 404 errors (Endpoints don't exist, which is fine)
+                            if !e.to_string().contains("404") {
+                                warn!(
+                                    "Failed to delete orphaned Endpoints during ExternalName transition: {}",
+                                    e
+                                );
+                            }
+                        } else {
+                            info!(
+                                project = project.name,
+                                "Deleted orphaned Endpoints (switched from IP to DNS backend)"
+                            );
+                        }
+
                         let svc = self.create_backend_service_externalname(
                             project,
                             namespace,
@@ -1183,6 +1203,22 @@ impl KubernetesController {
                         "Created backend service (ClusterIP+Endpoints)"
                     );
                 } else {
+                    // ExternalName - clean up any orphaned Endpoints
+                    let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+                    if let Err(e) = endpoints_api
+                        .delete(service_name, &DeleteParams::default())
+                        .await
+                    {
+                        // Ignore 404 errors (expected when creating for the first time)
+                        if !e.to_string().contains("404") {
+                            warn!(
+                                "Failed to delete orphaned Endpoints before ExternalName creation: {}",
+                                e
+                            );
+                        }
+                    }
+
                     let svc = self.create_backend_service_externalname(
                         project,
                         namespace,
@@ -1274,8 +1310,7 @@ impl KubernetesController {
         // Fetch custom domains
         use crate::db::custom_domains as db_custom_domains;
         let custom_domains =
-            db_custom_domains::list_project_custom_domains(&self.state.db_pool, project.id)
-                .await?;
+            db_custom_domains::list_project_custom_domains(&self.state.db_pool, project.id).await?;
 
         let ingress_api: Api<Ingress> = Api::namespaced(self.kube_client.clone(), namespace);
 
@@ -1284,7 +1319,8 @@ impl KubernetesController {
                 let current_version = existing_ingress.metadata.resource_version.as_deref();
 
                 if self.needs_apply(deployment_id, "ingress", current_version) {
-                    let ingress = self.create_ingress(project, deployment, metadata, &custom_domains);
+                    let ingress =
+                        self.create_ingress(project, deployment, metadata, &custom_domains);
                     let result = ingress_api
                         .patch(
                             &ingress_name,
