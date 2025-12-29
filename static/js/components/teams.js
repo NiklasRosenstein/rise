@@ -88,7 +88,7 @@ function TeamsList({ currentUser }) {
     };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading teams: {error}</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading teams: {error}</p>;
 
     return (
         <section>
@@ -98,20 +98,20 @@ function TeamsList({ currentUser }) {
                     Create Team
                 </Button>
             </div>
-            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
                 <table className="w-full">
-                    <thead className="bg-gray-800">
+                    <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Name</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Members</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Owners</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Name</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Members</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Owners</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800">
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                         {teams.length === 0 ? (
                             <tr>
-                                <td colSpan="4" className="px-6 py-8 text-center text-gray-400">
+                                <td colSpan="4" className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
                                     No teams found.
                                 </td>
                             </tr>
@@ -120,9 +120,9 @@ function TeamsList({ currentUser }) {
                                 <tr
                                     key={t.id}
                                     onClick={() => window.location.hash = `team/${t.name}`}
-                                    className="hover:bg-gray-800/50 transition-colors cursor-pointer"
+                                    className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors cursor-pointer"
                                 >
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-100">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                                         <div className="flex items-center gap-2">
                                             {t.name}
                                             {t.idp_managed && (
@@ -130,9 +130,9 @@ function TeamsList({ currentUser }) {
                                             )}
                                         </div>
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{t.members.length}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{t.owners.length}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDate(t.created)}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{t.members.length}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{t.owners.length}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(t.created)}</td>
                                 </tr>
                             ))
                         )}
@@ -165,7 +165,7 @@ function TeamsList({ currentUser }) {
                         required
                         rows={3}
                     />
-                    <p className="text-sm text-gray-500 -mt-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-500 -mt-2">
                         Owners can manage the team. At least one owner is required.
                     </p>
 
@@ -178,7 +178,7 @@ function TeamsList({ currentUser }) {
                         placeholder="charlie@example.com, dana@example.com"
                         rows={3}
                     />
-                    <p className="text-sm text-gray-500 -mt-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-500 -mt-2">
                         Members can use the team for project ownership.
                     </p>
 
@@ -338,16 +338,16 @@ function TeamDetail({ teamName, currentUser }) {
     };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading team: {error}</p>;
-    if (!team) return <p className="text-gray-400">Team not found.</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading team: {error}</p>;
+    if (!team) return <p className="text-gray-600 dark:text-gray-400">Team not found.</p>;
 
     return (
         <section>
-            <a href="#teams" className="inline-flex items-center gap-2 text-indigo-400 hover:text-indigo-300 mb-6 transition-colors">
+            <a href="#teams" className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
                 ← Back to Teams
             </a>
 
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-6 mb-6">
                 <div className="flex justify-between items-start mb-4">
                     <div>
                         <div className="flex items-center gap-2">
@@ -369,12 +369,12 @@ function TeamDetail({ teamName, currentUser }) {
                 </div>
                 <dl className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                        <dt className="text-gray-400">Created</dt>
-                        <dd className="mt-1 text-gray-200">{formatDate(team.created)}</dd>
+                        <dt className="text-gray-600 dark:text-gray-400">Created</dt>
+                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{formatDate(team.created)}</dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">Updated</dt>
-                        <dd className="mt-1 text-gray-200">{formatDate(team.updated)}</dd>
+                        <dt className="text-gray-600 dark:text-gray-400">Updated</dt>
+                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{formatDate(team.updated)}</dd>
                     </div>
                 </dl>
                 {team.idp_managed && !currentUser?.is_admin && (
@@ -389,18 +389,18 @@ function TeamDetail({ teamName, currentUser }) {
                     <h4 className="text-lg font-bold">Owners</h4>
                 </div>
                 {team.owners && team.owners.length > 0 ? (
-                    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800 mb-4">
+                    <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800 mb-4">
                         <table className="w-full">
-                            <thead className="bg-gray-800">
+                            <thead className="bg-gray-100 dark:bg-gray-800">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
-                                    {canEdit && <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>}
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Email</th>
+                                    {canEdit && <th className="px-6 py-3 text-right text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>}
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-800">
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                                 {team.owners.map(owner => (
-                                    <tr key={owner.id} className="hover:bg-gray-800/50 transition-colors">
-                                        <td className="px-6 py-4 text-sm text-gray-200">{owner.email}</td>
+                                    <tr key={owner.id} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
+                                        <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{owner.email}</td>
                                         {canEdit && (
                                             <td className="px-6 py-4">
                                                 <div className="flex justify-end">
@@ -420,7 +420,7 @@ function TeamDetail({ teamName, currentUser }) {
                         </table>
                     </div>
                 ) : (
-                    <p className="text-gray-400 mb-4">No owners</p>
+                    <p className="text-gray-600 dark:text-gray-400 mb-4">No owners</p>
                 )}
                 {canEdit && (
                     <div className="flex justify-end">
@@ -431,7 +431,7 @@ function TeamDetail({ teamName, currentUser }) {
                                 value={newOwnerEmail}
                                 onChange={(e) => setNewOwnerEmail(e.target.value)}
                                 onKeyPress={(e) => e.key === 'Enter' && handleAddOwner()}
-                                className="w-64 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                                className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
                             />
                             <Button variant="primary" size="sm" onClick={handleAddOwner}>
                                 Add
@@ -446,18 +446,18 @@ function TeamDetail({ teamName, currentUser }) {
                     <h4 className="text-lg font-bold">Members</h4>
                 </div>
                 {team.members && team.members.length > 0 ? (
-                    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800 mb-4">
+                    <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800 mb-4">
                         <table className="w-full">
-                            <thead className="bg-gray-800">
+                            <thead className="bg-gray-100 dark:bg-gray-800">
                                 <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
-                                    {canEdit && <th className="px-6 py-3 text-right text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>}
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Email</th>
+                                    {canEdit && <th className="px-6 py-3 text-right text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>}
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-800">
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                                 {team.members.map(member => (
-                                    <tr key={member.id} className="hover:bg-gray-800/50 transition-colors">
-                                        <td className="px-6 py-4 text-sm text-gray-200">{member.email}</td>
+                                    <tr key={member.id} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
+                                        <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{member.email}</td>
                                         {canEdit && (
                                             <td className="px-6 py-4">
                                                 <div className="flex justify-end">
@@ -477,7 +477,7 @@ function TeamDetail({ teamName, currentUser }) {
                         </table>
                     </div>
                 ) : (
-                    <p className="text-gray-400 mb-4">No members</p>
+                    <p className="text-gray-600 dark:text-gray-400 mb-4">No members</p>
                 )}
                 {canEdit && (
                     <div className="flex justify-end">
@@ -488,7 +488,7 @@ function TeamDetail({ teamName, currentUser }) {
                                 value={newMemberEmail}
                                 onChange={(e) => setNewMemberEmail(e.target.value)}
                                 onKeyPress={(e) => e.key === 'Enter' && handleAddMember()}
-                                className="w-64 bg-gray-800 border border-gray-700 rounded px-3 py-2 text-sm text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                                className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
                             />
                             <Button variant="primary" size="sm" onClick={handleAddMember}>
                                 Add
@@ -505,10 +505,10 @@ function TeamDetail({ teamName, currentUser }) {
                     title="Delete Team"
                 >
                     <div className="mb-6">
-                        <p className="text-gray-300 mb-4">
+                        <p className="text-gray-700 dark:text-gray-300 mb-4">
                             Are you sure you want to delete team <strong className="text-white">{team.name}</strong>?
                         </p>
-                        <p className="text-sm text-gray-400">
+                        <p className="text-sm text-gray-600 dark:text-gray-400">
                             This action cannot be undone.
                         </p>
                     </div>

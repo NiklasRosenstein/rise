@@ -77,7 +77,7 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
             </FormField>
 
             <div className="space-y-3">
-                <h4 className="text-sm font-semibold text-gray-300">Environment Variables</h4>
+                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Environment Variables</h4>
                 <FormField
                     label="Database URL Environment Variable"
                     id="rds-database-url-env-var"
@@ -91,37 +91,37 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                         type="checkbox"
                         checked={injectPgVars}
                         onChange={(e) => setInjectPgVars(e.target.checked)}
-                        className="w-4 h-4 text-indigo-600 bg-gray-700 border-gray-600 rounded focus:ring-indigo-500 focus:ring-2"
+                        className="w-4 h-4 text-indigo-600 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-indigo-500 focus:ring-2"
                     />
-                    <span className="text-sm text-gray-300">
-                        Inject <code className="bg-gray-700 px-1 rounded">PG*</code> variables
-                        <span className="text-gray-500 ml-2">(PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)</span>
+                    <span className="text-sm text-gray-700 dark:text-gray-300">
+                        Inject <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded text-gray-900 dark:text-gray-200">PG*</code> variables
+                        <span className="text-gray-600 dark:text-gray-500 ml-2">(PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)</span>
                     </span>
                 </label>
-                <p className="text-xs text-gray-500">
+                <p className="text-xs text-gray-600 dark:text-gray-500">
                     Note: Only one RDS extension should have PG* variables enabled per project, as they will override each other.
                 </p>
             </div>
 
-            <div className="bg-gray-800 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-gray-300 mb-2">About This Extension</h4>
-                <p className="text-sm text-gray-400">
+            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">About This Extension</h4>
+                <p className="text-sm text-gray-600 dark:text-gray-400">
                     This extension provisions a PostgreSQL database on AWS RDS. The instance size, disk size,
                     and other infrastructure settings are configured at the server level.
                 </p>
-                <p className="text-sm text-gray-400 mt-2">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                     <strong>Shared mode:</strong> All deployment groups (default, staging, etc.) use the same database.
                     This means staging deployments use the same database as production.
                 </p>
-                <p className="text-sm text-gray-400 mt-2">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                     <strong>Isolated mode:</strong> Each deployment group gets its own empty database.
                     This is useful for staging environments to have their own clean database instead of working with the production database.
                 </p>
             </div>
 
-            <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
-                <p className="text-sm text-yellow-200">
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-yellow-900 dark:text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
                     Creating a new RDS instance typically takes <strong>5-15 minutes</strong>.
                     No new deployments can be created until the RDS instance is available.
                     You can monitor the provisioning status in the Extensions tab.
@@ -338,13 +338,13 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                     helperText="Comma-separated list of OAuth scopes to request"
                 />
 
-                <div className="bg-gray-800 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-gray-300 mb-2">About This Extension</h4>
-                    <p className="text-sm text-gray-400">
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">About This Extension</h4>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
                         The Generic OAuth 2.0 extension allows your application to authenticate end users via any OAuth 2.0 provider
                         (Snowflake, Google, GitHub, custom SSO, etc.) without managing client secrets locally.
                     </p>
-                    <p className="text-sm text-gray-400 mt-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                         <strong>Security:</strong> Client secrets are stored encrypted and never exposed to your application.
                         Tokens are delivered in URL fragments for frontend apps or via secure exchange for backend apps.
                     </p>
@@ -355,14 +355,14 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
             <div className="lg:col-span-1 space-y-6">
                 {/* Redirect URI Configuration - Must be set in provider FIRST */}
                 <section>
-                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Redirect URI</h2>
-                    <div className="bg-blue-900/20 border-2 border-blue-600 rounded-lg p-4">
-                        <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 Required Setup</h3>
-                        <p className="text-sm text-blue-200 mb-3">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Redirect URI</h2>
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-600 dark:border-blue-600 rounded-lg p-4">
+                        <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-2">🔗 Required Setup</h3>
+                        <p className="text-sm text-blue-800 dark:text-blue-200 mb-3">
                             Configure this callback URL in your OAuth provider first:
                         </p>
                         <div className="flex items-center gap-2 mb-2">
-                            <code className="flex-1 bg-gray-800 px-3 py-2 rounded text-xs text-gray-200 break-all font-mono">
+                            <code className="flex-1 bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all font-mono">
                                 {redirectUri}
                             </code>
                             <button
@@ -377,10 +377,10 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                                 Copy
                             </button>
                         </div>
-                        <p className="text-xs text-blue-300">
+                        <p className="text-xs text-blue-900 dark:text-blue-300">
                             Also called "Callback URL" or "Authorized redirect URIs".
                             {!isEnabled && instanceName && (
-                                <span className="block mt-2 text-blue-200">
+                                <span className="block mt-2 text-blue-800 dark:text-blue-200">
                                     <strong>Note:</strong> Uses extension name "{instanceName}"
                                 </span>
                             )}
@@ -390,12 +390,12 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
 
                 {/* Quick Start Templates */}
                 <section>
-                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Quick Start</h2>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Quick Start</h2>
                     <div className="space-y-2">
                         <button
                             type="button"
                             onClick={() => applyTemplate('snowflake')}
-                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors text-left"
+                            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
                             title="Apply Snowflake template"
                         >
                             📋 Snowflake Template
@@ -403,7 +403,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                         <button
                             type="button"
                             onClick={() => applyTemplate('google')}
-                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors text-left"
+                            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
                             title="Apply Google template"
                         >
                             📋 Google Template
@@ -411,26 +411,26 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                         <button
                             type="button"
                             onClick={() => applyTemplate('github')}
-                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-200 font-semibold transition-colors text-left"
+                            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
                             title="Apply GitHub template"
                         >
                             📋 GitHub Template
                         </button>
                     </div>
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-gray-600 dark:text-gray-500 mt-2">
                         Click to auto-fill endpoints for common providers
                     </p>
                 </section>
 
                 {/* Setup Steps */}
                 <section>
-                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Setup Steps</h2>
-                    <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
-                        <ol className="text-sm text-yellow-200 list-decimal list-inside space-y-2">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Setup Steps</h2>
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
+                        <ol className="text-sm text-yellow-900 dark:text-yellow-200 list-decimal list-inside space-y-2">
                             <li>Configure redirect URI in OAuth provider</li>
                             <li>Get client ID and secret from provider</li>
                             <li>Store secret as encrypted env var:
-                                <code className="block bg-gray-800 px-2 py-1 rounded mt-1 text-xs">
+                                <code className="block bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded mt-1 text-xs">
                                     rise env set {displayProjectName} {clientSecretRef || 'OAUTH_SECRET'} "..." --secret
                                 </code>
                             </li>
@@ -502,13 +502,13 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={onClose}>
-            <div className="bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
+            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 {/* Modal Header */}
-                <div className="flex items-center justify-between p-6 border-b border-gray-700">
-                    <h2 className="text-xl font-bold text-white">Integration Guide</h2>
+                <div className="flex items-center justify-between p-6 border-b border-gray-300 dark:border-gray-700">
+                    <h2 className="text-xl font-bold text-gray-900 dark:text-white">Integration Guide</h2>
                     <button
                         onClick={onClose}
-                        className="text-gray-400 hover:text-white transition-colors"
+                        className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
                         title="Close"
                     >
                         <div className="w-6 h-6 svg-mask" style={{
@@ -519,13 +519,13 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
                 </div>
 
                 {/* Tabs */}
-                <div className="flex border-b border-gray-700 bg-gray-900 px-6">
+                <div className="flex border-b border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-6">
                     <button
                         onClick={() => setActiveTab('fragment')}
                         className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                             activeTab === 'fragment'
                                 ? 'border-indigo-500 text-indigo-400'
-                                : 'border-transparent text-gray-400 hover:text-gray-300'
+                                : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
                         }`}
                     >
                         Fragment Flow (SPAs)
@@ -535,7 +535,7 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
                         className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                             activeTab === 'exchange'
                                 ? 'border-indigo-500 text-indigo-400'
-                                : 'border-transparent text-gray-400 hover:text-gray-300'
+                                : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
                         }`}
                     >
                         Exchange Flow (Backend)
@@ -545,7 +545,7 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
                         className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
                             activeTab === 'local'
                                 ? 'border-indigo-500 text-indigo-400'
-                                : 'border-transparent text-gray-400 hover:text-gray-300'
+                                : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
                         }`}
                     >
                         Local Development
@@ -556,22 +556,22 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
                 <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
                     {activeTab === 'fragment' && (
                         <div className="space-y-4">
-                            <p className="text-sm text-gray-300">
+                            <p className="text-sm text-gray-700 dark:text-gray-300">
                                 <strong>Fragment Flow</strong> is the default and recommended approach for single-page applications (SPAs).
-                                Tokens are returned in the URL fragment (<code className="bg-gray-900 px-1 rounded">#access_token=...</code>),
+                                Tokens are returned in the URL fragment (<code className="bg-white dark:bg-gray-900 px-1 rounded">#access_token=...</code>),
                                 which never reaches the server.
                             </p>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-300 mb-2">Authorization URL:</p>
-                                <code className="block bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Authorization URL:</p>
+                                <code className="block bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all">
                                     {authorizeUrl}
                                 </code>
                             </div>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-300 mb-2">Example Code:</p>
-                                <pre className="bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Example Code:</p>
+                                <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
 {`// Initiate OAuth login (fragment flow is default)
 function login() {
   const authUrl = '${authorizeUrl}';
@@ -611,28 +611,28 @@ handleCallback();`}
 
                     {activeTab === 'exchange' && (
                         <div className="space-y-4">
-                            <p className="text-sm text-gray-300">
+                            <p className="text-sm text-gray-700 dark:text-gray-300">
                                 <strong>Exchange Flow</strong> is designed for server-rendered applications. Your backend receives a
                                 temporary exchange token as a query parameter, which it exchanges for the actual OAuth tokens via a server-side API call.
                             </p>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-300 mb-2">Authorization URL:</p>
-                                <code className="block bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Authorization URL:</p>
+                                <code className="block bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all">
                                     {authorizeUrl}?flow=exchange
                                 </code>
                             </div>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-300 mb-2">Exchange Endpoint:</p>
-                                <code className="block bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 break-all">
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Exchange Endpoint:</p>
+                                <code className="block bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all">
                                     {exchangeUrl}?exchange_token=...
                                 </code>
                             </div>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-300 mb-2">Example Code (Node.js/Express):</p>
-                                <pre className="bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Example Code (Node.js/Express):</p>
+                                <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
 {`// Initiate OAuth login with exchange flow
 app.get('/login', (req, res) => {
   const authUrl = '${authorizeUrl}?flow=exchange';
@@ -679,14 +679,14 @@ app.get('/oauth/callback', async (req, res) => {
 
                     {activeTab === 'local' && (
                         <div className="space-y-4">
-                            <p className="text-sm text-gray-300">
+                            <p className="text-sm text-gray-700 dark:text-gray-300">
                                 For local development, you can override the redirect URI to point to your local development server.
                                 Rise always handles the OAuth provider callback, so you don't need to register localhost URLs with your OAuth provider.
                             </p>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-300 mb-2">Fragment Flow (localhost):</p>
-                                <pre className="bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Fragment Flow (localhost):</p>
+                                <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
 {`// Override redirect URI for local development
 const authUrl = '${authorizeUrl}?redirect_uri=' +
   encodeURIComponent('http://localhost:3000/callback');
@@ -704,8 +704,8 @@ function handleCallback() {
                             </div>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-300 mb-2">Exchange Flow (localhost):</p>
-                                <pre className="bg-gray-900 px-3 py-2 rounded text-xs text-gray-200 overflow-x-auto">
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Exchange Flow (localhost):</p>
+                                <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
 {`// Override redirect URI for local development
 app.get('/login', (req, res) => {
   const authUrl = '${authorizeUrl}?flow=exchange&redirect_uri=' +
@@ -721,10 +721,10 @@ app.get('/oauth/callback', async (req, res) => {
                                 </pre>
                             </div>
 
-                            <div className="bg-blue-900/20 border border-blue-700 rounded p-4">
-                                <p className="text-sm font-semibold text-blue-300 mb-2">ℹ️ How it Works</p>
-                                <p className="text-xs text-blue-200">
-                                    The OAuth provider only redirects to <code className="bg-gray-800 px-1 rounded">{callbackUrl}</code> (Rise's callback URL).
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-600 dark:border-blue-700 rounded p-4">
+                                <p className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-2">ℹ️ How it Works</p>
+                                <p className="text-xs text-blue-800 dark:text-blue-200">
+                                    The OAuth provider only redirects to <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{callbackUrl}</code> (Rise's callback URL).
                                     Rise then redirects to your app's redirect_uri with the tokens. You don't need to configure localhost URLs in your OAuth provider.
                                 </p>
                             </div>
@@ -775,52 +775,52 @@ function OAuthDetailView({ extension, projectName }) {
                 <div className="lg:col-span-2 space-y-6">
                     {/* Provider Configuration */}
                     <section>
-                        <h2 className="text-lg font-semibold text-gray-200 mb-3">OAuth Provider</h2>
-                        <div className="bg-gray-900 rounded p-4 space-y-3">
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">OAuth Provider</h2>
+                        <div className="bg-white dark:bg-gray-900 rounded p-4 space-y-3">
                             <div>
-                                <p className="text-sm text-gray-500">Provider Name</p>
-                                <p className="text-gray-300 font-semibold">{spec.provider_name || 'N/A'}</p>
+                                <p className="text-sm text-gray-600 dark:text-gray-500">Provider Name</p>
+                                <p className="text-gray-700 dark:text-gray-300 font-semibold">{spec.provider_name || 'N/A'}</p>
                             </div>
                             {spec.description && (
                                 <div>
-                                    <p className="text-sm text-gray-500">Description</p>
-                                    <p className="text-gray-300">{spec.description}</p>
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">Description</p>
+                                    <p className="text-gray-700 dark:text-gray-300">{spec.description}</p>
                                 </div>
                             )}
                             <div>
-                                <p className="text-sm text-gray-500">Client ID</p>
-                                <p className="text-gray-300 font-mono text-sm">{spec.client_id || 'N/A'}</p>
+                                <p className="text-sm text-gray-600 dark:text-gray-500">Client ID</p>
+                                <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">{spec.client_id || 'N/A'}</p>
                             </div>
                             <div>
-                                <p className="text-sm text-gray-500">Client Secret Reference</p>
-                                <p className="text-gray-300 font-mono text-sm">{spec.client_secret_ref || 'N/A'}</p>
+                                <p className="text-sm text-gray-600 dark:text-gray-500">Client Secret Reference</p>
+                                <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">{spec.client_secret_ref || 'N/A'}</p>
                             </div>
                         </div>
                     </section>
 
                     {/* Endpoints */}
                     <section>
-                        <h2 className="text-lg font-semibold text-gray-200 mb-3">OAuth Endpoints</h2>
-                        <div className="bg-gray-900 rounded p-4 space-y-3">
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">OAuth Endpoints</h2>
+                        <div className="bg-white dark:bg-gray-900 rounded p-4 space-y-3">
                             <div>
-                                <p className="text-sm text-gray-500">Authorization Endpoint</p>
-                                <p className="text-gray-300 font-mono text-xs break-all">{spec.authorization_endpoint || 'N/A'}</p>
+                                <p className="text-sm text-gray-600 dark:text-gray-500">Authorization Endpoint</p>
+                                <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.authorization_endpoint || 'N/A'}</p>
                             </div>
                             <div>
-                                <p className="text-sm text-gray-500">Token Endpoint</p>
-                                <p className="text-gray-300 font-mono text-xs break-all">{spec.token_endpoint || 'N/A'}</p>
+                                <p className="text-sm text-gray-600 dark:text-gray-500">Token Endpoint</p>
+                                <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.token_endpoint || 'N/A'}</p>
                             </div>
                         </div>
                     </section>
 
                     {/* Scopes */}
                     <section>
-                        <h2 className="text-lg font-semibold text-gray-200 mb-3">
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">
                             OAuth Scopes ({scopesArray.length})
                         </h2>
-                        <div className="bg-gray-900 rounded p-4">
+                        <div className="bg-white dark:bg-gray-900 rounded p-4">
                             {scopesArray.length === 0 ? (
-                                <p className="text-gray-400 text-sm">No scopes configured</p>
+                                <p className="text-gray-600 dark:text-gray-400 text-sm">No scopes configured</p>
                             ) : (
                                 <div className="flex flex-wrap gap-2">
                                     {scopesArray.map((scope, idx) => (
@@ -841,8 +841,8 @@ function OAuthDetailView({ extension, projectName }) {
                 <div className="lg:col-span-1 space-y-6">
                     {/* Configuration Status */}
                     <section>
-                        <h2 className="text-lg font-semibold text-gray-200 mb-3">Status</h2>
-                        <div className="bg-gray-900 rounded p-4">
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Status</h2>
+                        <div className="bg-white dark:bg-gray-900 rounded p-4">
                             {status.error ? (
                                 <div className="p-3 bg-red-900/20 border border-red-700 rounded">
                                     <p className="text-sm text-red-300">
@@ -860,18 +860,18 @@ function OAuthDetailView({ extension, projectName }) {
                                         </p>
                                     </div>
                                 ) : (
-                                    <div className="p-3 bg-yellow-900/20 border border-yellow-700 rounded">
-                                        <p className="text-sm text-yellow-300">
+                                    <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
+                                        <p className="text-sm text-yellow-900 dark:text-yellow-300">
                                             ⚠ Waiting For Auth
                                         </p>
-                                        <p className="text-xs text-yellow-400 mt-1">
+                                        <p className="text-xs text-yellow-800 dark:text-yellow-400 mt-1">
                                             Complete OAuth flow to verify configuration
                                         </p>
                                     </div>
                                 )
                             ) : (
-                                <div className="p-3 bg-gray-800 rounded">
-                                    <p className="text-sm text-gray-400">
+                                <div className="p-3 bg-gray-100 dark:bg-gray-800 rounded">
+                                    <p className="text-sm text-gray-600 dark:text-gray-400">
                                         Configuration pending...
                                     </p>
                                 </div>
@@ -881,28 +881,28 @@ function OAuthDetailView({ extension, projectName }) {
 
                     {/* Test OAuth Flow */}
                     <section>
-                        <h2 className="text-lg font-semibold text-gray-200 mb-3">Test</h2>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Test</h2>
                         <button
                             onClick={handleTestOAuth}
                             className="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors"
                         >
                             🔐 Test OAuth Flow
                         </button>
-                        <p className="text-xs text-gray-500 mt-2">
+                        <p className="text-xs text-gray-600 dark:text-gray-500 mt-2">
                             Test the OAuth flow and return to this page with a notification.
                         </p>
                     </section>
 
                     {/* Integration Guide Button */}
                     <section>
-                        <h2 className="text-lg font-semibold text-gray-200 mb-3">Integration</h2>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Integration</h2>
                         <button
                             onClick={() => setShowGuideModal(true)}
                             className="w-full px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-colors"
                         >
                             📚 Integration Guide
                         </button>
-                        <p className="text-xs text-gray-500 mt-2">
+                        <p className="text-xs text-gray-600 dark:text-gray-500 mt-2">
                             View code examples for Fragment Flow, Exchange Flow, and local development.
                         </p>
                     </section>
@@ -968,9 +968,9 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     helperText="Name of the environment variable where the OAuth client secret will be stored. Defaults to 'SNOWFLAKE_CLIENT_SECRET'."
                 />
 
-                <div className="bg-gray-800 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-gray-300 mb-2">How This Works</h4>
-                    <ol className="text-sm text-gray-400 space-y-2 list-decimal list-inside">
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">How This Works</h4>
+                    <ol className="text-sm text-gray-600 dark:text-gray-400 space-y-2 list-decimal list-inside">
                         <li>This extension provisions a Snowflake SECURITY INTEGRATION (OAuth provider)</li>
                         <li>Automatically creates a Generic OAuth extension for end-user authentication</li>
                         <li>OAuth credentials are retrieved from Snowflake and stored encrypted</li>
@@ -978,9 +978,9 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     </ol>
                 </div>
 
-                <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
-                    <p className="text-sm text-yellow-200">
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-yellow-900 dark:text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
+                    <p className="text-sm text-yellow-800 dark:text-yellow-200">
                         Creating the Snowflake integration typically takes <strong>10-30 seconds</strong>.
                         The extension will automatically create the OAuth integration in Snowflake and configure
                         the corresponding OAuth extension for your project.
@@ -991,12 +991,12 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
             {/* Right column: Guidance */}
             <div className="space-y-4">
                 <section>
-                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Configuration Notes</h2>
-                    <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-3">
-                        <p className="text-sm text-blue-200 mb-2">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Configuration Notes</h2>
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-600 dark:border-blue-700 rounded-lg p-3">
+                        <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
                             <strong>Backend Configuration</strong>
                         </p>
-                        <p className="text-xs text-blue-200">
+                        <p className="text-xs text-blue-800 dark:text-blue-200">
                             Snowflake credentials (account, user, password/key) are configured at the server level.
                             You only need to specify additional blocked roles and scopes here.
                         </p>
@@ -1004,9 +1004,9 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                 </section>
 
                 <section>
-                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Common Scopes</h2>
-                    <div className="bg-gray-800 rounded-lg p-3">
-                        <ul className="text-xs text-gray-400 space-y-1">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Common Scopes</h2>
+                    <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
+                        <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
                             <li><code>refresh_token</code> - Enable refresh tokens (default)</li>
                             <li><code>session:role:ANALYST</code> - Allow ANALYST role</li>
                             <li><code>session:role:DEVELOPER</code> - Allow DEVELOPER role</li>
@@ -1016,9 +1016,9 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                 </section>
 
                 <section>
-                    <h2 className="text-lg font-semibold text-gray-200 mb-3">Security</h2>
-                    <div className="bg-gray-800 rounded-lg p-3">
-                        <p className="text-xs text-gray-400">
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Security</h2>
+                    <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
+                        <p className="text-xs text-gray-600 dark:text-gray-400">
                             Blocked roles prevent users from accessing sensitive roles.
                             ACCOUNTADMIN and SECURITYADMIN are always blocked by default.
                         </p>
@@ -1074,45 +1074,45 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
         <>
             <div className="mb-6">
                 <div className="flex items-center space-x-3">
-                    <h2 className="text-xl font-semibold text-gray-100">Snowflake OAuth Provisioner</h2>
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Snowflake OAuth Provisioner</h2>
                     {getStateBadge()}
                 </div>
-                <p className="text-sm text-gray-400 mt-2">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                     Automatically provisions Snowflake SECURITY INTEGRATIONs and configures OAuth extensions
                 </p>
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Snowflake Integration Details */}
-                <section className="bg-gray-800 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-gray-200 mb-4">Snowflake Integration</h3>
+                <section className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-4">Snowflake Integration</h3>
 
                     <div className="space-y-3 text-sm">
                         {status.integration_name && (
                             <div>
-                                <span className="text-gray-500">Integration Name:</span>
-                                <span className="text-gray-300 ml-2 font-mono">{status.integration_name}</span>
+                                <span className="text-gray-600 dark:text-gray-500">Integration Name:</span>
+                                <span className="text-gray-700 dark:text-gray-300 ml-2 font-mono">{status.integration_name}</span>
                             </div>
                         )}
 
                         {status.oauth_client_id && (
                             <div>
-                                <span className="text-gray-500">OAuth Client ID:</span>
-                                <span className="text-gray-300 ml-2 font-mono text-xs">{status.oauth_client_id}</span>
+                                <span className="text-gray-600 dark:text-gray-500">OAuth Client ID:</span>
+                                <span className="text-gray-700 dark:text-gray-300 ml-2 font-mono text-xs">{status.oauth_client_id}</span>
                             </div>
                         )}
 
                         {status.redirect_uri && (
                             <div>
-                                <span className="text-gray-500">Redirect URI:</span>
-                                <span className="text-gray-300 ml-2 font-mono text-xs">{status.redirect_uri}</span>
+                                <span className="text-gray-600 dark:text-gray-500">Redirect URI:</span>
+                                <span className="text-gray-700 dark:text-gray-300 ml-2 font-mono text-xs">{status.redirect_uri}</span>
                             </div>
                         )}
 
                         {status.created_at && (
                             <div>
-                                <span className="text-gray-500">Created:</span>
-                                <span className="text-gray-300 ml-2">{formatDate(status.created_at)}</span>
+                                <span className="text-gray-600 dark:text-gray-500">Created:</span>
+                                <span className="text-gray-700 dark:text-gray-300 ml-2">{formatDate(status.created_at)}</span>
                             </div>
                         )}
                     </div>
@@ -1135,14 +1135,14 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                 </section>
 
                 {/* OAuth Extension Details */}
-                <section className="bg-gray-800 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-gray-200 mb-4">OAuth Extension</h3>
+                <section className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-4">OAuth Extension</h3>
 
                     {status.oauth_extension_name ? (
                         <div className="space-y-3">
                             <div className="text-sm">
-                                <span className="text-gray-500">Extension Name:</span>
-                                <span className="text-gray-300 ml-2 font-mono">{status.oauth_extension_name}</span>
+                                <span className="text-gray-600 dark:text-gray-500">Extension Name:</span>
+                                <span className="text-gray-700 dark:text-gray-300 ml-2 font-mono">{status.oauth_extension_name}</span>
                             </div>
 
                             {status.state === 'Available' && (
@@ -1156,27 +1156,27 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                                 </div>
                             )}
 
-                            <div className="mt-4 p-3 bg-blue-900/20 border border-blue-700 rounded">
-                                <p className="text-xs text-blue-200">
+                            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-600 dark:border-blue-700 rounded">
+                                <p className="text-xs text-blue-800 dark:text-blue-200">
                                     The OAuth extension is automatically created and managed by this provisioner.
                                     Users can authenticate using their Snowflake credentials.
                                 </p>
                             </div>
                         </div>
                     ) : (
-                        <div className="text-sm text-gray-400">
+                        <div className="text-sm text-gray-600 dark:text-gray-400">
                             OAuth extension will be created during provisioning
                         </div>
                     )}
                 </section>
 
                 {/* Configuration Summary */}
-                <section className="bg-gray-800 rounded-lg p-4 lg:col-span-2">
-                    <h3 className="text-lg font-semibold text-gray-200 mb-4">Configuration</h3>
+                <section className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 lg:col-span-2">
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-4">Configuration</h3>
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <h4 className="text-sm font-semibold text-gray-400 mb-2">Blocked Roles</h4>
+                            <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2">Blocked Roles</h4>
                             {spec.blocked_roles && spec.blocked_roles.length > 0 ? (
                                 <div className="flex flex-wrap gap-2">
                                     {spec.blocked_roles.map((role, idx) => (
@@ -1186,28 +1186,28 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                                     ))}
                                 </div>
                             ) : (
-                                <p className="text-xs text-gray-500">Using backend defaults only</p>
+                                <p className="text-xs text-gray-600 dark:text-gray-500">Using backend defaults only</p>
                             )}
                         </div>
 
                         <div>
-                            <h4 className="text-sm font-semibold text-gray-400 mb-2">OAuth Scopes</h4>
+                            <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2">OAuth Scopes</h4>
                             {spec.scopes && spec.scopes.length > 0 ? (
                                 <div className="flex flex-wrap gap-2">
                                     {spec.scopes.map((scope, idx) => (
-                                        <span key={idx} className="bg-blue-900/30 text-blue-300 text-xs px-2 py-1 rounded font-mono">
+                                        <span key={idx} className="bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-300 text-xs px-2 py-1 rounded font-mono">
                                             {scope}
                                         </span>
                                     ))}
                                 </div>
                             ) : (
-                                <p className="text-xs text-gray-500">Using backend defaults only</p>
+                                <p className="text-xs text-gray-600 dark:text-gray-500">Using backend defaults only</p>
                             )}
                         </div>
                     </div>
 
-                    <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-700 rounded">
-                        <p className="text-xs text-yellow-200">
+                    <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
+                        <p className="text-xs text-yellow-800 dark:text-yellow-200">
                             <strong>Note:</strong> Additional roles and scopes are combined with backend defaults
                             (not replaced). ACCOUNTADMIN and SECURITYADMIN are always blocked.
                         </p>
@@ -1318,35 +1318,35 @@ function AwsRdsDetailView({ extension, projectName }) {
         <div className="space-y-6">
             {/* Instance Information */}
             <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">RDS Instance</h2>
-                <div className="bg-gray-900 rounded p-4 grid grid-cols-2 gap-4">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">RDS Instance</h2>
+                <div className="bg-white dark:bg-gray-900 rounded p-4 grid grid-cols-2 gap-4">
                     <div>
-                        <p className="text-sm text-gray-500">State</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-500">State</p>
                         <div className="mt-1">{getInstanceStateBadge()}</div>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500">Instance ID</p>
-                        <p className="text-gray-300">{status.instance_id || 'N/A'}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-500">Instance ID</p>
+                        <p className="text-gray-700 dark:text-gray-300">{status.instance_id || 'N/A'}</p>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500">Instance Size</p>
-                        <p className="text-gray-300">{status.instance_size || 'N/A'}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-500">Instance Size</p>
+                        <p className="text-gray-700 dark:text-gray-300">{status.instance_size || 'N/A'}</p>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500">Engine</p>
-                        <p className="text-gray-300">{spec.engine || 'postgres'} {spec.engine_version || ''}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-500">Engine</p>
+                        <p className="text-gray-700 dark:text-gray-300">{spec.engine || 'postgres'} {spec.engine_version || ''}</p>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500">Endpoint</p>
-                        <p className="text-gray-300 font-mono text-xs">{status.endpoint || 'Pending...'}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-500">Endpoint</p>
+                        <p className="text-gray-700 dark:text-gray-300 font-mono text-xs">{status.endpoint || 'Pending...'}</p>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500">Database Isolation</p>
-                        <p className="text-gray-300 capitalize">{spec.database_isolation || 'shared'}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-500">Database Isolation</p>
+                        <p className="text-gray-700 dark:text-gray-300 capitalize">{spec.database_isolation || 'shared'}</p>
                     </div>
                     <div>
-                        <p className="text-sm text-gray-500">Master Username</p>
-                        <p className="text-gray-300">{status.master_username || 'N/A'}</p>
+                        <p className="text-sm text-gray-600 dark:text-gray-500">Master Username</p>
+                        <p className="text-gray-700 dark:text-gray-300">{status.master_username || 'N/A'}</p>
                     </div>
                 </div>
 
@@ -1361,12 +1361,12 @@ function AwsRdsDetailView({ extension, projectName }) {
 
             {/* Databases */}
             <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">
                     Databases ({Object.keys(databases).length})
                 </h2>
 
                 {Object.keys(databases).length === 0 ? (
-                    <div className="bg-gray-900 rounded p-4 text-gray-400 text-center">
+                    <div className="bg-white dark:bg-gray-900 rounded p-4 text-gray-600 dark:text-gray-400 text-center">
                         No databases provisioned yet
                     </div>
                 ) : (
@@ -1384,11 +1384,11 @@ function AwsRdsDetailView({ extension, projectName }) {
 
             {/* Configuration */}
             <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">Environment Variables</h2>
-                <div className="bg-gray-900 rounded p-4 space-y-3">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Environment Variables</h2>
+                <div className="bg-white dark:bg-gray-900 rounded p-4 space-y-3">
                     <div>
-                        <span className="text-gray-400 text-sm">Database URL Variable:</span>
-                        <code className="ml-2 bg-gray-800 px-2 py-1 rounded text-gray-200 text-sm">
+                        <span className="text-gray-600 dark:text-gray-400 text-sm">Database URL Variable:</span>
+                        <code className="ml-2 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded text-gray-900 dark:text-gray-200 text-sm">
                             {spec.database_url_env_var || 'DATABASE_URL'}
                         </code>
                     </div>
@@ -1399,8 +1399,8 @@ function AwsRdsDetailView({ extension, projectName }) {
                             disabled
                             className="rounded"
                         />
-                        <span className="text-gray-300 text-sm">
-                            Inject <code className="bg-gray-800 px-1 rounded">PG*</code> variables
+                        <span className="text-gray-700 dark:text-gray-300 text-sm">
+                            Inject <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">PG*</code> variables
                         </span>
                     </label>
                 </div>
@@ -1442,9 +1442,9 @@ function DatabaseCard({ name, status }) {
         : null;
 
     return (
-        <div className="bg-gray-900 rounded-lg p-4 border border-gray-700">
+        <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-300 dark:border-gray-700">
             <div className="flex items-center justify-between mb-3">
-                <h3 className="text-white font-semibold">{name}</h3>
+                <h3 className="text-gray-900 dark:text-white font-semibold">{name}</h3>
                 <span className={`${badgeColor} text-white text-xs font-semibold px-2 py-1 rounded uppercase`}>
                     {statusText}
                 </span>
@@ -1452,16 +1452,16 @@ function DatabaseCard({ name, status }) {
 
             <div className="space-y-2 text-sm">
                 <div>
-                    <span className="text-gray-500">User:</span>
-                    <span className="text-gray-300 ml-2 font-mono">{status.user}</span>
+                    <span className="text-gray-600 dark:text-gray-500">User:</span>
+                    <span className="text-gray-700 dark:text-gray-300 ml-2 font-mono">{status.user}</span>
                 </div>
 
                 {isScheduledForCleanup && cleanupTime && (
-                    <div className="mt-3 p-2 bg-yellow-900/20 border border-yellow-700 rounded">
-                        <p className="text-xs text-yellow-300">
+                    <div className="mt-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
+                        <p className="text-xs text-yellow-900 dark:text-yellow-300">
                             <strong>⏱️ Cleanup Scheduled</strong>
                         </p>
-                        <p className="text-xs text-yellow-200 mt-1">
+                        <p className="text-xs text-yellow-800 dark:text-yellow-200 mt-1">
                             Will be deleted at {formatDate(cleanupTime.toISOString())}
                         </p>
                     </div>
