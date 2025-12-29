@@ -1139,9 +1139,9 @@ impl KubernetesController {
 
             // Use dynamic host routing if backend service exists
             let signin_url = if self.backend_address.is_some() {
-                // Use dynamic host routing - browser will go to /.rise/auth/signin on current domain
+                // Use relative URL - nginx will use current request's scheme and host
                 format!(
-                    "$scheme://$http_host/.rise/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
+                    "/.rise/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
                     urlencoding::encode(&project.name)
                 )
             } else {
