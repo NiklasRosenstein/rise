@@ -356,9 +356,9 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                 {/* Redirect URI Configuration - Must be set in provider FIRST */}
                 <section>
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Redirect URI</h2>
-                    <div className="bg-blue-900/20 border-2 border-blue-600 rounded-lg p-4">
-                        <h3 className="text-sm font-semibold text-blue-300 mb-2">🔗 Required Setup</h3>
-                        <p className="text-sm text-blue-200 mb-3">
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-600 dark:border-blue-600 rounded-lg p-4">
+                        <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-2">🔗 Required Setup</h3>
+                        <p className="text-sm text-blue-800 dark:text-blue-200 mb-3">
                             Configure this callback URL in your OAuth provider first:
                         </p>
                         <div className="flex items-center gap-2 mb-2">
@@ -377,10 +377,10 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                                 Copy
                             </button>
                         </div>
-                        <p className="text-xs text-blue-300">
+                        <p className="text-xs text-blue-900 dark:text-blue-300">
                             Also called "Callback URL" or "Authorized redirect URIs".
                             {!isEnabled && instanceName && (
-                                <span className="block mt-2 text-blue-200">
+                                <span className="block mt-2 text-blue-800 dark:text-blue-200">
                                     <strong>Note:</strong> Uses extension name "{instanceName}"
                                 </span>
                             )}
@@ -721,9 +721,9 @@ app.get('/oauth/callback', async (req, res) => {
                                 </pre>
                             </div>
 
-                            <div className="bg-blue-900/20 border border-blue-700 rounded p-4">
-                                <p className="text-sm font-semibold text-blue-300 mb-2">ℹ️ How it Works</p>
-                                <p className="text-xs text-blue-200">
+                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-600 dark:border-blue-700 rounded p-4">
+                                <p className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-2">ℹ️ How it Works</p>
+                                <p className="text-xs text-blue-800 dark:text-blue-200">
                                     The OAuth provider only redirects to <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{callbackUrl}</code> (Rise's callback URL).
                                     Rise then redirects to your app's redirect_uri with the tokens. You don't need to configure localhost URLs in your OAuth provider.
                                 </p>
@@ -992,11 +992,11 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
             <div className="space-y-4">
                 <section>
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Configuration Notes</h2>
-                    <div className="bg-blue-900/20 border border-blue-700 rounded-lg p-3">
-                        <p className="text-sm text-blue-200 mb-2">
+                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-600 dark:border-blue-700 rounded-lg p-3">
+                        <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
                             <strong>Backend Configuration</strong>
                         </p>
-                        <p className="text-xs text-blue-200">
+                        <p className="text-xs text-blue-800 dark:text-blue-200">
                             Snowflake credentials (account, user, password/key) are configured at the server level.
                             You only need to specify additional blocked roles and scopes here.
                         </p>
@@ -1156,8 +1156,8 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                                 </div>
                             )}
 
-                            <div className="mt-4 p-3 bg-blue-900/20 border border-blue-700 rounded">
-                                <p className="text-xs text-blue-200">
+                            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-600 dark:border-blue-700 rounded">
+                                <p className="text-xs text-blue-800 dark:text-blue-200">
                                     The OAuth extension is automatically created and managed by this provisioner.
                                     Users can authenticate using their Snowflake credentials.
                                 </p>
@@ -1195,7 +1195,7 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                             {spec.scopes && spec.scopes.length > 0 ? (
                                 <div className="flex flex-wrap gap-2">
                                     {spec.scopes.map((scope, idx) => (
-                                        <span key={idx} className="bg-blue-900/30 text-blue-300 text-xs px-2 py-1 rounded font-mono">
+                                        <span key={idx} className="bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-300 text-xs px-2 py-1 rounded font-mono">
                                             {scope}
                                         </span>
                                     ))}
