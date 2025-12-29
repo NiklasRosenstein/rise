@@ -71,7 +71,7 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
     };
 
     return (
-        <header className="bg-gray-900 border-b border-gray-800">
+        <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
             <nav className="container mx-auto px-4 py-4">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
@@ -96,13 +96,13 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                     <div className="flex items-center gap-6">
                         <a
                             href="#projects"
-                            className={`transition-colors ${isProjectsActive ? 'text-indigo-400 font-semibold' : 'text-gray-300 hover:text-white'}`}
+                            className={`transition-colors ${isProjectsActive ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'}`}
                         >
                             Projects
                         </a>
                         <a
                             href="#teams"
-                            className={`transition-colors ${isTeamsActive ? 'text-indigo-400 font-semibold' : 'text-gray-300 hover:text-white'}`}
+                            className={`transition-colors ${isTeamsActive ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'}`}
                         >
                             Teams
                         </a>
@@ -122,15 +122,15 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                             </button>
 
                             {isProfileOpen && (
-                                <div className="absolute right-0 mt-2 w-64 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50">
-                                    <div className="p-4 border-b border-gray-700">
-                                        <p className="text-sm text-gray-400 mb-1">Signed in as</p>
-                                        <p className="text-white font-medium break-all">{user?.email}</p>
+                                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50">
+                                    <div className="p-4 border-b border-gray-200 dark:border-gray-700">
+                                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Signed in as</p>
+                                        <p className="text-gray-900 dark:text-white font-medium break-all">{user?.email}</p>
                                     </div>
                                     <div className="p-2">
                                         <button
                                             onClick={handleCopyJWT}
-                                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-gray-300 hover:bg-gray-700 rounded transition-colors"
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                                         >
                                             <div className="w-4 h-4 svg-mask" style={{
                                                 maskImage: 'url(/assets/copy.svg)',
@@ -139,14 +139,14 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                             Copy JWT Token
                                         </button>
                                     </div>
-                                    <div className="p-2 border-t border-gray-700">
+                                    <div className="p-2 border-t border-gray-200 dark:border-gray-700">
                                         <div className="px-3 py-2">
-                                            <p className="text-xs text-gray-400 mb-2">Theme</p>
+                                            <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">Theme</p>
                                             <div className="space-y-1">
                                                 <button
                                                     onClick={() => handleThemeChange('system')}
                                                     className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm rounded transition-colors ${
-                                                        theme === 'system' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                                                        theme === 'system' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                                     }`}
                                                 >
                                                     <div className="w-4 h-4 svg-mask" style={{
@@ -158,7 +158,7 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                                 <button
                                                     onClick={() => handleThemeChange('light')}
                                                     className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm rounded transition-colors ${
-                                                        theme === 'light' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                                                        theme === 'light' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                                     }`}
                                                 >
                                                     <div className="w-4 h-4 svg-mask" style={{
@@ -170,7 +170,7 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                                 <button
                                                     onClick={() => handleThemeChange('dark')}
                                                     className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm rounded transition-colors ${
-                                                        theme === 'dark' ? 'bg-indigo-600 text-white' : 'text-gray-300 hover:bg-gray-700'
+                                                        theme === 'dark' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
                                                     }`}
                                                 >
                                                     <div className="w-4 h-4 svg-mask" style={{
@@ -182,10 +182,10 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                             </div>
                                         </div>
                                     </div>
-                                    <div className="p-2 border-t border-gray-700">
+                                    <div className="p-2 border-t border-gray-200 dark:border-gray-700">
                                         <button
                                             onClick={() => { setIsProfileOpen(false); onLogout(); }}
-                                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-red-400 hover:bg-gray-700 rounded transition-colors"
+                                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
                                         >
                                             <div className="w-4 h-4 svg-mask" style={{
                                                 maskImage: 'url(/assets/logout.svg)',
@@ -210,28 +210,28 @@ function GettingStartedModal({ isOpen, onClose, publicUrl, version }) {
 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Getting Started" maxWidth="max-w-3xl">
-            <div className="space-y-4 text-gray-300">
+            <div className="space-y-4 text-gray-700 dark:text-gray-300">
                 <p>This is how you get started with your first Rise project:</p>
 
-                <div className="bg-gray-800 rounded-lg p-4 space-y-4">
+                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 space-y-4">
                     <div>
-                        <h4 className="text-sm font-semibold text-gray-400 mb-2"># Install the Rise CLI and log-in</h4>
+                        <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2"># Install the Rise CLI and log-in</h4>
                         <pre className="text-sm text-indigo-300 overflow-x-auto whitespace-pre-wrap">$ {installCommand}{'\n'}$ rise login --url {publicUrl || window.location.origin}</pre>
                     </div>
 
                     <div>
-                        <h4 className="text-sm font-semibold text-gray-400 mb-2"># Deploy a sample project</h4>
+                        <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2"># Deploy a sample project</h4>
                         <pre className="text-sm text-indigo-300 overflow-x-auto whitespace-pre-wrap">$ git clone https://github.com/GoogleCloudPlatform/buildpack-samples{'\n'}$ rise project create my-project # Pick a unique project name{'\n'}$ rise deployment create my-project buildpack-samples/sample-python/</pre>
                     </div>
                 </div>
 
-                <p className="text-sm text-gray-400 mt-4">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">
                     For more information, visit the{' '}
                     <a
                         href="https://github.com/NiklasRosenstein/rise"
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-indigo-400 hover:text-indigo-300 underline"
+                        className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 underline"
                     >
                         Rise documentation on GitHub
                     </a>.
@@ -258,8 +258,8 @@ function LoginPage() {
     };
 
     return (
-        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-black">
-            <div className="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl">
+        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-200 dark:from-gray-900 dark:via-gray-950 dark:to-black">
+            <div className="w-full max-w-md p-8 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 shadow-2xl">
                 <div className="text-center mb-8">
                     <div className="flex justify-center mb-4">
                         <div className="w-16 h-16 svg-mask text-indigo-500" style={{
@@ -267,14 +267,14 @@ function LoginPage() {
                             WebkitMaskImage: 'url(/assets/logo.svg)'
                         }}></div>
                     </div>
-                    <h1 className="text-3xl font-bold text-white mb-2">Rise</h1>
-                    <p className="text-gray-400">Container Deployment Platform</p>
+                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Rise</h1>
+                    <p className="text-gray-600 dark:text-gray-400">Container Deployment Platform</p>
                 </div>
 
                 {loading ? (
                     <div className="flex flex-col items-center gap-4 py-8">
                         <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                        <p className="text-gray-300">{status}</p>
+                        <p className="text-gray-700 dark:text-gray-300">{status}</p>
                     </div>
                 ) : (
                     <>
@@ -285,7 +285,7 @@ function LoginPage() {
                             Login with OAuth
                         </button>
                         {status && (
-                            <p className="text-center text-sm text-red-400">{status}</p>
+                            <p className="text-center text-sm text-red-600 dark:text-red-400">{status}</p>
                         )}
                     </>
                 )}
@@ -464,7 +464,7 @@ function App() {
     }
 
     return (
-        <div className="min-h-screen flex flex-col">
+        <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-950">
             <Header
                 user={user}
                 onLogout={handleLogout}

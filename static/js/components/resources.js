@@ -143,7 +143,7 @@ function ServiceAccountsList({ projectName }) {
     };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading service accounts: {error}</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading service accounts: {error}</p>;
 
     return (
         <div>
@@ -152,35 +152,35 @@ function ServiceAccountsList({ projectName }) {
                     Create Service Account
                 </Button>
             </div>
-            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
                 <table className="w-full">
-                    <thead className="bg-gray-800">
+                    <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Email</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Issuer URL</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Claims</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Email</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Issuer URL</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Claims</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800">
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                         {serviceAccounts.length === 0 ? (
                             <tr>
-                                <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
+                                <td colSpan="5" className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
                                     No service accounts found.
                                 </td>
                             </tr>
                         ) : (
                             serviceAccounts.map(sa => (
-                            <tr key={sa.id} className="hover:bg-gray-800/50 transition-colors">
-                                <td className="px-6 py-4 text-sm text-gray-200">{sa.email}</td>
-                                <td className="px-6 py-4 text-sm text-gray-300 break-all max-w-xs">{sa.issuer_url}</td>
-                                <td className="px-6 py-4 text-xs font-mono text-gray-300">
+                            <tr key={sa.id} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
+                                <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{sa.email}</td>
+                                <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 break-all max-w-xs">{sa.issuer_url}</td>
+                                <td className="px-6 py-4 text-xs font-mono text-gray-700 dark:text-gray-300">
                                     {Object.entries(sa.claims || {})
                                         .map(([key, value]) => `${key}=${value}`)
                                         .join(', ')}
                                 </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDate(sa.created_at)}</td>
+                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(sa.created_at)}</td>
                                 <td className="px-6 py-4 text-sm">
                                     <div className="flex gap-2">
                                         <Button
@@ -237,8 +237,8 @@ function ServiceAccountsList({ projectName }) {
                         placeholder={`{\n  "sub": "repo:myorg/myrepo:*"\n}`}
                         rows={5}
                     />
-                    <p className="text-sm text-gray-500">
-                        <strong>Note:</strong> Additional claims should be provided as a JSON object. The <code className="bg-gray-800 px-1 rounded">aud</code> claim is configured separately above.
+                    <p className="text-sm text-gray-600 dark:text-gray-500">
+                        <strong>Note:</strong> Additional claims should be provided as a JSON object. The <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">aud</code> claim is configured separately above.
                     </p>
 
                     <div className="flex justify-end gap-3 pt-4">
@@ -352,7 +352,7 @@ function DomainsList({ projectName }) {
     };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading custom domains: {error}</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading custom domains: {error}</p>;
 
     return (
         <div>
@@ -361,27 +361,27 @@ function DomainsList({ projectName }) {
                     Add Domain
                 </Button>
             </div>
-            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
                 <table className="w-full">
-                    <thead className="bg-gray-800">
+                    <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Domain</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Domain</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800">
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                         {domains.length === 0 ? (
                             <tr>
-                                <td colSpan="3" className="px-6 py-8 text-center text-gray-400">
+                                <td colSpan="3" className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
                                     No custom domains configured.
                                 </td>
                             </tr>
                         ) : (
                             domains.map(domain => (
-                            <tr key={domain.id} className="hover:bg-gray-800/50 transition-colors">
-                                <td className="px-6 py-4 text-sm font-mono text-gray-200">{domain.domain}</td>
-                                <td className="px-6 py-4 text-sm text-gray-300">{formatDate(domain.created_at)}</td>
+                            <tr key={domain.id} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
+                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{domain.domain}</td>
+                                <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{formatDate(domain.created_at)}</td>
                                 <td className="px-6 py-4 text-sm">
                                     <Button
                                         variant="danger"
@@ -412,7 +412,7 @@ function DomainsList({ projectName }) {
                         placeholder="example.com"
                         required
                     />
-                    <p className="text-sm text-gray-500">
+                    <p className="text-sm text-gray-600 dark:text-gray-500">
                         <strong>Note:</strong> Make sure to configure your DNS to point this domain to your Rise deployment before adding it.
                         The domain will be added to the ingress for the default deployment group only.
                     </p>
@@ -538,7 +538,7 @@ function EnvVarsList({ projectName, deploymentId }) {
     };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading environment variables: {error}</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading environment variables: {error}</p>;
 
     return (
         <div>
@@ -549,30 +549,30 @@ function EnvVarsList({ projectName, deploymentId }) {
                     </Button>
                 </div>
             )}
-            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
                 <table className="w-full">
-                    <thead className="bg-gray-800">
+                    <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Key</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Value</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Key</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Value</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Type</th>
                             {!deploymentId && (
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                             )}
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800">
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                         {envVars.length === 0 ? (
                             <tr>
-                                <td colSpan={deploymentId ? "3" : "4"} className="px-6 py-8 text-center text-gray-400">
+                                <td colSpan={deploymentId ? "3" : "4"} className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
                                     No environment variables configured.
                                 </td>
                             </tr>
                         ) : (
                             envVars.map(env => (
-                            <tr key={env.key} className="hover:bg-gray-800/50 transition-colors">
-                                <td className="px-6 py-4 text-sm font-mono text-gray-200">{env.key}</td>
-                                <td className="px-6 py-4 text-sm font-mono text-gray-200">{env.value}</td>
+                            <tr key={env.key} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
+                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{env.key}</td>
+                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{env.value}</td>
                                 <td className="px-6 py-4 text-sm">
                                     {env.is_secret ? (
                                         <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
@@ -607,12 +607,12 @@ function EnvVarsList({ projectName, deploymentId }) {
                 </table>
             </div>
             {deploymentId ? (
-                <p className="mt-4 text-sm text-gray-500">
+                <p className="mt-4 text-sm text-gray-600 dark:text-gray-500">
                     <strong>Note:</strong> Environment variables are read-only snapshots taken at deployment time.
                     Secret values are always masked for security.
                 </p>
             ) : (
-                <p className="mt-4 text-sm text-gray-500">
+                <p className="mt-4 text-sm text-gray-600 dark:text-gray-500">
                     <strong>Note:</strong> Environment variables are snapshots at deployment time.
                     Changes to project variables will only apply to new deployments, not existing ones.
                     Secret values are always masked for security.
@@ -825,20 +825,20 @@ function ExtensionsList({ projectName }) {
     };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading extensions: {error}</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading extensions: {error}</p>;
 
     return (
         <div className="space-y-6">
             {/* Enabled Extensions - Table with Add Icons */}
             <div>
                 <div className="flex items-center gap-3 mb-3">
-                    <h3 className="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+                    <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
                         Enabled Extensions
                     </h3>
                     {availableExtensions.length > 0 && (
                         <div className="flex items-center gap-2">
                             {/* Plus icon indicator (non-clickable) */}
-                            <div className="w-8 h-8 flex items-center justify-center text-gray-500">
+                            <div className="w-8 h-8 flex items-center justify-center text-gray-600 dark:text-gray-500">
                                 <div className="w-5 h-5 svg-mask" style={{
                                     maskImage: 'url(/assets/plus.svg)',
                                     WebkitMaskImage: 'url(/assets/plus.svg)'
@@ -856,7 +856,7 @@ function ExtensionsList({ projectName }) {
                                             onClick={() => {
                                                 window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}/@new`;
                                             }}
-                                            className="w-8 h-8 flex items-center justify-center bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-indigo-500 rounded-sm transition-all"
+                                            className="w-8 h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-700 hover:border-indigo-500 rounded-sm transition-all"
                                             title={`Add ${extType.display_name}`}
                                         >
                                             {iconUrl ? (
@@ -866,7 +866,7 @@ function ExtensionsList({ projectName }) {
                                                     className="w-6 h-6 rounded object-contain"
                                                 />
                                             ) : (
-                                                <div className="w-6 h-6 flex items-center justify-center text-gray-400 text-xs font-bold">
+                                                <div className="w-6 h-6 flex items-center justify-center text-gray-600 dark:text-gray-400 text-xs font-bold">
                                                     {extType.display_name.charAt(0).toUpperCase()}
                                                 </div>
                                             )}
@@ -878,24 +878,24 @@ function ExtensionsList({ projectName }) {
                     )}
                 </div>
                 {enabledExtensions.length === 0 ? (
-                    <div className="bg-gray-900 rounded-lg border border-gray-800 px-6 py-8 text-center">
-                        <p className="text-gray-400 text-sm">
+                    <div className="bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 px-6 py-8 text-center">
+                        <p className="text-gray-600 dark:text-gray-400 text-sm">
                             No extensions enabled yet. Click an extension icon to add one.
                         </p>
                     </div>
                 ) : (
-                    <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+                    <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
                         <table className="w-full">
-                            <thead className="bg-gray-800">
+                            <thead className="bg-gray-100 dark:bg-gray-800">
                                 <tr>
                                     <th className="w-12 px-3 py-3"></th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Extension</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Type</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Updated</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Extension</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Type</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Updated</th>
                                 </tr>
                             </thead>
-                            <tbody className="divide-y divide-gray-800">
+                            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                                 {enabledExtensions
                                     .sort((a, b) => a.extension.localeCompare(b.extension))
                                     .map(ext => {
@@ -905,7 +905,7 @@ function ExtensionsList({ projectName }) {
                                         return (
                                             <tr
                                                 key={ext.extension}
-                                                className="hover:bg-gray-800/50 transition-colors cursor-pointer"
+                                                className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors cursor-pointer"
                                                 onClick={() => {
                                                     // Navigate to the specific extension instance
                                                     window.location.hash = `#project/${projectName}/extensions/${ext.extension_type}/${ext.extension}`;
@@ -923,15 +923,15 @@ function ExtensionsList({ projectName }) {
                                                     )}
                                                 </td>
                                                 <td className="px-6 py-4 text-sm">
-                                                    <span className="font-mono text-gray-200">{ext.extension}</span>
+                                                    <span className="font-mono text-gray-900 dark:text-gray-200">{ext.extension}</span>
                                                 </td>
-                                                <td className="px-6 py-4 text-sm text-gray-300">
+                                                <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
                                                     {extType?.description || ext.extension_type}
                                                 </td>
                                                 <td className="px-6 py-4 text-sm">
                                                     {renderExtensionStatusBadge(ext)}
                                                 </td>
-                                                <td className="px-6 py-4 text-sm text-gray-400">
+                                                <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                                                     {formatDate(ext.updated)}
                                                 </td>
                                             </tr>
@@ -954,30 +954,30 @@ function ExtensionsList({ projectName }) {
                     {selectedExtension && (
                         <>
                             {/* Tab Navigation */}
-                            <div className="border-b border-gray-700">
+                            <div className="border-b border-gray-300 dark:border-gray-700">
                                 <div className="flex gap-6">
                                     {hasExtensionUI(selectedExtension.extension_type) && (
                                         <button
-                                            className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'ui' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                            className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'ui' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                             onClick={() => setModalTab('ui')}
                                         >
                                             Configure
                                         </button>
                                     )}
                                     <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                         onClick={() => setModalTab('config')}
                                     >
                                         {hasExtensionUI(selectedExtension.extension_type) ? 'JSON' : 'Configuration'}
                                     </button>
                                     <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                         onClick={() => setModalTab('schema')}
                                     >
                                         Schema
                                     </button>
                                     <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'docs' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'docs' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                         onClick={() => setModalTab('docs')}
                                     >
                                         Documentation
@@ -985,13 +985,13 @@ function ExtensionsList({ projectName }) {
                                     {editMode && selectedExtensionData && (
                                         <>
                                             <button
-                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'status' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'status' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                                 onClick={() => setModalTab('status')}
                                             >
                                                 Status
                                             </button>
                                             <button
-                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'delete' ? 'border-red-500 text-red-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'delete' ? 'border-red-500 text-red-400' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                                 onClick={() => setModalTab('delete')}
                                             >
                                                 Delete
@@ -1024,7 +1024,7 @@ function ExtensionsList({ projectName }) {
                                         required
                                         rows={15}
                                     />
-                                    <p className="text-sm text-gray-500">
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">
                                         Enter the extension configuration as a JSON object. See the Schema and Documentation tabs for valid fields and examples.
                                         {hasExtensionUI(selectedExtension.extension_type) && <span> Use the Configure tab for a form-based interface.</span>}
                                     </p>
@@ -1033,11 +1033,11 @@ function ExtensionsList({ projectName }) {
 
                             {modalTab === 'schema' && (
                                 <div className="space-y-4">
-                                    <h4 className="text-sm font-semibold text-gray-300">Schema</h4>
-                                    <pre className="text-xs font-mono text-gray-300 bg-gray-800 p-4 rounded overflow-x-auto max-h-96">
+                                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Schema</h4>
+                                    <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 p-4 rounded overflow-x-auto max-h-96">
                                         {JSON.stringify(selectedExtension.spec_schema, null, 2)}
                                     </pre>
-                                    <p className="text-sm text-gray-500">
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">
                                         This JSON schema defines the valid structure for the extension configuration.
                                     </p>
                                 </div>
@@ -1045,9 +1045,9 @@ function ExtensionsList({ projectName }) {
 
                             {modalTab === 'docs' && (
                                 <div className="space-y-4">
-                                    <h4 className="text-sm font-semibold text-gray-300">Documentation</h4>
+                                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Documentation</h4>
                                     <div
-                                        className="prose prose-sm prose-invert max-w-none bg-gray-800 p-4 rounded max-h-96 overflow-y-auto"
+                                        className="prose prose-sm prose-invert max-w-none bg-gray-100 dark:bg-gray-800 p-4 rounded max-h-96 overflow-y-auto"
                                         dangerouslySetInnerHTML={{
                                             __html: marked.parse(selectedExtension.documentation)
                                         }}
@@ -1058,25 +1058,25 @@ function ExtensionsList({ projectName }) {
                             {modalTab === 'status' && editMode && selectedExtensionData && (
                                 <div className="space-y-4">
                                     <div>
-                                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Status Summary</h4>
-                                        <p className="text-gray-200">{selectedExtensionData.status_summary}</p>
+                                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Status Summary</h4>
+                                        <p className="text-gray-900 dark:text-gray-200">{selectedExtensionData.status_summary}</p>
                                     </div>
 
                                     <div>
-                                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Current Spec</h4>
-                                        <pre className="text-xs font-mono text-gray-300 bg-gray-800 p-3 rounded overflow-x-auto">
+                                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Current Spec</h4>
+                                        <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 p-3 rounded overflow-x-auto">
                                             {JSON.stringify(selectedExtensionData.spec, null, 2)}
                                         </pre>
                                     </div>
 
                                     <div>
-                                        <h4 className="text-sm font-semibold text-gray-300 mb-2">Full Status</h4>
-                                        <pre className="text-xs font-mono text-gray-300 bg-gray-800 p-3 rounded overflow-x-auto max-h-96">
+                                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Full Status</h4>
+                                        <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 p-3 rounded overflow-x-auto max-h-96">
                                             {JSON.stringify(selectedExtensionData.status, null, 2)}
                                         </pre>
                                     </div>
 
-                                    <div className="text-xs text-gray-500">
+                                    <div className="text-xs text-gray-600 dark:text-gray-500">
                                         <p>Created: {formatDate(selectedExtensionData.created)}</p>
                                         <p>Updated: {formatDate(selectedExtensionData.updated)}</p>
                                     </div>
@@ -1200,9 +1200,9 @@ function GenericExtensionDetailView({ extension }) {
     return (
         <div className="space-y-6">
             <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">Status</h2>
-                <div className="bg-gray-900 rounded p-4">
-                    <p className="text-gray-300">{extension.status_summary}</p>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Status</h2>
+                <div className="bg-white dark:bg-gray-900 rounded p-4">
+                    <p className="text-gray-700 dark:text-gray-300">{extension.status_summary}</p>
 
                     {extension.status && extension.status.error && (
                         <div className="mt-3 p-3 bg-red-900/20 border border-red-700 rounded">
@@ -1215,31 +1215,31 @@ function GenericExtensionDetailView({ extension }) {
             </section>
 
             <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">Configuration</h2>
-                <pre className="bg-gray-900 rounded p-4 overflow-x-auto">
-                    <code className="text-sm text-gray-300">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Configuration</h2>
+                <pre className="bg-white dark:bg-gray-900 rounded p-4 overflow-x-auto">
+                    <code className="text-sm text-gray-700 dark:text-gray-300">
                         {JSON.stringify(extension.spec, null, 2)}
                     </code>
                 </pre>
             </section>
 
             <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">Full Status</h2>
-                <pre className="bg-gray-900 rounded p-4 overflow-x-auto">
-                    <code className="text-sm text-gray-300">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Full Status</h2>
+                <pre className="bg-white dark:bg-gray-900 rounded p-4 overflow-x-auto">
+                    <code className="text-sm text-gray-700 dark:text-gray-300">
                         {JSON.stringify(extension.status, null, 2)}
                     </code>
                 </pre>
             </section>
 
             <section>
-                <h2 className="text-lg font-semibold text-gray-200 mb-3">Metadata</h2>
-                <div className="bg-gray-900 rounded p-4 space-y-2">
-                    <p className="text-sm text-gray-300">
-                        <span className="text-gray-500">Created:</span> {formatDate(extension.created)}
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Metadata</h2>
+                <div className="bg-white dark:bg-gray-900 rounded p-4 space-y-2">
+                    <p className="text-sm text-gray-700 dark:text-gray-300">
+                        <span className="text-gray-600 dark:text-gray-500">Created:</span> {formatDate(extension.created)}
                     </p>
-                    <p className="text-sm text-gray-300">
-                        <span className="text-gray-500">Updated:</span> {formatDate(extension.updated)}
+                    <p className="text-sm text-gray-700 dark:text-gray-300">
+                        <span className="text-gray-600 dark:text-gray-500">Updated:</span> {formatDate(extension.updated)}
                     </p>
                 </div>
             </section>
@@ -1462,7 +1462,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                 <div className="mb-6">
                     <button
                         onClick={() => window.location.hash = `#project/${projectName}/extensions`}
-                        className="text-indigo-400 hover:text-indigo-300 flex items-center gap-2"
+                        className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-2"
                     >
                         <div className="w-5 h-5 svg-mask" style={{
                             maskImage: 'url(/assets/arrow-left.svg)',
@@ -1486,7 +1486,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
             <div className="mb-6 flex items-center justify-between">
                 <button
                     onClick={() => window.location.hash = `#project/${projectName}/extensions`}
-                    className="text-indigo-400 hover:text-indigo-300 flex items-center gap-2"
+                    className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-2"
                 >
                     <div className="w-5 h-5 svg-mask" style={{
                         maskImage: 'url(/assets/arrow-left.svg)',
@@ -1494,8 +1494,8 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                     }}></div>
                     Back to Extensions
                 </button>
-                <div className="flex items-center gap-2 text-sm text-gray-400">
-                    <a href={`#project/${projectName}`} className="hover:text-indigo-400 transition-colors">
+                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
+                    <a href={`#project/${projectName}`} className="hover:text-indigo-600 dark:text-indigo-400 transition-colors">
                         {projectName}
                     </a>
                     <span>/</span>
@@ -1503,7 +1503,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                 </div>
             </div>
 
-            <div className="bg-gray-800 rounded-lg shadow-xl p-6">
+            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg shadow-xl p-6">
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center space-x-4">
                         {getExtensionIcon(extensionType.extension_type) && (
@@ -1517,7 +1517,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                             <h1 className="text-2xl font-bold text-white">
                                 {extensionType.display_name}
                             </h1>
-                            <p className="text-gray-400">{extensionType.description}</p>
+                            <p className="text-gray-600 dark:text-gray-400">{extensionType.description}</p>
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
@@ -1532,12 +1532,12 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                 </div>
 
                 {/* Tab Navigation */}
-                <div className="border-b border-gray-700 mb-6">
+                <div className="border-b border-gray-300 dark:border-gray-700 mb-6">
                     <div className="flex gap-6">
                         {/* Left-aligned: Extension-specific tabs */}
                         {isEnabled && (
                             <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'overview' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'overview' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                 onClick={() => setActiveTab('overview')}
                             >
                                 Overview
@@ -1545,7 +1545,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                         )}
                         {hasExtensionUI(extensionType.extension_type) && (
                             <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'configure' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'configure' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                 onClick={() => setActiveTab('configure')}
                             >
                                 Configure{hasUnsavedChanges && ' *'}
@@ -1557,34 +1557,34 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
 
                         {/* Right-aligned: Common tabs */}
                         <button
-                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                             onClick={() => setActiveTab('config')}
                         >
                             Spec{hasUnsavedChanges && ' *'}
                         </button>
                         {isEnabled && (
                             <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'status' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'status' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                 onClick={() => setActiveTab('status')}
                             >
                                 Status
                             </button>
                         )}
                         <button
-                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                             onClick={() => setActiveTab('schema')}
                         >
                             Schema
                         </button>
                         <button
-                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'docs' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'docs' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                             onClick={() => setActiveTab('docs')}
                         >
                             Documentation
                         </button>
                         {isEnabled && (
                             <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'delete' ? 'border-red-500 text-red-400' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'delete' ? 'border-red-500 text-red-400' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                 onClick={() => setActiveTab('delete')}
                             >
                                 Delete
@@ -1605,7 +1605,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                 {activeTab === 'configure' && extensionAPI?.renderConfigureTab && (
                     <div className="space-y-4">
                         {!isEnabled && (
-                            <div className="pb-4 border-b border-gray-700">
+                            <div className="pb-4 border-b border-gray-300 dark:border-gray-700">
                                 <FormField
                                     label="Extension Name"
                                     id="extension-instance-name"
@@ -1614,13 +1614,13 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                                     placeholder={getDefaultExtensionName(extensionTypeProp)}
                                     required
                                 />
-                                <p className="text-sm text-gray-500 mt-2">
+                                <p className="text-sm text-gray-600 dark:text-gray-500 mt-2">
                                     Give this extension instance a unique name. You can create multiple instances of the same extension type with different names.
                                 </p>
                             </div>
                         )}
                         {extensionAPI.renderConfigureTab(uiSpec, extensionType.spec_schema, handleUiSpecChange, projectName, instanceName, isEnabled)}
-                        <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+                        <div className="flex justify-end gap-3 pt-4 border-t border-gray-300 dark:border-gray-700">
                             <Button
                                 variant="primary"
                                 onClick={handleSave}
@@ -1635,7 +1635,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                 {activeTab === 'config' && (
                     <div className="space-y-4">
                         {!isEnabled && (
-                            <div className="pb-4 border-b border-gray-700">
+                            <div className="pb-4 border-b border-gray-300 dark:border-gray-700">
                                 <FormField
                                     label="Extension Name"
                                     id="extension-instance-name-config"
@@ -1644,7 +1644,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                                     placeholder={getDefaultExtensionName(extensionTypeProp)}
                                     required
                                 />
-                                <p className="text-sm text-gray-500 mt-2">
+                                <p className="text-sm text-gray-600 dark:text-gray-500 mt-2">
                                     Give this extension instance a unique name. You can create multiple instances of the same extension type with different names.
                                 </p>
                             </div>
@@ -1659,11 +1659,11 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                             required
                             rows={15}
                         />
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-gray-600 dark:text-gray-500">
                             Enter the extension configuration as a JSON object. See the Schema and Documentation tabs for valid fields and examples.
                             {hasExtensionUI(extensionType.extension_type) && <span> Use the Configure tab for a form-based interface.</span>}
                         </p>
-                        <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+                        <div className="flex justify-end gap-3 pt-4 border-t border-gray-300 dark:border-gray-700">
                             <Button
                                 variant="primary"
                                 onClick={handleSave}
@@ -1678,25 +1678,25 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                 {activeTab === 'status' && isEnabled && (
                     <div className="space-y-4">
                         <div>
-                            <h4 className="text-sm font-semibold text-gray-300 mb-2">Status Summary</h4>
-                            <p className="text-gray-200">{enabledExtension.status_summary}</p>
+                            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Status Summary</h4>
+                            <p className="text-gray-900 dark:text-gray-200">{enabledExtension.status_summary}</p>
                         </div>
 
                         <div>
-                            <h4 className="text-sm font-semibold text-gray-300 mb-2">Current Spec</h4>
-                            <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-3 rounded overflow-x-auto">
+                            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Current Spec</h4>
+                            <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 p-3 rounded overflow-x-auto">
                                 {JSON.stringify(enabledExtension.spec, null, 2)}
                             </pre>
                         </div>
 
                         <div>
-                            <h4 className="text-sm font-semibold text-gray-300 mb-2">Full Status</h4>
-                            <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-3 rounded overflow-x-auto max-h-96">
+                            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Full Status</h4>
+                            <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 p-3 rounded overflow-x-auto max-h-96">
                                 {JSON.stringify(enabledExtension.status, null, 2)}
                             </pre>
                         </div>
 
-                        <div className="text-xs text-gray-500">
+                        <div className="text-xs text-gray-600 dark:text-gray-500">
                             <p>Created: {formatDate(enabledExtension.created)}</p>
                             <p>Updated: {formatDate(enabledExtension.updated)}</p>
                         </div>
@@ -1705,11 +1705,11 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
 
                 {activeTab === 'schema' && (
                     <div className="space-y-4">
-                        <h4 className="text-sm font-semibold text-gray-300">Schema</h4>
-                        <pre className="text-xs font-mono text-gray-300 bg-gray-900 p-4 rounded overflow-x-auto max-h-96">
+                        <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Schema</h4>
+                        <pre className="text-xs font-mono text-gray-700 dark:text-gray-300 bg-white dark:bg-gray-900 p-4 rounded overflow-x-auto max-h-96">
                             {JSON.stringify(extensionType.spec_schema, null, 2)}
                         </pre>
-                        <p className="text-sm text-gray-500">
+                        <p className="text-sm text-gray-600 dark:text-gray-500">
                             This JSON schema defines the valid structure for the extension configuration.
                         </p>
                     </div>
@@ -1743,7 +1743,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                             required
                         />
 
-                        <div className="flex justify-end gap-3 pt-4 border-t border-gray-700">
+                        <div className="flex justify-end gap-3 pt-4 border-t border-gray-300 dark:border-gray-700">
                             <Button
                                 variant="secondary"
                                 onClick={() => setActiveTab('overview')}

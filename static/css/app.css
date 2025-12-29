@@ -127,7 +127,7 @@
 }
 
 .modal-content {
-    background-color: #1f2937;
+    background-color: white;
     border-radius: 0.5rem;
     width: 100%;
     max-height: calc(100vh - 2rem);
@@ -136,22 +136,34 @@
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
 }
 
+.dark .modal-content {
+    background-color: #1f2937;
+}
+
 .modal-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     padding: 1.5rem;
-    border-bottom: 1px solid #374151;
+    border-bottom: 1px solid #e5e7eb;
+}
+
+.dark .modal-header {
+    border-bottom-color: #374151;
 }
 
 .modal-title {
     font-size: 1.25rem;
     font-weight: 700;
+    color: #111827;
+}
+
+.dark .modal-title {
     color: white;
 }
 
 .modal-close-button {
-    color: #9ca3af;
+    color: #6b7280;
     background: transparent;
     border: none;
     padding: 0.5rem;
@@ -163,7 +175,16 @@
     justify-content: center;
 }
 
+.dark .modal-close-button {
+    color: #9ca3af;
+}
+
 .modal-close-button:hover {
+    background-color: #f3f4f6;
+    color: #111827;
+}
+
+.dark .modal-close-button:hover {
     background-color: #374151;
     color: white;
 }
@@ -176,12 +197,16 @@
 
 /* Markdown/Prose Styling */
 .prose {
-    color: #d1d5db;
+    color: #374151;
     line-height: 1.75;
 }
 
+.dark .prose {
+    color: #d1d5db;
+}
+
 .prose h1 {
-    color: #f9fafb;
+    color: #111827;
     font-weight: 800;
     font-size: 2.25rem;
     margin-top: 0;
@@ -189,8 +214,12 @@
     line-height: 1.1111111;
 }
 
+.dark .prose h1 {
+    color: #f9fafb;
+}
+
 .prose h2 {
-    color: #f3f4f6;
+    color: #1f2937;
     font-weight: 700;
     font-size: 1.875rem;
     margin-top: 2.5rem;
@@ -198,8 +227,12 @@
     line-height: 1.3333333;
 }
 
-.prose h3 {
+.dark .prose h2 {
     color: #f3f4f6;
+}
+
+.prose h3 {
+    color: #1f2937;
     font-weight: 600;
     font-size: 1.5rem;
     margin-top: 2rem;
@@ -207,13 +240,21 @@
     line-height: 1.6;
 }
 
-.prose h4 {
+.dark .prose h3 {
     color: #f3f4f6;
+}
+
+.prose h4 {
+    color: #1f2937;
     font-weight: 600;
     font-size: 1.25rem;
     margin-top: 1.75rem;
     margin-bottom: 0.75rem;
     line-height: 1.5;
+}
+
+.dark .prose h4 {
+    color: #f3f4f6;
 }
 
 .prose p {
@@ -244,17 +285,22 @@
 }
 
 .prose code {
-    color: #f3f4f6;
-    background-color: #374151;
+    color: #1f2937;
+    background-color: #e5e7eb;
     padding: 0.25rem 0.375rem;
     border-radius: 0.25rem;
     font-size: 0.875em;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-.prose pre {
+.dark .prose code {
     color: #f3f4f6;
-    background-color: #1f2937;
+    background-color: #374151;
+}
+
+.prose pre {
+    color: #1f2937;
+    background-color: #f3f4f6;
     overflow-x: auto;
     font-size: 0.875em;
     line-height: 1.7142857;
@@ -262,6 +308,11 @@
     margin-bottom: 1.75rem;
     border-radius: 0.375rem;
     padding: 1rem 1.25rem;
+}
+
+.dark .prose pre {
+    color: #f3f4f6;
+    background-color: #1f2937;
 }
 
 .prose pre code {
@@ -277,42 +328,67 @@
 }
 
 .prose strong {
-    color: #f3f4f6;
+    color: #111827;
     font-weight: 600;
 }
 
-.prose em {
+.dark .prose strong {
     color: #f3f4f6;
+}
+
+.prose em {
+    color: #111827;
     font-style: italic;
 }
 
+.dark .prose em {
+    color: #f3f4f6;
+}
+
 .prose a {
-    color: #60a5fa;
+    color: #2563eb;
     text-decoration: underline;
     font-weight: 500;
 }
 
+.dark .prose a {
+    color: #60a5fa;
+}
+
 .prose a:hover {
+    color: #1d4ed8;
+}
+
+.dark .prose a:hover {
     color: #93c5fd;
 }
 
 .prose blockquote {
     font-weight: 500;
     font-style: italic;
-    color: #f3f4f6;
+    color: #1f2937;
     border-left-width: 0.25rem;
-    border-left-color: #4b5563;
+    border-left-color: #d1d5db;
     quotes: "\201C""\201D""\2018""\2019";
     margin-top: 1.75rem;
     margin-bottom: 1.75rem;
     padding-left: 1rem;
 }
 
+.dark .prose blockquote {
+    color: #f3f4f6;
+    border-left-color: #4b5563;
+}
+
 .prose hr {
-    border-color: #4b5563;
+    border-color: #d1d5db;
     border-top-width: 1px;
     margin-top: 3rem;
     margin-bottom: 3rem;
+}
+
+.dark .prose hr {
+    border-color: #4b5563;
 }
 
 .prose table {
@@ -326,9 +402,14 @@
 }
 
 .prose thead {
-    color: #f3f4f6;
+    color: #111827;
     font-weight: 600;
     border-bottom-width: 1px;
+    border-bottom-color: #d1d5db;
+}
+
+.dark .prose thead {
+    color: #f3f4f6;
     border-bottom-color: #4b5563;
 }
 
@@ -341,6 +422,10 @@
 
 .prose tbody tr {
     border-bottom-width: 1px;
+    border-bottom-color: #e5e7eb;
+}
+
+.dark .prose tbody tr {
     border-bottom-color: #374151;
 }
 
