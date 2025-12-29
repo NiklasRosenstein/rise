@@ -60,11 +60,14 @@ struct KubernetesMetadata {
 
 /// Reconciliation phases for Kubernetes deployments
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+#[serde(rename_all = "PascalCase")]
 enum ReconcilePhase {
     #[default]
     NotStarted,
+    // Old phases - kept temporarily until reconciliation loop is refactored
     CreatingNamespace,
     CreatingImagePullSecret,
+    CreatingBackendService,
     CreatingService,
     #[serde(alias = "CreatingReplicaSet")]
     CreatingDeployment,
@@ -107,6 +110,8 @@ pub struct KubernetesControllerConfig {
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub auth_backend_url: String,
     pub auth_signin_url: String,
+    /// Backend address for routing /.rise/* traffic to the Rise backend
+    pub backend_address: Option<crate::server::settings::BackendAddress>,
     pub namespace_labels: std::collections::HashMap<String, String>,
     pub namespace_annotations: std::collections::HashMap<String, String>,
     pub ingress_annotations: std::collections::HashMap<String, String>,
@@ -128,6 +133,8 @@ pub struct KubernetesController {
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     auth_backend_url: String,
     auth_signin_url: String,
+    /// Backend address for routing /.rise/* traffic to the Rise backend
+    backend_address: Option<crate::server::settings::BackendAddress>,
     namespace_labels: std::collections::HashMap<String, String>,
     namespace_annotations: std::collections::HashMap<String, String>,
     ingress_annotations: std::collections::HashMap<String, String>,
@@ -135,6 +142,11 @@ pub struct KubernetesController {
     custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
     node_selector: std::collections::HashMap<String, String>,
     image_pull_secret_name: Option<String>,
+    /// In-memory cache of resource versions for drift detection
+    /// Key: "deployment-{id}-{resource_type}" (e.g., "deployment-123-service")
+    /// Value: last observed resourceVersion from Kubernetes API
+    /// Lost on controller restart → causes one re-apply, then cached again
+    resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
 }
 
 impl KubernetesController {
@@ -155,6 +167,7 @@ impl KubernetesController {
             registry_provider: config.registry_provider,
             auth_backend_url: config.auth_backend_url,
             auth_signin_url: config.auth_signin_url,
+            backend_address: config.backend_address,
             namespace_labels: config.namespace_labels,
             namespace_annotations: config.namespace_annotations,
             ingress_annotations: config.ingress_annotations,
@@ -162,7 +175,51 @@ impl KubernetesController {
             custom_domain_tls_mode: config.custom_domain_tls_mode,
             node_selector: config.node_selector,
             image_pull_secret_name: config.image_pull_secret_name,
+            resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         })
+    }
+
+    /// Get cache key for a deployment's resource
+    fn resource_cache_key(deployment_id: uuid::Uuid, resource_type: &str) -> String {
+        format!("deployment-{}-{}", deployment_id, resource_type)
+    }
+
+    /// Check if resource needs apply based on version cache
+    /// Returns true if: no cached version OR current version != cached version
+    fn needs_apply(
+        &self,
+        deployment_id: uuid::Uuid,
+        resource_type: &str,
+        current_version: Option<&str>,
+    ) -> bool {
+        let key = Self::resource_cache_key(deployment_id, resource_type);
+        let cache = self.resource_versions.read().unwrap();
+
+        match (cache.get(&key), current_version) {
+            (None, _) => true,                                  // Never seen before
+            (Some(_), None) => true, // Resource exists but has no version?
+            (Some(cached), Some(current)) => cached != current, // Version changed
+        }
+    }
+
+    /// Update cached resource version
+    fn update_version_cache(
+        &self,
+        deployment_id: uuid::Uuid,
+        resource_type: &str,
+        version: Option<String>,
+    ) {
+        if let Some(version) = version {
+            let key = Self::resource_cache_key(deployment_id, resource_type);
+            let mut cache = self.resource_versions.write().unwrap();
+            cache.insert(key, version);
+        }
+    }
+
+    /// Clear all cached versions for a deployment (on termination/deletion)
+    fn clear_deployment_cache(&self, deployment_id: uuid::Uuid) {
+        let mut cache = self.resource_versions.write().unwrap();
+        cache.retain(|k, _| !k.starts_with(&format!("deployment-{}-", deployment_id)));
     }
 
     /// Test connection to Kubernetes API
@@ -830,6 +887,474 @@ impl KubernetesController {
         labels
     }
 
+    /// Apply all supporting resources for a deployment (idempotent)
+    /// - Namespace
+    /// - ImagePullSecret (if needed)
+    /// - BackendService (if configured)
+    /// - Service
+    /// - Ingress
+    ///
+    /// Uses in-memory version cache to skip unnecessary applies
+    async fn apply_supporting_resources(
+        &self,
+        deployment: &Deployment,
+        project: &Project,
+        metadata: &mut KubernetesMetadata,
+    ) -> Result<()> {
+        let namespace = Self::namespace_name(project);
+
+        // 1. Apply Namespace
+        self.apply_namespace(deployment.id, project, &namespace)
+            .await?;
+
+        // 2. Apply ImagePullSecret (if needed)
+        if let Some(ref registry_provider) = self.registry_provider {
+            if self.image_pull_secret_name.is_none() {
+                self.apply_image_pull_secret(deployment.id, project, &namespace, registry_provider)
+                    .await?;
+            }
+        }
+
+        // 3. Apply BackendService (if configured)
+        if let Some(ref backend_address) = self.backend_address {
+            self.apply_backend_service(deployment.id, project, &namespace, backend_address)
+                .await?;
+        }
+
+        // 4. Apply Service
+        self.apply_service(deployment.id, project, deployment, &namespace, metadata)
+            .await?;
+
+        // 5. Apply Ingress
+        self.apply_ingress(deployment.id, project, deployment, &namespace, metadata)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Apply namespace with drift detection
+    async fn apply_namespace(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        namespace_name: &str,
+    ) -> Result<()> {
+        let ns_api: Api<Namespace> = Api::all(self.kube_client.clone());
+
+        match ns_api.get(namespace_name).await {
+            Ok(existing_ns) => {
+                let current_version = existing_ns.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "namespace", current_version) {
+                    let ns = self.create_namespace(project);
+                    let result = ns_api
+                        .patch(
+                            namespace_name,
+                            &PatchParams::apply("rise-controller"),
+                            &Patch::Apply(&ns),
+                        )
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "namespace",
+                        result.metadata.resource_version,
+                    );
+                    info!("Applied namespace '{}' (drift detected)", namespace_name);
+                } else {
+                    debug!("Namespace '{}' is up-to-date", namespace_name);
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                let ns = self.create_namespace(project);
+                let result = ns_api.create(&PostParams::default(), &ns).await?;
+                self.update_version_cache(
+                    deployment_id,
+                    "namespace",
+                    result.metadata.resource_version,
+                );
+
+                // Add finalizer to project
+                use crate::db::projects as db_projects;
+                db_projects::add_finalizer(
+                    &self.state.db_pool,
+                    project.id,
+                    KUBERNETES_NAMESPACE_FINALIZER,
+                )
+                .await?;
+
+                info!("Created namespace '{}'", namespace_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        Ok(())
+    }
+
+    /// Apply image pull secret with drift detection
+    async fn apply_image_pull_secret(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        namespace: &str,
+        registry_provider: &Arc<dyn RegistryProvider>,
+    ) -> Result<()> {
+        let secret_name = IMAGE_PULL_SECRET_NAME;
+        let secret_api: Api<Secret> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        match secret_api.get(secret_name).await {
+            Ok(existing_secret) => {
+                let current_version = existing_secret.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "image-pull-secret", current_version) {
+                    let (username, password) = registry_provider.get_pull_credentials().await?;
+                    let secret = self.create_dockerconfigjson_secret(
+                        secret_name,
+                        registry_provider.registry_host(),
+                        &username,
+                        &password,
+                    )?;
+                    let result = secret_api
+                        .patch(
+                            secret_name,
+                            &PatchParams::apply("rise-controller").force(),
+                            &Patch::Apply(&secret),
+                        )
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "image-pull-secret",
+                        result.metadata.resource_version,
+                    );
+                    info!(
+                        project = project.name,
+                        namespace = namespace,
+                        "Applied image pull secret (drift detected)"
+                    );
+                } else {
+                    debug!("Image pull secret is up-to-date");
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                let (username, password) = registry_provider.get_pull_credentials().await?;
+                let secret = self.create_dockerconfigjson_secret(
+                    secret_name,
+                    registry_provider.registry_host(),
+                    &username,
+                    &password,
+                )?;
+                let result = secret_api.create(&PostParams::default(), &secret).await?;
+                self.update_version_cache(
+                    deployment_id,
+                    "image-pull-secret",
+                    result.metadata.resource_version,
+                );
+                info!(
+                    project = project.name,
+                    namespace = namespace,
+                    "Created image pull secret"
+                );
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        Ok(())
+    }
+
+    /// Apply backend service with drift detection
+    async fn apply_backend_service(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        namespace: &str,
+        backend_address: &crate::server::settings::BackendAddress,
+    ) -> Result<()> {
+        let service_name = "rise-backend";
+        let service_api: Api<Service> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        match service_api.get(service_name).await {
+            Ok(existing_svc) => {
+                let current_version = existing_svc.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "backend-service", current_version) {
+                    if backend_address.is_ip_address() {
+                        // ClusterIP with Endpoints
+                        let svc = self.create_backend_service_clusterip(
+                            project,
+                            namespace,
+                            backend_address.port,
+                        );
+                        let result = service_api
+                            .patch(
+                                service_name,
+                                &PatchParams::apply("rise").force(),
+                                &Patch::Apply(&svc),
+                            )
+                            .await?;
+                        self.update_version_cache(
+                            deployment_id,
+                            "backend-service",
+                            result.metadata.resource_version,
+                        );
+
+                        // Apply Endpoints
+                        let endpoints = self.create_backend_endpoints(
+                            project,
+                            namespace,
+                            &backend_address.host,
+                            backend_address.port,
+                        );
+                        let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                            Api::namespaced(self.kube_client.clone(), namespace);
+                        endpoints_api
+                            .patch(
+                                service_name,
+                                &PatchParams::apply("rise").force(),
+                                &Patch::Apply(&endpoints),
+                            )
+                            .await?;
+
+                        info!(
+                            project = project.name,
+                            backend_ip = backend_address.host,
+                            backend_port = backend_address.port,
+                            "Applied backend service (ClusterIP+Endpoints, drift detected)"
+                        );
+                    } else {
+                        // ExternalName - clean up Endpoints if they exist from previous IP-based config
+                        let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                            Api::namespaced(self.kube_client.clone(), namespace);
+                        if let Err(e) = endpoints_api
+                            .delete(service_name, &DeleteParams::default())
+                            .await
+                        {
+                            // Ignore 404 errors (Endpoints don't exist, which is fine)
+                            if !e.to_string().contains("404") {
+                                warn!(
+                                    "Failed to delete orphaned Endpoints during ExternalName transition: {}",
+                                    e
+                                );
+                            }
+                        } else {
+                            info!(
+                                project = project.name,
+                                "Deleted orphaned Endpoints (switched from IP to DNS backend)"
+                            );
+                        }
+
+                        let svc = self.create_backend_service_externalname(
+                            project,
+                            namespace,
+                            &backend_address.host,
+                        );
+                        let result = service_api
+                            .patch(
+                                service_name,
+                                &PatchParams::apply("rise").force(),
+                                &Patch::Apply(&svc),
+                            )
+                            .await?;
+                        self.update_version_cache(
+                            deployment_id,
+                            "backend-service",
+                            result.metadata.resource_version,
+                        );
+                        info!(
+                            project = project.name,
+                            backend_dns = backend_address.host,
+                            backend_port = backend_address.port,
+                            "Applied backend service (ExternalName, drift detected)"
+                        );
+                    }
+                } else {
+                    debug!("Backend service is up-to-date");
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                // Create new service
+                if backend_address.is_ip_address() {
+                    let svc = self.create_backend_service_clusterip(
+                        project,
+                        namespace,
+                        backend_address.port,
+                    );
+                    let result = service_api.create(&PostParams::default(), &svc).await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "backend-service",
+                        result.metadata.resource_version,
+                    );
+
+                    let endpoints = self.create_backend_endpoints(
+                        project,
+                        namespace,
+                        &backend_address.host,
+                        backend_address.port,
+                    );
+                    let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+                    endpoints_api
+                        .create(&PostParams::default(), &endpoints)
+                        .await?;
+
+                    info!(
+                        project = project.name,
+                        backend_ip = backend_address.host,
+                        backend_port = backend_address.port,
+                        "Created backend service (ClusterIP+Endpoints)"
+                    );
+                } else {
+                    // ExternalName - clean up any orphaned Endpoints
+                    let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+                    if let Err(e) = endpoints_api
+                        .delete(service_name, &DeleteParams::default())
+                        .await
+                    {
+                        // Ignore 404 errors (expected when creating for the first time)
+                        if !e.to_string().contains("404") {
+                            warn!(
+                                "Failed to delete orphaned Endpoints before ExternalName creation: {}",
+                                e
+                            );
+                        }
+                    }
+
+                    let svc = self.create_backend_service_externalname(
+                        project,
+                        namespace,
+                        &backend_address.host,
+                    );
+                    let result = service_api.create(&PostParams::default(), &svc).await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "backend-service",
+                        result.metadata.resource_version,
+                    );
+                    info!(
+                        project = project.name,
+                        backend_dns = backend_address.host,
+                        backend_port = backend_address.port,
+                        "Created backend service (ExternalName)"
+                    );
+                }
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        Ok(())
+    }
+
+    /// Apply service with drift detection
+    async fn apply_service(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        deployment: &Deployment,
+        namespace: &str,
+        metadata: &mut KubernetesMetadata,
+    ) -> Result<()> {
+        let service_name = Self::service_name(project, deployment);
+        let service_api: Api<Service> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        match service_api.get(&service_name).await {
+            Ok(existing_svc) => {
+                let current_version = existing_svc.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "service", current_version) {
+                    let svc = self.create_service(project, deployment, metadata);
+                    let result = service_api
+                        .patch(
+                            &service_name,
+                            &PatchParams::apply("rise").force(),
+                            &Patch::Apply(&svc),
+                        )
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "service",
+                        result.metadata.resource_version,
+                    );
+                    info!("Applied Service '{}' (drift detected)", service_name);
+                } else {
+                    debug!("Service '{}' is up-to-date", service_name);
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                let svc = self.create_service(project, deployment, metadata);
+                let result = service_api.create(&PostParams::default(), &svc).await?;
+                self.update_version_cache(
+                    deployment_id,
+                    "service",
+                    result.metadata.resource_version,
+                );
+                info!("Created Service '{}'", service_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        metadata.service_name = Some(service_name);
+        Ok(())
+    }
+
+    /// Apply ingress with drift detection
+    async fn apply_ingress(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        deployment: &Deployment,
+        namespace: &str,
+        metadata: &mut KubernetesMetadata,
+    ) -> Result<()> {
+        let ingress_name = Self::ingress_name(project, deployment);
+
+        // Fetch custom domains
+        use crate::db::custom_domains as db_custom_domains;
+        let custom_domains =
+            db_custom_domains::list_project_custom_domains(&self.state.db_pool, project.id).await?;
+
+        let ingress_api: Api<Ingress> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        match ingress_api.get(&ingress_name).await {
+            Ok(existing_ingress) => {
+                let current_version = existing_ingress.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "ingress", current_version) {
+                    let ingress =
+                        self.create_ingress(project, deployment, metadata, &custom_domains);
+                    let result = ingress_api
+                        .patch(
+                            &ingress_name,
+                            &PatchParams::apply("rise").force(),
+                            &Patch::Apply(&ingress),
+                        )
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "ingress",
+                        result.metadata.resource_version,
+                    );
+                    info!("Applied Ingress '{}' (drift detected)", ingress_name);
+                } else {
+                    debug!("Ingress '{}' is up-to-date", ingress_name);
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                let ingress = self.create_ingress(project, deployment, metadata, &custom_domains);
+                let result = ingress_api.create(&PostParams::default(), &ingress).await?;
+                self.update_version_cache(
+                    deployment_id,
+                    "ingress",
+                    result.metadata.resource_version,
+                );
+                info!("Created Ingress '{}'", ingress_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        metadata.ingress_name = Some(ingress_name);
+        Ok(())
+    }
+
     /// Create Namespace resource
     fn create_namespace(&self, project: &Project) -> Namespace {
         // Start with common labels and merge in configured namespace labels
@@ -892,6 +1417,97 @@ impl KubernetesController {
                 ..Default::default()
             }),
             ..Default::default()
+        }
+    }
+
+    /// Create ExternalName service for routing to Rise backend (DNS names)
+    fn create_backend_service_externalname(
+        &self,
+        project: &Project,
+        namespace: &str,
+        external_name: &str,
+    ) -> Service {
+        Service {
+            metadata: ObjectMeta {
+                name: Some("rise-backend".to_string()),
+                namespace: Some(namespace.to_string()),
+                labels: Some(Self::common_labels(project)),
+                ..Default::default()
+            },
+            spec: Some(ServiceSpec {
+                type_: Some("ExternalName".to_string()),
+                external_name: Some(external_name.to_string()),
+                // Note: ports are not used by ExternalName services
+                // (kube-proxy returns CNAME record, actual port is in Ingress config)
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Create ClusterIP service for routing to Rise backend (IP addresses)
+    /// Requires manual Endpoints resource to specify the target IP
+    fn create_backend_service_clusterip(
+        &self,
+        project: &Project,
+        namespace: &str,
+        port: u16,
+    ) -> Service {
+        Service {
+            metadata: ObjectMeta {
+                name: Some("rise-backend".to_string()),
+                namespace: Some(namespace.to_string()),
+                labels: Some(Self::common_labels(project)),
+                ..Default::default()
+            },
+            spec: Some(ServiceSpec {
+                type_: Some("ClusterIP".to_string()),
+                // No selector - we'll create manual Endpoints
+                ports: Some(vec![ServicePort {
+                    name: Some("http".to_string()),
+                    port: port as i32,
+                    target_port: Some(
+                        k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(port as i32),
+                    ),
+                    protocol: Some("TCP".to_string()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Create Endpoints for ClusterIP backend service pointing to an IP address
+    fn create_backend_endpoints(
+        &self,
+        project: &Project,
+        namespace: &str,
+        ip: &str,
+        port: u16,
+    ) -> k8s_openapi::api::core::v1::Endpoints {
+        use k8s_openapi::api::core::v1::{EndpointAddress, EndpointPort, EndpointSubset};
+
+        k8s_openapi::api::core::v1::Endpoints {
+            metadata: ObjectMeta {
+                name: Some("rise-backend".to_string()),
+                namespace: Some(namespace.to_string()),
+                labels: Some(Self::common_labels(project)),
+                ..Default::default()
+            },
+            subsets: Some(vec![EndpointSubset {
+                addresses: Some(vec![EndpointAddress {
+                    ip: ip.to_string(),
+                    ..Default::default()
+                }]),
+                ports: Some(vec![EndpointPort {
+                    name: Some("http".to_string()),
+                    port: port as i32,
+                    protocol: Some("TCP".to_string()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }]),
         }
     }
 
@@ -1102,11 +1718,24 @@ impl KubernetesController {
                 "{}/api/v1/auth/ingress?project={}",
                 self.auth_backend_url, project.name
             );
-            let signin_url = format!(
-                "{}/api/v1/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
-                self.auth_signin_url,
-                urlencoding::encode(&project.name)
-            );
+
+            // Use dynamic host routing if backend service exists
+            let signin_url = if self.backend_address.is_some() {
+                // Use $http_host to preserve port, but use literal scheme from config to avoid parsing error
+                // (nginx parser fails on $scheme:// at start of URL, but accepts http:// or https://)
+                format!(
+                    "{}://$http_host/.rise/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
+                    self.ingress_schema,  // "http" or "https" from config
+                    urlencoding::encode(&project.name)
+                )
+            } else {
+                // Fall back to configured auth_signin_url for deployments without custom domains
+                format!(
+                    "{}/api/v1/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
+                    self.auth_signin_url,
+                    urlencoding::encode(&project.name)
+                )
+            };
 
             // Nginx auth subrequest - returns 2xx for allowed, 401/403 for denied
             // If auth-url is unreachable or returns 5xx, nginx defaults to DENY (fail-closed)
@@ -1137,46 +1766,86 @@ impl KubernetesController {
 
         // Build rules - primary host + custom domains
         let service_name = Self::service_name(project, deployment);
+
+        // Build paths for primary host
+        let mut primary_paths = vec![HTTPIngressPath {
+            path: Some(ingress_path),
+            path_type: path_type.to_string(),
+            backend: IngressBackend {
+                service: Some(IngressServiceBackend {
+                    name: service_name.clone(),
+                    port: Some(ServiceBackendPort {
+                        name: Some("http".to_string()),
+                        ..Default::default()
+                    }),
+                }),
+                ..Default::default()
+            },
+        }];
+
+        // Add /.rise/ path routing if backend service exists
+        if let Some(ref backend_addr) = self.backend_address {
+            primary_paths.push(HTTPIngressPath {
+                path: Some("/.rise/".to_string()),
+                path_type: "Prefix".to_string(),
+                backend: IngressBackend {
+                    service: Some(IngressServiceBackend {
+                        name: "rise-backend".to_string(),
+                        port: Some(ServiceBackendPort {
+                            number: Some(backend_addr.port as i32),
+                            ..Default::default()
+                        }),
+                    }),
+                    ..Default::default()
+                },
+            });
+        }
+
         let mut rules = vec![IngressRule {
             host: Some(url_components.host.clone()),
             http: Some(HTTPIngressRuleValue {
-                paths: vec![HTTPIngressPath {
-                    path: Some(ingress_path),
-                    path_type: path_type.to_string(),
-                    backend: IngressBackend {
-                        service: Some(IngressServiceBackend {
-                            name: service_name.clone(),
-                            port: Some(ServiceBackendPort {
-                                name: Some("http".to_string()),
-                                ..Default::default()
-                            }),
-                        }),
-                        ..Default::default()
-                    },
-                }],
+                paths: primary_paths,
             }),
         }];
 
         // Add custom domain rules (always from root, no path prefix)
         for domain in custom_domains {
+            let mut paths = vec![HTTPIngressPath {
+                path: Some("/".to_string()),
+                path_type: "Prefix".to_string(),
+                backend: IngressBackend {
+                    service: Some(IngressServiceBackend {
+                        name: service_name.clone(),
+                        port: Some(ServiceBackendPort {
+                            name: Some("http".to_string()),
+                            ..Default::default()
+                        }),
+                    }),
+                    ..Default::default()
+                },
+            }];
+
+            // Add /.rise/ path routing for custom domains if backend service exists
+            if let Some(ref backend_addr) = self.backend_address {
+                paths.push(HTTPIngressPath {
+                    path: Some("/.rise/".to_string()),
+                    path_type: "Prefix".to_string(),
+                    backend: IngressBackend {
+                        service: Some(IngressServiceBackend {
+                            name: "rise-backend".to_string(),
+                            port: Some(ServiceBackendPort {
+                                number: Some(backend_addr.port as i32),
+                                ..Default::default()
+                            }),
+                        }),
+                        ..Default::default()
+                    },
+                });
+            }
+
             rules.push(IngressRule {
                 host: Some(domain.domain.clone()),
-                http: Some(HTTPIngressRuleValue {
-                    paths: vec![HTTPIngressPath {
-                        path: Some("/".to_string()),
-                        path_type: "Prefix".to_string(),
-                        backend: IngressBackend {
-                            service: Some(IngressServiceBackend {
-                                name: service_name.clone(),
-                                port: Some(ServiceBackendPort {
-                                    name: Some("http".to_string()),
-                                    ..Default::default()
-                                }),
-                            }),
-                            ..Default::default()
-                        },
-                    }],
-                }),
+                http: Some(HTTPIngressRuleValue { paths }),
             });
         }
 
@@ -1488,7 +2157,7 @@ impl DeploymentBackend for KubernetesController {
                         }
 
                         // Skip to next phase - we don't manage external secrets
-                        metadata.reconcile_phase = ReconcilePhase::CreatingService;
+                        metadata.reconcile_phase = ReconcilePhase::CreatingBackendService;
                         continue;
                     }
 
@@ -1536,8 +2205,154 @@ impl DeploymentBackend for KubernetesController {
                         debug!("No registry provider or external secret configured, skipping image pull secret creation");
                     }
 
-                    metadata.reconcile_phase = ReconcilePhase::CreatingService;
+                    metadata.reconcile_phase = ReconcilePhase::CreatingBackendService;
                     // Continue to next phase
+                    continue;
+                }
+
+                ReconcilePhase::CreatingBackendService => {
+                    // Skip if backend_address not configured
+                    if self.backend_address.is_none() {
+                        metadata.reconcile_phase = ReconcilePhase::CreatingService;
+                        continue;
+                    }
+
+                    let backend_address = self.backend_address.as_ref().unwrap();
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
+
+                    let service_api: Api<Service> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
+
+                    if backend_address.is_ip_address() {
+                        // IP address: Create ClusterIP service + manual Endpoints
+                        let service = self.create_backend_service_clusterip(
+                            project,
+                            namespace,
+                            backend_address.port,
+                        );
+                        let endpoints = self.create_backend_endpoints(
+                            project,
+                            namespace,
+                            &backend_address.host,
+                            backend_address.port,
+                        );
+
+                        let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                            Api::namespaced(self.kube_client.clone(), namespace);
+
+                        // Create/update service
+                        match service_api
+                            .patch(
+                                service.metadata.name.as_ref().unwrap(),
+                                &PatchParams::apply("rise-controller"),
+                                &Patch::Apply(&service),
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    backend_ip = backend_address.host,
+                                    backend_port = backend_address.port,
+                                    "Backend ClusterIP service created for /.rise/ routing"
+                                );
+                            }
+                            Err(e) if is_namespace_not_found_error(&e) => {
+                                warn!(
+                                    "Namespace missing during backend service creation, resetting to CreatingNamespace"
+                                );
+                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                metadata.namespace = None;
+                                continue;
+                            }
+                            Err(e) => {
+                                return Err(anyhow::anyhow!(
+                                    "Failed to create backend ClusterIP service: {}",
+                                    e
+                                ))
+                            }
+                        }
+
+                        // Create/update endpoints
+                        match endpoints_api
+                            .patch(
+                                endpoints.metadata.name.as_ref().unwrap(),
+                                &PatchParams::apply("rise-controller"),
+                                &Patch::Apply(&endpoints),
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    backend_ip = backend_address.host,
+                                    backend_port = backend_address.port,
+                                    "Backend Endpoints created for /.rise/ routing"
+                                );
+                            }
+                            Err(e) if is_namespace_not_found_error(&e) => {
+                                warn!(
+                                    "Namespace missing during backend endpoints creation, resetting to CreatingNamespace"
+                                );
+                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                metadata.namespace = None;
+                                continue;
+                            }
+                            Err(e) => {
+                                return Err(anyhow::anyhow!(
+                                    "Failed to create backend Endpoints: {}",
+                                    e
+                                ))
+                            }
+                        }
+                    } else {
+                        // DNS name: Create ExternalName service
+                        let service = self.create_backend_service_externalname(
+                            project,
+                            namespace,
+                            &backend_address.host,
+                        );
+
+                        match service_api
+                            .patch(
+                                service.metadata.name.as_ref().unwrap(),
+                                &PatchParams::apply("rise-controller"),
+                                &Patch::Apply(&service),
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    backend_dns = backend_address.host,
+                                    backend_port = backend_address.port,
+                                    "Backend ExternalName service created for /.rise/ routing"
+                                );
+                            }
+                            Err(e) if is_namespace_not_found_error(&e) => {
+                                warn!(
+                                    "Namespace missing during backend service creation, resetting to CreatingNamespace"
+                                );
+                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                metadata.namespace = None;
+                                continue;
+                            }
+                            Err(e) => {
+                                return Err(anyhow::anyhow!(
+                                    "Failed to create backend ExternalName service: {}",
+                                    e
+                                ))
+                            }
+                        }
+                    }
+
+                    metadata.reconcile_phase = ReconcilePhase::CreatingService;
                     continue;
                 }
 
@@ -2003,73 +2818,35 @@ impl DeploymentBackend for KubernetesController {
                 }
 
                 ReconcilePhase::Completed => {
-                    // Check and correct drift on all resources
-                    let namespace = metadata
-                        .namespace
-                        .as_ref()
-                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
-
                     // Load and decrypt environment variables for drift detection
                     let env_vars = self
                         .load_env_vars(deployment.id, metadata.http_port)
                         .await?;
 
-                    // 1. Re-apply Service to correct any drift
-                    let service_name = Self::service_name(project, deployment);
-                    let svc_api: Api<Service> =
-                        Api::namespaced(self.kube_client.clone(), namespace);
-                    let svc = self.create_service(project, deployment, &metadata);
-                    let patch_params = PatchParams::apply("rise").force();
-                    let patch = Patch::Apply(&svc);
-                    match svc_api.patch(&service_name, &patch_params, &patch).await {
+                    // Apply all supporting resources with drift detection
+                    // This reconciles: Namespace, ImagePullSecret, BackendService, Service, Ingress
+                    // Uses in-memory version cache to skip unchanged resources
+                    match self
+                        .apply_supporting_resources(deployment, project, &mut metadata)
+                        .await
+                    {
                         Ok(_) => {}
                         Err(e) if is_namespace_not_found_error(&e) => {
-                            warn!("Namespace missing during Completed phase (Service), resetting to CreatingNamespace");
+                            warn!("Namespace missing during Completed phase, resetting to CreatingNamespace");
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
                             metadata.namespace = None;
                             continue;
                         }
-                        Err(e) => return Err(e.into()),
+                        Err(e) => return Err(e),
                     }
 
-                    // 2. Re-apply Ingress to correct any drift
-                    let ingress_name = Self::ingress_name(project, deployment);
-                    let ingress_api: Api<Ingress> =
-                        Api::namespaced(self.kube_client.clone(), namespace);
+                    // Get namespace after apply_supporting_resources (which may update metadata)
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
-                    let custom_domains = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP
-                    {
-                        let domains = crate::db::custom_domains::list_project_custom_domains(
-                            &self.state.db_pool,
-                            project.id,
-                        )
-                        .await
-                        .unwrap_or_default();
-                        domains
-                    } else {
-                        Vec::new()
-                    };
-
-                    let ingress =
-                        self.create_ingress(project, deployment, &metadata, &custom_domains);
-
-                    let patch_params = PatchParams::apply("rise").force();
-                    let patch = Patch::Apply(&ingress);
-                    match ingress_api
-                        .patch(&ingress_name, &patch_params, &patch)
-                        .await
-                    {
-                        Ok(_patched_ingress) => {}
-                        Err(e) if is_namespace_not_found_error(&e) => {
-                            warn!("Namespace missing during Completed phase (Ingress), resetting to CreatingNamespace");
-                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
-                            metadata.namespace = None;
-                            continue;
-                        }
-                        Err(e) => return Err(e.into()),
-                    }
-
-                    // 3. Check Deployment for drift
+                    // Check Deployment for drift
                     let deploy_name = metadata
                         .deployment_name
                         .as_ref()
@@ -2310,6 +3087,9 @@ impl DeploymentBackend for KubernetesController {
             "Terminating deployment {} - deleting Deployment",
             deployment.deployment_id
         );
+
+        // Clear cached resource versions for this deployment
+        self.clear_deployment_cache(deployment.id);
 
         // Parse metadata, but don't fail if it's missing or incomplete
         let metadata: Option<KubernetesMetadata> =
@@ -2724,6 +3504,7 @@ mod tests {
             registry_provider: None,
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
+            backend_address: None,
             namespace_labels: std::collections::HashMap::new(),
             namespace_annotations: std::collections::HashMap::new(),
             ingress_annotations: std::collections::HashMap::new(),
@@ -2731,6 +3512,7 @@ mod tests {
             custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
             node_selector: std::collections::HashMap::new(),
             image_pull_secret_name: None,
+            resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
 

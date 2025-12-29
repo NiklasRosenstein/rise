@@ -2,6 +2,7 @@
 
 server:
   cookie_secure: false
+  cookie_domain: ".rise.local"
   jwt_signing_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" # Generate with: openssl rand -base64 32
 
 encryption:
@@ -24,6 +25,7 @@ registry:
 deployment_controller:
   auth_backend_url: "http://172.17.0.1:3000"  # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host)
   auth_signin_url: "http://rise.local:3000"  # Domain for user-facing OAuth redirects
+  backend_address: "172.17.0.1:3000"  # Minikube host IP for /.rise/ routing
   ingress_annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
   ingress_port: 8080 # `mise minikube:launch` port-forwards the ingress controller to this port

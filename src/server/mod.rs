@@ -104,6 +104,8 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 
     let app = Router::new()
         .nest("/api/v1", api_routes)
+        // Root-level auth routes for custom domain support via Ingress routing
+        .merge(auth::routes::rise_auth_routes())
         .merge(frontend::routes::frontend_routes())
         .with_state(state.clone())
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
@@ -208,6 +210,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
         ingress_schema,
         auth_backend_url,
         auth_signin_url,
+        backend_address,
         _namespace_format,
         namespace_labels,
         namespace_annotations,
@@ -226,6 +229,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             ingress_schema,
             auth_backend_url,
             auth_signin_url,
+            backend_address,
             namespace_format,
             namespace_labels,
             namespace_annotations,
@@ -243,6 +247,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             ingress_schema,
             auth_backend_url,
             auth_signin_url,
+            backend_address,
             namespace_format,
             namespace_labels,
             namespace_annotations,
@@ -280,6 +285,12 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
     // Get registry provider
     let registry_provider = app_state.registry_provider.clone();
 
+    // Parse backend_address if provided
+    let parsed_backend_address = backend_address
+        .as_ref()
+        .map(|addr| settings::BackendAddress::parse(addr))
+        .transpose()?;
+
     let backend = Arc::new(deployment::controller::KubernetesController::new(
         controller_state.clone(),
         kube_client,
@@ -292,6 +303,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             registry_provider,
             auth_backend_url,
             auth_signin_url,
+            backend_address: parsed_backend_address,
             namespace_labels,
             namespace_annotations,
             ingress_annotations,

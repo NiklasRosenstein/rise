@@ -173,6 +173,34 @@ fn default_node_selector() -> std::collections::HashMap<String, String> {
     selector
 }
 
+/// Backend address for routing /.rise/* traffic to the Rise backend
+#[derive(Debug, Clone)]
+pub struct BackendAddress {
+    pub host: String,
+    pub port: u16,
+}
+
+impl BackendAddress {
+    pub fn parse(s: &str) -> Result<Self, anyhow::Error> {
+        let parts: Vec<&str> = s.rsplitn(2, ':').collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!(
+                "backend_address must be in format HOST:PORT"
+            ));
+        }
+        let port = parts[0]
+            .parse::<u16>()
+            .map_err(|_| anyhow::anyhow!("Invalid port number"))?;
+        let host = parts[1].to_string();
+        Ok(Self { host, port })
+    }
+
+    /// Check if the host is an IP address (vs a DNS name)
+    pub fn is_ip_address(&self) -> bool {
+        self.host.parse::<std::net::IpAddr>().is_ok()
+    }
+}
+
 /// TLS mode for custom domains
 #[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "kebab-case")]
@@ -243,6 +271,20 @@ pub enum DeploymentControllerSettings {
         /// This must be the public URL where the backend is accessible via Ingress.
         /// The domain should share a parent with app domains for cookie sharing (see struct docs).
         auth_signin_url: String,
+
+        /// Address of the Rise backend for routing /.rise/* traffic
+        ///
+        /// Format: HOST:PORT where HOST can be DNS name or IP address
+        ///
+        /// Examples:
+        ///   - rise-backend.default.svc.cluster.local:3000 (in-cluster DNS)
+        ///   - 172.17.0.1:3000 (minikube host IP for development)
+        ///
+        /// Note: Always creates an ExternalName service. K8s accepts IP addresses
+        /// in externalName field (treated as DNS names but still routable).
+        /// If not set, /.rise/ routing will be disabled.
+        #[serde(default)]
+        backend_address: Option<String>,
 
         /// Namespace format template for deployed applications
         /// Template variables: {project_name}

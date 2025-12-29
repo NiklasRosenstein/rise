@@ -166,6 +166,7 @@ async fn init_kubernetes_backend(
         ingress_schema,
         auth_backend_url,
         auth_signin_url,
+        backend_address,
         namespace_labels,
         namespace_annotations,
         ingress_annotations,
@@ -195,6 +196,12 @@ async fn init_kubernetes_backend(
         };
         let kube_client = kube::Client::try_from(kube_config)?;
 
+        // Parse backend_address if provided
+        let parsed_backend_address = backend_address
+            .as_ref()
+            .map(|addr| crate::server::settings::BackendAddress::parse(addr))
+            .transpose()?;
+
         let k8s_backend = KubernetesController::new(
             (*controller_state).clone(),
             kube_client,
@@ -207,6 +214,7 @@ async fn init_kubernetes_backend(
                 registry_provider,
                 auth_backend_url: auth_backend_url.clone(),
                 auth_signin_url: auth_signin_url.clone(),
+                backend_address: parsed_backend_address,
                 namespace_labels: namespace_labels.clone(),
                 namespace_annotations: namespace_annotations.clone(),
                 ingress_annotations: ingress_annotations.clone(),
