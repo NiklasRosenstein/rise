@@ -1227,11 +1227,15 @@ pub async fn ingress_auth(
 
     // Allow access to /.rise/* paths without authentication (login page, static assets)
     // This prevents redirect loops when users try to access the signin page
-    if let Some(original_uri) = headers.get("x-original-uri").and_then(|v| v.to_str().ok()) {
-        if original_uri.starts_with("/.rise/") {
+    // Use x-auth-request-redirect header which contains the request path
+    if let Some(redirect_path) = headers
+        .get("x-auth-request-redirect")
+        .and_then(|v| v.to_str().ok())
+    {
+        if redirect_path.starts_with("/.rise/") {
             tracing::debug!(
                 project = %params.project,
-                original_uri = %original_uri,
+                redirect_path = %redirect_path,
                 "Allowing unauthenticated access to .rise path"
             );
             return Ok((
