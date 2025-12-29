@@ -167,14 +167,33 @@ fn default_namespace_format() -> String {
     "rise-{project_name}".to_string()
 }
 
-fn default_backend_service_namespace() -> String {
-    "default".to_string()
-}
-
 fn default_node_selector() -> std::collections::HashMap<String, String> {
     let mut selector = std::collections::HashMap::new();
     selector.insert("kubernetes.io/arch".to_string(), "amd64".to_string());
     selector
+}
+
+/// Backend address for routing /.rise/* traffic to the Rise backend
+#[derive(Debug, Clone)]
+pub struct BackendAddress {
+    pub host: String,
+    pub port: u16,
+}
+
+impl BackendAddress {
+    pub fn parse(s: &str) -> Result<Self, anyhow::Error> {
+        let parts: Vec<&str> = s.rsplitn(2, ':').collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!(
+                "backend_address must be in format HOST:PORT"
+            ));
+        }
+        let port = parts[0]
+            .parse::<u16>()
+            .map_err(|_| anyhow::anyhow!("Invalid port number"))?;
+        let host = parts[1].to_string();
+        Ok(Self { host, port })
+    }
 }
 
 /// TLS mode for custom domains
@@ -248,25 +267,19 @@ pub enum DeploymentControllerSettings {
         /// The domain should share a parent with app domains for cookie sharing (see struct docs).
         auth_signin_url: String,
 
-        /// Kubernetes service name for the Rise backend (for routing /.rise/auth/* via Ingress)
-        /// Example: "rise-backend"
-        /// Required for custom domain support - enables OAuth flow through custom domain's Ingress.
-        /// If not set, custom domain auth routing will not be enabled.
+        /// Address of the Rise backend for routing /.rise/* traffic
+        ///
+        /// Format: HOST:PORT where HOST can be DNS name or IP address
+        ///
+        /// Examples:
+        ///   - rise-backend.default.svc.cluster.local:3000 (in-cluster DNS)
+        ///   - 172.17.0.1:3000 (minikube host IP for development)
+        ///
+        /// Note: Always creates an ExternalName service. K8s accepts IP addresses
+        /// in externalName field (treated as DNS names but still routable).
+        /// If not set, /.rise/ routing will be disabled.
         #[serde(default)]
-        backend_service_name: Option<String>,
-
-        /// Kubernetes service port for the Rise backend (for routing /.rise/auth/* via Ingress)
-        /// Example: 3000
-        /// Required along with backend_service_name for custom domain auth routing.
-        #[serde(default)]
-        backend_service_port: Option<u16>,
-
-        /// Kubernetes namespace where the Rise backend service is deployed
-        /// Example: "default" or "rise-system"
-        /// Required along with backend_service_name for custom domain auth routing.
-        /// If not set, defaults to "default".
-        #[serde(default = "default_backend_service_namespace")]
-        backend_service_namespace: String,
+        backend_address: Option<String>,
 
         /// Namespace format template for deployed applications
         /// Template variables: {project_name}
