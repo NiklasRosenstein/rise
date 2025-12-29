@@ -91,10 +91,10 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                         type="checkbox"
                         checked={injectPgVars}
                         onChange={(e) => setInjectPgVars(e.target.checked)}
-                        className="w-4 h-4 text-indigo-600 bg-gray-700 border-gray-600 rounded focus:ring-indigo-500 focus:ring-2"
+                        className="w-4 h-4 text-indigo-600 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-indigo-500 focus:ring-2"
                     />
                     <span className="text-sm text-gray-700 dark:text-gray-300">
-                        Inject <code className="bg-gray-700 px-1 rounded">PG*</code> variables
+                        Inject <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded text-gray-900 dark:text-gray-200">PG*</code> variables
                         <span className="text-gray-600 dark:text-gray-500 ml-2">(PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)</span>
                     </span>
                 </label>
@@ -395,7 +395,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                         <button
                             type="button"
                             onClick={() => applyTemplate('snowflake')}
-                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
+                            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
                             title="Apply Snowflake template"
                         >
                             📋 Snowflake Template
@@ -403,7 +403,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                         <button
                             type="button"
                             onClick={() => applyTemplate('google')}
-                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
+                            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
                             title="Apply Google template"
                         >
                             📋 Google Template
@@ -411,7 +411,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                         <button
                             type="button"
                             onClick={() => applyTemplate('github')}
-                            className="w-full px-3 py-2 bg-gray-700 hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
+                            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
                             title="Apply GitHub template"
                         >
                             📋 GitHub Template
@@ -505,7 +505,7 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
             <div className="bg-gray-100 dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
                 {/* Modal Header */}
                 <div className="flex items-center justify-between p-6 border-b border-gray-300 dark:border-gray-700">
-                    <h2 className="text-xl font-bold text-white">Integration Guide</h2>
+                    <h2 className="text-xl font-bold text-gray-900 dark:text-white">Integration Guide</h2>
                     <button
                         onClick={onClose}
                         className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -1444,7 +1444,7 @@ function DatabaseCard({ name, status }) {
     return (
         <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-300 dark:border-gray-700">
             <div className="flex items-center justify-between mb-3">
-                <h3 className="text-white font-semibold">{name}</h3>
+                <h3 className="text-gray-900 dark:text-white font-semibold">{name}</h3>
                 <span className={`${badgeColor} text-white text-xs font-semibold px-2 py-1 rounded uppercase`}>
                     {statusText}
                 </span>
