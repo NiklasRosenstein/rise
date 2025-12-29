@@ -669,7 +669,7 @@ pub async fn sync_custom_domains(
     for domain in desired_domains {
         if !current_domains.contains(domain) {
             println!("Adding domain '{}' from rise.toml", domain);
-            domain::add_domain(http_client, backend_url, token, project, domain).await?;
+            domain::add_domain(http_client, backend_url, token, project, domain, None).await?;
         }
     }
 
