@@ -2818,73 +2818,35 @@ impl DeploymentBackend for KubernetesController {
                 }
 
                 ReconcilePhase::Completed => {
-                    // Check and correct drift on all resources
-                    let namespace = metadata
-                        .namespace
-                        .as_ref()
-                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
-
                     // Load and decrypt environment variables for drift detection
                     let env_vars = self
                         .load_env_vars(deployment.id, metadata.http_port)
                         .await?;
 
-                    // 1. Re-apply Service to correct any drift
-                    let service_name = Self::service_name(project, deployment);
-                    let svc_api: Api<Service> =
-                        Api::namespaced(self.kube_client.clone(), namespace);
-                    let svc = self.create_service(project, deployment, &metadata);
-                    let patch_params = PatchParams::apply("rise").force();
-                    let patch = Patch::Apply(&svc);
-                    match svc_api.patch(&service_name, &patch_params, &patch).await {
+                    // Apply all supporting resources with drift detection
+                    // This reconciles: Namespace, ImagePullSecret, BackendService, Service, Ingress
+                    // Uses in-memory version cache to skip unchanged resources
+                    match self
+                        .apply_supporting_resources(deployment, project, &mut metadata)
+                        .await
+                    {
                         Ok(_) => {}
                         Err(e) if is_namespace_not_found_error(&e) => {
-                            warn!("Namespace missing during Completed phase (Service), resetting to CreatingNamespace");
+                            warn!("Namespace missing during Completed phase, resetting to CreatingNamespace");
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
                             metadata.namespace = None;
                             continue;
                         }
-                        Err(e) => return Err(e.into()),
+                        Err(e) => return Err(e),
                     }
 
-                    // 2. Re-apply Ingress to correct any drift
-                    let ingress_name = Self::ingress_name(project, deployment);
-                    let ingress_api: Api<Ingress> =
-                        Api::namespaced(self.kube_client.clone(), namespace);
+                    // Get namespace after apply_supporting_resources (which may update metadata)
+                    let namespace = metadata
+                        .namespace
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
-                    let custom_domains = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP
-                    {
-                        let domains = crate::db::custom_domains::list_project_custom_domains(
-                            &self.state.db_pool,
-                            project.id,
-                        )
-                        .await
-                        .unwrap_or_default();
-                        domains
-                    } else {
-                        Vec::new()
-                    };
-
-                    let ingress =
-                        self.create_ingress(project, deployment, &metadata, &custom_domains);
-
-                    let patch_params = PatchParams::apply("rise").force();
-                    let patch = Patch::Apply(&ingress);
-                    match ingress_api
-                        .patch(&ingress_name, &patch_params, &patch)
-                        .await
-                    {
-                        Ok(_patched_ingress) => {}
-                        Err(e) if is_namespace_not_found_error(&e) => {
-                            warn!("Namespace missing during Completed phase (Ingress), resetting to CreatingNamespace");
-                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
-                            metadata.namespace = None;
-                            continue;
-                        }
-                        Err(e) => return Err(e.into()),
-                    }
-
-                    // 3. Check Deployment for drift
+                    // Check Deployment for drift
                     let deploy_name = metadata
                         .deployment_name
                         .as_ref()
