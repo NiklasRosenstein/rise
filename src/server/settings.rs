@@ -194,6 +194,11 @@ impl BackendAddress {
         let host = parts[1].to_string();
         Ok(Self { host, port })
     }
+
+    /// Check if the host is an IP address (vs a DNS name)
+    pub fn is_ip_address(&self) -> bool {
+        self.host.parse::<std::net::IpAddr>().is_ok()
+    }
 }
 
 /// TLS mode for custom domains

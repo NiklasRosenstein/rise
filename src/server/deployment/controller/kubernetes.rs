@@ -901,11 +901,8 @@ impl KubernetesController {
         }
     }
 
-    /// Create ExternalName service for routing to Rise backend
-    /// Note: externalName accepts both DNS names and IP addresses
-    /// From K8s docs: "A Service of type: ExternalName accepts an IPv4 address string,
-    /// but treats that string as a DNS name comprised of digits, not as an IP address"
-    fn create_backend_service(
+    /// Create ExternalName service for routing to Rise backend (DNS names)
+    fn create_backend_service_externalname(
         &self,
         project: &Project,
         namespace: &str,
@@ -926,6 +923,72 @@ impl KubernetesController {
                 ..Default::default()
             }),
             ..Default::default()
+        }
+    }
+
+    /// Create ClusterIP service for routing to Rise backend (IP addresses)
+    /// Requires manual Endpoints resource to specify the target IP
+    fn create_backend_service_clusterip(
+        &self,
+        project: &Project,
+        namespace: &str,
+        port: u16,
+    ) -> Service {
+        Service {
+            metadata: ObjectMeta {
+                name: Some("rise-backend".to_string()),
+                namespace: Some(namespace.to_string()),
+                labels: Some(Self::common_labels(project)),
+                ..Default::default()
+            },
+            spec: Some(ServiceSpec {
+                type_: Some("ClusterIP".to_string()),
+                // No selector - we'll create manual Endpoints
+                ports: Some(vec![ServicePort {
+                    name: Some("http".to_string()),
+                    port: port as i32,
+                    target_port: Some(
+                        k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(port as i32),
+                    ),
+                    protocol: Some("TCP".to_string()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Create Endpoints for ClusterIP backend service pointing to an IP address
+    fn create_backend_endpoints(
+        &self,
+        project: &Project,
+        namespace: &str,
+        ip: &str,
+        port: u16,
+    ) -> k8s_openapi::api::core::v1::Endpoints {
+        use k8s_openapi::api::core::v1::{EndpointAddress, EndpointPort, EndpointSubset};
+
+        k8s_openapi::api::core::v1::Endpoints {
+            metadata: ObjectMeta {
+                name: Some("rise-backend".to_string()),
+                namespace: Some(namespace.to_string()),
+                labels: Some(Self::common_labels(project)),
+                ..Default::default()
+            },
+            subsets: Some(vec![EndpointSubset {
+                addresses: Some(vec![EndpointAddress {
+                    ip: ip.to_string(),
+                    ..Default::default()
+                }]),
+                ports: Some(vec![EndpointPort {
+                    name: Some("http".to_string()),
+                    port: port as i32,
+                    protocol: Some("TCP".to_string()),
+                    ..Default::default()
+                }]),
+                ..Default::default()
+            }]),
         }
     }
 
@@ -1641,43 +1704,132 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
-                    // Create ExternalName service (works for both DNS and IP addresses)
-                    let service =
-                        self.create_backend_service(project, namespace, &backend_address.host);
-
                     let service_api: Api<Service> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
-                    match service_api
-                        .patch(
-                            service.metadata.name.as_ref().unwrap(),
-                            &PatchParams::apply("rise-controller"),
-                            &Patch::Apply(&service),
-                        )
-                        .await
-                    {
-                        Ok(_) => {
-                            info!(
-                                project = project.name,
-                                deployment_id = %deployment.id,
-                                backend_host = backend_address.host,
-                                backend_port = backend_address.port,
-                                "Backend ExternalName service created for /.rise/ routing"
-                            );
+                    if backend_address.is_ip_address() {
+                        // IP address: Create ClusterIP service + manual Endpoints
+                        let service = self.create_backend_service_clusterip(
+                            project,
+                            namespace,
+                            backend_address.port,
+                        );
+                        let endpoints = self.create_backend_endpoints(
+                            project,
+                            namespace,
+                            &backend_address.host,
+                            backend_address.port,
+                        );
+
+                        let endpoints_api: Api<k8s_openapi::api::core::v1::Endpoints> =
+                            Api::namespaced(self.kube_client.clone(), namespace);
+
+                        // Create/update service
+                        match service_api
+                            .patch(
+                                service.metadata.name.as_ref().unwrap(),
+                                &PatchParams::apply("rise-controller"),
+                                &Patch::Apply(&service),
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    backend_ip = backend_address.host,
+                                    backend_port = backend_address.port,
+                                    "Backend ClusterIP service created for /.rise/ routing"
+                                );
+                            }
+                            Err(e) if is_namespace_not_found_error(&e) => {
+                                warn!(
+                                    "Namespace missing during backend service creation, resetting to CreatingNamespace"
+                                );
+                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                metadata.namespace = None;
+                                continue;
+                            }
+                            Err(e) => {
+                                return Err(anyhow::anyhow!(
+                                    "Failed to create backend ClusterIP service: {}",
+                                    e
+                                ))
+                            }
                         }
-                        Err(e) if is_namespace_not_found_error(&e) => {
-                            warn!(
-                                "Namespace missing during backend service creation, resetting to CreatingNamespace"
-                            );
-                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
-                            metadata.namespace = None;
-                            continue;
+
+                        // Create/update endpoints
+                        match endpoints_api
+                            .patch(
+                                endpoints.metadata.name.as_ref().unwrap(),
+                                &PatchParams::apply("rise-controller"),
+                                &Patch::Apply(&endpoints),
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    backend_ip = backend_address.host,
+                                    backend_port = backend_address.port,
+                                    "Backend Endpoints created for /.rise/ routing"
+                                );
+                            }
+                            Err(e) if is_namespace_not_found_error(&e) => {
+                                warn!(
+                                    "Namespace missing during backend endpoints creation, resetting to CreatingNamespace"
+                                );
+                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                metadata.namespace = None;
+                                continue;
+                            }
+                            Err(e) => {
+                                return Err(anyhow::anyhow!(
+                                    "Failed to create backend Endpoints: {}",
+                                    e
+                                ))
+                            }
                         }
-                        Err(e) => {
-                            return Err(anyhow::anyhow!(
-                                "Failed to create backend ExternalName service: {}",
-                                e
-                            ))
+                    } else {
+                        // DNS name: Create ExternalName service
+                        let service = self.create_backend_service_externalname(
+                            project,
+                            namespace,
+                            &backend_address.host,
+                        );
+
+                        match service_api
+                            .patch(
+                                service.metadata.name.as_ref().unwrap(),
+                                &PatchParams::apply("rise-controller"),
+                                &Patch::Apply(&service),
+                            )
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    backend_dns = backend_address.host,
+                                    backend_port = backend_address.port,
+                                    "Backend ExternalName service created for /.rise/ routing"
+                                );
+                            }
+                            Err(e) if is_namespace_not_found_error(&e) => {
+                                warn!(
+                                    "Namespace missing during backend service creation, resetting to CreatingNamespace"
+                                );
+                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                metadata.namespace = None;
+                                continue;
+                            }
+                            Err(e) => {
+                                return Err(anyhow::anyhow!(
+                                    "Failed to create backend ExternalName service: {}",
+                                    e
+                                ))
+                            }
                         }
                     }
 
