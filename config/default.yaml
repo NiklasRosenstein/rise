@@ -93,14 +93,6 @@ deployment_controller:
   # auth_backend_url: "http://rise-backend.default.svc.cluster.local:3000"  # Internal cluster URL
   # auth_signin_url: "https://rise.example.com"  # Public API URL
 
-  # Optional: Address of the Rise backend for routing /.rise/* traffic
-  # Format: HOST:PORT (HOST can be DNS name or IP address)
-  # Examples:
-  #   - rise-backend.default.svc.cluster.local:3000 (in-cluster)
-  #   - 172.17.0.1:3000 (development/minikube)
-  # If not set, /.rise/ routing will be disabled
-  # backend_address: "rise-backend.default.svc.cluster.local:3000"
-
   # Optional: Labels to apply to all managed namespaces
   # namespace_labels:
   #   environment: "production"
