@@ -958,26 +958,26 @@ function ExtensionsList({ projectName }) {
                                 <div className="flex gap-6">
                                     {hasExtensionUI(selectedExtension.extension_type) && (
                                         <button
-                                            className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'ui' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                            className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'ui' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                             onClick={() => setModalTab('ui')}
                                         >
                                             Configure
                                         </button>
                                     )}
                                     <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'config' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                         onClick={() => setModalTab('config')}
                                     >
                                         {hasExtensionUI(selectedExtension.extension_type) ? 'JSON' : 'Configuration'}
                                     </button>
                                     <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'schema' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                         onClick={() => setModalTab('schema')}
                                     >
                                         Schema
                                     </button>
                                     <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'docs' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'docs' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                         onClick={() => setModalTab('docs')}
                                     >
                                         Documentation
@@ -985,7 +985,7 @@ function ExtensionsList({ projectName }) {
                                     {editMode && selectedExtensionData && (
                                         <>
                                             <button
-                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'status' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'status' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                                 onClick={() => setModalTab('status')}
                                             >
                                                 Status
@@ -1514,7 +1514,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                             />
                         )}
                         <div>
-                            <h1 className="text-2xl font-bold text-white">
+                            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
                                 {extensionType.display_name}
                             </h1>
                             <p className="text-gray-600 dark:text-gray-400">{extensionType.description}</p>
@@ -1537,7 +1537,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                         {/* Left-aligned: Extension-specific tabs */}
                         {isEnabled && (
                             <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'overview' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'overview' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                 onClick={() => setActiveTab('overview')}
                             >
                                 Overview
@@ -1545,7 +1545,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                         )}
                         {hasExtensionUI(extensionType.extension_type) && (
                             <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'configure' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'configure' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                 onClick={() => setActiveTab('configure')}
                             >
                                 Configure{hasUnsavedChanges && ' *'}
@@ -1557,27 +1557,27 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
 
                         {/* Right-aligned: Common tabs */}
                         <button
-                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'config' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'config' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                             onClick={() => setActiveTab('config')}
                         >
                             Spec{hasUnsavedChanges && ' *'}
                         </button>
                         {isEnabled && (
                             <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'status' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'status' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                 onClick={() => setActiveTab('status')}
                             >
                                 Status
                             </button>
                         )}
                         <button
-                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'schema' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'schema' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                             onClick={() => setActiveTab('schema')}
                         >
                             Schema
                         </button>
                         <button
-                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'docs' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'docs' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                             onClick={() => setActiveTab('docs')}
                         >
                             Documentation

@@ -119,9 +119,9 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
                 </p>
             </div>
 
-            <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
-                <p className="text-sm text-yellow-200">
+            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
+                <h4 className="text-sm font-semibold text-yellow-900 dark:text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
+                <p className="text-sm text-yellow-800 dark:text-yellow-200">
                     Creating a new RDS instance typically takes <strong>5-15 minutes</strong>.
                     No new deployments can be created until the RDS instance is available.
                     You can monitor the provisioning status in the Extensions tab.
@@ -425,8 +425,8 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                 {/* Setup Steps */}
                 <section>
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Setup Steps</h2>
-                    <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
-                        <ol className="text-sm text-yellow-200 list-decimal list-inside space-y-2">
+                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
+                        <ol className="text-sm text-yellow-900 dark:text-yellow-200 list-decimal list-inside space-y-2">
                             <li>Configure redirect URI in OAuth provider</li>
                             <li>Get client ID and secret from provider</li>
                             <li>Store secret as encrypted env var:
@@ -860,11 +860,11 @@ function OAuthDetailView({ extension, projectName }) {
                                         </p>
                                     </div>
                                 ) : (
-                                    <div className="p-3 bg-yellow-900/20 border border-yellow-700 rounded">
-                                        <p className="text-sm text-yellow-300">
+                                    <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
+                                        <p className="text-sm text-yellow-900 dark:text-yellow-300">
                                             ⚠ Waiting For Auth
                                         </p>
-                                        <p className="text-xs text-yellow-400 mt-1">
+                                        <p className="text-xs text-yellow-800 dark:text-yellow-400 mt-1">
                                             Complete OAuth flow to verify configuration
                                         </p>
                                     </div>
@@ -978,9 +978,9 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     </ol>
                 </div>
 
-                <div className="bg-yellow-900/20 border border-yellow-700 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
-                    <p className="text-sm text-yellow-200">
+                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
+                    <h4 className="text-sm font-semibold text-yellow-900 dark:text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
+                    <p className="text-sm text-yellow-800 dark:text-yellow-200">
                         Creating the Snowflake integration typically takes <strong>10-30 seconds</strong>.
                         The extension will automatically create the OAuth integration in Snowflake and configure
                         the corresponding OAuth extension for your project.
@@ -1206,8 +1206,8 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                         </div>
                     </div>
 
-                    <div className="mt-4 p-3 bg-yellow-900/20 border border-yellow-700 rounded">
-                        <p className="text-xs text-yellow-200">
+                    <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
+                        <p className="text-xs text-yellow-800 dark:text-yellow-200">
                             <strong>Note:</strong> Additional roles and scopes are combined with backend defaults
                             (not replaced). ACCOUNTADMIN and SECURITYADMIN are always blocked.
                         </p>
@@ -1457,11 +1457,11 @@ function DatabaseCard({ name, status }) {
                 </div>
 
                 {isScheduledForCleanup && cleanupTime && (
-                    <div className="mt-3 p-2 bg-yellow-900/20 border border-yellow-700 rounded">
-                        <p className="text-xs text-yellow-300">
+                    <div className="mt-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
+                        <p className="text-xs text-yellow-900 dark:text-yellow-300">
                             <strong>⏱️ Cleanup Scheduled</strong>
                         </p>
-                        <p className="text-xs text-yellow-200 mt-1">
+                        <p className="text-xs text-yellow-800 dark:text-yellow-200 mt-1">
                             Will be deleted at {formatDate(cleanupTime.toISOString())}
                         </p>
                     </div>
