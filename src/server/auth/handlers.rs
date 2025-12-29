@@ -1225,6 +1225,23 @@ pub async fn ingress_auth(
         "Ingress auth check"
     );
 
+    // Allow access to /.rise/* paths without authentication (login page, static assets)
+    // This prevents redirect loops when users try to access the signin page
+    if let Some(original_uri) = headers.get("x-original-uri").and_then(|v| v.to_str().ok()) {
+        if original_uri.starts_with("/.rise/") {
+            tracing::debug!(
+                project = %params.project,
+                original_uri = %original_uri,
+                "Allowing unauthenticated access to .rise path"
+            );
+            return Ok((
+                StatusCode::OK,
+                [("X-Auth-Request-User", "anonymous".to_string())],
+            )
+                .into_response());
+        }
+    }
+
     // Extract and validate Rise JWT (required)
     let rise_jwt = cookie_helpers::extract_ingress_jwt_cookie(&headers).ok_or_else(|| {
         tracing::debug!("No ingress JWT cookie found");
