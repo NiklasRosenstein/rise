@@ -27,11 +27,11 @@ function VisibilityBadge({ visibility }) {
     return (
         <span className="inline-flex items-center gap-1.5 text-sm">
             {visibility === 'Private' ? (
-                <LockIcon className="w-4 h-4 text-gray-400" />
+                <LockIcon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
             ) : (
-                <GlobeIcon className="w-4 h-4 text-gray-400" />
+                <GlobeIcon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
             )}
-            <span className="text-gray-300">{visibility}</span>
+            <span className="text-gray-700 dark:text-gray-300">{visibility}</span>
         </span>
     );
 }
@@ -132,7 +132,7 @@ function ProjectsList() {
     };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading projects: {error}</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading projects: {error}</p>;
 
     return (
         <section>
@@ -142,21 +142,21 @@ function ProjectsList() {
                     Create Project
                 </Button>
             </div>
-            <div className="bg-gray-900 rounded-lg overflow-hidden border border-gray-800">
+            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
                 <table className="w-full">
-                    <thead className="bg-gray-800">
+                    <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Name</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Owner</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Visibility</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">URL</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Name</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Owner</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Visibility</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">URL</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800">
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                         {projects.length === 0 ? (
                             <tr>
-                                <td colSpan="5" className="px-6 py-8 text-center text-gray-400">
+                                <td colSpan="5" className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
                                     No projects found.
                                 </td>
                             </tr>
@@ -168,11 +168,11 @@ function ProjectsList() {
                                 <tr
                                     key={p.id}
                                     onClick={() => window.location.hash = `project/${p.name}`}
-                                    className="hover:bg-gray-800/50 transition-colors cursor-pointer"
+                                    className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
                                 >
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-100">{p.name}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{p.name}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge status={p.status} /></td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{owner}</td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{owner}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm"><VisibilityBadge visibility={p.visibility} /></td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                                         {p.primary_url ? (
@@ -180,7 +180,7 @@ function ProjectsList() {
                                                 href={p.primary_url}
                                                 target="_blank"
                                                 rel="noopener noreferrer"
-                                                className="text-indigo-400 hover:text-indigo-300"
+                                                className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
                                                 onClick={(e) => e.stopPropagation()}
                                             >
                                                 {p.primary_url}
@@ -209,7 +209,7 @@ function ProjectsList() {
                         placeholder="my-awesome-app"
                         required
                     />
-                    <p className="text-sm text-gray-500 -mt-2">
+                    <p className="text-sm text-gray-600 dark:text-gray-500 -mt-2">
                         Only lowercase letters, numbers, and hyphens allowed
                     </p>
 
@@ -354,16 +354,16 @@ function ProjectDetail({ projectName, initialTab }) {
     };
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading project: {error}</p>;
-    if (!project) return <p className="text-gray-400">Project not found.</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading project: {error}</p>;
+    if (!project) return <p className="text-gray-600 dark:text-gray-400">Project not found.</p>;
 
     return (
         <section>
-            <a href="#projects" className="inline-flex items-center gap-2 text-indigo-400 hover:text-indigo-300 mb-6 transition-colors">
+            <a href="#projects" className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
                 ← Back to Projects
             </a>
 
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-6 mb-6">
                 <div className="flex justify-between items-start mb-4">
                     <h3 className="text-2xl font-bold">Project {project.name}</h3>
                     <Button
@@ -376,18 +376,18 @@ function ProjectDetail({ projectName, initialTab }) {
                 </div>
                 <dl className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                        <dt className="text-gray-400">Status</dt>
+                        <dt className="text-gray-600 dark:text-gray-400">Status</dt>
                         <dd className="mt-1"><StatusBadge status={project.status} /></dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400 mb-1">Visibility</dt>
+                        <dt className="text-gray-600 dark:text-gray-400 mb-1">Visibility</dt>
                         <dd className="mt-1">
                             {!editingVisibility ? (
                                 <div className="flex items-center gap-2">
                                     <VisibilityBadge visibility={project.visibility} />
                                     <button
                                         onClick={handleEditVisibility}
-                                        className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                                        className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
                                     >
                                         Edit
                                     </button>
@@ -397,7 +397,7 @@ function ProjectDetail({ projectName, initialTab }) {
                                     <select
                                         value={newVisibility}
                                         onChange={(e) => setNewVisibility(e.target.value)}
-                                        className="bg-gray-800 border border-gray-700 text-gray-100 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                        className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
                                         disabled={updatingVisibility}
                                     >
                                         <option value="Public">Public</option>
@@ -426,65 +426,65 @@ function ProjectDetail({ projectName, initialTab }) {
                         </dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">URLs</dt>
+                        <dt className="text-gray-600 dark:text-gray-400">URLs</dt>
                         <dd className="mt-1 space-y-1">
                             {project.primary_url ? (
                                 <>
                                     <div>
-                                        <a href={project.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{project.primary_url}</a>
+                                        <a href={project.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">{project.primary_url}</a>
                                     </div>
                                     {project.custom_domain_urls && project.custom_domain_urls.map((url, idx) => (
                                         <div key={idx}>
-                                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{url}</a>
+                                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">{url}</a>
                                         </div>
                                     ))}
                                 </>
                             ) : (
-                                <span className="text-gray-500">-</span>
+                                <span className="text-gray-500 dark:text-gray-500">-</span>
                             )}
                         </dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">Created</dt>
-                        <dd className="mt-1 text-gray-200">{formatDate(project.created)}</dd>
+                        <dt className="text-gray-600 dark:text-gray-400">Created</dt>
+                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{formatDate(project.created)}</dd>
                     </div>
                 </dl>
             </div>
 
-            <div className="border-b border-gray-800 mb-6">
+            <div className="border-b border-gray-200 dark:border-gray-800 mb-6">
                 <div className="flex gap-8">
                     <button
-                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'overview' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'overview' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                         onClick={() => changeTab('overview')}
                     >
                         Overview
                     </button>
                     <button
-                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'deployments' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'deployments' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                         onClick={() => changeTab('deployments')}
                     >
                         Deployments
                     </button>
                     <button
-                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'service-accounts' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'service-accounts' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                         onClick={() => changeTab('service-accounts')}
                     >
                         Service Accounts
                     </button>
                     <button
-                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'env-vars' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'env-vars' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                         onClick={() => changeTab('env-vars')}
                     >
                         Environment Variables
                     </button>
                     <button
-                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'domains' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'domains' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                         onClick={() => changeTab('domains')}
                     >
                         Domains
                     </button>
                     <button
-                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'extensions' ? 'border-indigo-500 text-white' : 'border-transparent text-gray-400 hover:text-gray-300'}`}
+                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'extensions' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                         onClick={() => changeTab('extensions')}
                     >
                         Extensions

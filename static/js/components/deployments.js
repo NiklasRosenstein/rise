@@ -69,7 +69,7 @@ function ActiveDeploymentsSummary({ projectName }) {
     }, [loadSummary]);
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading active deployments: {error}</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading active deployments: {error}</p>;
 
     const handleStopClick = (deployment) => {
         setDeploymentToStop(deployment);
@@ -94,7 +94,7 @@ function ActiveDeploymentsSummary({ projectName }) {
     };
 
     const groups = Object.keys(activeDeployments);
-    if (groups.length === 0) return <p className="text-gray-400">No active deployments.</p>;
+    if (groups.length === 0) return <p className="text-gray-600 dark:text-gray-400">No active deployments.</p>;
 
     // Sort groups: "default" first, then by active deployment's created timestamp
     const sortedGroups = groups.sort((a, b) => {
@@ -134,7 +134,7 @@ function ActiveDeploymentsSummary({ projectName }) {
                     const otherProgressing = groupData.progressing.filter(d => d.deployment_id !== deployment.deployment_id).length;
 
                     return (
-                        <div key={group} className="bg-gray-900 border border-gray-800 rounded-lg p-6">
+                        <div key={group} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-6">
                             <div className="flex justify-between items-center mb-4">
                                 <h5 className="text-lg font-semibold">Group: {group}</h5>
                                 <div className="flex items-center gap-3">
@@ -152,37 +152,37 @@ function ActiveDeploymentsSummary({ projectName }) {
                             </div>
                         <dl className="grid grid-cols-2 gap-4 text-sm">
                             <div>
-                                <dt className="text-gray-400">Deployment ID</dt>
-                                <dd className="font-mono text-gray-200">{deployment.deployment_id}</dd>
+                                <dt className="text-gray-600 dark:text-gray-400">Deployment ID</dt>
+                                <dd className="font-mono text-gray-900 dark:text-gray-200">{deployment.deployment_id}</dd>
                             </div>
                             <div>
-                                <dt className="text-gray-400">Image</dt>
-                                <dd className="font-mono text-gray-200 text-xs">{deployment.image ? deployment.image.split('/').pop() : '-'}</dd>
+                                <dt className="text-gray-600 dark:text-gray-400">Image</dt>
+                                <dd className="font-mono text-gray-900 dark:text-gray-200 text-xs">{deployment.image ? deployment.image.split('/').pop() : '-'}</dd>
                             </div>
                             <div>
-                                <dt className="text-gray-400">URL</dt>
-                                <dd>{deployment.primary_url ? <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{deployment.primary_url}</a> : '-'}</dd>
+                                <dt className="text-gray-600 dark:text-gray-400">URL</dt>
+                                <dd>{deployment.primary_url ? <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">{deployment.primary_url}</a> : '-'}</dd>
                             </div>
                             <div>
-                                <dt className="text-gray-400">Created</dt>
-                                <dd className="text-gray-200">{formatDate(deployment.created)}</dd>
+                                <dt className="text-gray-600 dark:text-gray-400">Created</dt>
+                                <dd className="text-gray-900 dark:text-gray-200">{formatDate(deployment.created)}</dd>
                             </div>
                             {deployment.expires_at && (
                                 <div>
-                                    <dt className="text-gray-400">Expires</dt>
-                                    <dd className="text-gray-200">
+                                    <dt className="text-gray-600 dark:text-gray-400">Expires</dt>
+                                    <dd className="text-gray-900 dark:text-gray-200">
                                         {formatTimeRemaining(deployment.expires_at)}
-                                        <span className="text-gray-500 text-xs ml-2">({formatDate(deployment.expires_at)})</span>
+                                        <span className="text-gray-600 dark:text-gray-500 text-xs ml-2">({formatDate(deployment.expires_at)})</span>
                                     </dd>
                                 </div>
                             )}
                         </dl>
-                        <div className="mt-4 pt-4 border-t border-gray-800 flex items-center justify-between">
-                            <a href={`#deployment/${projectName}/${deployment.deployment_id}`} className="text-indigo-400 hover:text-indigo-300">
+                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
+                            <a href={`#deployment/${projectName}/${deployment.deployment_id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">
                                 View Details
                             </a>
                             {otherProgressing > 0 && (
-                                <span className="text-sm text-gray-500">
+                                <span className="text-sm text-gray-600 dark:text-gray-500">
                                     +{otherProgressing} other{otherProgressing === 1 ? '' : 's'} progressing
                                 </span>
                             )}
@@ -322,7 +322,7 @@ function DeploymentsList({ projectName }) {
     };
 
     if (loading && deployments.length === 0) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading deployments: {error}</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading deployments: {error}</p>;
 
     // Find the most recent deployment in the default group (only non-terminal)
     const mostRecentDefault = deployments.find(d => d.deployment_group === 'default' && !isTerminal(d.status));
@@ -331,12 +331,12 @@ function DeploymentsList({ projectName }) {
         <div>
             <div className="mb-4 flex items-center gap-2">
                 <label htmlFor="deployment-group-filter" className="flex items-center gap-2">
-                    <span className="text-sm text-gray-400 whitespace-nowrap">Filter by group:</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Filter by group:</span>
                     <select
                         id="deployment-group-filter"
                         value={groupFilter}
                         onChange={handleGroupChange}
-                        className="bg-gray-900 border border-gray-700 rounded px-3 py-2 text-sm text-gray-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                        className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
                     >
                         <option value="">All groups</option>
                         {deploymentGroups.map(group => (
@@ -346,25 +346,25 @@ function DeploymentsList({ projectName }) {
                 </label>
             </div>
 
-            <div className="bg-gray-900 rounded-lg overflow-x-auto border border-gray-800">
+            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-800">
                 <table className="w-full">
-                    <thead className="bg-gray-800">
+                    <thead className="bg-gray-100 dark:bg-gray-800">
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">ID</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created by</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Image</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Group</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">URL</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Expires</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Created</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-300 uppercase tracking-wider">Actions</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">ID</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created by</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Image</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Group</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">URL</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Expires</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
                         </tr>
                     </thead>
-                    <tbody className="divide-y divide-gray-800">
+                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
                         {deployments.length === 0 ? (
                             <tr>
-                                <td colSpan="9" className="px-6 py-8 text-center text-gray-400">
+                                <td colSpan="9" className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
                                     No deployments found.
                                 </td>
                             </tr>
@@ -375,36 +375,36 @@ function DeploymentsList({ projectName }) {
                                     <tr
                                         key={d.id}
                                         onClick={() => window.location.hash = `deployment/${projectName}/${d.deployment_id}`}
-                                        className={`transition-colors cursor-pointer ${isHighlighted ? 'bg-indigo-900/20 border-l-4 border-l-indigo-500 hover:bg-indigo-900/30' : 'hover:bg-gray-800/50'}`}
+                                        className={`transition-colors cursor-pointer ${isHighlighted ? 'bg-indigo-900/20 border-l-4 border-l-indigo-500 hover:bg-indigo-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
                                     >
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-200">{d.deployment_id}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-gray-200">{d.deployment_id}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge status={d.status} /></td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{d.created_by_email || '-'}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs font-mono text-gray-300">{d.image ? d.image.split('/').pop() : '-'}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{d.deployment_group}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{d.created_by_email || '-'}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-xs font-mono text-gray-700 dark:text-gray-300">{d.image ? d.image.split('/').pop() : '-'}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{d.deployment_group}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                                             {d.primary_url ? (
                                                 <a
                                                     href={d.primary_url}
                                                     target="_blank"
                                                     rel="noopener noreferrer"
-                                                    className="text-indigo-400 hover:text-indigo-300"
+                                                    className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
                                                     onClick={(e) => e.stopPropagation()}
                                                 >
                                                     Link
                                                 </a>
                                             ) : '-'}
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
                                             {d.expires_at ? (
                                                 <span>
                                                     {formatTimeRemaining(d.expires_at)}
                                                     <br />
-                                                    <span className="text-gray-500 text-xs">({formatDate(d.expires_at)})</span>
+                                                    <span className="text-gray-600 dark:text-gray-500 text-xs">({formatDate(d.expires_at)})</span>
                                                 </span>
                                             ) : '-'}
                                         </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-300">{formatDate(d.created)}</td>
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(d.created)}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm">
                                             <div className="flex gap-2">
                                                 {isRollbackable(d.status) && (
@@ -445,17 +445,17 @@ function DeploymentsList({ projectName }) {
                 <button
                     onClick={() => setPage(p => p - 1)}
                     disabled={page === 0}
-                    className="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white px-4 py-2 rounded text-sm transition-colors"
+                    className="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-100 dark:bg-gray-800 disabled:text-gray-600 text-white px-4 py-2 rounded text-sm transition-colors"
                 >
                     Previous
                 </button>
-                <span className="text-sm text-gray-400">
+                <span className="text-sm text-gray-600 dark:text-gray-400">
                     Page {page + 1} (showing {deployments.length} deployments)
                 </span>
                 <button
                     onClick={() => setPage(p => p + 1)}
                     disabled={!hasMore}
-                    className="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-800 disabled:text-gray-600 text-white px-4 py-2 rounded text-sm transition-colors"
+                    className="bg-gray-700 hover:bg-gray-600 disabled:bg-gray-100 dark:bg-gray-800 disabled:text-gray-600 text-white px-4 py-2 rounded text-sm transition-colors"
                 >
                     Next
                 </button>
@@ -704,7 +704,7 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
             <div className="flex justify-between items-center mb-3">
                 <h3 className="text-xl font-bold">Runtime Logs</h3>
                 <div className="flex gap-2 items-center">
-                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                    <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                         <span>Tail lines:</span>
                         <input
                             type="number"
@@ -713,15 +713,15 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
                             onBlur={handleTailLinesBlur}
                             onKeyPress={handleTailLinesKeyPress}
                             min="1"
-                            className="w-20 bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-100 focus:outline-none focus:border-indigo-500"
+                            className="w-20 bg-gray-100 dark:bg-gray-800 border border-gray-600 rounded px-2 py-1 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-indigo-500"
                         />
                     </label>
-                    <label className="flex items-center gap-2 text-sm text-gray-400">
+                    <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                         <input
                             type="checkbox"
                             checked={autoScroll}
                             onChange={(e) => setAutoScroll(e.target.checked)}
-                            className="rounded border-gray-600 bg-gray-800 text-indigo-600 focus:ring-indigo-500"
+                            className="rounded border-gray-600 bg-gray-100 dark:bg-gray-800 text-indigo-600 focus:ring-indigo-500"
                         />
                         Auto-scroll
                     </label>
@@ -763,18 +763,18 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
             </div>
 
             {error && (
-                <div className="mb-3 p-3 bg-red-900/20 border border-red-800 rounded text-red-400 text-sm">
+                <div className="mb-3 p-3 bg-red-900/20 border border-red-800 rounded text-red-600 dark:text-red-400 text-sm">
                     Error: {error}
                 </div>
             )}
 
-            <div className="bg-gray-950 border border-gray-800 rounded-lg overflow-hidden">
+            <div className="bg-gray-950 border border-gray-200 dark:border-gray-800 rounded-lg overflow-hidden">
                 <div
-                    className="p-4 overflow-y-auto font-mono text-xs text-gray-300"
+                    className="p-4 overflow-y-auto font-mono text-xs text-gray-700 dark:text-gray-300"
                     style={{ height: '400px' }}
                 >
                     {logs.length === 0 ? (
-                        <div className="text-gray-500 text-center py-8">
+                        <div className="text-gray-600 dark:text-gray-500 text-center py-8">
                             {streaming ? 'Waiting for logs...' : 'No logs yet. Click "Load Logs" or "Follow Logs" to view.'}
                         </div>
                     ) : (
@@ -791,7 +791,7 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
             </div>
 
             {streaming && (
-                <div className="mt-2 flex items-center gap-2 text-sm text-gray-400">
+                <div className="mt-2 flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
                     <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                     Live streaming logs...
                 </div>
@@ -855,16 +855,16 @@ function DeploymentDetail({ projectName, deploymentId }) {
     }, [deployment?.status, loadDeployment]);
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-400">Error loading deployment: {error}</p>;
-    if (!deployment) return <p className="text-gray-400">Deployment not found.</p>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading deployment: {error}</p>;
+    if (!deployment) return <p className="text-gray-600 dark:text-gray-400">Deployment not found.</p>;
 
     return (
         <section>
-            <a href={`#project/${projectName}`} className="inline-flex items-center gap-2 text-indigo-400 hover:text-indigo-300 mb-6 transition-colors">
+            <a href={`#project/${projectName}`} className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
                 ← Back
             </a>
 
-            <div className="bg-gray-900 border border-gray-800 rounded-lg p-6 mb-6">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-6 mb-6">
                 <div className="flex justify-between items-center mb-4">
                     <h3 className="text-2xl font-bold">Deployment {deployment.deployment_id}</h3>
                     <div className="flex items-center gap-3">
@@ -882,75 +882,75 @@ function DeploymentDetail({ projectName, deploymentId }) {
                 </div>
                 <dl className="grid grid-cols-2 gap-4 text-sm">
                     <div>
-                        <dt className="text-gray-400">Project</dt>
-                        <dd className="mt-1 text-gray-200">{deployment.project}</dd>
+                        <dt className="text-gray-600 dark:text-gray-400">Project</dt>
+                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{deployment.project}</dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">Created by</dt>
-                        <dd className="mt-1 text-gray-200">{deployment.created_by_email || '-'}</dd>
+                        <dt className="text-gray-600 dark:text-gray-400">Created by</dt>
+                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{deployment.created_by_email || '-'}</dd>
                     </div>
                     <div className="col-span-2">
-                        <dt className="text-gray-400">Image</dt>
-                        <dd className="mt-1 font-mono text-sm text-gray-200">{deployment.image || '-'}</dd>
+                        <dt className="text-gray-600 dark:text-gray-400">Image</dt>
+                        <dd className="mt-1 font-mono text-sm text-gray-900 dark:text-gray-200">{deployment.image || '-'}</dd>
                     </div>
                     <div className="col-span-2">
-                        <dt className="text-gray-400">Image Digest</dt>
-                        <dd className="mt-1 font-mono text-xs text-gray-300">{deployment.image_digest || '-'}</dd>
+                        <dt className="text-gray-600 dark:text-gray-400">Image Digest</dt>
+                        <dd className="mt-1 font-mono text-xs text-gray-700 dark:text-gray-300">{deployment.image_digest || '-'}</dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">Group</dt>
-                        <dd className="mt-1 text-gray-200">{deployment.deployment_group}</dd>
+                        <dt className="text-gray-600 dark:text-gray-400">Group</dt>
+                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{deployment.deployment_group}</dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">URLs</dt>
+                        <dt className="text-gray-600 dark:text-gray-400">URLs</dt>
                         <dd className="mt-1 space-y-1">
                             {deployment.primary_url ? (
                                 <>
                                     <div>
-                                        <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{deployment.primary_url}</a>
+                                        <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">{deployment.primary_url}</a>
                                     </div>
                                     {deployment.custom_domain_urls && deployment.custom_domain_urls.map((url, idx) => (
                                         <div key={idx}>
-                                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-indigo-400 hover:text-indigo-300">{url}</a>
+                                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">{url}</a>
                                         </div>
                                     ))}
                                 </>
                             ) : (
-                                <span className="text-gray-500">-</span>
+                                <span className="text-gray-600 dark:text-gray-500">-</span>
                             )}
                         </dd>
                     </div>
                     <div>
-                        <dt className="text-gray-400">Created</dt>
-                        <dd className="mt-1 text-gray-200">{formatDate(deployment.created)}</dd>
+                        <dt className="text-gray-600 dark:text-gray-400">Created</dt>
+                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{formatDate(deployment.created)}</dd>
                     </div>
                     {deployment.completed_at && (
                         <div>
-                            <dt className="text-gray-400">Completed</dt>
-                            <dd className="mt-1 text-gray-200">{formatDate(deployment.completed_at)}</dd>
+                            <dt className="text-gray-600 dark:text-gray-400">Completed</dt>
+                            <dd className="mt-1 text-gray-900 dark:text-gray-200">{formatDate(deployment.completed_at)}</dd>
                         </div>
                     )}
                     {deployment.expires_at && (
                         <div>
-                            <dt className="text-gray-400">Expires</dt>
-                            <dd className="mt-1 text-gray-200">
+                            <dt className="text-gray-600 dark:text-gray-400">Expires</dt>
+                            <dd className="mt-1 text-gray-900 dark:text-gray-200">
                                 {formatTimeRemaining(deployment.expires_at)}
-                                <span className="text-gray-500 text-xs ml-2">({formatDate(deployment.expires_at)})</span>
+                                <span className="text-gray-600 dark:text-gray-500 text-xs ml-2">({formatDate(deployment.expires_at)})</span>
                             </dd>
                         </div>
                     )}
                     {deployment.error_message && (
                         <div className="col-span-2">
-                            <dt className="text-gray-400">Error</dt>
-                            <dd className="mt-1 text-red-400">{deployment.error_message}</dd>
+                            <dt className="text-gray-600 dark:text-gray-400">Error</dt>
+                            <dd className="mt-1 text-red-600 dark:text-red-400">{deployment.error_message}</dd>
                         </div>
                     )}
                 </dl>
                 {deployment.build_logs && (
                     <details className="mt-4">
-                        <summary className="cursor-pointer text-indigo-400 hover:text-indigo-300 font-semibold">Build Logs</summary>
-                        <pre className="mt-2 bg-gray-950 border border-gray-800 rounded p-4 overflow-x-auto text-xs">
-                            <code className="text-gray-300">{deployment.build_logs}</code>
+                        <summary className="cursor-pointer text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-semibold">Build Logs</summary>
+                        <pre className="mt-2 bg-gray-950 border border-gray-200 dark:border-gray-800 rounded p-4 overflow-x-auto text-xs">
+                            <code className="text-gray-700 dark:text-gray-300">{deployment.build_logs}</code>
                         </pre>
                     </details>
                 )}
