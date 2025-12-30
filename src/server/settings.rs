@@ -667,15 +667,17 @@ mod tests {
         // This test verifies that unused fields are detected during deserialization
         // We can't easily test the warning output itself, but we can verify the config
         // still loads successfully even with unknown fields
-        
+
         use std::fs;
         use tempfile::TempDir;
 
         // Create a temporary directory with a default.yaml config
         let temp_dir = TempDir::new().unwrap();
         let config_path = temp_dir.path().join("default.yaml");
-        
-        fs::write(&config_path, r#"
+
+        fs::write(
+            &config_path,
+            r#"
 server:
   host: "0.0.0.0"
   port: 3000
@@ -700,22 +702,28 @@ deployment_controller:
   auth_signin_url: "http://localhost:3000"
 
 unknown_top_level: "also unknown"
-"#).unwrap();
+"#,
+        )
+        .unwrap();
 
         // Set environment variables to point to our test config
         env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
         env::set_var("RISE_CONFIG_RUN_MODE", "production"); // Use a mode that doesn't exist
-        
+
         // This should load successfully despite unknown fields
         // (The warnings would appear in logs)
         let result = Settings::new();
-        
+
         // Clean up env vars
         env::remove_var("RISE_CONFIG_DIR");
         env::remove_var("RISE_CONFIG_RUN_MODE");
 
         // Config should load successfully (warnings are logged, not errors)
-        assert!(result.is_ok(), "Config should load despite unknown fields: {:?}", result.err());
+        assert!(
+            result.is_ok(),
+            "Config should load despite unknown fields: {:?}",
+            result.err()
+        );
     }
 }
 

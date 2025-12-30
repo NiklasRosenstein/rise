@@ -97,7 +97,7 @@ pub fn load_full_project_config(app_path: &str) -> Result<Option<ProjectBuildCon
     if let Some(path) = config_path {
         info!("Loading project config from {}", path.display());
         let content = std::fs::read_to_string(&path)?;
-        
+
         // Deserialize and collect any unused fields
         let mut unused_fields = Vec::new();
         let deserializer = toml::Deserializer::new(&content);
@@ -107,7 +107,11 @@ pub fn load_full_project_config(app_path: &str) -> Result<Option<ProjectBuildCon
 
         // Warn about unused fields
         for field in &unused_fields {
-            warn!("Unknown configuration field in {}: {}", path.display(), field);
+            warn!(
+                "Unknown configuration field in {}: {}",
+                path.display(),
+                field
+            );
         }
 
         // Validate version
@@ -174,11 +178,11 @@ foo = "bar"
 
         // Load the config - it should succeed despite unknown fields
         let result = load_full_project_config(temp_dir.path().to_str().unwrap());
-        
+
         assert!(result.is_ok(), "Config should load despite unknown fields");
         let config = result.unwrap();
         assert!(config.is_some(), "Config should be present");
-        
+
         let config = config.unwrap();
         assert_eq!(config.version, Some(1));
         assert!(config.project.is_some());
@@ -210,11 +214,11 @@ builder = "paketobuildpacks/builder-jammy-base"
 
         // Load the config - should work fine
         let result = load_full_project_config(temp_dir.path().to_str().unwrap());
-        
+
         assert!(result.is_ok());
         let config = result.unwrap();
         assert!(config.is_some());
-        
+
         let config = config.unwrap();
         assert_eq!(config.version, Some(1));
         assert!(config.project.is_some());
