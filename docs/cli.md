@@ -24,8 +24,30 @@ CLI stores configuration in `~/.config/rise/config.json` (created automatically 
 | `rise deployment` | `d` | `create` (`c`), `list` (`ls`), `show` (`s`), `rollback`, `stop` |
 | `rise build` | - | - |
 | `rise run` | - | - |
+| `rise backend` | - | `server`, `check-config`, `dev-oidc-issuer` |
 
 Use `rise --help` or `rise <command> --help` for details.
+
+### Backend Commands
+
+Backend commands are used for running and managing the Rise backend server:
+
+```bash
+# Start the backend server
+rise backend server
+
+# Check backend configuration for errors
+rise backend check-config
+
+# Run a local OIDC issuer for testing
+rise backend dev-oidc-issuer --port 5678
+```
+
+The `check-config` command is particularly useful for:
+- Validating configuration before deployment
+- Checking for typos in configuration files
+- Identifying unused/deprecated configuration options
+- CI/CD pipeline validation steps
 
 ## Common Workflows
 
