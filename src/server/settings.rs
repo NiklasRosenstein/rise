@@ -537,9 +537,17 @@ impl Settings {
         }
         let json_value = serde_json::Value::Object(json_map);
 
-        // Deserialize from JSON value
-        let mut settings: Settings = serde_json::from_value(json_value)
-            .map_err(|e| ConfigError::Message(format!("Failed to deserialize settings: {}", e)))?;
+        // Deserialize from JSON value and collect unused fields
+        let mut unused_fields = Vec::new();
+        let mut settings: Settings = serde_ignored::deserialize(json_value, |path| {
+            unused_fields.push(path.to_string());
+        })
+        .map_err(|e| ConfigError::Message(format!("Failed to deserialize settings: {}", e)))?;
+
+        // Warn about unused fields
+        for field in &unused_fields {
+            tracing::warn!("Unknown configuration field in backend config: {}", field);
+        }
 
         // Special handling for DATABASE_URL environment variable (common convention)
         // This takes precedence over both TOML config and RISE_DATABASE__URL
@@ -652,6 +660,62 @@ mod tests {
     fn test_substitute_env_vars_in_string_no_substitution() {
         let result = Settings::substitute_env_vars_in_string("plain_value");
         assert_eq!(result, "plain_value");
+    }
+
+    #[test]
+    fn test_unused_fields_warning() {
+        // This test verifies that unused fields are detected during deserialization
+        // We can't easily test the warning output itself, but we can verify the config
+        // still loads successfully even with unknown fields
+        
+        use std::fs;
+        use tempfile::TempDir;
+
+        // Create a temporary directory with a default.yaml config
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("default.yaml");
+        
+        fs::write(&config_path, r#"
+server:
+  host: "0.0.0.0"
+  port: 3000
+  public_url: "http://localhost:3000"
+  jwt_signing_secret: "test-secret-key-for-testing-123456"
+  unknown_field: "should trigger warning"
+
+database:
+  url: "postgres://test@localhost/test"
+
+auth:
+  issuer: "http://localhost:5556"
+  client_id: "test"
+  client_secret: "test"
+
+deployment_controller:
+  type: "kubernetes"
+  ingress_class: "nginx"
+  production_ingress_url_template: "{project_name}.test.local"
+  namespace_format: "rise-{project_name}"
+  auth_backend_url: "http://localhost:3000"
+  auth_signin_url: "http://localhost:3000"
+
+unknown_top_level: "also unknown"
+"#).unwrap();
+
+        // Set environment variables to point to our test config
+        env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
+        env::set_var("RISE_CONFIG_RUN_MODE", "production"); // Use a mode that doesn't exist
+        
+        // This should load successfully despite unknown fields
+        // (The warnings would appear in logs)
+        let result = Settings::new();
+        
+        // Clean up env vars
+        env::remove_var("RISE_CONFIG_DIR");
+        env::remove_var("RISE_CONFIG_RUN_MODE");
+
+        // Config should load successfully (warnings are logged, not errors)
+        assert!(result.is_ok(), "Config should load despite unknown fields: {:?}", result.err());
     }
 }
 

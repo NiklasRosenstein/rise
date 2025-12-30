@@ -7,6 +7,9 @@ pub enum BackendCommands {
     /// Start the HTTP server with all controllers
     #[cfg(feature = "server")]
     Server,
+    /// Check backend configuration for errors and unused options
+    #[cfg(feature = "server")]
+    CheckConfig,
     /// Run a local OIDC issuer for testing service accounts
     DevOidcIssuer {
         /// Port to listen on
@@ -24,6 +27,20 @@ pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
         BackendCommands::Server => {
             let settings = crate::server::settings::Settings::new()?;
             crate::server::run_server(settings).await
+        }
+        #[cfg(feature = "server")]
+        BackendCommands::CheckConfig => {
+            println!("Checking backend configuration...");
+            match crate::server::settings::Settings::new() {
+                Ok(_) => {
+                    println!("✓ Configuration is valid");
+                    Ok(())
+                }
+                Err(e) => {
+                    eprintln!("✗ Configuration error: {}", e);
+                    std::process::exit(1);
+                }
+            }
         }
         BackendCommands::DevOidcIssuer { port, token } => dev_oidc_issuer::run(port, token).await,
     }

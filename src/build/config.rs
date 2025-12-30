@@ -97,7 +97,18 @@ pub fn load_full_project_config(app_path: &str) -> Result<Option<ProjectBuildCon
     if let Some(path) = config_path {
         info!("Loading project config from {}", path.display());
         let content = std::fs::read_to_string(&path)?;
-        let config: ProjectBuildConfig = toml::from_str(&content)?;
+        
+        // Deserialize and collect any unused fields
+        let mut unused_fields = Vec::new();
+        let deserializer = toml::Deserializer::new(&content);
+        let config: ProjectBuildConfig = serde_ignored::deserialize(deserializer, |path| {
+            unused_fields.push(path.to_string());
+        })?;
+
+        // Warn about unused fields
+        for field in &unused_fields {
+            warn!("Unknown configuration field in {}: {}", path.display(), field);
+        }
 
         // Validate version
         if let Some(version) = config.version {
@@ -126,4 +137,88 @@ pub fn write_project_config(app_path: &str, config: &ProjectBuildConfig) -> Resu
     std::fs::write(&rise_toml_path, toml_string)?;
     info!("Wrote project config to {}", rise_toml_path.display());
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_load_config_with_unused_fields() {
+        // Create a temporary directory for test
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rise_toml_path = temp_dir.path().join("rise.toml");
+
+        // Write a config with some unknown fields
+        std::fs::write(
+            &rise_toml_path,
+            r#"
+version = 1
+
+[project]
+name = "test-project"
+visibility = "private"
+
+[build]
+backend = "docker"
+
+# Unknown fields that should trigger warnings
+unknown_field = "test"
+another_unknown = 123
+
+[unknown_section]
+foo = "bar"
+"#,
+        )
+        .unwrap();
+
+        // Load the config - it should succeed despite unknown fields
+        let result = load_full_project_config(temp_dir.path().to_str().unwrap());
+        
+        assert!(result.is_ok(), "Config should load despite unknown fields");
+        let config = result.unwrap();
+        assert!(config.is_some(), "Config should be present");
+        
+        let config = config.unwrap();
+        assert_eq!(config.version, Some(1));
+        assert!(config.project.is_some());
+        assert_eq!(config.project.unwrap().name, "test-project");
+    }
+
+    #[test]
+    fn test_load_config_without_unknown_fields() {
+        // Create a temporary directory for test
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rise_toml_path = temp_dir.path().join("rise.toml");
+
+        // Write a clean config
+        std::fs::write(
+            &rise_toml_path,
+            r#"
+version = 1
+
+[project]
+name = "clean-project"
+visibility = "public"
+
+[build]
+backend = "pack"
+builder = "paketobuildpacks/builder-jammy-base"
+"#,
+        )
+        .unwrap();
+
+        // Load the config - should work fine
+        let result = load_full_project_config(temp_dir.path().to_str().unwrap());
+        
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.is_some());
+        
+        let config = config.unwrap();
+        assert_eq!(config.version, Some(1));
+        assert!(config.project.is_some());
+        assert_eq!(config.project.as_ref().unwrap().name, "clean-project");
+        assert_eq!(config.project.as_ref().unwrap().visibility, "public");
+    }
 }

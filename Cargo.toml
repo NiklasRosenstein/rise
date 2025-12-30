@@ -24,6 +24,7 @@ cli = [
     "dep:toml",
     "dep:url",
     "dep:webbrowser",
+    "dep:serde_ignored",
 ]
 server = [
     "k8s",  # Server requires a deployment backend (currently k8s is the only one)
@@ -44,6 +45,7 @@ server = [
     "dep:rust-embed",
     "dep:mime_guess",
     "dep:tera",
+    "dep:serde_ignored",
 ]
 aws = [
     "server",  # AWS features require server (which includes k8s)
@@ -95,6 +97,7 @@ rsa = { version = "0.9", optional = true }
 toml = { version = "0.8", optional = true }
 url = { version = "2.5", optional = true }
 webbrowser = { version = "1.0.2", optional = true }
+serde_ignored = { version = "0.1", optional = true }
 
 # Server core dependencies
 config = { version = "0.15.19", optional = true }
