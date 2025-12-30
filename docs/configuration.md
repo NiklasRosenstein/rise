@@ -274,6 +274,50 @@ The backend validates configuration on startup:
 - Required fields must be set
 - Invalid values cause startup failure with clear error messages
 - Environment variable substitution errors are reported
+- **Unknown configuration fields generate warnings** (as of v0.9.0)
+
+### Checking Configuration
+
+Use the `rise backend check-config` command to validate backend configuration:
+
+```bash
+rise backend check-config
+```
+
+This command:
+- Loads and validates backend configuration files
+- Reports any unknown/unused configuration fields as warnings
+- Exits with an error if configuration is invalid
+- Useful for CI/CD pipelines and deployment validation
+
+Example output:
+```
+Checking backend configuration...
+⚠️  WARN: Unknown configuration field in backend config: server.typo_field
+⚠️  WARN: Unknown configuration field in backend config: unknown_section
+✓ Configuration is valid
+```
+
+### Unknown Field Warnings
+
+Starting in v0.9.0, Rise warns about unrecognized configuration fields to help catch typos and outdated options:
+
+**Backend Configuration (YAML/TOML):**
+```bash
+# Warnings appear in logs when starting server or using check-config
+WARN rise::server::settings: Unknown configuration field in backend config: server.unknown_field
+```
+
+**Project Configuration (rise.toml):**
+```bash
+# Warnings appear when loading rise.toml (during build, deploy, etc.)
+WARN rise::build::config: Unknown configuration field in ./rise.toml: build.?.typo_field
+```
+
+These are warnings, not errors - your configuration will still load and work. The warnings help you:
+- Catch typos in field names
+- Identify outdated configuration options after upgrades
+- Ensure your configuration is being used as intended
 
 Run with `RUST_LOG=debug` to see configuration loading details:
 
