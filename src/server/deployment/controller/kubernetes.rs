@@ -22,10 +22,11 @@ use tracing::{debug, error, info, warn};
 
 use super::{DeploymentBackend, DeploymentUrls, HealthStatus, ReconcileResult};
 use crate::db::deployments as db_deployments;
-use crate::db::models::{Deployment, DeploymentStatus, Project, ProjectVisibility};
+use crate::db::models::{Deployment, DeploymentStatus, Project};
 use crate::db::projects as db_projects;
 use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
 use crate::server::registry::RegistryProvider;
+use crate::server::settings::AccessRequirement;
 use crate::server::state::ControllerState;
 
 // Kubernetes label and annotation constants
@@ -119,6 +120,7 @@ pub struct KubernetesControllerConfig {
     pub custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
     pub node_selector: std::collections::HashMap<String, String>,
     pub image_pull_secret_name: Option<String>,
+    pub access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
 }
 
 /// Kubernetes controller implementation
@@ -142,6 +144,7 @@ pub struct KubernetesController {
     custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
     node_selector: std::collections::HashMap<String, String>,
     image_pull_secret_name: Option<String>,
+    access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
     /// In-memory cache of resource versions for drift detection
     /// Key: "deployment-{id}-{resource_type}" (e.g., "deployment-123-service")
     /// Value: last observed resourceVersion from Kubernetes API
@@ -175,6 +178,7 @@ impl KubernetesController {
             custom_domain_tls_mode: config.custom_domain_tls_mode,
             node_selector: config.node_selector,
             image_pull_secret_name: config.image_pull_secret_name,
+            access_classes: config.access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         })
     }
@@ -1711,47 +1715,75 @@ impl KubernetesController {
             );
         }
 
-        if matches!(project.visibility, ProjectVisibility::Private) {
-            // Add Nginx auth annotations for private projects
-            // Note: All API routes are nested under /api/v1 prefix
-            let auth_url = format!(
-                "{}/api/v1/auth/ingress?project={}",
-                self.auth_backend_url, project.name
-            );
-
-            // Use dynamic host routing if backend service exists
-            let signin_url = if self.backend_address.is_some() {
-                // Use $http_host to preserve port, but use literal scheme from config to avoid parsing error
-                // (nginx parser fails on $scheme:// at start of URL, but accepts http:// or https://)
-                format!(
-                    "{}://$http_host/.rise/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
-                    self.ingress_schema,  // "http" or "https" from config
-                    urlencoding::encode(&project.name)
+        // Get access class configuration
+        let access_class = self
+            .access_classes
+            .get(&project.access_class)
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "Access class '{}' not configured in deployment controller. Available: {}",
+                    project.access_class,
+                    self.access_classes
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 )
-            } else {
-                // Fall back to configured auth_signin_url for deployments without custom domains
-                format!(
-                    "{}/api/v1/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
-                    self.auth_signin_url,
-                    urlencoding::encode(&project.name)
-                )
-            };
+            })?;
 
-            // Nginx auth subrequest - returns 2xx for allowed, 401/403 for denied
-            // If auth-url is unreachable or returns 5xx, nginx defaults to DENY (fail-closed)
-            // IMPORTANT: Ensure auth-url points to the correct endpoint (/api/v1/auth/ingress)
-            // If misconfigured to hit the frontend catch-all route, it may return 200 OK and grant access
-            annotations.insert("nginx.ingress.kubernetes.io/auth-url".to_string(), auth_url);
-            annotations.insert(
-                "nginx.ingress.kubernetes.io/auth-signin".to_string(),
-                signin_url,
-            );
-            annotations.insert(
-                "nginx.ingress.kubernetes.io/auth-response-headers".to_string(),
-                "X-Auth-Request-Email,X-Auth-Request-User".to_string(),
-            );
+        // Apply authentication based on access requirement
+        match access_class.access_requirement {
+            AccessRequirement::None => {
+                // No authentication required - fully public
+                // No nginx auth annotations needed
+            }
+            AccessRequirement::Authenticated | AccessRequirement::Member => {
+                // Both require authentication, but differ in authorization logic
+                // The /auth/ingress endpoint will handle the membership check
+                // Note: All API routes are nested under /api/v1 prefix
+                let auth_url = format!(
+                    "{}/api/v1/auth/ingress?project={}",
+                    self.auth_backend_url, project.name
+                );
+
+                // Use dynamic host routing if backend service exists
+                let signin_url = if self.backend_address.is_some() {
+                    // Use $http_host to preserve port, but use literal scheme from config to avoid parsing error
+                    // (nginx parser fails on $scheme:// at start of URL, but accepts http:// or https://)
+                    format!(
+                        "{}://$http_host/.rise/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
+                        self.ingress_schema,  // "http" or "https" from config
+                        urlencoding::encode(&project.name)
+                    )
+                } else {
+                    // Fall back to configured auth_signin_url for deployments without custom domains
+                    format!(
+                        "{}/api/v1/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
+                        self.auth_signin_url,
+                        urlencoding::encode(&project.name)
+                    )
+                };
+
+                // Nginx auth subrequest - returns 2xx for allowed, 401/403 for denied
+                // If auth-url is unreachable or returns 5xx, nginx defaults to DENY (fail-closed)
+                // IMPORTANT: Ensure auth-url points to the correct endpoint (/api/v1/auth/ingress)
+                // If misconfigured to hit the frontend catch-all route, it may return 200 OK and grant access
+                annotations.insert("nginx.ingress.kubernetes.io/auth-url".to_string(), auth_url);
+                annotations.insert(
+                    "nginx.ingress.kubernetes.io/auth-signin".to_string(),
+                    signin_url,
+                );
+                annotations.insert(
+                    "nginx.ingress.kubernetes.io/auth-response-headers".to_string(),
+                    "X-Auth-Request-Email,X-Auth-Request-User".to_string(),
+                );
+            }
         }
-        // Public projects have no auth annotations
+
+        // Apply custom annotations from access class
+        for (key, value) in &access_class.custom_annotations {
+            annotations.insert(key.clone(), value.clone());
+        }
 
         // Determine path and path type based on routing mode
         let (ingress_path, path_type) = if let Some(ref path) = url_components.path_prefix {

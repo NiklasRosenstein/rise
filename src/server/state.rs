@@ -173,6 +173,7 @@ async fn init_kubernetes_backend(
         custom_domain_tls_mode,
         node_selector,
         image_pull_secret_name,
+        access_classes,
         ..
     }) = &settings.deployment_controller
     {
@@ -219,6 +220,7 @@ async fn init_kubernetes_backend(
                 custom_domain_tls_mode: custom_domain_tls_mode.clone(),
                 node_selector: node_selector.clone(),
                 image_pull_secret_name: image_pull_secret_name.clone(),
+                access_classes: access_classes.clone(),
             },
         )?;
 
