@@ -27,9 +27,9 @@ pub struct ProjectConfig {
     /// Project name
     pub name: String,
 
-    /// Visibility (Public or Private)
-    #[serde(default = "default_visibility")]
-    pub visibility: String,
+    /// Access class (e.g., public, private)
+    #[serde(default = "default_access_class", alias = "visibility")]
+    pub access_class: String,
 
     /// Custom domains
     #[serde(default)]
@@ -40,8 +40,8 @@ pub struct ProjectConfig {
     pub env: HashMap<String, String>,
 }
 
-fn default_visibility() -> String {
-    "private".to_string()
+fn default_access_class() -> String {
+    "public".to_string()
 }
 
 /// Build configuration options for a project
@@ -223,6 +223,6 @@ builder = "paketobuildpacks/builder-jammy-base"
         assert_eq!(config.version, Some(1));
         assert!(config.project.is_some());
         assert_eq!(config.project.as_ref().unwrap().name, "clean-project");
-        assert_eq!(config.project.as_ref().unwrap().visibility, "public");
+        assert_eq!(config.project.as_ref().unwrap().access_class, "public");
     }
 }

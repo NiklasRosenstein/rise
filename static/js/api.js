@@ -94,11 +94,15 @@ class RiseAPI {
         return this.request(`/projects/${idOrName}${queryString ? '?' + queryString : ''}`);
     }
 
-    async createProject(name, visibility, owner) {
+    async createProject(name, access_class, owner) {
         return this.request('/projects', {
             method: 'POST',
-            body: JSON.stringify({ name, visibility, owner })
+            body: JSON.stringify({ name, access_class, owner })
         });
+    }
+
+    async getAccessClasses() {
+        return this.request('/projects/access-classes');
     }
 
     async updateProject(nameOrId, updates) {

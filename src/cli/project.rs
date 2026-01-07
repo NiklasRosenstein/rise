@@ -68,7 +68,7 @@ pub async fn create_project(
     backend_url: &str,
     config: &Config,
     name: &str,
-    visibility: ProjectVisibility,
+    access_class: &str,
     owner: Option<String>,
     path: &str,
 ) -> Result<()> {
@@ -110,13 +110,13 @@ pub async fn create_project(
     #[derive(Serialize)]
     struct CreateRequest {
         name: String,
-        visibility: ProjectVisibility,
+        access_class: String,
         owner: OwnerType,
     }
 
     let request = CreateRequest {
         name: name.to_string(),
-        visibility: visibility.clone(),
+        access_class: access_class.to_string(),
         owner: owner_payload,
     };
 
@@ -148,7 +148,7 @@ pub async fn create_project(
 
         let project_config = ProjectConfig {
             name: name.to_string(),
-            visibility: visibility.to_string().to_lowercase(),
+            access_class: access_class.to_string(),
             custom_domains: Vec::new(),
             env: HashMap::new(),
         };
@@ -207,7 +207,7 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                 .set_header(vec![
                     Cell::new("NAME").add_attribute(Attribute::Bold),
                     Cell::new("STATUS").add_attribute(Attribute::Bold),
-                    Cell::new("VISIBILITY").add_attribute(Attribute::Bold),
+                    Cell::new("ACCESS CLASS").add_attribute(Attribute::Bold),
                     Cell::new("OWNER").add_attribute(Attribute::Bold),
                     Cell::new("ACTIVE DEPLOYMENT").add_attribute(Attribute::Bold),
                     Cell::new("URL").add_attribute(Attribute::Bold),
@@ -235,7 +235,7 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                 table.add_row(vec![
                     Cell::new(&project.name),
                     Cell::new(format!("{}", project.status)),
-                    Cell::new(format!("{}", project.visibility)),
+                    Cell::new(&project.access_class),
                     Cell::new(&owner),
                     Cell::new(&active_deployment),
                     Cell::new(url),
@@ -292,7 +292,7 @@ pub async fn show_project(
         println!("Project: {}", project.name);
         println!("ID: {}", project.id);
         println!("Status: {}", project.status);
-        println!("Visibility: {}", project.visibility);
+        println!("Access Class: {}", project.access_class);
         if let Some(url) = project.primary_url {
             println!("Primary URL: {}", url);
         } else {
@@ -374,7 +374,7 @@ pub async fn update_project(
     config: &Config,
     project_identifier: &str,
     name: Option<String>,
-    visibility: Option<ProjectVisibility>,
+    access_class: Option<String>,
     owner: Option<String>,
     sync: bool,
     path: &str,
@@ -395,21 +395,18 @@ pub async fn update_project(
             .project
             .ok_or_else(|| anyhow::anyhow!("No [project] section found in rise.toml"))?;
 
-        // Parse visibility
-        let visibility_enum: ProjectVisibility = project_config.visibility.parse()?;
-
         info!("Syncing project metadata from rise.toml to backend...");
 
-        // Update project name and visibility
+        // Update project name and access_class
         #[derive(Serialize)]
         struct SyncUpdateRequest {
             name: String,
-            visibility: ProjectVisibility,
+            access_class: String,
         }
 
         let request = SyncUpdateRequest {
             name: project_config.name.clone(),
-            visibility: visibility_enum,
+            access_class: project_config.access_class.clone(),
         };
 
         let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
@@ -494,14 +491,14 @@ pub async fn update_project(
         #[serde(skip_serializing_if = "Option::is_none")]
         name: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
-        visibility: Option<ProjectVisibility>,
+        access_class: Option<String>,
         #[serde(skip_serializing_if = "Option::is_none")]
         owner: Option<OwnerType>,
     }
 
     let request = UpdateRequest {
         name: name.clone(),
-        visibility: visibility.clone(),
+        access_class: access_class.clone(),
         owner: owner_payload,
     };
 
@@ -538,9 +535,9 @@ pub async fn update_project(
                     updated = true;
                 }
 
-                // Update visibility in rise.toml if provided
-                if let Some(ref new_visibility) = visibility {
-                    project_config.visibility = new_visibility.to_string().to_lowercase();
+                // Update access_class in rise.toml if provided
+                if let Some(ref new_access_class) = access_class {
+                    project_config.access_class = new_access_class.clone();
                     updated = true;
                 }
 

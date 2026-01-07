@@ -3,35 +3,11 @@
 
 const { useState, useEffect, useCallback } = React;
 
-// Icon components for visibility
-function LockIcon({ className = "w-4 h-4" }) {
+// Access Class Badge Component
+function AccessClassBadge({ accessClass }) {
     return (
-        <div className={`${className} svg-mask`} style={{
-            maskImage: 'url(/assets/lock.svg)',
-            WebkitMaskImage: 'url(/assets/lock.svg)'
-        }}></div>
-    );
-}
-
-function GlobeIcon({ className = "w-4 h-4" }) {
-    return (
-        <div className={`${className} svg-mask`} style={{
-            maskImage: 'url(/assets/globe.svg)',
-            WebkitMaskImage: 'url(/assets/globe.svg)'
-        }}></div>
-    );
-}
-
-// Visibility Badge Component
-function VisibilityBadge({ visibility }) {
-    return (
-        <span className="inline-flex items-center gap-1.5 text-sm">
-            {visibility === 'Private' ? (
-                <LockIcon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-            ) : (
-                <GlobeIcon className="w-4 h-4 text-gray-600 dark:text-gray-400" />
-            )}
-            <span className="text-gray-700 dark:text-gray-300">{visibility}</span>
+        <span className="text-sm text-gray-700 dark:text-gray-300">
+            {accessClass}
         </span>
     );
 }
@@ -42,9 +18,10 @@ function ProjectsList() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [formData, setFormData] = useState({ name: '', visibility: 'Public', owner: 'self' });
+    const [formData, setFormData] = useState({ name: '', access_class: 'public', owner: 'self' });
     const [teams, setTeams] = useState([]);
     const [currentUser, setCurrentUser] = useState(null);
+    const [accessClasses, setAccessClasses] = useState([]);
     const [saving, setSaving] = useState(false);
     const { showToast } = useToast();
 
@@ -87,8 +64,20 @@ function ProjectsList() {
         loadCurrentUser();
     }, []);
 
+    useEffect(() => {
+        async function loadAccessClasses() {
+            try {
+                const data = await api.getAccessClasses();
+                setAccessClasses(data.access_classes || []);
+            } catch (err) {
+                console.error('Failed to load access classes:', err);
+            }
+        }
+        loadAccessClasses();
+    }, []);
+
     const handleCreateClick = () => {
-        setFormData({ name: '', visibility: 'Public', owner: 'self' });
+        setFormData({ name: '', access_class: 'public', owner: 'self' });
         setIsModalOpen(true);
     };
 
@@ -120,7 +109,7 @@ function ProjectsList() {
                 owner = { team: formData.owner };
             }
 
-            await api.createProject(formData.name, formData.visibility, owner);
+            await api.createProject(formData.name, formData.access_class, owner);
             showToast(`Project ${formData.name} created successfully`, 'success');
             setIsModalOpen(false);
             loadProjects();
@@ -149,7 +138,7 @@ function ProjectsList() {
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Name</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Owner</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Visibility</th>
+                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Access Class</th>
                             <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">URL</th>
                         </tr>
                     </thead>
@@ -173,7 +162,7 @@ function ProjectsList() {
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{p.name}</td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge status={p.status} /></td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{owner}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><VisibilityBadge visibility={p.visibility} /></td>
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm"><AccessClassBadge accessClass={p.access_class} /></td>
                                     <td className="px-6 py-4 whitespace-nowrap text-sm">
                                         {p.primary_url ? (
                                             <a
@@ -214,16 +203,24 @@ function ProjectsList() {
                     </p>
 
                     <FormField
-                        label="Visibility"
-                        id="project-visibility"
+                        label="Access Class"
+                        id="project-access-class"
                         type="select"
-                        value={formData.visibility}
-                        onChange={(e) => setFormData({ ...formData, visibility: e.target.value })}
+                        value={formData.access_class}
+                        onChange={(e) => setFormData({ ...formData, access_class: e.target.value })}
                         required
                     >
-                        <option value="Public">Public</option>
-                        <option value="Private">Private</option>
+                        {accessClasses.map(ac => (
+                            <option key={ac.id} value={ac.id} title={ac.description}>
+                                {ac.display_name}
+                            </option>
+                        ))}
                     </FormField>
+                    {accessClasses.find(ac => ac.id === formData.access_class) && (
+                        <p className="text-sm text-gray-600 dark:text-gray-500 -mt-2">
+                            {accessClasses.find(ac => ac.id === formData.access_class).description}
+                        </p>
+                    )}
 
                     <FormField
                         label="Owner"
@@ -269,9 +266,10 @@ function ProjectDetail({ projectName, initialTab }) {
     const [activeTab, setActiveTab] = useState(initialTab || 'overview');
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
-    const [editingVisibility, setEditingVisibility] = useState(false);
-    const [newVisibility, setNewVisibility] = useState(null);
-    const [updatingVisibility, setUpdatingVisibility] = useState(false);
+    const [editingAccessClass, setEditingAccessClass] = useState(false);
+    const [newAccessClass, setNewAccessClass] = useState(null);
+    const [updatingAccessClass, setUpdatingAccessClass] = useState(false);
+    const [accessClasses, setAccessClasses] = useState([]);
     const { showToast } = useToast();
 
     useEffect(() => {
@@ -287,6 +285,18 @@ function ProjectDetail({ projectName, initialTab }) {
         }
         loadProject();
     }, [projectName]);
+
+    useEffect(() => {
+        async function loadAccessClasses() {
+            try {
+                const data = await api.getAccessClasses();
+                setAccessClasses(data.access_classes || []);
+            } catch (err) {
+                console.error('Failed to load access classes:', err);
+            }
+        }
+        loadAccessClasses();
+    }, []);
 
     // Update activeTab when initialTab changes (e.g., browser back/forward)
     useEffect(() => {
@@ -322,34 +332,35 @@ function ProjectDetail({ projectName, initialTab }) {
         }
     };
 
-    const handleEditVisibility = () => {
-        setNewVisibility(project.visibility);
-        setEditingVisibility(true);
+    const handleEditAccessClass = () => {
+        setNewAccessClass(project.access_class);
+        setEditingAccessClass(true);
     };
 
-    const handleCancelEditVisibility = () => {
-        setEditingVisibility(false);
-        setNewVisibility(null);
+    const handleCancelEditAccessClass = () => {
+        setEditingAccessClass(false);
+        setNewAccessClass(null);
     };
 
-    const handleSaveVisibility = async () => {
-        if (!project || !newVisibility || newVisibility === project.visibility) {
-            setEditingVisibility(false);
+    const handleSaveAccessClass = async () => {
+        if (!project || !newAccessClass || newAccessClass === project.access_class) {
+            setEditingAccessClass(false);
             return;
         }
 
-        setUpdatingVisibility(true);
+        setUpdatingAccessClass(true);
         try {
-            await api.updateProject(project.name, { visibility: newVisibility });
-            showToast(`Project visibility updated to ${newVisibility}`, 'success');
+            await api.updateProject(project.name, { access_class: newAccessClass });
+            const ac = accessClasses.find(a => a.id === newAccessClass);
+            showToast(`Project access class updated to ${ac ? ac.display_name : newAccessClass}`, 'success');
             // Reload project to get updated data
             const updatedProject = await api.getProject(projectName, { expand: 'owner' });
             setProject(updatedProject);
-            setEditingVisibility(false);
+            setEditingAccessClass(false);
         } catch (err) {
-            showToast(`Failed to update visibility: ${err.message}`, 'error');
+            showToast(`Failed to update access class: ${err.message}`, 'error');
         } finally {
-            setUpdatingVisibility(false);
+            setUpdatingAccessClass(false);
         }
     };
 
@@ -380,47 +391,64 @@ function ProjectDetail({ projectName, initialTab }) {
                         <dd className="mt-1"><StatusBadge status={project.status} /></dd>
                     </div>
                     <div>
-                        <dt className="text-gray-600 dark:text-gray-400 mb-1">Visibility</dt>
+                        <dt className="text-gray-600 dark:text-gray-400 mb-1">Access Class</dt>
                         <dd className="mt-1">
-                            {!editingVisibility ? (
-                                <div className="flex items-center gap-2">
-                                    <VisibilityBadge visibility={project.visibility} />
-                                    <button
-                                        onClick={handleEditVisibility}
-                                        className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
-                                    >
-                                        Edit
-                                    </button>
+                            {!editingAccessClass ? (
+                                <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-2">
+                                        <AccessClassBadge accessClass={project.access_class} />
+                                        <button
+                                            onClick={handleEditAccessClass}
+                                            className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 transition-colors"
+                                        >
+                                            Edit
+                                        </button>
+                                    </div>
+                                    {accessClasses.find(ac => ac.id === project.access_class) && (
+                                        <p className="text-xs text-gray-600 dark:text-gray-500">
+                                            {accessClasses.find(ac => ac.id === project.access_class).description}
+                                        </p>
+                                    )}
                                 </div>
                             ) : (
-                                <div className="flex items-center gap-2">
-                                    <select
-                                        value={newVisibility}
-                                        onChange={(e) => setNewVisibility(e.target.value)}
-                                        className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                        disabled={updatingVisibility}
-                                    >
-                                        <option value="Public">Public</option>
-                                        <option value="Private">Private</option>
-                                    </select>
-                                    <Button
-                                        variant="primary"
-                                        size="sm"
-                                        onClick={handleSaveVisibility}
-                                        loading={updatingVisibility}
-                                        className="!py-1 !px-2 !text-xs"
-                                    >
-                                        Save
-                                    </Button>
-                                    <Button
-                                        variant="secondary"
-                                        size="sm"
-                                        onClick={handleCancelEditVisibility}
-                                        disabled={updatingVisibility}
-                                        className="!py-1 !px-2 !text-xs"
-                                    >
-                                        Cancel
-                                    </Button>
+                                <div className="flex flex-col gap-2">
+                                    <div className="flex items-center gap-2">
+                                        <select
+                                            value={newAccessClass}
+                                            onChange={(e) => setNewAccessClass(e.target.value)}
+                                            className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                            disabled={updatingAccessClass}
+                                        >
+                                            {accessClasses.map(ac => (
+                                                <option key={ac.id} value={ac.id}>
+                                                    {ac.display_name}
+                                                </option>
+                                            ))}
+                                        </select>
+                                        <Button
+                                            variant="primary"
+                                            size="sm"
+                                            onClick={handleSaveAccessClass}
+                                            loading={updatingAccessClass}
+                                            className="!py-1 !px-2 !text-xs"
+                                        >
+                                            Save
+                                        </Button>
+                                        <Button
+                                            variant="secondary"
+                                            size="sm"
+                                            onClick={handleCancelEditAccessClass}
+                                            disabled={updatingAccessClass}
+                                            className="!py-1 !px-2 !text-xs"
+                                        >
+                                            Cancel
+                                        </Button>
+                                    </div>
+                                    {accessClasses.find(ac => ac.id === newAccessClass) && (
+                                        <p className="text-xs text-gray-600 dark:text-gray-500">
+                                            {accessClasses.find(ac => ac.id === newAccessClass).description}
+                                        </p>
+                                    )}
                                 </div>
                             )}
                         </dd>

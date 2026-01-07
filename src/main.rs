@@ -166,9 +166,9 @@ enum ProjectCommands {
     Create {
         /// Project name
         name: String,
-        /// Visibility (public or private)
-        #[arg(long, default_value = "private")]
-        visibility: String,
+        /// Access class (e.g., public, private)
+        #[arg(long, default_value = "public")]
+        access_class: String,
         /// Owner (format: "user:email" or "team:name", defaults to current user)
         #[arg(long)]
         owner: Option<String>,
@@ -195,9 +195,9 @@ enum ProjectCommands {
         /// New project name
         #[arg(long)]
         name: Option<String>,
-        /// New visibility (public or private)
+        /// New access class (e.g., public, private)
         #[arg(long)]
-        visibility: Option<String>,
+        access_class: Option<String>,
         /// Transfer ownership (format: "user:email" or "team:name")
         #[arg(long)]
         owner: Option<String>,
@@ -706,21 +706,16 @@ async fn main() -> Result<()> {
         Commands::Project(project_cmd) => match project_cmd {
             ProjectCommands::Create {
                 name,
-                visibility,
+                access_class,
                 owner,
                 path,
             } => {
-                let visibility_enum: ProjectVisibility = visibility.parse().unwrap_or_else(|e| {
-                    eprintln!("Error: {}", e);
-                    std::process::exit(1);
-                });
-
                 project::create_project(
                     &http_client,
                     &backend_url,
                     &config,
                     name,
-                    visibility_enum,
+                    access_class,
                     owner.clone(),
                     path,
                 )
@@ -735,25 +730,18 @@ async fn main() -> Result<()> {
             ProjectCommands::Update {
                 project,
                 name,
-                visibility,
+                access_class,
                 owner,
                 sync,
                 path,
             } => {
-                let visibility_enum = visibility.as_ref().map(|v| {
-                    v.parse().unwrap_or_else(|e: anyhow::Error| {
-                        eprintln!("Error: {}", e);
-                        std::process::exit(1);
-                    })
-                });
-
                 project::update_project(
                     &http_client,
                     &backend_url,
                     &config,
                     project,
                     name.clone(),
-                    visibility_enum,
+                    access_class.clone(),
                     owner.clone(),
                     *sync,
                     path,
