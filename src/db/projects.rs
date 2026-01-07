@@ -15,7 +15,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
             SELECT
                 id, name,
                 status as "status: ProjectStatus",
-                visibility as "visibility: ProjectVisibility",
+                access_class,
                 owner_user_id, owner_team_id,
                 finalizers,
                 created_at, updated_at
@@ -34,7 +34,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
             SELECT
                 id, name,
                 status as "status: ProjectStatus",
-                visibility as "visibility: ProjectVisibility",
+                access_class,
                 owner_user_id, owner_team_id,
                 finalizers,
                 created_at, updated_at
@@ -57,7 +57,7 @@ pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
         SELECT DISTINCT
             p.id, p.name,
             p.status as "status: ProjectStatus",
-            p.visibility as "visibility: ProjectVisibility",
+            p.access_class,
             p.owner_user_id, p.owner_team_id,
             p.finalizers,
             p.created_at, p.updated_at
@@ -94,7 +94,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
         SELECT
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
@@ -118,7 +118,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
         SELECT
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
@@ -139,29 +139,28 @@ pub async fn create(
     pool: &PgPool,
     name: &str,
     status: ProjectStatus,
-    visibility: ProjectVisibility,
+    access_class: String,
     owner_user_id: Option<Uuid>,
     owner_team_id: Option<Uuid>,
 ) -> Result<Project> {
     let status_str = status.to_string();
-    let visibility_str = visibility.to_string();
 
     let project = sqlx::query_as!(
         Project,
         r#"
-        INSERT INTO projects (name, status, visibility, owner_user_id, owner_team_id)
+        INSERT INTO projects (name, status, access_class, owner_user_id, owner_team_id)
         VALUES ($1, $2, $3, $4, $5)
         RETURNING
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
         "#,
         name,
         status_str,
-        visibility_str,
+        access_class,
         owner_user_id,
         owner_team_id
     )
@@ -185,7 +184,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
         RETURNING
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
@@ -200,34 +199,28 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
     Ok(project)
 }
 
-/// Update project visibility
-pub async fn update_visibility(
-    pool: &PgPool,
-    id: Uuid,
-    visibility: ProjectVisibility,
-) -> Result<Project> {
-    let visibility_str = visibility.to_string();
-
+/// Update project access class
+pub async fn update_access_class(pool: &PgPool, id: Uuid, access_class: String) -> Result<Project> {
     let project = sqlx::query_as!(
         Project,
         r#"
         UPDATE projects
-        SET visibility = $2
+        SET access_class = $2
         WHERE id = $1
         RETURNING
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
         "#,
         id,
-        visibility_str
+        access_class
     )
     .fetch_one(pool)
     .await
-    .context("Failed to update project visibility")?;
+    .context("Failed to update project access class")?;
 
     Ok(project)
 }
@@ -248,7 +241,7 @@ pub async fn update_owner(
         RETURNING
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
@@ -445,7 +438,7 @@ pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
         RETURNING
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
@@ -467,7 +460,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
         SELECT
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
@@ -541,7 +534,7 @@ pub async fn find_deleting_with_finalizer(
         SELECT
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at
@@ -586,7 +579,7 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
         SELECT
             id, name,
             status as "status: ProjectStatus",
-            visibility as "visibility: ProjectVisibility",
+            access_class,
             owner_user_id, owner_team_id,
             finalizers,
             created_at, updated_at

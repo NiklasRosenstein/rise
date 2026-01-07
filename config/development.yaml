@@ -29,3 +29,19 @@ deployment_controller:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
   ingress_port: 8080 # `mise minikube:launch` port-forwards the ingress controller to this port
   ingress_schema: "http" # Use http for local development (defaults to https in production)
+  access_classes:
+    public:
+      display_name: "Public"
+      description: "Fully public - no authentication required."
+      ingress_class: "nginx"
+      access_requirement: None
+    authenticated:
+      display_name: "Authenticated"
+      description: "Requires authentication but not project membership."
+      ingress_class: "nginx"
+      access_requirement: Authenticated
+    private:
+      display_name: "Private"
+      description: "Requires authentication and project membership."
+      ingress_class: "nginx"
+      access_requirement: Member

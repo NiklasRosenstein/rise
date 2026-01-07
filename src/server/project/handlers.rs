@@ -1,8 +1,9 @@
 use super::fuzzy::find_similar_projects;
 use super::models::{
-    CreateProjectRequest, CreateProjectResponse, GetProjectParams, OwnerInfo,
-    Project as ApiProject, ProjectErrorResponse, ProjectOwner, ProjectStatus, ProjectVisibility,
-    ProjectWithOwnerInfo, TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
+    AccessClassInfo, CreateProjectRequest, CreateProjectResponse, GetProjectParams,
+    ListAccessClassesResponse, OwnerInfo, Project as ApiProject, ProjectErrorResponse,
+    ProjectOwner, ProjectStatus, ProjectWithOwnerInfo, TeamInfo, UpdateProjectRequest,
+    UpdateProjectResponse, UserInfo,
 };
 use crate::db::models::User;
 use crate::db::{projects, service_accounts, teams as db_teams, users as db_users};
@@ -14,11 +15,67 @@ use axum::{
 };
 use uuid::Uuid;
 
+/// List available access classes for the deployment controller
+pub async fn list_access_classes(
+    State(state): State<AppState>,
+    Extension(_user): Extension<User>,
+) -> Result<Json<ListAccessClassesResponse>, (StatusCode, String)> {
+    use crate::server::settings::DeploymentControllerSettings;
+
+    let access_classes = match &state.settings.deployment_controller {
+        Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => access_classes
+            .iter()
+            .map(|(id, class)| AccessClassInfo {
+                id: id.clone(),
+                display_name: class.display_name.clone(),
+                description: class.description.clone(),
+            })
+            .collect(),
+        None => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "No deployment controller configured".to_string(),
+            ));
+        }
+    };
+
+    Ok(Json(ListAccessClassesResponse { access_classes }))
+}
+
 pub async fn create_project(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Json(payload): Json<CreateProjectRequest>,
 ) -> Result<Json<CreateProjectResponse>, (StatusCode, String)> {
+    // Validate access_class against configured access classes
+    use crate::server::settings::DeploymentControllerSettings;
+
+    let is_valid_access_class = match &state.settings.deployment_controller {
+        Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => {
+            access_classes.contains_key(&payload.access_class)
+        }
+        None => false,
+    };
+
+    if !is_valid_access_class {
+        let available = match &state.settings.deployment_controller {
+            Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => access_classes
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", "),
+            _ => "none".to_string(),
+        };
+
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Invalid access class '{}'. Available: {}",
+                payload.access_class, available
+            ),
+        ));
+    }
+
     // Validate owner - exactly one of owner_user or owner_team must be set
     let (owner_user_id, owner_team_id) = match &payload.owner {
         ProjectOwner::User(user_id) => {
@@ -61,7 +118,7 @@ pub async fn create_project(
         &state.db_pool,
         &payload.name,
         crate::db::models::ProjectStatus::Stopped,
-        crate::db::models::ProjectVisibility::from(payload.visibility),
+        payload.access_class,
         owner_user_id,
         owner_team_id,
     )
@@ -215,7 +272,7 @@ pub async fn list_projects(
             updated: project.updated_at.to_rfc3339(),
             name: project.name,
             status: ProjectStatus::from(project.status),
-            visibility: ProjectVisibility::from(project.visibility),
+            access_class: project.access_class,
             owner_user: project.owner_user_id.map(|id| id.to_string()),
             owner_team: project.owner_team_id.map(|id| id.to_string()),
             owner_user_email,
@@ -542,23 +599,54 @@ pub async fn update_project(
         })?;
     }
 
-    // Update visibility if provided
-    if let Some(visibility) = payload.visibility {
-        updated_project = projects::update_visibility(
-            &state.db_pool,
-            updated_project.id,
-            crate::db::models::ProjectVisibility::from(visibility),
-        )
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
+    // Update access_class if provided
+    if let Some(access_class) = payload.access_class {
+        // Validate against configured access classes
+        use crate::server::settings::DeploymentControllerSettings;
+
+        let is_valid = match &state.settings.deployment_controller {
+            Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => {
+                access_classes.contains_key(&access_class)
+            }
+            None => false,
+        };
+
+        if !is_valid {
+            let available = match &state.settings.deployment_controller {
+                Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => {
+                    access_classes
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                }
+                _ => "none".to_string(),
+            };
+
+            return Err((
+                StatusCode::BAD_REQUEST,
                 Json(ProjectErrorResponse {
-                    error: format!("Failed to update project visibility: {}", e),
+                    error: format!(
+                        "Invalid access class '{}'. Available: {}",
+                        access_class, available
+                    ),
                     suggestions: None,
                 }),
-            )
-        })?;
+            ));
+        }
+
+        updated_project =
+            projects::update_access_class(&state.db_pool, updated_project.id, access_class)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ProjectErrorResponse {
+                            error: format!("Failed to update project access class: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
     }
 
     // Update status if provided
@@ -725,7 +813,7 @@ async fn expand_project_with_owner(
         id: project.id.to_string(),
         name: project.name,
         status: ProjectStatus::from(project.status),
-        visibility: ProjectVisibility::from(project.visibility),
+        access_class: project.access_class,
         owner: owner_info,
         primary_url: None,          // Will be populated by caller
         custom_domain_urls: vec![], // Will be populated by caller
@@ -807,7 +895,7 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         updated: project.updated_at.to_rfc3339(),
         name: project.name,
         status: ProjectStatus::from(project.status),
-        visibility: ProjectVisibility::from(project.visibility),
+        access_class: project.access_class,
         owner_user: project.owner_user_id.map(|id| id.to_string()),
         owner_team: project.owner_team_id.map(|id| id.to_string()),
         owner_user_email: None, // Will be populated by caller if needed

@@ -18,7 +18,7 @@ pub struct Project {
     pub id: Uuid,
     pub name: String,
     pub status: ProjectStatus,
-    pub visibility: ProjectVisibility,
+    pub access_class: String,
     pub owner_user_id: Option<Uuid>,
     pub owner_team_id: Option<Uuid>,
     /// Finalizers that must be removed before the project can be deleted.
@@ -49,23 +49,6 @@ impl std::fmt::Display for ProjectStatus {
             ProjectStatus::Deploying => write!(f, "Deploying"),
             ProjectStatus::Deleting => write!(f, "Deleting"),
             ProjectStatus::Terminated => write!(f, "Terminated"),
-        }
-    }
-}
-
-/// Project visibility enum
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type)]
-#[sqlx(type_name = "text")]
-pub enum ProjectVisibility {
-    Public,
-    Private,
-}
-
-impl std::fmt::Display for ProjectVisibility {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProjectVisibility::Public => write!(f, "Public"),
-            ProjectVisibility::Private => write!(f, "Private"),
         }
     }
 }
