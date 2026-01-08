@@ -3577,18 +3577,18 @@ mod tests {
 
         // Verify the rise.dev/deployment-id label is present
         assert!(
-            labels.contains_key("rise.dev/deployment-id"),
+            labels.contains_key(LABEL_DEPLOYMENT_ID),
             "Labels should contain rise.dev/deployment-id"
         );
         assert_eq!(
-            labels.get("rise.dev/deployment-id").unwrap(),
+            labels.get(LABEL_DEPLOYMENT_ID).unwrap(),
             &deployment.deployment_id,
             "deployment-id label should match deployment.deployment_id"
         );
 
         // Also verify other expected labels
-        assert!(labels.contains_key("rise.dev/managed-by"));
-        assert!(labels.contains_key("rise.dev/project"));
-        assert!(labels.contains_key("rise.dev/deployment-group"));
+        assert!(labels.contains_key(LABEL_MANAGED_BY));
+        assert!(labels.contains_key(LABEL_PROJECT));
+        assert!(labels.contains_key(LABEL_DEPLOYMENT_GROUP));
     }
 }
