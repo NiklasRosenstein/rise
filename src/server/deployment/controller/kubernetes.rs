@@ -33,6 +33,7 @@ const LABEL_MANAGED_BY: &str = "rise.dev/managed-by";
 const LABEL_PROJECT: &str = "rise.dev/project";
 const LABEL_DEPLOYMENT_GROUP: &str = "rise.dev/deployment-group";
 const LABEL_DEPLOYMENT_ID: &str = "rise.dev/deployment-id";
+const LABEL_DEPLOYMENT_UUID: &str = "rise.dev/deployment-uuid";
 const ANNOTATION_LAST_REFRESH: &str = "rise.dev/last-refresh";
 
 /// Image pull secret name used for private registry authentication
@@ -884,6 +885,7 @@ impl KubernetesController {
             LABEL_DEPLOYMENT_ID.to_string(),
             deployment.deployment_id.clone(),
         );
+        labels.insert(LABEL_DEPLOYMENT_UUID.to_string(), deployment.id.to_string());
         labels
     }
 
@@ -3538,5 +3540,76 @@ mod tests {
         let parsed = KubernetesController::parse_ingress_url(url);
         assert_eq!(parsed.host, "rise.dev");
         assert_eq!(parsed.path_prefix, Some("/myapp/staging".to_string()));
+    }
+
+    #[test]
+    fn test_deployment_labels_includes_deployment_id() {
+        use crate::db::models::{Deployment, Project, ProjectStatus};
+        use uuid::Uuid;
+
+        let deployment_uuid = Uuid::new_v4();
+        let project = Project {
+            id: Uuid::new_v4(),
+            name: "test-project".to_string(),
+            status: ProjectStatus::Running,
+            visibility: crate::db::models::ProjectVisibility::Public,
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let deployment = Deployment {
+            id: deployment_uuid,
+            project_id: project.id,
+            deployment_id: "20240108-103000".to_string(),
+            created_by_id: Uuid::new_v4(),
+            deployment_group: "default".to_string(),
+            status: crate::db::models::DeploymentStatus::Deploying,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::json!({}),
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let labels = KubernetesController::deployment_labels(&project, &deployment);
+
+        // Verify the rise.dev/deployment-id label is present
+        assert!(
+            labels.contains_key(LABEL_DEPLOYMENT_ID),
+            "Labels should contain rise.dev/deployment-id"
+        );
+        assert_eq!(
+            labels.get(LABEL_DEPLOYMENT_ID).unwrap(),
+            &deployment.deployment_id,
+            "deployment-id label should match deployment.deployment_id"
+        );
+
+        // Verify the rise.dev/deployment-uuid label is present
+        assert!(
+            labels.contains_key(LABEL_DEPLOYMENT_UUID),
+            "Labels should contain rise.dev/deployment-uuid"
+        );
+        assert_eq!(
+            labels.get(LABEL_DEPLOYMENT_UUID).unwrap(),
+            &deployment.id.to_string(),
+            "deployment-uuid label should match deployment.id"
+        );
+
+        // Also verify other expected labels
+        assert!(labels.contains_key(LABEL_MANAGED_BY));
+        assert!(labels.contains_key(LABEL_PROJECT));
+        assert!(labels.contains_key(LABEL_DEPLOYMENT_GROUP));
     }
 }
