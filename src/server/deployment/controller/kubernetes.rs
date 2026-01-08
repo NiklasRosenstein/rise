@@ -3539,4 +3539,56 @@ mod tests {
         assert_eq!(parsed.host, "rise.dev");
         assert_eq!(parsed.path_prefix, Some("/myapp/staging".to_string()));
     }
+
+    #[test]
+    fn test_deployment_labels_includes_deployment_id() {
+        use crate::db::models::{Deployment, Project};
+        use uuid::Uuid;
+
+        let project = Project {
+            id: Uuid::new_v4(),
+            name: "test-project".to_string(),
+            team_id: Uuid::new_v4(),
+            visibility: crate::db::models::ProjectVisibility::Public,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            deleted_at: None,
+            url: None,
+            finalizers: vec![],
+        };
+
+        let deployment = Deployment {
+            id: Uuid::new_v4(),
+            project_id: project.id,
+            deployment_id: "20240108-103000".to_string(),
+            deployment_group: "default".to_string(),
+            status: crate::db::models::DeploymentStatus::Deploying,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+            terminated_at: None,
+            controller_metadata: serde_json::json!({}),
+            is_active: false,
+        };
+
+        let labels = KubernetesController::deployment_labels(&project, &deployment);
+
+        // Verify the rise.dev/deployment-id label is present
+        assert!(
+            labels.contains_key("rise.dev/deployment-id"),
+            "Labels should contain rise.dev/deployment-id"
+        );
+        assert_eq!(
+            labels.get("rise.dev/deployment-id").unwrap(),
+            &deployment.deployment_id,
+            "deployment-id label should match deployment.deployment_id"
+        );
+
+        // Also verify other expected labels
+        assert!(labels.contains_key("rise.dev/managed-by"));
+        assert!(labels.contains_key("rise.dev/project"));
+        assert!(labels.contains_key("rise.dev/deployment-group"));
+    }
 }
