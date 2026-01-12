@@ -62,7 +62,7 @@ NETWORK_NAME=rise_bridge
 REGISTRY_NAME=rise-registry
 REGISTRY_DIR="/etc/containerd/certs.d/localhost:5000"
 
-minikube start --driver=docker --network="${NETWORK_NAME}" --insecure-registry="${REGISTRY_NAME}:5000"
+minikube start --driver=docker --network="${NETWORK_NAME}" --insecure-registry="${REGISTRY_NAME}:5000" --memory=4096mb --cpus=2
 minikube addons enable ingress
 
 for node in $(minikube node list | awk '{print $1}'); do
