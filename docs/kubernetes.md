@@ -369,6 +369,7 @@ labels:
   rise.dev/project: "my-app"
   rise.dev/deployment-group: "default"
   rise.dev/deployment-id: "20251207-143022"
+  rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
 ```
 
 ## Kubernetes Resources
@@ -493,6 +494,7 @@ metadata:
     rise.dev/project: "my-app"
     rise.dev/deployment-group: "default"
     rise.dev/deployment-id: "20251207-143022"
+    rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
 spec:
   replicas: 1
   selector:
@@ -500,12 +502,14 @@ spec:
       rise.dev/project: "my-app"
       rise.dev/deployment-group: "default"
       rise.dev/deployment-id: "20251207-143022"
+      rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
   template:
     metadata:
       labels:
         rise.dev/project: "my-app"
         rise.dev/deployment-group: "default"
         rise.dev/deployment-id: "20251207-143022"
+        rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
     spec:
       imagePullSecrets:
         - name: rise-registry-creds
@@ -535,6 +539,7 @@ spec:
     rise.dev/project: "my-app"
     rise.dev/deployment-group: "default"
     rise.dev/deployment-id: "20251207-143022"  # Updated on traffic switch
+    rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"  # Updated on traffic switch
   ports:
     - port: 80
       targetPort: 8080
