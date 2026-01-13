@@ -674,33 +674,6 @@ pub async fn mark_needs_reconcile(pool: &PgPool, id: Uuid) -> Result<()> {
     Ok(())
 }
 
-/// Mark all Healthy/Unhealthy deployments for a project as needing reconciliation
-///
-/// Used when project configuration changes (access_class) require updating
-/// Ingress resources for all active deployments without creating new deployments.
-pub async fn mark_project_deployments_for_reconcile(pool: &PgPool, project_id: Uuid) -> Result<()> {
-    let result = sqlx::query!(
-        r#"
-        UPDATE deployments
-        SET needs_reconcile = TRUE, updated_at = NOW()
-        WHERE project_id = $1
-          AND status IN ('Healthy', 'Unhealthy')
-        "#,
-        project_id
-    )
-    .execute(pool)
-    .await
-    .context("Failed to mark project deployments for reconciliation")?;
-
-    tracing::info!(
-        "Marked {} deployment(s) for project {} as needing reconciliation",
-        result.rows_affected(),
-        project_id
-    );
-
-    Ok(())
-}
-
 /// Clear the needs_reconcile flag for a deployment
 ///
 /// Called after successfully reconciling a deployment
