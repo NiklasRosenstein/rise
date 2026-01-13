@@ -2106,6 +2106,11 @@ impl KubernetesController {
     ) -> Option<Vec<k8s_openapi::api::networking::v1::IngressTLS>> {
         let shared_secret = self.ingress_tls_secret_name.as_ref()?;
 
+        // Early return if no custom domains
+        if custom_domains.is_empty() {
+            return None;
+        }
+
         let mut tls_configs = Vec::new();
 
         match self.custom_domain_tls_mode {
@@ -2113,12 +2118,10 @@ impl KubernetesController {
                 // All custom domains share the same TLS secret
                 let all_hosts: Vec<String> = custom_domains.iter().map(|d| d.domain.clone()).collect();
                 
-                if !all_hosts.is_empty() {
-                    tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
-                        hosts: Some(all_hosts),
-                        secret_name: Some(shared_secret.clone()),
-                    });
-                }
+                tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
+                    hosts: Some(all_hosts),
+                    secret_name: Some(shared_secret.clone()),
+                });
             }
             crate::server::settings::CustomDomainTlsMode::PerDomain => {
                 // Each custom domain gets its own tls-{domain} secret
@@ -3641,6 +3644,9 @@ mod tests {
     use k8s_openapi::api::core::v1::{Container, PodSpec, PodTemplateSpec};
     use std::collections::BTreeMap;
 
+    // Test database URL for mock controllers
+    const TEST_DATABASE_URL: &str = "postgres://localhost/test";
+
     fn create_test_deployment(
         name: &str,
         replicas: i32,
@@ -3749,7 +3755,7 @@ mod tests {
         // Note: We won't actually connect to K8s or DB for these unit tests
         let pool = PgPoolOptions::new()
             .max_connections(1)
-            .connect_lazy("postgres://localhost/test")
+            .connect_lazy(TEST_DATABASE_URL)
             .expect("Failed to create pool");
 
         let state = ControllerState {
@@ -4194,7 +4200,7 @@ mod tests {
 
         let pool = PgPoolOptions::new()
             .max_connections(1)
-            .connect_lazy("postgres://localhost/test")
+            .connect_lazy(TEST_DATABASE_URL)
             .expect("Failed to create pool");
 
         let state = ControllerState {
