@@ -100,9 +100,15 @@ variable "scan_on_push" {
 }
 
 variable "enable_kms" {
-  description = "Enable KMS encryption for ECR repositories. If true, a KMS key will be automatically created. If false, AES256 encryption is used."
+  description = "Enable KMS encryption. If true, a KMS key will be automatically created for encryption. If false, AES256 encryption is used where applicable."
   type        = bool
   default     = false
+}
+
+variable "kms_key_alias" {
+  description = "Override the KMS key alias name. Defaults to '{name}' for new deployments. For backwards compatibility with existing deployments, set to '{name}-ecr'."
+  type        = string
+  default     = null
 }
 
 # Lifecycle policies

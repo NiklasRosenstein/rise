@@ -54,7 +54,7 @@ module "rise_aws" {
   name                   = "rise-backend"
   enable_ecr             = true
   enable_rds             = true
-  enable_kms             = true  # Enable KMS encryption for ECR
+  enable_kms             = true  # Enable KMS encryption
   irsa_oidc_provider_arn = module.eks.oidc_provider_arn
   irsa_namespace         = "rise-system"
   irsa_service_account   = "rise-backend"
@@ -176,7 +176,8 @@ This makes it easy to reference in your configuration management tool (e.g., usi
 | rds_subnet_ids | Subnet IDs for RDS DB subnet group | `list(string)` | `[]` | no |
 | rds_allowed_security_groups | Security groups allowed to access RDS | `list(string)` | `[]` | no |
 | rds_allowed_cidr_blocks | CIDR blocks allowed to access RDS on port 5432 | `list(string)` | `[]` | no |
-| enable_kms | Enable KMS encryption for ECR | `bool` | `false` | no |
+| enable_kms | Enable KMS encryption | `bool` | `false` | no |
+| kms_key_alias | Override KMS key alias name (defaults to `{name}`, use `{name}-ecr` for backwards compatibility) | `string` | `null` | no |
 | create_iam_user | Create an IAM user with access keys | `bool` | `false` | no |
 | irsa_oidc_provider_arn | OIDC provider ARN for IRSA | `string` | `null` | no |
 | irsa_namespace | Kubernetes namespace for IRSA | `string` | `"rise-system"` | no |
@@ -256,7 +257,9 @@ All RDS instances created by Rise are automatically tagged with:
 These tags are useful for cost allocation, resource discovery, and operational management.
 
 **KMS Permissions (if `enable_kms = true`):**
-- `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - For KMS-encrypted ECR repositories
+- `kms:Encrypt`, `kms:Decrypt`, `kms:GenerateDataKey*`, `kms:DescribeKey` - For KMS encryption
+- The KMS key alias name changed from `{name}-ecr` to `{name}` to better reflect its general-purpose use
+- For backwards compatibility with existing deployments, set `kms_key_alias = "{name}-ecr"` to preserve the old naming
 
 **Note:** ECR permissions are scoped to `rise/*` repositories. RDS permissions (if enabled) are scoped to `rise-*` instance names.
 

@@ -2,6 +2,9 @@ locals {
   name        = var.name
   repo_prefix = "${var.name}/"
 
+  # KMS key alias name - defaults to just the name, but can be overridden for backwards compatibility
+  kms_key_alias = var.kms_key_alias != null ? var.kms_key_alias : var.name
+
   default_tags = {
     "rise:managed-by" = "terraform"
     "rise:component"  = "backend"
@@ -35,13 +38,13 @@ locals {
 }
 
 # -----------------------------------------------------------------------------
-# KMS Key (for KMS encryption)
+# KMS Key (for encryption)
 # -----------------------------------------------------------------------------
 
 resource "aws_kms_key" "ecr" {
   count = var.enable_ecr && var.enable_kms ? 1 : 0
 
-  description             = "KMS key for Rise ECR repository encryption"
+  description             = "KMS key for Rise encryption"
   deletion_window_in_days = 30
   enable_key_rotation     = true
   tags                    = local.tags
@@ -50,7 +53,7 @@ resource "aws_kms_key" "ecr" {
 resource "aws_kms_alias" "ecr" {
   count = var.enable_ecr && var.enable_kms ? 1 : 0
 
-  name          = "alias/${var.name}-ecr"
+  name          = "alias/${local.kms_key_alias}"
   target_key_id = aws_kms_key.ecr[0].key_id
 }
 
