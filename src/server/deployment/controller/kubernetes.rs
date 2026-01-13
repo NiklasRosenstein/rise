@@ -3881,4 +3881,354 @@ mod tests {
         assert!(labels.contains_key(LABEL_PROJECT));
         assert!(labels.contains_key(LABEL_DEPLOYMENT_GROUP));
     }
+
+    #[test]
+    fn test_ingress_names() {
+        use crate::db::models::{Deployment, Project, ProjectStatus};
+        use uuid::Uuid;
+
+        let project = Project {
+            id: Uuid::new_v4(),
+            name: "test-project".to_string(),
+            status: ProjectStatus::Running,
+            visibility: crate::db::models::ProjectVisibility::Public,
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let deployment = Deployment {
+            id: Uuid::new_v4(),
+            project_id: project.id,
+            deployment_id: "20240108-103000".to_string(),
+            created_by_id: Uuid::new_v4(),
+            deployment_group: "default".to_string(),
+            status: crate::db::models::DeploymentStatus::Deploying,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::json!({}),
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        // Test primary ingress name
+        let ingress_name = KubernetesController::ingress_name(&project, &deployment);
+        assert_eq!(ingress_name, "default");
+
+        // Test custom domain ingress name
+        let custom_domain_ingress_name =
+            KubernetesController::custom_domain_ingress_name(&project, &deployment);
+        assert_eq!(custom_domain_ingress_name, "default-custom-domains");
+    }
+
+    #[tokio::test]
+    async fn test_primary_ingress_with_path_prefix_has_annotation() {
+        let controller = create_mock_controller_with_path_based_routing();
+
+        use crate::db::models::{Deployment, Project, ProjectStatus};
+        use uuid::Uuid;
+
+        let project = Project {
+            id: Uuid::new_v4(),
+            name: "compass".to_string(),
+            status: ProjectStatus::Running,
+            visibility: crate::db::models::ProjectVisibility::Public,
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let deployment = Deployment {
+            id: Uuid::new_v4(),
+            project_id: project.id,
+            deployment_id: "20240108-103000".to_string(),
+            created_by_id: Uuid::new_v4(),
+            deployment_group: "default".to_string(),
+            status: crate::db::models::DeploymentStatus::Deploying,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::json!({}),
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let metadata = KubernetesMetadata {
+            namespace: Some("rise-compass".to_string()),
+            deployment_name: Some("compass-20240108-103000".to_string()),
+            service_name: Some("default".to_string()),
+            ingress_name: Some("default".to_string()),
+            image_tag: None,
+            http_port: 8080,
+            reconcile_phase: ReconcilePhase::Completed,
+            previous_deployment: None,
+        };
+
+        let ingress = controller.create_primary_ingress(&project, &deployment, &metadata);
+
+        // Verify the x-forwarded-prefix annotation is present
+        let annotations = ingress.metadata.annotations.unwrap();
+        assert!(
+            annotations.contains_key("nginx.ingress.kubernetes.io/x-forwarded-prefix"),
+            "Primary ingress should have x-forwarded-prefix annotation for path-based routing"
+        );
+        assert_eq!(
+            annotations.get("nginx.ingress.kubernetes.io/x-forwarded-prefix"),
+            Some(&"/compass".to_string()),
+            "x-forwarded-prefix should be /compass"
+        );
+
+        // Verify the rewrite-target annotation is also present
+        assert!(
+            annotations.contains_key("nginx.ingress.kubernetes.io/rewrite-target"),
+            "Primary ingress should have rewrite-target annotation for path-based routing"
+        );
+
+        // Verify there's only one rule (primary host)
+        let rules = ingress.spec.unwrap().rules.unwrap();
+        assert_eq!(rules.len(), 1, "Primary ingress should have exactly 1 rule");
+        assert_eq!(
+            rules[0].host,
+            Some("rise.dev".to_string()),
+            "Primary ingress should have the configured host"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_custom_domain_ingress_without_annotation() {
+        let controller = create_mock_controller_with_path_based_routing();
+
+        use crate::db::models::{CustomDomain, Deployment, Project, ProjectStatus};
+        use uuid::Uuid;
+
+        let project = Project {
+            id: Uuid::new_v4(),
+            name: "compass".to_string(),
+            status: ProjectStatus::Running,
+            visibility: crate::db::models::ProjectVisibility::Public,
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let deployment = Deployment {
+            id: Uuid::new_v4(),
+            project_id: project.id,
+            deployment_id: "20240108-103000".to_string(),
+            created_by_id: Uuid::new_v4(),
+            deployment_group: "default".to_string(),
+            status: crate::db::models::DeploymentStatus::Deploying,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::json!({}),
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let metadata = KubernetesMetadata {
+            namespace: Some("rise-compass".to_string()),
+            deployment_name: Some("compass-20240108-103000".to_string()),
+            service_name: Some("default".to_string()),
+            ingress_name: Some("default".to_string()),
+            image_tag: None,
+            http_port: 8080,
+            reconcile_phase: ReconcilePhase::Completed,
+            previous_deployment: None,
+        };
+
+        let custom_domains = vec![CustomDomain {
+            id: Uuid::new_v4(),
+            domain: "compass-dev.example.com".to_string(),
+            project_id: project.id,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }];
+
+        let ingress =
+            controller.create_custom_domain_ingress(&project, &deployment, &metadata, &custom_domains);
+
+        // Verify the x-forwarded-prefix annotation is NOT present
+        if let Some(annotations) = &ingress.metadata.annotations {
+            assert!(
+                !annotations.contains_key("nginx.ingress.kubernetes.io/x-forwarded-prefix"),
+                "Custom domain ingress should NOT have x-forwarded-prefix annotation"
+            );
+            // Also verify rewrite-target is not present
+            assert!(
+                !annotations.contains_key("nginx.ingress.kubernetes.io/rewrite-target"),
+                "Custom domain ingress should NOT have rewrite-target annotation"
+            );
+        }
+
+        // Verify there's one rule for the custom domain
+        let rules = ingress.spec.unwrap().rules.unwrap();
+        assert_eq!(rules.len(), 1, "Custom domain ingress should have exactly 1 rule");
+        assert_eq!(
+            rules[0].host,
+            Some("compass-dev.example.com".to_string()),
+            "Custom domain ingress should have the custom domain as host"
+        );
+
+        // Verify the path is "/" (not "/compass")
+        let paths = rules[0].http.as_ref().unwrap().paths.clone();
+        assert!(
+            paths.iter().any(|p| p.path == Some("/".to_string())),
+            "Custom domain ingress should use root path '/'"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_subdomain_based_ingress_without_annotation() {
+        let controller = create_mock_controller(); // Uses subdomain-based routing
+
+        use crate::db::models::{Deployment, Project, ProjectStatus};
+        use uuid::Uuid;
+
+        let project = Project {
+            id: Uuid::new_v4(),
+            name: "myapp".to_string(),
+            status: ProjectStatus::Running,
+            visibility: crate::db::models::ProjectVisibility::Public,
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let deployment = Deployment {
+            id: Uuid::new_v4(),
+            project_id: project.id,
+            deployment_id: "20240108-103000".to_string(),
+            created_by_id: Uuid::new_v4(),
+            deployment_group: "default".to_string(),
+            status: crate::db::models::DeploymentStatus::Deploying,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::json!({}),
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let metadata = KubernetesMetadata {
+            namespace: Some("rise-myapp".to_string()),
+            deployment_name: Some("myapp-20240108-103000".to_string()),
+            service_name: Some("default".to_string()),
+            ingress_name: Some("default".to_string()),
+            image_tag: None,
+            http_port: 8080,
+            reconcile_phase: ReconcilePhase::Completed,
+            previous_deployment: None,
+        };
+
+        let ingress = controller.create_primary_ingress(&project, &deployment, &metadata);
+
+        // Verify the x-forwarded-prefix annotation is NOT present (subdomain-based routing)
+        if let Some(annotations) = &ingress.metadata.annotations {
+            assert!(
+                !annotations.contains_key("nginx.ingress.kubernetes.io/x-forwarded-prefix"),
+                "Subdomain-based ingress should NOT have x-forwarded-prefix annotation"
+            );
+        }
+
+        // Verify the host is a subdomain
+        let rules = ingress.spec.unwrap().rules.unwrap();
+        assert_eq!(rules.len(), 1);
+        assert_eq!(
+            rules[0].host,
+            Some("myapp.test.local".to_string()),
+            "Subdomain-based ingress should use subdomain"
+        );
+    }
+
+    // Helper function to create a mock controller with path-based routing
+    fn create_mock_controller_with_path_based_routing() -> KubernetesController {
+        use crate::server::state::ControllerState;
+        use axum::http::Uri;
+        use sqlx::postgres::PgPoolOptions;
+
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+
+        let pool = PgPoolOptions::new()
+            .max_connections(1)
+            .connect_lazy("postgres://localhost/test")
+            .expect("Failed to create pool");
+
+        let state = ControllerState {
+            db_pool: pool,
+            encryption_provider: None,
+        };
+
+        let cluster_url = "http://localhost:8080"
+            .parse::<Uri>()
+            .expect("Failed to parse URI");
+        let kube_config = kube::Config::new(cluster_url);
+        let kube_client = kube::Client::try_from(kube_config).expect("Failed to create client");
+
+        KubernetesController {
+            state,
+            kube_client,
+            ingress_class: "nginx".to_string(),
+            // Path-based routing template: rise.dev/{project_name}
+            production_ingress_url_template: "rise.dev/{project_name}".to_string(),
+            staging_ingress_url_template: None,
+            ingress_port: None,
+            ingress_schema: "https".to_string(),
+            registry_provider: None,
+            auth_backend_url: "http://localhost:3000".to_string(),
+            auth_signin_url: "http://localhost:3000".to_string(),
+            backend_address: None,
+            namespace_labels: std::collections::HashMap::new(),
+            namespace_annotations: std::collections::HashMap::new(),
+            ingress_annotations: std::collections::HashMap::new(),
+            ingress_tls_secret_name: None,
+            custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
+            node_selector: std::collections::HashMap::new(),
+            image_pull_secret_name: None,
+            resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+        }
+    }
 }
