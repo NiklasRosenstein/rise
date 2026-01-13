@@ -618,6 +618,24 @@ pub async fn update_project(
                         }),
                     )
                 })?;
+
+        // Mark all active deployments for reconciliation so Ingress annotations are updated
+        use crate::db::deployments as db_deployments;
+        db_deployments::mark_project_deployments_for_reconcile(&state.db_pool, updated_project.id)
+            .await
+            .map_err(|e| {
+                tracing::error!(
+                    "Failed to mark deployments for reconciliation after access_class update: {:?}",
+                    e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ProjectErrorResponse {
+                        error: format!("Failed to schedule deployment updates: {}", e),
+                        suggestions: None,
+                    }),
+                )
+            })?;
     }
 
     // Update status if provided
