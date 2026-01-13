@@ -269,7 +269,7 @@ mod tests {
         // (assuming SSL_CERT_FILE is not set in test environment)
         std::env::remove_var("SSL_CERT_FILE");
         std::env::remove_var("RISE_RAILPACK_EMBED_SSL_CERT");
-        
+
         let config = Config {
             token: None,
             backend_url: None,
@@ -277,7 +277,10 @@ mod tests {
             managed_buildkit: None,
             railpack_embed_ssl_cert: None,
         };
-        assert!(!config.get_railpack_embed_ssl_cert(), "Should default to false when SSL_CERT_FILE is not set");
+        assert!(
+            !config.get_railpack_embed_ssl_cert(),
+            "Should default to false when SSL_CERT_FILE is not set"
+        );
 
         // Test 2: Default to true when SSL_CERT_FILE is set (even if file doesn't exist)
         std::env::set_var("SSL_CERT_FILE", "/path/to/cert.pem");
@@ -288,7 +291,10 @@ mod tests {
             managed_buildkit: None,
             railpack_embed_ssl_cert: None,
         };
-        assert!(config.get_railpack_embed_ssl_cert(), "Should default to true when SSL_CERT_FILE is set");
+        assert!(
+            config.get_railpack_embed_ssl_cert(),
+            "Should default to true when SSL_CERT_FILE is set"
+        );
         std::env::remove_var("SSL_CERT_FILE");
 
         // Test 3: Config file value used when env vars not set
@@ -299,7 +305,10 @@ mod tests {
             managed_buildkit: None,
             railpack_embed_ssl_cert: Some(true),
         };
-        assert!(config.get_railpack_embed_ssl_cert(), "Should use config file value when set to true");
+        assert!(
+            config.get_railpack_embed_ssl_cert(),
+            "Should use config file value when set to true"
+        );
 
         let config = Config {
             token: None,
@@ -308,7 +317,10 @@ mod tests {
             managed_buildkit: None,
             railpack_embed_ssl_cert: Some(false),
         };
-        assert!(!config.get_railpack_embed_ssl_cert(), "Should use config file value when set to false");
+        assert!(
+            !config.get_railpack_embed_ssl_cert(),
+            "Should use config file value when set to false"
+        );
 
         // Test 4: RISE_RAILPACK_EMBED_SSL_CERT env var takes precedence over SSL_CERT_FILE
         std::env::set_var("SSL_CERT_FILE", "/path/to/cert.pem");
@@ -320,11 +332,17 @@ mod tests {
             managed_buildkit: None,
             railpack_embed_ssl_cert: None,
         };
-        assert!(!config.get_railpack_embed_ssl_cert(), "RISE_RAILPACK_EMBED_SSL_CERT=false should override SSL_CERT_FILE");
-        
+        assert!(
+            !config.get_railpack_embed_ssl_cert(),
+            "RISE_RAILPACK_EMBED_SSL_CERT=false should override SSL_CERT_FILE"
+        );
+
         std::env::set_var("RISE_RAILPACK_EMBED_SSL_CERT", "true");
-        assert!(config.get_railpack_embed_ssl_cert(), "RISE_RAILPACK_EMBED_SSL_CERT=true should work");
-        
+        assert!(
+            config.get_railpack_embed_ssl_cert(),
+            "RISE_RAILPACK_EMBED_SSL_CERT=true should work"
+        );
+
         // Clean up
         std::env::remove_var("SSL_CERT_FILE");
         std::env::remove_var("RISE_RAILPACK_EMBED_SSL_CERT");
