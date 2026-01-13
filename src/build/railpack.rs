@@ -160,16 +160,9 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             }
         } else {
             warn!(
-                "--railpack-embed-ssl-cert specified but SSL_CERT_FILE environment variable not set"
+                "--railpack-embed-ssl-cert enabled but SSL_CERT_FILE environment variable not set"
             );
         }
-    } else if std::env::var("SSL_CERT_FILE").is_ok() {
-        // SSL_CERT_FILE is set but flag not used - warn user
-        warn!(
-            "SSL_CERT_FILE is set but --railpack-embed-ssl-cert not specified. \
-             Build-time RUN commands may fail with SSL errors. \
-             Use --railpack-embed-ssl-cert to embed certificate into build plan."
-        );
     }
 
     let proxy_vars = super::proxy::read_and_transform_proxy_vars();
