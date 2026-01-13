@@ -87,7 +87,7 @@ fn update_rise_toml_add_domain(app_path: &str, project: &str, domain: &str) -> R
     if config.project.is_none() {
         config.project = Some(ProjectConfig {
             name: project.to_string(),
-            visibility: "private".to_string(),
+            access_class: "private".to_string(),
             custom_domains: Vec::new(),
             env: std::collections::HashMap::new(),
         });

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE projects\n        SET visibility = $2\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE status NOT IN ('Deleting', 'Terminated')\n        ORDER BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       },
       {
         "ordinal": 3,
-        "name": "visibility: ProjectVisibility",
+        "name": "access_class",
         "type_info": "Text"
       },
       {
@@ -50,10 +50,7 @@
       }
     ],
     "parameters": {
-      "Left": [
-        "Uuid",
-        "Text"
-      ]
+      "Left": []
     },
     "nullable": [
       false,
@@ -67,5 +64,5 @@
       false
     ]
   },
-  "hash": "768f60181b930c7b27bd1c258ce78b080704d7fd2885874ef8399f2af88a6c61"
+  "hash": "903a82543e9a18b3e5f5c24049189b17febe9e2029b9104841692bccf43cc0ac"
 }

@@ -1,7 +1,4 @@
-use crate::db::{
-    models::{ProjectVisibility, User},
-    projects, users,
-};
+use crate::db::{models::User, projects, users};
 use crate::server::auth::{
     cookie_helpers::{self, CookieSettings},
     token_storage::{
@@ -1298,61 +1295,93 @@ pub async fn ingress_auth(
             (StatusCode::NOT_FOUND, "Project not found".to_string())
         })?;
 
-    // Check if project is public - if so, allow access without further checks
-    if matches!(project.visibility, ProjectVisibility::Public) {
-        tracing::debug!(
-            project = %params.project,
-            user_id = %user.id,
-            user_email = %user.email,
-            "Public project access granted"
-        );
-        return Ok((
-            StatusCode::OK,
-            [
-                ("X-Auth-Request-Email", email),
-                ("X-Auth-Request-User", user.id.to_string()),
-            ],
-        )
-            .into_response());
-    }
-
-    // For private projects, check access permissions
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Database error checking access: {:#}", e);
+    // Get project's access class configuration
+    use crate::server::settings::AccessRequirement;
+    let access_class = state
+        .access_classes
+        .get(&project.access_class)
+        .ok_or_else(|| {
+            tracing::error!("Access class '{}' not configured", project.access_class);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
+                "Invalid access class".to_string(),
             )
         })?;
 
-    if has_access {
-        tracing::debug!(
-            project = %params.project,
-            user_id = %user.id,
-            user_email = %user.email,
-            "Private project access granted"
-        );
-        Ok((
-            StatusCode::OK,
-            [
-                ("X-Auth-Request-Email", email),
-                ("X-Auth-Request-User", user.id.to_string()),
-            ],
-        )
-            .into_response())
-    } else {
-        tracing::warn!(
-            project = %params.project,
-            user_id = %user.id,
-            user_email = %user.email,
-            "Private project access denied"
-        );
-        Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ))
+    // Handle different access requirements
+    match access_class.access_requirement {
+        AccessRequirement::None => {
+            // Should never be called - None means no nginx auth annotations
+            // But if it is called, deny access as a safety measure
+            tracing::warn!(
+                project = %params.project,
+                "Auth endpoint called for AccessRequirement::None project"
+            );
+            Err((
+                StatusCode::FORBIDDEN,
+                "This project should not require authentication".to_string(),
+            ))
+        }
+
+        AccessRequirement::Authenticated => {
+            // Allow all authenticated users (no membership check)
+            tracing::debug!(
+                project = %params.project,
+                user_id = %user.id,
+                user_email = %user.email,
+                access_class = %project.access_class,
+                "Access granted - authenticated user"
+            );
+            Ok((
+                StatusCode::OK,
+                [
+                    ("X-Auth-Request-Email", email),
+                    ("X-Auth-Request-User", user.id.to_string()),
+                ],
+            )
+                .into_response())
+        }
+
+        AccessRequirement::Member => {
+            // Check project membership (owner or team member)
+            let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Database error checking access: {:#}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Database error".to_string(),
+                    )
+                })?;
+
+            if has_access {
+                tracing::debug!(
+                    project = %params.project,
+                    user_id = %user.id,
+                    user_email = %user.email,
+                    "Access granted - project member"
+                );
+                Ok((
+                    StatusCode::OK,
+                    [
+                        ("X-Auth-Request-Email", email),
+                        ("X-Auth-Request-User", user.id.to_string()),
+                    ],
+                )
+                    .into_response())
+            } else {
+                tracing::warn!(
+                    project = %params.project,
+                    user_id = %user.id,
+                    user_email = %user.email,
+                    "Access denied - not a project member"
+                );
+                Err((
+                    StatusCode::FORBIDDEN,
+                    "You do not have access to this project".to_string(),
+                ))
+            }
+        }
     }
 }
 

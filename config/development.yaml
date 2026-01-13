@@ -1,4 +1,6 @@
 # Insecure development configuration - DO NOT USE IN PRODUCTION.
+#
+# Takes precedence over values in default.yaml.
 
 server:
   cookie_secure: false
@@ -23,7 +25,7 @@ registry:
   client_registry_url: "localhost:5000"   # Client-facing URL for CLI push operations
 
 deployment_controller:
-  auth_backend_url: "http://172.17.0.1:3000"  # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host)
+  auth_backend_url: "http://host.minikube.internal:3000"  # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host)
   auth_signin_url: "http://rise.local:3000"  # Domain for user-facing OAuth redirects
   ingress_annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"

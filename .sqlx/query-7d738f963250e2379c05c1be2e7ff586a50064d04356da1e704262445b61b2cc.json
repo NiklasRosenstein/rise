@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE id = $1\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       },
       {
         "ordinal": 3,
-        "name": "visibility: ProjectVisibility",
+        "name": "access_class",
         "type_info": "Text"
       },
       {
@@ -66,5 +66,5 @@
       false
     ]
   },
-  "hash": "ddbfe0eb40d8a2b14768ee94a959fe548a9fececf274b0bceda28fa27ebf409b"
+  "hash": "7d738f963250e2379c05c1be2e7ff586a50064d04356da1e704262445b61b2cc"
 }

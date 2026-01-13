@@ -7,6 +7,10 @@ use axum::{
 
 pub fn routes() -> Router<AppState> {
     Router::new()
+        .route(
+            "/projects/access-classes",
+            get(handlers::list_access_classes),
+        )
         .route("/projects", get(handlers::list_projects))
         .route("/projects", post(handlers::create_project))
         .route("/projects/{id_or_name}", get(handlers::get_project))
