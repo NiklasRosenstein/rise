@@ -4,7 +4,7 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::db::deployments;
-use crate::db::models::{Project, ProjectStatus, ProjectVisibility};
+use crate::db::models::{Project, ProjectStatus};
 
 /// List all projects (optionally filtered by owner)
 pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Project>> {

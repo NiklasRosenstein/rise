@@ -161,7 +161,7 @@ version = 1
 
 [project]
 name = "test-project"
-visibility = "private"
+access_class = "private"
 
 [build]
 backend = "docker"
@@ -203,7 +203,7 @@ version = 1
 
 [project]
 name = "clean-project"
-visibility = "public"
+access_class = "public"
 
 [build]
 backend = "pack"

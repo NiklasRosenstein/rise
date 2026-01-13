@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE status NOT IN ('Deleting', 'Terminated')\n        ORDER BY created_at DESC\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE status = 'Deleting' AND $1 = ANY(finalizers)\n        ORDER BY updated_at ASC\n        LIMIT $2\n        ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       },
       {
         "ordinal": 3,
-        "name": "visibility: ProjectVisibility",
+        "name": "access_class",
         "type_info": "Text"
       },
       {
@@ -50,7 +50,10 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Text",
+        "Int8"
+      ]
     },
     "nullable": [
       false,
@@ -64,5 +67,5 @@
       false
     ]
   },
-  "hash": "60f86bfb86944ed43e15f1dd297560fdb691b4f120ea04d0148a66199f88829a"
+  "hash": "0340ee7cc9be31fe5258059b631b7ba1ddee70e191c85b07e896ac511f657aae"
 }

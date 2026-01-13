@@ -12,9 +12,6 @@ mod build;
 #[cfg(feature = "cli")]
 mod cli;
 
-#[cfg(feature = "cli")]
-use api::project::ProjectVisibility;
-
 #[cfg(feature = "server")]
 mod db;
 #[cfg(feature = "server")]

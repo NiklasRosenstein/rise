@@ -1,5 +1,5 @@
 use config::{Config, ConfigError};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -307,7 +307,7 @@ pub enum DeploymentControllerSettings {
         /// Backend URL for Nginx auth subrequests (internal cluster URL)
         /// Example: "http://rise-backend.default.svc.cluster.local:3000"
         /// This is the URL Nginx will use internally within the cluster to validate authentication.
-        /// For Minikube development, use "http://172.17.0.1:3000" (Docker bridge IP) to reach host.
+        /// For Minikube development, use the Docker bridge IP to reach host (e.g., "http://host.minikube.internal:3000").
         auth_backend_url: String,
 
         /// Public backend URL for browser redirects during authentication

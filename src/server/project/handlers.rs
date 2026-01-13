@@ -20,24 +20,15 @@ pub async fn list_access_classes(
     State(state): State<AppState>,
     Extension(_user): Extension<User>,
 ) -> Result<Json<ListAccessClassesResponse>, (StatusCode, String)> {
-    use crate::server::settings::DeploymentControllerSettings;
-
-    let access_classes = match &state.settings.deployment_controller {
-        Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => access_classes
-            .iter()
-            .map(|(id, class)| AccessClassInfo {
-                id: id.clone(),
-                display_name: class.display_name.clone(),
-                description: class.description.clone(),
-            })
-            .collect(),
-        None => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "No deployment controller configured".to_string(),
-            ));
-        }
-    };
+    let access_classes = state
+        .access_classes
+        .iter()
+        .map(|(id, class)| AccessClassInfo {
+            id: id.clone(),
+            display_name: class.display_name.clone(),
+            description: class.description.clone(),
+        })
+        .collect();
 
     Ok(Json(ListAccessClassesResponse { access_classes }))
 }
@@ -48,24 +39,15 @@ pub async fn create_project(
     Json(payload): Json<CreateProjectRequest>,
 ) -> Result<Json<CreateProjectResponse>, (StatusCode, String)> {
     // Validate access_class against configured access classes
-    use crate::server::settings::DeploymentControllerSettings;
-
-    let is_valid_access_class = match &state.settings.deployment_controller {
-        Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => {
-            access_classes.contains_key(&payload.access_class)
-        }
-        None => false,
-    };
+    let is_valid_access_class = state.access_classes.contains_key(&payload.access_class);
 
     if !is_valid_access_class {
-        let available = match &state.settings.deployment_controller {
-            Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => access_classes
-                .keys()
-                .cloned()
-                .collect::<Vec<_>>()
-                .join(", "),
-            _ => "none".to_string(),
-        };
+        let available = state
+            .access_classes
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>()
+            .join(", ");
 
         return Err((
             StatusCode::BAD_REQUEST,
@@ -602,26 +584,15 @@ pub async fn update_project(
     // Update access_class if provided
     if let Some(access_class) = payload.access_class {
         // Validate against configured access classes
-        use crate::server::settings::DeploymentControllerSettings;
-
-        let is_valid = match &state.settings.deployment_controller {
-            Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => {
-                access_classes.contains_key(&access_class)
-            }
-            None => false,
-        };
+        let is_valid = state.access_classes.contains_key(&access_class);
 
         if !is_valid {
-            let available = match &state.settings.deployment_controller {
-                Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => {
-                    access_classes
-                        .keys()
-                        .cloned()
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                }
-                _ => "none".to_string(),
-            };
+            let available = state
+                .access_classes
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ");
 
             return Err((
                 StatusCode::BAD_REQUEST,

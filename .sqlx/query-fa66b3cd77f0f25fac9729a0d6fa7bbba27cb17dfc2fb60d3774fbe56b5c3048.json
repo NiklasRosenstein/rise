@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, name,\n                status as \"status: ProjectStatus\",\n                visibility as \"visibility: ProjectVisibility\",\n                owner_user_id, owner_team_id,\n                finalizers,\n                created_at, updated_at\n            FROM projects\n            ORDER BY created_at DESC\n            ",
+  "query": "\n        SELECT id, name, status as \"status: _\", access_class,\n               owner_user_id, owner_team_id, finalizers,\n               created_at, updated_at\n        FROM projects\n        WHERE id = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -15,12 +15,12 @@
       },
       {
         "ordinal": 2,
-        "name": "status: ProjectStatus",
+        "name": "status: _",
         "type_info": "Text"
       },
       {
         "ordinal": 3,
-        "name": "visibility: ProjectVisibility",
+        "name": "access_class",
         "type_info": "Text"
       },
       {
@@ -50,7 +50,9 @@
       }
     ],
     "parameters": {
-      "Left": []
+      "Left": [
+        "Uuid"
+      ]
     },
     "nullable": [
       false,
@@ -64,5 +66,5 @@
       false
     ]
   },
-  "hash": "f03ba7a3db6bebe3b4c09269326a8740a8e452d4957023aef85bb7c87a4d006e"
+  "hash": "fa66b3cd77f0f25fac9729a0d6fa7bbba27cb17dfc2fb60d3774fbe56b5c3048"
 }

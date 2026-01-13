@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE projects\n        SET status = $2\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        FROM projects\n        WHERE name = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       },
       {
         "ordinal": 3,
-        "name": "visibility: ProjectVisibility",
+        "name": "access_class",
         "type_info": "Text"
       },
       {
@@ -51,7 +51,6 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
         "Text"
       ]
     },
@@ -67,5 +66,5 @@
       false
     ]
   },
-  "hash": "25e8813059a69f8baaa5e0ad074533c147cc973f76bbcc1e5899da31d70ec697"
+  "hash": "8b3a680fae27e43166f49c1ae9f68a22d5ce951754b8139214d2ce679c6747f3"
 }

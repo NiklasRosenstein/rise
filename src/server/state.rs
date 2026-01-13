@@ -59,6 +59,8 @@ pub struct AppState {
             crate::server::extensions::providers::oauth::OAuthExchangeState,
         >,
     >,
+    pub access_classes:
+        Arc<std::collections::HashMap<String, crate::server::settings::AccessClass>>,
 }
 
 /// Initialize encryption provider from settings
@@ -687,6 +689,18 @@ impl AppState {
         );
         tracing::info!("Initialized OAuth exchange token store for secure backend flow");
 
+        // Extract access_classes from deployment controller settings
+        let access_classes =
+            if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
+                access_classes,
+                ..
+            }) = &settings.deployment_controller
+            {
+                Arc::new(access_classes.clone())
+            } else {
+                Arc::new(std::collections::HashMap::new())
+            };
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -705,6 +719,7 @@ impl AppState {
             extension_registry,
             oauth_state_store,
             oauth_exchange_store,
+            access_classes,
         })
     }
 
@@ -882,6 +897,18 @@ impl AppState {
                 .build(),
         );
 
+        // Extract access_classes from deployment controller settings
+        let access_classes =
+            if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
+                access_classes,
+                ..
+            }) = &settings.deployment_controller
+            {
+                Arc::new(access_classes.clone())
+            } else {
+                Arc::new(std::collections::HashMap::new())
+            };
+
         Ok(Self {
             db_pool,
             jwt_validator,
@@ -900,6 +927,7 @@ impl AppState {
             extension_registry,
             oauth_state_store,
             oauth_exchange_store,
+            access_classes,
         })
     }
 }

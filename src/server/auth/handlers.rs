@@ -1,7 +1,4 @@
-use crate::db::{
-    models::{ProjectVisibility, User},
-    projects, users,
-};
+use crate::db::{models::User, projects, users};
 use crate::server::auth::{
     cookie_helpers::{self, CookieSettings},
     token_storage::{
@@ -1299,24 +1296,17 @@ pub async fn ingress_auth(
         })?;
 
     // Get project's access class configuration
-    use crate::server::settings::{AccessRequirement, DeploymentControllerSettings};
-    let access_class = match &state.settings.deployment_controller {
-        Some(DeploymentControllerSettings::Kubernetes { access_classes, .. }) => {
-            access_classes.get(&project.access_class).ok_or_else(|| {
-                tracing::error!("Access class '{}' not configured", project.access_class);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Invalid access class".to_string(),
-                )
-            })?
-        }
-        None => {
-            return Err((
+    use crate::server::settings::AccessRequirement;
+    let access_class = state
+        .access_classes
+        .get(&project.access_class)
+        .ok_or_else(|| {
+            tracing::error!("Access class '{}' not configured", project.access_class);
+            (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                "No deployment controller".to_string(),
-            ));
-        }
-    };
+                "Invalid access class".to_string(),
+            )
+        })?;
 
     // Handle different access requirements
     match access_class.access_requirement {

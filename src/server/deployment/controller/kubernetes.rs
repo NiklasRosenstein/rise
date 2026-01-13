@@ -1721,9 +1721,10 @@ impl KubernetesController {
         let access_class = self
             .access_classes
             .get(&project.access_class)
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "Access class '{}' not configured in deployment controller. Available: {}",
+            .unwrap_or_else(|| {
+                panic!(
+                    "Access class '{}' not configured in deployment controller. Available: {}. \
+                     This should have been validated on project creation.",
                     project.access_class,
                     self.access_classes
                         .keys()
@@ -1731,7 +1732,7 @@ impl KubernetesController {
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
-            })?;
+            });
 
         // Apply authentication based on access requirement
         match access_class.access_requirement {
@@ -3546,6 +3547,7 @@ mod tests {
             custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
             node_selector: std::collections::HashMap::new(),
             image_pull_secret_name: None,
+            access_classes: std::collections::HashMap::new(),
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
         }
     }
@@ -3584,7 +3586,7 @@ mod tests {
             id: Uuid::new_v4(),
             name: "test-project".to_string(),
             status: ProjectStatus::Running,
-            visibility: crate::db::models::ProjectVisibility::Public,
+            access_class: "public".to_string(),
             owner_user_id: None,
             owner_team_id: None,
             finalizers: vec![],

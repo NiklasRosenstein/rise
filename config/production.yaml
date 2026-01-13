@@ -2,6 +2,8 @@
 #
 # This file shows how to use environment variable substitution for production deployments.
 # Copy this to local.yaml and customize, or set environment variables directly.
+#
+# Takes precedence over values in default.yaml.
 
 auth:
   issuer: "${DEX_ISSUER:-http://dex:5556/dex}"

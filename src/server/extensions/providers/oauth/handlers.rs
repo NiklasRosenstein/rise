@@ -56,6 +56,7 @@ fn generate_code_challenge(verifier: &str) -> String {
 
 /// Extract session ID from cookie header
 fn extract_session_id_from_cookie(cookie_header: Option<&str>) -> Option<String> {
+    // TODO: Use proper cookie parsing library
     cookie_header?.split(';').find_map(|cookie| {
         let cookie = cookie.trim();
         if cookie.starts_with("rise_oauth_session=") {

@@ -1,7 +1,6 @@
 use crate::api::project::{
     CreateProjectResponse, DomainsResponse, EnvVarsResponse, MeResponse, OwnerInfo, Project,
-    ProjectErrorResponse, ProjectStatus, ProjectVisibility, ProjectWithOwnerInfo,
-    UpdateProjectResponse,
+    ProjectErrorResponse, ProjectStatus, ProjectWithOwnerInfo, UpdateProjectResponse,
 };
 use crate::config::Config;
 use anyhow::{Context, Result};

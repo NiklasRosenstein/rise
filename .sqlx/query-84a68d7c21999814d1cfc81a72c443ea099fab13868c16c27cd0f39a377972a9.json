@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO projects (name, status, visibility, owner_user_id, owner_team_id)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            visibility as \"visibility: ProjectVisibility\",\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        ",
+  "query": "\n        UPDATE projects\n        SET owner_user_id = $2, owner_team_id = $3\n        WHERE id = $1\n        RETURNING\n            id, name,\n            status as \"status: ProjectStatus\",\n            access_class,\n            owner_user_id, owner_team_id,\n            finalizers,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -20,7 +20,7 @@
       },
       {
         "ordinal": 3,
-        "name": "visibility: ProjectVisibility",
+        "name": "access_class",
         "type_info": "Text"
       },
       {
@@ -51,9 +51,7 @@
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Text",
-        "Text",
+        "Uuid",
         "Uuid",
         "Uuid"
       ]
@@ -70,5 +68,5 @@
       false
     ]
   },
-  "hash": "214e9288042dc6044c50f1a7fc86f7afc7debb2e4a901b59078d2900a5078ebd"
+  "hash": "84a68d7c21999814d1cfc81a72c443ea099fab13868c16c27cd0f39a377972a9"
 }
