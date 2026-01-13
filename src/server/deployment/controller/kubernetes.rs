@@ -1810,38 +1810,15 @@ impl KubernetesController {
         }
     }
 
-    /// Create primary Ingress resource for default project URL
-    fn create_primary_ingress(
-        &self,
-        project: &Project,
-        deployment: &Deployment,
-        metadata: &KubernetesMetadata,
-    ) -> Ingress {
-        let url_components = self.ingress_url_components(project, deployment);
-
+    /// Build common ingress annotations (auth annotations for private projects)
+    /// Returns a BTreeMap starting with user-provided annotations, with auth annotations added if needed
+    fn build_ingress_annotations(&self, project: &Project) -> BTreeMap<String, String> {
         // Start with user-provided annotations from config (convert HashMap to BTreeMap)
         let mut annotations: BTreeMap<String, String> = self
             .ingress_annotations
             .iter()
             .map(|(k, v)| (k.clone(), v.clone()))
             .collect();
-
-        // Add Nginx rewrite annotations for sub-path routing
-        // This is safe here because we only handle the primary URL (not custom domains)
-        if let Some(ref path) = url_components.path_prefix {
-            // Strip path prefix: /myapp/foo → /foo
-            annotations.insert(
-                "nginx.ingress.kubernetes.io/rewrite-target".to_string(),
-                "/$2".to_string(),
-            );
-
-            // Pass original prefix as header using the built-in annotation
-            // This annotation is now only applied to the primary ingress with path-based routing
-            annotations.insert(
-                "nginx.ingress.kubernetes.io/x-forwarded-prefix".to_string(),
-                path.trim_end_matches('/').to_string(),
-            );
-        }
 
         if matches!(project.visibility, ProjectVisibility::Private) {
             // Add Nginx auth annotations for private projects
@@ -1883,29 +1860,23 @@ impl KubernetesController {
                 "X-Auth-Request-Email,X-Auth-Request-User".to_string(),
             );
         }
-        // Public projects have no auth annotations
 
-        // Determine path and path type based on routing mode
-        let (ingress_path, path_type) = if let Some(ref path) = url_components.path_prefix {
-            // Regex: /myapp(/|$)(.*)
-            // Matches: /myapp, /myapp/, /myapp/anything
-            // $2 captures everything after /myapp/
-            let pattern = format!("{}(/|$)(.*)", path.trim_end_matches('/'));
-            (pattern, "ImplementationSpecific")
-        } else {
-            ("/".to_string(), "Prefix")
-        };
+        annotations
+    }
 
-        // Build rules - only primary host
-        let service_name = Self::service_name(project, deployment);
-
-        // Build paths for primary host
-        let mut primary_paths = vec![HTTPIngressPath {
-            path: Some(ingress_path),
-            path_type: path_type.to_string(),
+    /// Build HTTP paths for an ingress rule, including optional backend service routing
+    fn build_ingress_paths(
+        &self,
+        service_name: &str,
+        app_path: &str,
+        app_path_type: &str,
+    ) -> Vec<HTTPIngressPath> {
+        let mut paths = vec![HTTPIngressPath {
+            path: Some(app_path.to_string()),
+            path_type: app_path_type.to_string(),
             backend: IngressBackend {
                 service: Some(IngressServiceBackend {
-                    name: service_name.clone(),
+                    name: service_name.to_string(),
                     port: Some(ServiceBackendPort {
                         name: Some("http".to_string()),
                         ..Default::default()
@@ -1917,7 +1888,7 @@ impl KubernetesController {
 
         // Add /.rise/ path routing if backend service exists
         if let Some(ref backend_addr) = self.backend_address {
-            primary_paths.push(HTTPIngressPath {
+            paths.push(HTTPIngressPath {
                 path: Some("/.rise/".to_string()),
                 path_type: "Prefix".to_string(),
                 backend: IngressBackend {
@@ -1932,6 +1903,53 @@ impl KubernetesController {
                 },
             });
         }
+
+        paths
+    }
+
+    /// Create primary Ingress resource for default project URL
+    fn create_primary_ingress(
+        &self,
+        project: &Project,
+        deployment: &Deployment,
+        metadata: &KubernetesMetadata,
+    ) -> Ingress {
+        let url_components = self.ingress_url_components(project, deployment);
+
+        // Build common annotations
+        let mut annotations = self.build_ingress_annotations(project);
+
+        // Add Nginx rewrite annotations for sub-path routing
+        // This is safe here because we only handle the primary URL (not custom domains)
+        if let Some(ref path) = url_components.path_prefix {
+            // Strip path prefix: /myapp/foo → /foo
+            annotations.insert(
+                "nginx.ingress.kubernetes.io/rewrite-target".to_string(),
+                "/$2".to_string(),
+            );
+
+            // Pass original prefix as header using the built-in annotation
+            // This annotation is now only applied to the primary ingress with path-based routing
+            annotations.insert(
+                "nginx.ingress.kubernetes.io/x-forwarded-prefix".to_string(),
+                path.trim_end_matches('/').to_string(),
+            );
+        }
+
+        // Determine path and path type based on routing mode
+        let (ingress_path, path_type) = if let Some(ref path) = url_components.path_prefix {
+            // Regex: /myapp(/|$)(.*)
+            // Matches: /myapp, /myapp/, /myapp/anything
+            // $2 captures everything after /myapp/
+            let pattern = format!("{}(/|$)(.*)", path.trim_end_matches('/'));
+            (pattern, "ImplementationSpecific")
+        } else {
+            ("/".to_string(), "Prefix")
+        };
+
+        // Build paths for primary host
+        let service_name = Self::service_name(project, deployment);
+        let primary_paths = self.build_ingress_paths(&service_name, &ingress_path, path_type);
 
         let rules = vec![IngressRule {
             host: Some(url_components.host.clone()),
@@ -1974,87 +1992,17 @@ impl KubernetesController {
         metadata: &KubernetesMetadata,
         custom_domains: &[crate::db::models::CustomDomain],
     ) -> Ingress {
-        // Start with user-provided annotations from config (convert HashMap to BTreeMap)
-        let mut annotations: BTreeMap<String, String> = self
-            .ingress_annotations
-            .iter()
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-
+        // Build common annotations (auth for private projects)
         // NOTE: We do NOT add x-forwarded-prefix annotation here
         // Custom domains always serve from root path (/) without any path prefix
-
-        if matches!(project.visibility, ProjectVisibility::Private) {
-            // Add Nginx auth annotations for private projects
-            let auth_url = format!(
-                "{}/api/v1/auth/ingress?project={}",
-                self.auth_backend_url, project.name
-            );
-
-            // Use dynamic host routing if backend service exists
-            let signin_url = if self.backend_address.is_some() {
-                format!(
-                    "{}://$http_host/.rise/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
-                    self.ingress_schema,
-                    urlencoding::encode(&project.name)
-                )
-            } else {
-                format!(
-                    "{}/api/v1/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
-                    self.auth_signin_url,
-                    urlencoding::encode(&project.name)
-                )
-            };
-
-            annotations.insert("nginx.ingress.kubernetes.io/auth-url".to_string(), auth_url);
-            annotations.insert(
-                "nginx.ingress.kubernetes.io/auth-signin".to_string(),
-                signin_url,
-            );
-            annotations.insert(
-                "nginx.ingress.kubernetes.io/auth-response-headers".to_string(),
-                "X-Auth-Request-Email,X-Auth-Request-User".to_string(),
-            );
-        }
+        let annotations = self.build_ingress_annotations(project);
 
         let service_name = Self::service_name(project, deployment);
 
         // Build rules for custom domains (always from root, no path prefix)
         let mut rules = Vec::new();
         for domain in custom_domains {
-            let mut paths = vec![HTTPIngressPath {
-                path: Some("/".to_string()),
-                path_type: "Prefix".to_string(),
-                backend: IngressBackend {
-                    service: Some(IngressServiceBackend {
-                        name: service_name.clone(),
-                        port: Some(ServiceBackendPort {
-                            name: Some("http".to_string()),
-                            ..Default::default()
-                        }),
-                    }),
-                    ..Default::default()
-                },
-            }];
-
-            // Add /.rise/ path routing for custom domains if backend service exists
-            if let Some(ref backend_addr) = self.backend_address {
-                paths.push(HTTPIngressPath {
-                    path: Some("/.rise/".to_string()),
-                    path_type: "Prefix".to_string(),
-                    backend: IngressBackend {
-                        service: Some(IngressServiceBackend {
-                            name: "rise-backend".to_string(),
-                            port: Some(ServiceBackendPort {
-                                number: Some(backend_addr.port as i32),
-                                ..Default::default()
-                            }),
-                        }),
-                        ..Default::default()
-                    },
-                });
-            }
-
+            let paths = self.build_ingress_paths(&service_name, "/", "Prefix");
             rules.push(IngressRule {
                 host: Some(domain.domain.clone()),
                 http: Some(HTTPIngressRuleValue { paths }),
