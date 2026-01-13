@@ -587,6 +587,11 @@ impl KubernetesController {
         Self::escaped_group_name(&deployment.deployment_group)
     }
 
+    /// Get Ingress name for custom domains
+    fn custom_domain_ingress_name(_project: &Project, deployment: &Deployment) -> String {
+        format!("{}-custom-domains", Self::escaped_group_name(&deployment.deployment_group))
+    }
+
     /// Get hostname (without path) for deployment
     #[allow(dead_code)]
     fn hostname(&self, project: &Project, deployment: &Deployment) -> String {
@@ -745,7 +750,7 @@ impl KubernetesController {
                 info!("Deleted Service {} for empty group", service_name);
             }
 
-            // Delete Ingress
+            // Delete primary Ingress
             let ingress_name = Self::ingress_name(&project, deployment);
             let ingress_api: Api<Ingress> = Api::namespaced(self.kube_client.clone(), namespace);
             if let Err(e) = ingress_api
@@ -753,10 +758,29 @@ impl KubernetesController {
                 .await
             {
                 if !e.to_string().contains("404") {
-                    warn!("Error deleting Ingress {}: {}", ingress_name, e);
+                    warn!("Error deleting primary Ingress {}: {}", ingress_name, e);
                 }
             } else {
-                info!("Deleted Ingress {} for empty group", ingress_name);
+                info!("Deleted primary Ingress {} for empty group", ingress_name);
+            }
+
+            // Delete custom domain Ingress
+            let custom_domain_ingress_name = Self::custom_domain_ingress_name(&project, deployment);
+            if let Err(e) = ingress_api
+                .delete(&custom_domain_ingress_name, &DeleteParams::default())
+                .await
+            {
+                if !e.to_string().contains("404") {
+                    warn!(
+                        "Error deleting custom domain Ingress {}: {}",
+                        custom_domain_ingress_name, e
+                    );
+                }
+            } else {
+                info!(
+                    "Deleted custom domain Ingress {} for empty group",
+                    custom_domain_ingress_name
+                );
             }
         } else {
             debug!(
@@ -1299,6 +1323,9 @@ impl KubernetesController {
     }
 
     /// Apply ingress with drift detection
+    /// This now creates two separate Ingresses when custom domains exist:
+    /// 1. Primary ingress for the default project URL (may include path-based routing)
+    /// 2. Custom domain ingress for custom domains (always uses root path)
     async fn apply_ingress(
         &self,
         deployment_id: uuid::Uuid,
@@ -1308,6 +1335,7 @@ impl KubernetesController {
         metadata: &mut KubernetesMetadata,
     ) -> Result<()> {
         let ingress_name = Self::ingress_name(project, deployment);
+        let custom_domain_ingress_name = Self::custom_domain_ingress_name(project, deployment);
 
         // Fetch custom domains
         use crate::db::custom_domains as db_custom_domains;
@@ -1316,13 +1344,13 @@ impl KubernetesController {
 
         let ingress_api: Api<Ingress> = Api::namespaced(self.kube_client.clone(), namespace);
 
+        // 1. Apply primary ingress (default project URL)
         match ingress_api.get(&ingress_name).await {
             Ok(existing_ingress) => {
                 let current_version = existing_ingress.metadata.resource_version.as_deref();
 
                 if self.needs_apply(deployment_id, "ingress", current_version) {
-                    let ingress =
-                        self.create_ingress(project, deployment, metadata, &custom_domains);
+                    let ingress = self.create_primary_ingress(project, deployment, metadata);
                     let result = ingress_api
                         .patch(
                             &ingress_name,
@@ -1335,22 +1363,123 @@ impl KubernetesController {
                         "ingress",
                         result.metadata.resource_version,
                     );
-                    info!("Applied Ingress '{}' (drift detected)", ingress_name);
+                    info!("Applied primary Ingress '{}' (drift detected)", ingress_name);
                 } else {
-                    debug!("Ingress '{}' is up-to-date", ingress_name);
+                    debug!("Primary Ingress '{}' is up-to-date", ingress_name);
                 }
             }
             Err(kube::Error::Api(err)) if err.code == 404 => {
-                let ingress = self.create_ingress(project, deployment, metadata, &custom_domains);
+                let ingress = self.create_primary_ingress(project, deployment, metadata);
                 let result = ingress_api.create(&PostParams::default(), &ingress).await?;
                 self.update_version_cache(
                     deployment_id,
                     "ingress",
                     result.metadata.resource_version,
                 );
-                info!("Created Ingress '{}'", ingress_name);
+                info!("Created primary Ingress '{}'", ingress_name);
             }
             Err(e) => return Err(e.into()),
+        }
+
+        // 2. Handle custom domain ingress
+        if !custom_domains.is_empty() {
+            // Custom domains exist - create/update custom domain ingress
+            match ingress_api.get(&custom_domain_ingress_name).await {
+                Ok(existing_ingress) => {
+                    let current_version = existing_ingress.metadata.resource_version.as_deref();
+
+                    if self.needs_apply(deployment_id, "ingress-custom-domains", current_version) {
+                        let ingress = self.create_custom_domain_ingress(
+                            project,
+                            deployment,
+                            metadata,
+                            &custom_domains,
+                        );
+                        let result = ingress_api
+                            .patch(
+                                &custom_domain_ingress_name,
+                                &PatchParams::apply("rise").force(),
+                                &Patch::Apply(&ingress),
+                            )
+                            .await?;
+                        self.update_version_cache(
+                            deployment_id,
+                            "ingress-custom-domains",
+                            result.metadata.resource_version,
+                        );
+                        info!(
+                            "Applied custom domain Ingress '{}' (drift detected)",
+                            custom_domain_ingress_name
+                        );
+                    } else {
+                        debug!(
+                            "Custom domain Ingress '{}' is up-to-date",
+                            custom_domain_ingress_name
+                        );
+                    }
+                }
+                Err(kube::Error::Api(err)) if err.code == 404 => {
+                    let ingress = self.create_custom_domain_ingress(
+                        project,
+                        deployment,
+                        metadata,
+                        &custom_domains,
+                    );
+                    let result = ingress_api.create(&PostParams::default(), &ingress).await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "ingress-custom-domains",
+                        result.metadata.resource_version,
+                    );
+                    info!("Created custom domain Ingress '{}'", custom_domain_ingress_name);
+                }
+                Err(e) => return Err(e.into()),
+            }
+        } else {
+            // No custom domains - delete custom domain ingress if it exists
+            match ingress_api.get(&custom_domain_ingress_name).await {
+                Ok(_) => {
+                    // Custom domain ingress exists but shouldn't - delete it
+                    match ingress_api
+                        .delete(&custom_domain_ingress_name, &DeleteParams::default())
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                "Deleted custom domain Ingress '{}' (no custom domains configured)",
+                                custom_domain_ingress_name
+                            );
+                            // Clear cache entry for deleted ingress
+                            self.update_version_cache(
+                                deployment_id,
+                                "ingress-custom-domains",
+                                None,
+                            );
+                        }
+                        Err(e) if !e.to_string().contains("404") => {
+                            warn!(
+                                "Error deleting custom domain Ingress '{}': {}",
+                                custom_domain_ingress_name, e
+                            );
+                        }
+                        _ => {}
+                    }
+                }
+                Err(kube::Error::Api(err)) if err.code == 404 => {
+                    // Doesn't exist, that's fine
+                    debug!(
+                        "Custom domain Ingress '{}' doesn't exist (expected)",
+                        custom_domain_ingress_name
+                    );
+                }
+                Err(e) => {
+                    // Log but don't fail - this is just cleanup
+                    warn!(
+                        "Error checking for custom domain Ingress '{}': {}",
+                        custom_domain_ingress_name, e
+                    );
+                }
+            }
         }
 
         metadata.ingress_name = Some(ingress_name);
@@ -1681,13 +1810,12 @@ impl KubernetesController {
         }
     }
 
-    /// Create or update Ingress resource
-    fn create_ingress(
+    /// Create primary Ingress resource for default project URL
+    fn create_primary_ingress(
         &self,
         project: &Project,
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
-        custom_domains: &[crate::db::models::CustomDomain],
     ) -> Ingress {
         let url_components = self.ingress_url_components(project, deployment);
 
@@ -1699,6 +1827,7 @@ impl KubernetesController {
             .collect();
 
         // Add Nginx rewrite annotations for sub-path routing
+        // This is safe here because we only handle the primary URL (not custom domains)
         if let Some(ref path) = url_components.path_prefix {
             // Strip path prefix: /myapp/foo → /foo
             annotations.insert(
@@ -1707,6 +1836,7 @@ impl KubernetesController {
             );
 
             // Pass original prefix as header using the built-in annotation
+            // This annotation is now only applied to the primary ingress with path-based routing
             annotations.insert(
                 "nginx.ingress.kubernetes.io/x-forwarded-prefix".to_string(),
                 path.trim_end_matches('/').to_string(),
@@ -1766,7 +1896,7 @@ impl KubernetesController {
             ("/".to_string(), "Prefix")
         };
 
-        // Build rules - primary host + custom domains
+        // Build rules - only primary host
         let service_name = Self::service_name(project, deployment);
 
         // Build paths for primary host
@@ -1803,14 +1933,94 @@ impl KubernetesController {
             });
         }
 
-        let mut rules = vec![IngressRule {
+        let rules = vec![IngressRule {
             host: Some(url_components.host.clone()),
             http: Some(HTTPIngressRuleValue {
                 paths: primary_paths,
             }),
         }];
 
-        // Add custom domain rules (always from root, no path prefix)
+        // Build TLS configuration for primary host only
+        let tls = self.build_primary_tls_config(&url_components.host);
+
+        Ingress {
+            metadata: ObjectMeta {
+                name: Some(Self::ingress_name(project, deployment)),
+                namespace: metadata.namespace.clone(),
+                labels: Some(Self::common_labels(project)),
+                annotations: if !annotations.is_empty() {
+                    Some(annotations)
+                } else {
+                    None
+                },
+                ..Default::default()
+            },
+            spec: Some(IngressSpec {
+                ingress_class_name: Some(self.ingress_class.clone()),
+                tls,
+                rules: Some(rules),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    /// Create Ingress resource for custom domains
+    /// Custom domains always use root path (/) without path prefix or x-forwarded-prefix annotation
+    fn create_custom_domain_ingress(
+        &self,
+        project: &Project,
+        deployment: &Deployment,
+        metadata: &KubernetesMetadata,
+        custom_domains: &[crate::db::models::CustomDomain],
+    ) -> Ingress {
+        // Start with user-provided annotations from config (convert HashMap to BTreeMap)
+        let mut annotations: BTreeMap<String, String> = self
+            .ingress_annotations
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+
+        // NOTE: We do NOT add x-forwarded-prefix annotation here
+        // Custom domains always serve from root path (/) without any path prefix
+
+        if matches!(project.visibility, ProjectVisibility::Private) {
+            // Add Nginx auth annotations for private projects
+            let auth_url = format!(
+                "{}/api/v1/auth/ingress?project={}",
+                self.auth_backend_url, project.name
+            );
+
+            // Use dynamic host routing if backend service exists
+            let signin_url = if self.backend_address.is_some() {
+                format!(
+                    "{}://$http_host/.rise/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
+                    self.ingress_schema,
+                    urlencoding::encode(&project.name)
+                )
+            } else {
+                format!(
+                    "{}/api/v1/auth/signin?project={}&redirect=$scheme://$http_host$escaped_request_uri",
+                    self.auth_signin_url,
+                    urlencoding::encode(&project.name)
+                )
+            };
+
+            annotations.insert("nginx.ingress.kubernetes.io/auth-url".to_string(), auth_url);
+            annotations.insert(
+                "nginx.ingress.kubernetes.io/auth-signin".to_string(),
+                signin_url,
+            );
+            annotations.insert(
+                "nginx.ingress.kubernetes.io/auth-response-headers".to_string(),
+                "X-Auth-Request-Email,X-Auth-Request-User".to_string(),
+            );
+        }
+
+        let service_name = Self::service_name(project, deployment);
+
+        // Build rules for custom domains (always from root, no path prefix)
+        let mut rules = Vec::new();
         for domain in custom_domains {
             let mut paths = vec![HTTPIngressPath {
                 path: Some("/".to_string()),
@@ -1851,12 +2061,12 @@ impl KubernetesController {
             });
         }
 
-        // Build TLS configuration
-        let tls = self.build_tls_config(&url_components.host, custom_domains);
+        // Build TLS configuration for custom domains
+        let tls = self.build_custom_domain_tls_config(custom_domains);
 
         Ingress {
             metadata: ObjectMeta {
-                name: Some(Self::ingress_name(project, deployment)),
+                name: Some(Self::custom_domain_ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
                 annotations: if !annotations.is_empty() {
@@ -1876,10 +2086,22 @@ impl KubernetesController {
         }
     }
 
-    /// Build TLS configuration for Ingress based on custom_domain_tls_mode
-    fn build_tls_config(
+    /// Build TLS configuration for primary host only
+    fn build_primary_tls_config(
         &self,
         primary_host: &str,
+    ) -> Option<Vec<k8s_openapi::api::networking::v1::IngressTLS>> {
+        let shared_secret = self.ingress_tls_secret_name.as_ref()?;
+
+        Some(vec![k8s_openapi::api::networking::v1::IngressTLS {
+            hosts: Some(vec![primary_host.to_string()]),
+            secret_name: Some(shared_secret.clone()),
+        }])
+    }
+
+    /// Build TLS configuration for custom domains
+    fn build_custom_domain_tls_config(
+        &self,
         custom_domains: &[crate::db::models::CustomDomain],
     ) -> Option<Vec<k8s_openapi::api::networking::v1::IngressTLS>> {
         let shared_secret = self.ingress_tls_secret_name.as_ref()?;
@@ -1888,22 +2110,17 @@ impl KubernetesController {
 
         match self.custom_domain_tls_mode {
             crate::server::settings::CustomDomainTlsMode::Shared => {
-                // All hosts (primary + custom) share the same TLS secret
-                let mut all_hosts = vec![primary_host.to_string()];
-                all_hosts.extend(custom_domains.iter().map(|d| d.domain.clone()));
-
-                tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
-                    hosts: Some(all_hosts),
-                    secret_name: Some(shared_secret.clone()),
-                });
+                // All custom domains share the same TLS secret
+                let all_hosts: Vec<String> = custom_domains.iter().map(|d| d.domain.clone()).collect();
+                
+                if !all_hosts.is_empty() {
+                    tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
+                        hosts: Some(all_hosts),
+                        secret_name: Some(shared_secret.clone()),
+                    });
+                }
             }
             crate::server::settings::CustomDomainTlsMode::PerDomain => {
-                // Primary host uses shared secret
-                tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
-                    hosts: Some(vec![primary_host.to_string()]),
-                    secret_name: Some(shared_secret.clone()),
-                });
-
                 // Each custom domain gets its own tls-{domain} secret
                 for domain in custom_domains {
                     tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
@@ -2686,17 +2903,16 @@ impl DeploymentBackend for KubernetesController {
                         Vec::new()
                     };
 
-                    // Create Ingress for all deployment groups (each group gets its own hostname)
+                    // Apply both primary and custom domain ingresses
                     let ingress_name = Self::ingress_name(project, deployment);
+                    let custom_domain_ingress_name = Self::custom_domain_ingress_name(project, deployment);
                     let ingress_api: Api<Ingress> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
-                    let ingress =
-                        self.create_ingress(project, deployment, &metadata, &custom_domains);
-
-                    // Use server-side apply with force for idempotent ingress updates
+                    // 1. Apply primary ingress
+                    let primary_ingress = self.create_primary_ingress(project, deployment, &metadata);
                     let patch_params = PatchParams::apply("rise").force();
-                    let patch = Patch::Apply(&ingress);
+                    let patch = Patch::Apply(&primary_ingress);
                     let result = match ingress_api
                         .patch(&ingress_name, &patch_params, &patch)
                         .await
@@ -2704,7 +2920,7 @@ impl DeploymentBackend for KubernetesController {
                         Ok(r) => r,
                         Err(e) if is_namespace_not_found_error(&e) => {
                             warn!(
-                                "Namespace missing during Ingress creation, resetting to CreatingNamespace"
+                                "Namespace missing during primary Ingress creation, resetting to CreatingNamespace"
                             );
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
                             metadata.namespace = None;
@@ -2717,8 +2933,61 @@ impl DeploymentBackend for KubernetesController {
                         project = project.name,
                         deployment_id = %deployment.id,
                         resource_version = ?result.metadata.resource_version,
-                        "Ingress applied (any drift corrected)"
+                        "Primary Ingress applied (any drift corrected)"
                     );
+
+                    // 2. Handle custom domain ingress
+                    if !custom_domains.is_empty() {
+                        let custom_ingress = self.create_custom_domain_ingress(
+                            project,
+                            deployment,
+                            &metadata,
+                            &custom_domains,
+                        );
+                        let patch = Patch::Apply(&custom_ingress);
+                        match ingress_api
+                            .patch(&custom_domain_ingress_name, &patch_params, &patch)
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    "Custom domain Ingress applied"
+                                );
+                            }
+                            Err(e) if is_namespace_not_found_error(&e) => {
+                                warn!(
+                                    "Namespace missing during custom domain Ingress creation, resetting to CreatingNamespace"
+                                );
+                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                                metadata.namespace = None;
+                                continue;
+                            }
+                            Err(e) => return Err(e.into()),
+                        }
+                    } else {
+                        // No custom domains - delete custom domain ingress if it exists
+                        match ingress_api
+                            .delete(&custom_domain_ingress_name, &DeleteParams::default())
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    project = project.name,
+                                    deployment_id = %deployment.id,
+                                    "Deleted custom domain Ingress (no custom domains configured)"
+                                );
+                            }
+                            Err(e) if !e.to_string().contains("404") => {
+                                warn!(
+                                    "Error deleting custom domain Ingress '{}': {}",
+                                    custom_domain_ingress_name, e
+                                );
+                            }
+                            _ => {}
+                        }
+                    }
 
                     metadata.reconcile_phase = ReconcilePhase::WaitingForHealth;
                     // Continue to health check
