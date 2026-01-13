@@ -767,6 +767,12 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
+  access_classes:
+    public:
+      display_name: "Public"
+      description: "Test public access"
+      ingress_class: "nginx"
+      access_requirement: None
 
 unknown_top_level: "also unknown"
 "#,
