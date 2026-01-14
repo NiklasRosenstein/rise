@@ -35,38 +35,37 @@ pub fn template_to_regex(template: &str) -> Option<regex::Regex> {
         template
     };
 
-    // Escape regex special characters except for placeholders
-    let mut regex_pattern = String::new();
-    regex_pattern.push('^');
+    // Build regex pattern by replacing placeholders and escaping the rest
+    let mut regex_pattern = String::from("^");
 
-    let mut chars = hostname.chars().peekable();
-    while let Some(ch) = chars.next() {
-        match ch {
-            // Start of placeholder
-            '{' => {
-                // Read until closing brace
-                let mut placeholder = String::new();
-                while let Some(&next_ch) = chars.peek() {
-                    if next_ch == '}' {
-                        chars.next(); // consume the '}'
-                        break;
-                    }
-                    placeholder.push(chars.next().unwrap());
-                }
+    let mut current_pos = 0;
+    while current_pos < hostname.len() {
+        if let Some(start) = hostname[current_pos..].find('{') {
+            let start_pos = current_pos + start;
+
+            // Escape and append everything before the placeholder
+            if start_pos > current_pos {
+                regex_pattern.push_str(&regex::escape(&hostname[current_pos..start_pos]));
+            }
+
+            // Find the closing brace
+            if let Some(end) = hostname[start_pos..].find('}') {
+                let end_pos = start_pos + end;
 
                 // Replace placeholder with regex pattern
                 // Match one or more non-dot characters for single-level subdomain
                 regex_pattern.push_str(r"[a-z0-9]([a-z0-9-]*[a-z0-9])?");
+
+                current_pos = end_pos + 1;
+            } else {
+                // No closing brace found, escape the rest
+                regex_pattern.push_str(&regex::escape(&hostname[current_pos..]));
+                break;
             }
-            // Escape regex special characters
-            '.' | '-' | '+' | '*' | '?' | '^' | '$' | '(' | ')' | '[' | ']' | '|' | '\\' => {
-                regex_pattern.push('\\');
-                regex_pattern.push(ch);
-            }
-            // Regular characters
-            _ => {
-                regex_pattern.push(ch);
-            }
+        } else {
+            // No more placeholders, escape the rest
+            regex_pattern.push_str(&regex::escape(&hostname[current_pos..]));
+            break;
         }
     }
 
