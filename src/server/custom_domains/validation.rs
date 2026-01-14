@@ -2,7 +2,7 @@
 ///
 /// This module provides utilities to check if a custom domain would conflict with
 /// the automatically generated domain pattern for Rise projects.
-
+///
 /// Extract the domain pattern from an ingress URL template.
 ///
 /// The template may contain placeholders like `{project_name}` and `{deployment_group}`.
@@ -34,22 +34,22 @@ pub fn extract_domain_pattern(template: &str) -> Option<(String, bool)> {
         // Subdomain-based routing: "{project_name}.apps.example.com"
         // Replace placeholders with wildcards to get the pattern
         let mut pattern = template.to_string();
-        
+
         // Replace {project_name} with *
         if pattern.contains("{project_name}") {
             pattern = pattern.replace("{project_name}", "*");
         }
-        
+
         // Replace {deployment_group} with *
         if pattern.contains("{deployment_group}") {
             pattern = pattern.replace("{deployment_group}", "*");
         }
-        
+
         // If pattern still contains braces, it's an invalid template - ignore it
         if pattern.contains('{') || pattern.contains('}') {
             return None;
         }
-        
+
         Some((pattern, false))
     }
 }
@@ -76,53 +76,52 @@ fn matches_wildcard_pattern(domain: &str, pattern: &str) -> bool {
         // No wildcard - must match exactly
         return domain == pattern;
     }
-    
+
     // Split pattern by wildcard
     let parts: Vec<&str> = pattern.split('*').collect();
-    
+
     if parts.is_empty() {
         return false;
     }
-    
+
     // Check if domain starts with the first part
     let first_part = parts[0];
     if !domain.starts_with(first_part) {
         return false;
     }
-    
+
     // Check if domain ends with the last part
     let last_part = parts[parts.len() - 1];
     if !domain.ends_with(last_part) {
         return false;
     }
-    
+
     // For single wildcard pattern, check that the wildcard replacement doesn't contain dots
     if parts.len() == 2 {
         let wildcard_replacement = &domain[first_part.len()..domain.len() - last_part.len()];
-        
+
         // Wildcard must not be empty (to prevent matching the pattern itself)
         if wildcard_replacement.is_empty() {
             return false;
         }
-        
+
         // The wildcard replacement should not contain dots (to prevent subdomain wildcards)
         // For example, *.apps.example.com should match "foo.apps.example.com"
         // but not "foo.bar.apps.example.com"
         return !wildcard_replacement.contains('.');
     }
-    
+
     // For multiple wildcards, we need to match each part in sequence
     // This is a simplified implementation that checks each non-wildcard part appears in order
     let mut pos = first_part.len();
-    
+
     // Match middle parts (skip first and last as they're already checked)
-    for i in 1..parts.len() - 1 {
-        let part = parts[i];
+    for part in parts.iter().take(parts.len() - 1).skip(1) {
         if part.is_empty() {
             // Two wildcards in a row - skip
             continue;
         }
-        
+
         // Find this part in the remaining domain
         if let Some(found_pos) = domain[pos..].find(part) {
             pos += found_pos + part.len();
@@ -131,19 +130,19 @@ fn matches_wildcard_pattern(domain: &str, pattern: &str) -> bool {
             return false;
         }
     }
-    
+
     // Check that we've consumed enough of the domain to leave room for the last part
     if pos > domain.len() - last_part.len() {
         return false;
     }
-    
+
     // Additional check: ensure wildcards match non-empty content and don't cross subdomain boundaries
     // For patterns like *-*.preview.example.com, ensure both wildcards match content without dots
     let middle_section = &domain[first_part.len()..domain.len() - last_part.len()];
-    
+
     // Count number of wildcards (parts.len() - 1)
     let wildcard_count = parts.len() - 1;
-    
+
     // For patterns with multiple wildcards, we need at least one non-dot character per wildcard
     // This prevents matching patterns that would cross subdomain boundaries
     // Split the middle section by the middle parts and check each wildcard match
@@ -153,7 +152,7 @@ fn matches_wildcard_pattern(domain: &str, pattern: &str) -> bool {
         // but that requires proper parsing of the middle parts
         return !middle_section.is_empty();
     }
-    
+
     true
 }
 
@@ -193,7 +192,7 @@ pub fn validate_custom_domain(
             }
         }
     }
-    
+
     // Extract pattern from staging template if provided
     if let Some(staging_template) = staging_template {
         if let Some((pattern, has_path)) = extract_domain_pattern(staging_template) {
@@ -216,7 +215,7 @@ pub fn validate_custom_domain(
             }
         }
     }
-    
+
     Ok(())
 }
 
@@ -226,7 +225,8 @@ mod tests {
 
     #[test]
     fn test_extract_domain_pattern_subdomain() {
-        let (pattern, has_path) = extract_domain_pattern("{project_name}.apps.example.com").unwrap();
+        let (pattern, has_path) =
+            extract_domain_pattern("{project_name}.apps.example.com").unwrap();
         assert_eq!(pattern, "*.apps.example.com");
         assert!(!has_path);
     }
@@ -241,7 +241,8 @@ mod tests {
     #[test]
     fn test_extract_domain_pattern_staging() {
         let (pattern, has_path) =
-            extract_domain_pattern("{project_name}-{deployment_group}.preview.example.com").unwrap();
+            extract_domain_pattern("{project_name}-{deployment_group}.preview.example.com")
+                .unwrap();
         assert_eq!(pattern, "*-*.preview.example.com");
         assert!(!has_path);
     }
@@ -254,17 +255,35 @@ mod tests {
 
     #[test]
     fn test_matches_wildcard_pattern_subdomain() {
-        assert!(matches_wildcard_pattern("foo.apps.example.com", "*.apps.example.com"));
-        assert!(matches_wildcard_pattern("bar.apps.example.com", "*.apps.example.com"));
-        assert!(!matches_wildcard_pattern("apps.example.com", "*.apps.example.com")); // Too short
-        assert!(!matches_wildcard_pattern("foo.bar.apps.example.com", "*.apps.example.com")); // Too many levels
+        assert!(matches_wildcard_pattern(
+            "foo.apps.example.com",
+            "*.apps.example.com"
+        ));
+        assert!(matches_wildcard_pattern(
+            "bar.apps.example.com",
+            "*.apps.example.com"
+        ));
+        assert!(!matches_wildcard_pattern(
+            "apps.example.com",
+            "*.apps.example.com"
+        )); // Too short
+        assert!(!matches_wildcard_pattern(
+            "foo.bar.apps.example.com",
+            "*.apps.example.com"
+        )); // Too many levels
         assert!(!matches_wildcard_pattern("other.com", "*.apps.example.com"));
     }
 
     #[test]
     fn test_matches_wildcard_pattern_complex() {
-        assert!(matches_wildcard_pattern("foo-staging.preview.example.com", "*-*.preview.example.com"));
-        assert!(!matches_wildcard_pattern("foo.preview.example.com", "*-*.preview.example.com"));
+        assert!(matches_wildcard_pattern(
+            "foo-staging.preview.example.com",
+            "*-*.preview.example.com"
+        ));
+        assert!(!matches_wildcard_pattern(
+            "foo.preview.example.com",
+            "*-*.preview.example.com"
+        ));
     }
 
     #[test]
@@ -275,7 +294,9 @@ mod tests {
             None,
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("conflicts with the project default domain pattern"));
+        assert!(result
+            .unwrap_err()
+            .contains("conflicts with the project default domain pattern"));
     }
 
     #[test]
@@ -290,22 +311,16 @@ mod tests {
 
     #[test]
     fn test_validate_custom_domain_path_based_conflict() {
-        let result = validate_custom_domain(
-            "example.com",
-            "example.com/{project_name}",
-            None,
-        );
+        let result = validate_custom_domain("example.com", "example.com/{project_name}", None);
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("conflicts with the project default domain pattern"));
+        assert!(result
+            .unwrap_err()
+            .contains("conflicts with the project default domain pattern"));
     }
 
     #[test]
     fn test_validate_custom_domain_path_based_ok() {
-        let result = validate_custom_domain(
-            "other.com",
-            "example.com/{project_name}",
-            None,
-        );
+        let result = validate_custom_domain("other.com", "example.com/{project_name}", None);
         assert!(result.is_ok());
     }
 
@@ -317,7 +332,9 @@ mod tests {
             Some("{project_name}-{deployment_group}.preview.example.com"),
         );
         assert!(result.is_err());
-        assert!(result.unwrap_err().contains("staging deployment domain pattern"));
+        assert!(result
+            .unwrap_err()
+            .contains("staging deployment domain pattern"));
     }
 
     #[test]
