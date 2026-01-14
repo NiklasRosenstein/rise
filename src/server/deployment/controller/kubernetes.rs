@@ -692,6 +692,36 @@ impl KubernetesController {
         }
     }
 
+    /// Filter custom domains to remove any that would conflict with project default domain patterns.
+    /// This is a defensive check in case invalid domains were added before validation was implemented
+    /// or if the default domain configuration changed.
+    fn filter_valid_custom_domains(
+        &self,
+        custom_domains: Vec<crate::db::models::CustomDomain>,
+    ) -> Vec<crate::db::models::CustomDomain> {
+        use crate::server::custom_domains::validation;
+
+        custom_domains
+            .into_iter()
+            .filter(|domain| {
+                match validation::validate_custom_domain(
+                    &domain.domain,
+                    &self.production_ingress_url_template,
+                    self.staging_ingress_url_template.as_deref(),
+                ) {
+                    Ok(()) => true,
+                    Err(reason) => {
+                        warn!(
+                            "Ignoring custom domain '{}' that conflicts with project default domain pattern: {}",
+                            domain.domain, reason
+                        );
+                        false
+                    }
+                }
+            })
+            .collect()
+    }
+
     /// Clean up deployment group resources (Service and Ingress) if no other deployments exist in the group
     async fn cleanup_group_resources_if_empty(
         &self,
@@ -1348,6 +1378,9 @@ impl KubernetesController {
         use crate::db::custom_domains as db_custom_domains;
         let custom_domains =
             db_custom_domains::list_project_custom_domains(&self.state.db_pool, project.id).await?;
+
+        // Filter out custom domains that conflict with project default patterns
+        let custom_domains = self.filter_valid_custom_domains(custom_domains);
 
         let ingress_api: Api<Ingress> = Api::namespaced(self.kube_client.clone(), namespace);
 
@@ -2901,12 +2934,15 @@ impl DeploymentBackend for KubernetesController {
                     // Fetch custom domains (only for DEFAULT group)
                     let custom_domains = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP
                     {
-                        crate::db::custom_domains::list_project_custom_domains(
+                        let domains = crate::db::custom_domains::list_project_custom_domains(
                             &self.state.db_pool,
                             project.id,
                         )
                         .await
-                        .unwrap_or_default()
+                        .unwrap_or_default();
+
+                        // Filter out custom domains that conflict with project default patterns
+                        self.filter_valid_custom_domains(domains)
                     } else {
                         Vec::new()
                     };
@@ -3437,6 +3473,9 @@ impl DeploymentBackend for KubernetesController {
                 project.id,
             )
             .await?;
+
+            // Filter out custom domains that conflict with project default patterns
+            let custom_domains = self.filter_valid_custom_domains(custom_domains);
 
             // Build custom domain URLs with schema
             let mut urls = Vec::new();

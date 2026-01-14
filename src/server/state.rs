@@ -61,6 +61,10 @@ pub struct AppState {
     >,
     pub access_classes:
         Arc<std::collections::HashMap<String, crate::server::settings::AccessClass>>,
+    /// Production ingress URL template (for custom domain validation)
+    pub production_ingress_url_template: Option<String>,
+    /// Staging ingress URL template (for custom domain validation)
+    pub staging_ingress_url_template: Option<String>,
 }
 
 /// Initialize encryption provider from settings
@@ -690,15 +694,21 @@ impl AppState {
         tracing::info!("Initialized OAuth exchange token store for secure backend flow");
 
         // Extract access_classes from deployment controller settings
-        let access_classes =
+        let (access_classes, production_ingress_url_template, staging_ingress_url_template) =
             if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
                 access_classes,
+                production_ingress_url_template,
+                staging_ingress_url_template,
                 ..
             }) = &settings.deployment_controller
             {
-                Arc::new(access_classes.clone())
+                (
+                    Arc::new(access_classes.clone()),
+                    Some(production_ingress_url_template.clone()),
+                    staging_ingress_url_template.clone(),
+                )
             } else {
-                Arc::new(std::collections::HashMap::new())
+                (Arc::new(std::collections::HashMap::new()), None, None)
             };
 
         Ok(Self {
@@ -720,6 +730,8 @@ impl AppState {
             oauth_state_store,
             oauth_exchange_store,
             access_classes,
+            production_ingress_url_template,
+            staging_ingress_url_template,
         })
     }
 
@@ -898,15 +910,21 @@ impl AppState {
         );
 
         // Extract access_classes from deployment controller settings
-        let access_classes =
+        let (access_classes, production_ingress_url_template, staging_ingress_url_template) =
             if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
                 access_classes,
+                production_ingress_url_template,
+                staging_ingress_url_template,
                 ..
             }) = &settings.deployment_controller
             {
-                Arc::new(access_classes.clone())
+                (
+                    Arc::new(access_classes.clone()),
+                    Some(production_ingress_url_template.clone()),
+                    staging_ingress_url_template.clone(),
+                )
             } else {
-                Arc::new(std::collections::HashMap::new())
+                (Arc::new(std::collections::HashMap::new()), None, None)
             };
 
         Ok(Self {
@@ -928,6 +946,8 @@ impl AppState {
             oauth_state_store,
             oauth_exchange_store,
             access_classes,
+            production_ingress_url_template,
+            staging_ingress_url_template,
         })
     }
 }
