@@ -68,8 +68,10 @@ fn extract_session_id_from_cookie(cookie_header: Option<&str>) -> Option<String>
 }
 
 /// Validate redirect URI against allowed origins
-fn validate_redirect_uri(
+async fn validate_redirect_uri(
+    pool: &sqlx::PgPool,
     redirect_uri: &str,
+    project_id: uuid::Uuid,
     project_name: &str,
     api_url: &str,
 ) -> Result<(), String> {
@@ -96,6 +98,10 @@ fn validate_redirect_uri(
     // Pattern 1: api.domain.com -> project.domain.com
     if let Some(base_domain) = api_host.strip_prefix("api.") {
         allowed_domains.push(format!("{}.{}", project_name, base_domain));
+        
+        // Also allow the main Rise domain (e.g., rise.example.com)
+        // This is needed for the "Test OAuth Flow" button in the UI
+        allowed_domains.push(base_domain.to_string());
     }
 
     // Pattern 2: localhost -> project.apps.rise.local (for deployed apps)
@@ -106,6 +112,22 @@ fn validate_redirect_uri(
 
     // Pattern 3: domain.com -> project.domain.com (without api prefix)
     allowed_domains.push(format!("{}.{}", project_name, api_host));
+
+    // Also allow the API host itself (for cases where Rise UI is at the same domain as API)
+    allowed_domains.push(api_host.to_string());
+
+    // Fetch and allow project's custom domains
+    match crate::db::custom_domains::list_project_custom_domains(pool, project_id).await {
+        Ok(custom_domains) => {
+            for custom_domain in custom_domains {
+                allowed_domains.push(custom_domain.domain);
+            }
+        }
+        Err(e) => {
+            warn!("Failed to fetch custom domains for project validation: {:?}", e);
+            // Continue without custom domains rather than failing the request
+        }
+    }
 
     // Check if the redirect host matches any allowed domain (with or without port)
     let host_with_port = if let Some(p) = port {
@@ -119,8 +141,6 @@ fn validate_redirect_uri(
             return Ok(());
         }
     }
-
-    // TODO: Allow project's custom domains (requires custom domain support)
 
     Err(format!(
         "Invalid redirect URI: not authorized for this project (allowed: localhost, {})",
@@ -348,7 +368,8 @@ pub async fn authorize(
     // Determine final redirect URI
     let final_redirect_uri = if let Some(ref uri) = req.redirect_uri {
         // Validate redirect URI
-        validate_redirect_uri(uri, &project_name, &state.public_url)
+        validate_redirect_uri(&state.db_pool, uri, project.id, &project_name, &state.public_url)
+            .await
             .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         uri.clone()
     } else {
