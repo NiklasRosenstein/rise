@@ -708,6 +708,7 @@ impl KubernetesController {
                     &domain.domain,
                     &self.production_ingress_url_template,
                     self.staging_ingress_url_template.as_deref(),
+                    None, // Kubernetes controller doesn't have access to public_url
                 ) {
                     Ok(()) => true,
                     Err(reason) => {

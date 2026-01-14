@@ -63,6 +63,7 @@ pub async fn add_custom_domain(
             &payload.domain,
             production_template,
             state.staging_ingress_url_template.as_deref(),
+            Some(&state.public_url),
         ) {
             return Err((StatusCode::BAD_REQUEST, reason));
         }
