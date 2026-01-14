@@ -1,29 +1,18 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
-#[derive(Debug, Deserialize, Serialize, Clone, Default)]
-pub enum ProjectVisibility {
-    Public,
-    #[default]
-    Private,
+/// Access class information for API responses
+#[derive(Debug, Serialize, Clone)]
+pub struct AccessClassInfo {
+    pub id: String,
+    pub display_name: String,
+    pub description: String,
 }
 
-impl From<crate::db::models::ProjectVisibility> for ProjectVisibility {
-    fn from(visibility: crate::db::models::ProjectVisibility) -> Self {
-        match visibility {
-            crate::db::models::ProjectVisibility::Public => ProjectVisibility::Public,
-            crate::db::models::ProjectVisibility::Private => ProjectVisibility::Private,
-        }
-    }
-}
-
-impl From<ProjectVisibility> for crate::db::models::ProjectVisibility {
-    fn from(visibility: ProjectVisibility) -> Self {
-        match visibility {
-            ProjectVisibility::Public => crate::db::models::ProjectVisibility::Public,
-            ProjectVisibility::Private => crate::db::models::ProjectVisibility::Private,
-        }
-    }
+/// Response for listing available access classes
+#[derive(Debug, Serialize, Clone)]
+pub struct ListAccessClassesResponse {
+    pub access_classes: Vec<AccessClassInfo>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
@@ -79,7 +68,7 @@ pub struct Project {
     #[serde(default)]
     pub status: ProjectStatus,
     #[serde(default)]
-    pub visibility: ProjectVisibility,
+    pub access_class: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_user: Option<String>, // Relation to users collection
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -106,7 +95,7 @@ pub struct Project {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct CreateProjectRequest {
     pub name: String,
-    pub visibility: ProjectVisibility,
+    pub access_class: String,
     pub owner: ProjectOwner,
 }
 
@@ -118,7 +107,7 @@ pub struct CreateProjectResponse {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct UpdateProjectRequest {
     pub name: Option<String>,
-    pub visibility: Option<ProjectVisibility>,
+    pub access_class: Option<String>,
     pub status: Option<ProjectStatus>,
     pub owner: Option<ProjectOwner>,
 }
@@ -156,7 +145,7 @@ pub struct ProjectWithOwnerInfo {
     pub id: String,
     pub name: String,
     pub status: ProjectStatus,
-    pub visibility: ProjectVisibility,
+    pub access_class: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<OwnerInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]

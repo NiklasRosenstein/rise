@@ -2,38 +2,6 @@
 
 use serde::{Deserialize, Serialize};
 
-/// Project visibility setting
-#[derive(Debug, Deserialize, Serialize, Clone)]
-#[serde(rename_all = "PascalCase")]
-pub enum ProjectVisibility {
-    Public,
-    Private,
-}
-
-impl std::str::FromStr for ProjectVisibility {
-    type Err = anyhow::Error;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "public" => Ok(ProjectVisibility::Public),
-            "private" => Ok(ProjectVisibility::Private),
-            _ => Err(anyhow::anyhow!(
-                "Invalid visibility: {}. Must be 'public' or 'private'",
-                s
-            )),
-        }
-    }
-}
-
-impl std::fmt::Display for ProjectVisibility {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            ProjectVisibility::Public => write!(f, "Public"),
-            ProjectVisibility::Private => write!(f, "Private"),
-        }
-    }
-}
-
 /// Project status
 #[derive(Debug, Deserialize, Serialize, Clone, PartialEq)]
 #[serde(rename_all = "PascalCase")]
@@ -63,7 +31,7 @@ pub struct Project {
     pub id: String,
     pub name: String,
     pub status: ProjectStatus,
-    pub visibility: ProjectVisibility,
+    pub access_class: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner_user: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -109,7 +77,7 @@ pub struct ProjectWithOwnerInfo {
     pub name: String,
     pub status: ProjectStatus,
     #[allow(dead_code)]
-    pub visibility: ProjectVisibility,
+    pub access_class: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub owner: Option<OwnerInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]

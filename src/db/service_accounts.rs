@@ -18,7 +18,7 @@ pub async fn create(
     let project = sqlx::query_as!(
         Project,
         r#"
-        SELECT id, name, status as "status: _", visibility as "visibility: _",
+        SELECT id, name, status as "status: _", access_class,
                owner_user_id, owner_team_id, finalizers,
                created_at, updated_at
         FROM projects
@@ -293,10 +293,7 @@ pub async fn soft_delete(pool: &PgPool, id: Uuid) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::db::{
-        models::{ProjectStatus, ProjectVisibility},
-        projects, users,
-    };
+    use crate::db::{models::ProjectStatus, projects, users};
 
     #[sqlx::test]
     async fn test_create_service_account(pool: PgPool) -> Result<()> {
@@ -306,7 +303,7 @@ mod tests {
             &pool,
             "test-project",
             ProjectStatus::Stopped,
-            ProjectVisibility::Public,
+            "public".to_string(),
             Some(user.id),
             None,
         )
@@ -339,7 +336,7 @@ mod tests {
             &pool,
             "test-project",
             ProjectStatus::Stopped,
-            ProjectVisibility::Public,
+            "public".to_string(),
             Some(user.id),
             None,
         )
@@ -365,7 +362,7 @@ mod tests {
             &pool,
             "test-project",
             ProjectStatus::Stopped,
-            ProjectVisibility::Public,
+            "public".to_string(),
             Some(user.id),
             None,
         )
@@ -391,7 +388,7 @@ mod tests {
             &pool,
             "project1",
             ProjectStatus::Stopped,
-            ProjectVisibility::Public,
+            "public".to_string(),
             Some(user.id),
             None,
         )
@@ -400,7 +397,7 @@ mod tests {
             &pool,
             "project2",
             ProjectStatus::Stopped,
-            ProjectVisibility::Public,
+            "public".to_string(),
             Some(user.id),
             None,
         )
@@ -427,7 +424,7 @@ mod tests {
             &pool,
             "test-project",
             ProjectStatus::Stopped,
-            ProjectVisibility::Public,
+            "public".to_string(),
             Some(user.id),
             None,
         )
@@ -458,7 +455,7 @@ mod tests {
             &pool,
             "test-project",
             ProjectStatus::Stopped,
-            ProjectVisibility::Public,
+            "public".to_string(),
             Some(regular_user.id),
             None,
         )

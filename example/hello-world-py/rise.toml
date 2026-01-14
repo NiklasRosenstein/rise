@@ -2,7 +2,7 @@ version = 1
 
 [project]
 name = "hello-world-py"
-visibility = "private"
+access_class = "private"
 custom_domains = []
 
 [project.env]

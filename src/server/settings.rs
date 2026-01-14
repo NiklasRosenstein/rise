@@ -1,5 +1,5 @@
 use config::{Config, ConfigError};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::env;
 
 #[derive(Debug, Deserialize, Clone)]
@@ -227,6 +227,38 @@ fn default_custom_domain_tls_mode() -> CustomDomainTlsMode {
     CustomDomainTlsMode::PerDomain
 }
 
+/// Access requirement level for project ingress
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "PascalCase")]
+pub enum AccessRequirement {
+    /// No authentication required - fully public access
+    None,
+    /// Must be authenticated, but no project membership required
+    Authenticated,
+    /// Must be authenticated AND have project membership (owner or team member)
+    Member,
+}
+
+/// Access class configuration for ingress authentication
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct AccessClass {
+    /// Display name for UI (e.g., "Public")
+    pub display_name: String,
+
+    /// Description for UI
+    pub description: String,
+
+    /// Ingress class to use
+    pub ingress_class: String,
+
+    /// Access requirement level
+    pub access_requirement: AccessRequirement,
+
+    /// Optional custom nginx annotations
+    #[serde(default)]
+    pub custom_annotations: std::collections::HashMap<String, String>,
+}
+
 /// Deployment controller configuration
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -275,7 +307,7 @@ pub enum DeploymentControllerSettings {
         /// Backend URL for Nginx auth subrequests (internal cluster URL)
         /// Example: "http://rise-backend.default.svc.cluster.local:3000"
         /// This is the URL Nginx will use internally within the cluster to validate authentication.
-        /// For Minikube development, use "http://172.17.0.1:3000" (Docker bridge IP) to reach host.
+        /// For Minikube development, use the Docker bridge IP to reach host (e.g., "http://host.minikube.internal:3000").
         auth_backend_url: String,
 
         /// Public backend URL for browser redirects during authentication
@@ -340,6 +372,11 @@ pub enum DeploymentControllerSettings {
         /// Example: "my-registry-secret"
         #[serde(default)]
         image_pull_secret_name: Option<String>,
+
+        /// Access classes defining ingress authentication levels
+        /// Key: access class identifier (e.g., "public", "private")
+        /// Value: access class configuration (display info, ingress settings)
+        access_classes: std::collections::HashMap<String, AccessClass>,
     },
 }
 
@@ -576,6 +613,7 @@ impl Settings {
             ref namespace_format,
             ref production_ingress_url_template,
             ref staging_ingress_url_template,
+            ref access_classes,
             ..
         }) = settings.deployment_controller
         {
@@ -597,6 +635,35 @@ impl Settings {
                     "staging_ingress_url_template",
                     "{deployment_group}",
                 )?;
+            }
+
+            // Validate access classes
+            if access_classes.is_empty() {
+                return Err(ConfigError::Message(
+                    "Kubernetes deployment_controller requires at least one access class to be configured. \
+                     Add access_classes to your configuration file.".to_string()
+                ));
+            }
+
+            for (id, class) in access_classes {
+                if class.display_name.is_empty() {
+                    return Err(ConfigError::Message(format!(
+                        "Access class '{}' has empty display_name",
+                        id
+                    )));
+                }
+                if class.description.is_empty() {
+                    return Err(ConfigError::Message(format!(
+                        "Access class '{}' has empty description",
+                        id
+                    )));
+                }
+                if class.ingress_class.is_empty() {
+                    return Err(ConfigError::Message(format!(
+                        "Access class '{}' has empty ingress_class",
+                        id
+                    )));
+                }
             }
         }
 
@@ -700,6 +767,12 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
+  access_classes:
+    public:
+      display_name: "Public"
+      description: "Test public access"
+      ingress_class: "nginx"
+      access_requirement: None
 
 unknown_top_level: "also unknown"
 "#,

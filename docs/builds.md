@@ -317,19 +317,26 @@ Both flags can be used together for comprehensive SSL support.
 - Running behind corporate proxies with certificate inspection
 - Custom or self-signed certificates
 
+**Default behavior:**
+- **Automatically enabled** when `SSL_CERT_FILE` environment variable is set
+- This ensures builds work by default in most SSL certificate scenarios
+- Can be explicitly disabled with `--railpack-embed-ssl-cert=false`
+
 **Usage:**
 ```bash
 export SSL_CERT_FILE=/path/to/ca-certificates.crt
 
-# Shorthand (defaults to true)
-rise build myapp:latest --backend railpack --railpack-embed-ssl-cert
+# Embedding is automatically enabled when SSL_CERT_FILE is set
+rise build myapp:latest --backend railpack
 
-# Explicit values
-rise build myapp:latest --backend railpack --railpack-embed-ssl-cert=true
+# Explicitly disable even when SSL_CERT_FILE is set
 rise build myapp:latest --backend railpack --railpack-embed-ssl-cert=false
 
+# Explicitly enable (useful when SSL_CERT_FILE is not set)
+rise build myapp:latest --backend railpack --railpack-embed-ssl-cert=true
+
 # Combine with managed BuildKit for comprehensive SSL support
-rise build myapp:latest --backend railpack --managed-buildkit --railpack-embed-ssl-cert
+rise build myapp:latest --backend railpack --managed-buildkit
 ```
 
 **Environment variable support:**
@@ -346,9 +353,7 @@ rise build myapp:latest --backend railpack
 # Embedding is enabled via config
 ```
 
-**Precedence order:** CLI flag > Environment variable > Config file > Default (false)
-
-**Warning:** If `SSL_CERT_FILE` is set but `--railpack-embed-ssl-cert` is not specified, a warning will be logged to alert you that build-time SSL errors may occur.
+**Precedence order:** CLI flag > Environment variable > Config file > Default (enabled if SSL_CERT_FILE is set)
 
 ## Proxy Support
 

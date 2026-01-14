@@ -218,6 +218,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
         custom_domain_tls_mode,
         node_selector,
         image_pull_secret_name,
+        access_classes,
     ) = match settings.deployment_controller.clone() {
         Some(settings::DeploymentControllerSettings::Kubernetes {
             kubeconfig,
@@ -236,6 +237,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             custom_domain_tls_mode,
             node_selector,
             image_pull_secret_name,
+            access_classes,
         }) => (
             kubeconfig,
             ingress_class,
@@ -253,6 +255,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             custom_domain_tls_mode,
             node_selector,
             image_pull_secret_name,
+            access_classes,
         ),
         None => {
             anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
@@ -305,6 +308,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             custom_domain_tls_mode,
             node_selector,
             image_pull_secret_name,
+            access_classes,
         },
     )?);
 

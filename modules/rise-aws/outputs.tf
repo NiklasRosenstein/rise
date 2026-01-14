@@ -76,12 +76,12 @@ output "policy_document" {
 # -----------------------------------------------------------------------------
 
 output "kms_key_arn" {
-  description = "ARN of the KMS key for ECR encryption (null if KMS not enabled)"
+  description = "ARN of the KMS key for encryption (null if KMS not enabled)"
   value       = var.enable_kms ? aws_kms_key.ecr[0].arn : null
 }
 
 output "kms_key_id" {
-  description = "ID of the KMS key for ECR encryption (null if KMS not enabled)"
+  description = "ID of the KMS key for encryption (null if KMS not enabled)"
   value       = var.enable_kms ? aws_kms_key.ecr[0].key_id : null
 }
 
@@ -100,6 +100,12 @@ output "rise_config" {
         repo_prefix   = local.repo_prefix
         role_arn      = aws_iam_role.backend.arn
         push_role_arn = aws_iam_role.push_role[0].arn
+      }
+    } : {},
+    # KMS configuration (if enabled)
+    var.enable_kms ? {
+      kms = {
+        key_arn = aws_kms_key.ecr[0].arn
       }
     } : {},
     # RDS configuration (if enabled)
