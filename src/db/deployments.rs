@@ -794,6 +794,42 @@ pub async fn find_non_terminal_for_project_and_group(
     Ok(deployments)
 }
 
+/// Find the active deployment for a project in a specific group
+/// Returns the deployment marked as is_active=true in the specified group
+pub async fn find_active_deployment_for_group(
+    pool: &PgPool,
+    project_id: Uuid,
+    group: &str,
+) -> Result<Option<Deployment>> {
+    let deployment = sqlx::query_as!(
+        Deployment,
+        r#"
+        SELECT
+            id, deployment_id, project_id, created_by_id,
+            status as "status: DeploymentStatus",
+            deployment_group, expires_at,
+            termination_reason as "termination_reason: _",
+            completed_at, error_message, build_logs,
+            controller_metadata as "controller_metadata: serde_json::Value",
+            image, image_digest, rolled_back_from_deployment_id,
+            http_port, needs_reconcile, is_active,
+            created_at, updated_at
+        FROM deployments
+        WHERE project_id = $1
+          AND deployment_group = $2
+          AND is_active = TRUE
+        LIMIT 1
+        "#,
+        project_id,
+        group
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to find active deployment for project and group")?;
+
+    Ok(deployment)
+}
+
 /// Find last deployment for a project in a specific group
 /// Returns the most recent deployment regardless of status
 pub async fn find_last_for_project_and_group(

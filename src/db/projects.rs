@@ -311,47 +311,50 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
         return Ok(project);
     }
 
-    // Get last deployment from the "default" group only
+    // Get active deployment from the "default" group only
     // Other deployment groups (e.g., for merge requests) don't affect project status
-    let last_deployment = deployments::find_last_for_project_and_group(
+    let active_deployment = deployments::find_active_deployment_for_group(
         pool,
         project_id,
         crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP,
     )
     .await?;
 
-    // Determine status based on active deployment (using is_active flag)
-    // or last deployment if no active deployment exists
-    let status = if let Some(last) = last_deployment.as_ref() {
-        // Check if this deployment is marked as active
-        if last.is_active {
-            // Active deployment determines project status
-            match last.status {
-                DeploymentStatus::Healthy => ProjectStatus::Running,
-                DeploymentStatus::Unhealthy => ProjectStatus::Failed,
-                // Termination/cancellation in progress - show as Deploying (transitional)
-                DeploymentStatus::Terminating | DeploymentStatus::Cancelling => {
-                    ProjectStatus::Deploying
-                }
-                // Other in-progress states
-                DeploymentStatus::Pending
-                | DeploymentStatus::Building
-                | DeploymentStatus::Pushing
-                | DeploymentStatus::Pushed
-                | DeploymentStatus::Deploying => ProjectStatus::Deploying,
-                // Terminal states shouldn't be active, but handle gracefully
-                DeploymentStatus::Stopped
-                | DeploymentStatus::Cancelled
-                | DeploymentStatus::Superseded
-                | DeploymentStatus::Failed
-                | DeploymentStatus::Expired => ProjectStatus::Stopped,
+    // Determine status based on active deployment first, then check for in-progress deployments
+    let status = if let Some(active) = active_deployment.as_ref() {
+        // Active deployment determines project status
+        match active.status {
+            DeploymentStatus::Healthy => ProjectStatus::Running,
+            DeploymentStatus::Unhealthy => ProjectStatus::Failed,
+            // Termination/cancellation in progress - show as Deploying (transitional)
+            DeploymentStatus::Terminating | DeploymentStatus::Cancelling => {
+                ProjectStatus::Deploying
             }
-        } else {
-            // Not active deployment - use last deployment status
-            match last.status {
-                DeploymentStatus::Failed => ProjectStatus::Failed,
+            // Other in-progress states
+            DeploymentStatus::Pending
+            | DeploymentStatus::Building
+            | DeploymentStatus::Pushing
+            | DeploymentStatus::Pushed
+            | DeploymentStatus::Deploying => ProjectStatus::Deploying,
+            // Terminal states shouldn't be active, but handle gracefully
+            DeploymentStatus::Stopped
+            | DeploymentStatus::Cancelled
+            | DeploymentStatus::Superseded
+            | DeploymentStatus::Failed
+            | DeploymentStatus::Expired => ProjectStatus::Stopped,
+        }
+    } else {
+        // No active deployment - check last deployment for in-progress or recent activity
+        let last_deployment = deployments::find_last_for_project_and_group(
+            pool,
+            project_id,
+            crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP,
+        )
+        .await?;
 
-                // In-progress states
+        if let Some(last) = last_deployment.as_ref() {
+            match last.status {
+                // In-progress states - show as Deploying
                 DeploymentStatus::Pending
                 | DeploymentStatus::Building
                 | DeploymentStatus::Pushing
@@ -363,19 +366,20 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
                     ProjectStatus::Deploying
                 }
 
-                // Terminal states (no active deployment)
-                DeploymentStatus::Cancelled
+                // Terminal states with no active deployment - project is stopped
+                DeploymentStatus::Failed
+                | DeploymentStatus::Cancelled
                 | DeploymentStatus::Stopped
                 | DeploymentStatus::Superseded
                 | DeploymentStatus::Expired => ProjectStatus::Stopped,
 
-                // Running states without being active (shouldn't happen)
+                // Running states without being active (shouldn't happen, but treat as stopped)
                 DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => ProjectStatus::Stopped,
             }
+        } else {
+            // No deployments in default group at all
+            ProjectStatus::Stopped
         }
-    } else {
-        // No deployments in default group at all
-        ProjectStatus::Stopped
     };
 
     update_status(pool, project_id, status).await
@@ -593,4 +597,162 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
     .context("Failed to list active projects")?;
 
     Ok(projects)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::models::{DeploymentStatus, ProjectStatus};
+    use crate::db::deployments::{CreateDeploymentParams};
+    use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
+
+    /// Test that project status is based on active deployment, not the latest deployment
+    #[sqlx::test]
+    async fn test_project_status_with_active_and_failed_deployments(pool: PgPool) {
+        // Create a test user
+        let user = crate::db::users::create(&pool, "test@example.com")
+            .await
+            .expect("Failed to create test user");
+
+        // Create a test project
+        let project = create(
+            &pool,
+            "test-project",
+            ProjectStatus::Stopped,
+            "default".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await
+        .expect("Failed to create test project");
+
+        // Create a healthy deployment (older, but active)
+        let healthy_deployment = deployments::create(
+            &pool,
+            CreateDeploymentParams {
+                deployment_id: "20251220-100000",
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DeploymentStatus::Healthy,
+                image: Some("test:v1"),
+                image_digest: None,
+                rolled_back_from_deployment_id: None,
+                deployment_group: DEFAULT_DEPLOYMENT_GROUP,
+                expires_at: None,
+                http_port: 8080,
+                is_active: false, // Initially not active
+            },
+        )
+        .await
+        .expect("Failed to create healthy deployment");
+
+        // Mark the healthy deployment as active
+        deployments::mark_as_active(
+            &pool,
+            healthy_deployment.id,
+            project.id,
+            DEFAULT_DEPLOYMENT_GROUP,
+        )
+        .await
+        .expect("Failed to mark deployment as active");
+
+        // Update project status based on active deployment
+        let project = update_calculated_status(&pool, project.id)
+            .await
+            .expect("Failed to update project status");
+
+        // Project should be Running because the active deployment is Healthy
+        assert_eq!(
+            project.status,
+            ProjectStatus::Running,
+            "Project should be Running with active healthy deployment"
+        );
+
+        // Now create a newer failed deployment (not active)
+        let _failed_deployment = deployments::create(
+            &pool,
+            CreateDeploymentParams {
+                deployment_id: "20251220-110000",
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DeploymentStatus::Failed,
+                image: Some("test:v2"),
+                image_digest: None,
+                rolled_back_from_deployment_id: None,
+                deployment_group: DEFAULT_DEPLOYMENT_GROUP,
+                expires_at: None,
+                http_port: 8080,
+                is_active: false, // This is NOT active
+            },
+        )
+        .await
+        .expect("Failed to create failed deployment");
+
+        // Update project status again
+        let project = update_calculated_status(&pool, project.id)
+            .await
+            .expect("Failed to update project status");
+
+        // Project should STILL be Running because the ACTIVE deployment is Healthy
+        // even though the latest deployment failed
+        assert_eq!(
+            project.status,
+            ProjectStatus::Running,
+            "Project should remain Running with active healthy deployment, even when latest deployment failed"
+        );
+    }
+
+    /// Test that project status is Stopped when no active deployment but has failed deployment
+    #[sqlx::test]
+    async fn test_project_status_with_only_failed_deployment(pool: PgPool) {
+        // Create a test user
+        let user = crate::db::users::create(&pool, "test@example.com")
+            .await
+            .expect("Failed to create test user");
+
+        // Create a test project
+        let project = create(
+            &pool,
+            "test-project-2",
+            ProjectStatus::Stopped,
+            "default".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await
+        .expect("Failed to create test project");
+
+        // Create a failed deployment (not active)
+        let _failed_deployment = deployments::create(
+            &pool,
+            CreateDeploymentParams {
+                deployment_id: "20251220-120000",
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DeploymentStatus::Failed,
+                image: Some("test:v1"),
+                image_digest: None,
+                rolled_back_from_deployment_id: None,
+                deployment_group: DEFAULT_DEPLOYMENT_GROUP,
+                expires_at: None,
+                http_port: 8080,
+                is_active: false,
+            },
+        )
+        .await
+        .expect("Failed to create failed deployment");
+
+        // Update project status
+        let project = update_calculated_status(&pool, project.id)
+            .await
+            .expect("Failed to update project status");
+
+        // Project should be Stopped (not Failed) when no active deployment exists
+        // Terminal states without active deployments mean the project is stopped
+        assert_eq!(
+            project.status,
+            ProjectStatus::Stopped,
+            "Project should be Stopped when only failed deployment exists and no active deployment"
+        );
+    }
 }
