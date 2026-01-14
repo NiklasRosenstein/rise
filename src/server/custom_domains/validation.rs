@@ -105,9 +105,10 @@ fn matches_wildcard_pattern(domain: &str, pattern: &str) -> bool {
             return false;
         }
 
-        // The wildcard replacement should not contain dots (to prevent subdomain wildcards)
-        // For example, *.apps.example.com should match "foo.apps.example.com"
-        // but not "foo.bar.apps.example.com"
+        // Enforce single-level subdomain matching by ensuring the wildcard replacement
+        // doesn't contain dots. This prevents matching domains with additional subdomain levels.
+        // For example, pattern "*.apps.example.com" should match "foo.apps.example.com"
+        // but NOT "foo.bar.apps.example.com" (which has an extra subdomain level)
         return !wildcard_replacement.contains('.');
     }
 

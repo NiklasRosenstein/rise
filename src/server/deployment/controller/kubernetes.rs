@@ -712,8 +712,11 @@ impl KubernetesController {
                     Ok(()) => true,
                     Err(reason) => {
                         warn!(
-                            "Ignoring custom domain '{}' that conflicts with project default domain pattern: {}",
-                            domain.domain, reason
+                            domain_id = %domain.id,
+                            project_id = %domain.project_id,
+                            domain = %domain.domain,
+                            "Ignoring custom domain that conflicts with project default domain pattern: {}",
+                            reason
                         );
                         false
                     }
