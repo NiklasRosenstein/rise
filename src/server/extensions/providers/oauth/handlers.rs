@@ -74,6 +74,7 @@ async fn validate_redirect_uri(
     project_id: uuid::Uuid,
     project_name: &str,
     rise_public_url: &str,
+    app_domain_template: Option<&str>,
 ) -> Result<(), String> {
     let redirect_url =
         Url::parse(redirect_uri).map_err(|e| format!("Invalid redirect URI: {}", e))?;
@@ -102,9 +103,16 @@ async fn validate_redirect_uri(
     // This is needed for the "Test OAuth Flow" button in the UI
     allowed_domains.push(rise_host.to_string());
 
-    // Allow project subdomain: {project}.{domain}
-    // e.g., oauth-fragment-flow.rise.example.com
-    allowed_domains.push(format!("{}.{}", project_name, rise_host));
+    // Allow project app domain based on template
+    if let Some(template) = app_domain_template {
+        // Use the configured app domain template
+        let app_domain = template.replace("{project_name}", project_name);
+        allowed_domains.push(app_domain);
+    } else {
+        // Fallback: project subdomain on Rise domain
+        // e.g., oauth-fragment-flow.rise.example.com
+        allowed_domains.push(format!("{}.{}", project_name, rise_host));
+    }
 
     // Fetch and allow project's custom domains
     match crate::db::custom_domains::list_project_custom_domains(pool, project_id).await {
@@ -367,6 +375,7 @@ pub async fn authorize(
             project.id,
             &project_name,
             &state.public_url,
+            state.server_settings.app_domain_template.as_deref(),
         )
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;

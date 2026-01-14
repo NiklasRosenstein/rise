@@ -42,6 +42,12 @@ pub struct ServerSettings {
     /// Default: ["sub", "email", "name"]
     #[serde(default = "default_jwt_claims")]
     pub jwt_claims: Vec<String>,
+
+    /// App domain template for OAuth redirect validation
+    /// Used to validate redirect URIs for deployed apps (e.g., "{project_name}.apps.example.com")
+    /// If not set, defaults to "{project_name}.{rise_domain}" where rise_domain is extracted from public_url
+    #[serde(default)]
+    pub app_domain_template: Option<String>,
 }
 
 fn default_cookie_secure() -> bool {

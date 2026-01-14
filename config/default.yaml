@@ -26,6 +26,7 @@ server:
   cookie_secure: true
   jwt_signing_secret: "${RISE_JWT_SIGNING_SECRET}" # Generate with openssl rand -base64 32
   jwt_claims: ["sub", "email", "name"]
+  # app_domain_template: "{project_name}.apps.example.com"  # Optional: Template for app domains (for OAuth redirect validation)
 
 database:
   # DATABASE_URL environment variable is always used if set
