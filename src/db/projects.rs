@@ -602,8 +602,8 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db::deployments::CreateDeploymentParams;
     use crate::db::models::{DeploymentStatus, ProjectStatus};
-    use crate::db::deployments::{CreateDeploymentParams};
     use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
 
     /// Test that project status is based on active deployment, not the latest deployment
