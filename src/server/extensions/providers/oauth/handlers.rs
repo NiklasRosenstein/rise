@@ -12,6 +12,7 @@ use axum::{
 };
 use base64::Engine;
 use chrono::{Duration, Utc};
+use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use url::Url;
 use uuid::Uuid;
@@ -71,54 +72,78 @@ fn extract_session_id_from_cookie(cookie_header: Option<&str>) -> Option<String>
 async fn validate_redirect_uri(
     pool: &sqlx::PgPool,
     redirect_uri: &str,
-    project_id: uuid::Uuid,
-    project_name: &str,
+    project: &crate::db::models::Project,
     rise_public_url: &str,
-    app_domain_template: Option<&str>,
+    deployment_backend: &Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
 ) -> Result<(), String> {
     let redirect_url =
         Url::parse(redirect_uri).map_err(|e| format!("Invalid redirect URI: {}", e))?;
 
-    let host = redirect_url
-        .host_str()
-        .ok_or("Missing host in redirect URI")?;
-    let port = redirect_url.port();
+    // Allow localhost for local development (any port and path)
+    if let Some(host) = redirect_url.host_str() {
+        if host == "localhost" || host == "127.0.0.1" {
+            return Ok(());
+        }
+    }
 
-    // Allow localhost for local development (any port)
-    if host == "localhost" || host == "127.0.0.1" {
+    // Allow any redirect URL beginning with the Rise public URL
+    if redirect_uri.starts_with(rise_public_url) {
         return Ok(());
     }
 
-    // Parse the Rise public URL to extract the base domain
-    let rise_url_parsed =
-        Url::parse(rise_public_url).map_err(|e| format!("Invalid Rise public URL: {}", e))?;
-    let rise_host = rise_url_parsed
-        .host_str()
-        .ok_or("Missing host in Rise public URL")?;
+    // Get project's default deployment URL from the deployment backend
+    // We need to find an active deployment in the default group, or construct the URL from templates
+    let project_urls = match crate::db::deployments::find_active_for_project_and_group(
+        pool,
+        project.id,
+        crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP,
+    )
+    .await
+    {
+        Ok(Some(deployment)) => {
+            // Get URLs for the active deployment
+            deployment_backend
+                .get_deployment_urls(&deployment, project)
+                .await
+                .map_err(|e| format!("Failed to get deployment URLs: {}", e))?
+        }
+        Ok(None) | Err(_) => {
+            // No active deployment, we can't validate against project URL
+            // Fall back to just checking custom domains
+            warn!(
+                "No active deployment found for project {} in default group, skipping project URL validation",
+                project.name
+            );
+            crate::server::deployment::controller::DeploymentUrls {
+                primary_url: String::new(),
+                custom_domain_urls: vec![],
+            }
+        }
+    };
 
-    // Construct allowed redirect domains
-    let mut allowed_domains = vec![];
-
-    // Allow the main Rise domain (where API and UI are hosted)
-    // This is needed for the "Test OAuth Flow" button in the UI
-    allowed_domains.push(rise_host.to_string());
-
-    // Allow project app domain based on template
-    if let Some(template) = app_domain_template {
-        // Use the configured app domain template
-        let app_domain = template.replace("{project_name}", project_name);
-        allowed_domains.push(app_domain);
-    } else {
-        // Fallback: project subdomain on Rise domain
-        // e.g., oauth-fragment-flow.rise.example.com
-        allowed_domains.push(format!("{}.{}", project_name, rise_host));
+    // Check if redirect URI starts with the project's primary URL
+    if !project_urls.primary_url.is_empty() && redirect_uri.starts_with(&project_urls.primary_url) {
+        return Ok(());
     }
 
-    // Fetch and allow project's custom domains
-    match crate::db::custom_domains::list_project_custom_domains(pool, project_id).await {
+    // Check if redirect URI starts with any of the project's custom domain URLs
+    for custom_url in &project_urls.custom_domain_urls {
+        if redirect_uri.starts_with(custom_url) {
+            return Ok(());
+        }
+    }
+
+    // Fetch custom domains from database and check them as well
+    match crate::db::custom_domains::list_project_custom_domains(pool, project.id).await {
         Ok(custom_domains) => {
             for custom_domain in custom_domains {
-                allowed_domains.push(custom_domain.domain);
+                // Construct URL with both http and https schemes
+                for scheme in &["https", "http"] {
+                    let custom_url = format!("{}://{}", scheme, custom_domain.domain);
+                    if redirect_uri.starts_with(&custom_url) {
+                        return Ok(());
+                    }
+                }
             }
         }
         Err(e) => {
@@ -126,26 +151,13 @@ async fn validate_redirect_uri(
                 "Failed to fetch custom domains for project validation: {:?}",
                 e
             );
-            // Continue without custom domains rather than failing the request
-        }
-    }
-
-    // Check if the redirect host matches any allowed domain (with or without port)
-    let host_with_port = if let Some(p) = port {
-        format!("{}:{}", host, p)
-    } else {
-        host.to_string()
-    };
-
-    for allowed in &allowed_domains {
-        if host == allowed || host_with_port == *allowed {
-            return Ok(());
         }
     }
 
     Err(format!(
-        "Invalid redirect URI: not authorized for this project (allowed: localhost, {})",
-        allowed_domains.join(", ")
+        "Invalid redirect URI: not authorized for this project. Allowed: localhost, URLs starting with Rise public URL ({}), project URL ({}), or custom domains",
+        rise_public_url,
+        if project_urls.primary_url.is_empty() { "none" } else { &project_urls.primary_url }
     ))
 }
 
@@ -372,10 +384,9 @@ pub async fn authorize(
         validate_redirect_uri(
             &state.db_pool,
             uri,
-            project.id,
-            &project_name,
+            &project,
             &state.public_url,
-            state.server_settings.app_domain_template.as_deref(),
+            &state.deployment_backend,
         )
         .await
         .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
