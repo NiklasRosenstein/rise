@@ -2166,6 +2166,19 @@ impl DeploymentBackend for KubernetesController {
             metadata.http_port = deployment.http_port as u16;
         }
 
+        // Clear Ingress cache entries if needs_reconcile is set
+        // This ensures Ingress resources are re-applied when project settings change
+        // (e.g., access_class changes requiring updated auth annotations)
+        if deployment.needs_reconcile {
+            debug!(
+                "Clearing Ingress cache for deployment {} due to needs_reconcile flag",
+                deployment.deployment_id
+            );
+            // Clear both primary and custom domain Ingress cache entries
+            self.update_version_cache(deployment.id, "ingress", None);
+            self.update_version_cache(deployment.id, "ingress-custom-domains", None);
+        }
+
         debug!(
             "Reconciling deployment {} (status={:?}) in phase {:?}",
             deployment.deployment_id, deployment.status, metadata.reconcile_phase
