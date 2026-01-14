@@ -12,6 +12,7 @@ use axum::{
 };
 use base64::Engine;
 use chrono::{Duration, Utc};
+use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use url::Url;
 use uuid::Uuid;
@@ -68,63 +69,73 @@ fn extract_session_id_from_cookie(cookie_header: Option<&str>) -> Option<String>
 }
 
 /// Validate redirect URI against allowed origins
-fn validate_redirect_uri(
+async fn validate_redirect_uri(
+    pool: &sqlx::PgPool,
     redirect_uri: &str,
-    project_name: &str,
-    api_url: &str,
+    project: &crate::db::models::Project,
+    rise_public_url: &str,
+    deployment_backend: &Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
 ) -> Result<(), String> {
     let redirect_url =
         Url::parse(redirect_uri).map_err(|e| format!("Invalid redirect URI: {}", e))?;
 
-    let host = redirect_url
-        .host_str()
-        .ok_or("Missing host in redirect URI")?;
-    let port = redirect_url.port();
-
-    // Allow localhost for local development (any port)
-    if host == "localhost" || host == "127.0.0.1" {
-        return Ok(());
-    }
-
-    // Parse the API URL to extract the base domain
-    let api_parsed = Url::parse(api_url).map_err(|e| format!("Invalid API URL: {}", e))?;
-    let api_host = api_parsed.host_str().ok_or("Missing host in API URL")?;
-
-    // Construct project domains
-    let mut allowed_domains = vec![];
-
-    // Pattern 1: api.domain.com -> project.domain.com
-    if let Some(base_domain) = api_host.strip_prefix("api.") {
-        allowed_domains.push(format!("{}.{}", project_name, base_domain));
-    }
-
-    // Pattern 2: localhost -> project.apps.rise.local (for deployed apps)
-    // This handles the case where API is at localhost but apps are at *.apps.rise.local
-    if api_host == "localhost" || api_host == "127.0.0.1" {
-        allowed_domains.push(format!("{}.apps.rise.local", project_name));
-    }
-
-    // Pattern 3: domain.com -> project.domain.com (without api prefix)
-    allowed_domains.push(format!("{}.{}", project_name, api_host));
-
-    // Check if the redirect host matches any allowed domain (with or without port)
-    let host_with_port = if let Some(p) = port {
-        format!("{}:{}", host, p)
-    } else {
-        host.to_string()
-    };
-
-    for allowed in &allowed_domains {
-        if host == allowed || host_with_port == *allowed {
+    // Allow localhost for local development (any port and path)
+    if let Some(host) = redirect_url.host_str() {
+        if host == "localhost" || host == "127.0.0.1" {
             return Ok(());
         }
     }
 
-    // TODO: Allow project's custom domains (requires custom domain support)
+    // Allow any redirect URL beginning with the Rise public URL
+    if redirect_uri.starts_with(rise_public_url) {
+        return Ok(());
+    }
+
+    // Get project's deployment URLs from the deployment backend
+    // Check all active deployments (including staging/non-default groups)
+    let all_deployments =
+        match crate::db::deployments::get_active_deployments_for_project(pool, project.id).await {
+            Ok(deployments) => deployments,
+            Err(e) => {
+                warn!(
+                    "Failed to fetch active deployments for project {}: {:?}",
+                    project.name, e
+                );
+                vec![]
+            }
+        };
+
+    // Check if redirect URI starts with any deployment URL (primary or custom domain)
+    for deployment in &all_deployments {
+        match deployment_backend
+            .get_deployment_urls(deployment, project)
+            .await
+        {
+            Ok(urls) => {
+                // Check primary URL
+                if !urls.primary_url.is_empty() && redirect_uri.starts_with(&urls.primary_url) {
+                    return Ok(());
+                }
+
+                // Check custom domain URLs
+                for custom_url in &urls.custom_domain_urls {
+                    if redirect_uri.starts_with(custom_url) {
+                        return Ok(());
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to get deployment URLs for deployment {}: {:?}",
+                    deployment.deployment_id, e
+                );
+            }
+        }
+    }
 
     Err(format!(
-        "Invalid redirect URI: not authorized for this project (allowed: localhost, {})",
-        allowed_domains.join(", ")
+        "Invalid redirect URI: not authorized for this project. Allowed: localhost, URLs starting with Rise public URL ({}), or any active deployment URL",
+        rise_public_url
     ))
 }
 
@@ -348,8 +359,15 @@ pub async fn authorize(
     // Determine final redirect URI
     let final_redirect_uri = if let Some(ref uri) = req.redirect_uri {
         // Validate redirect URI
-        validate_redirect_uri(uri, &project_name, &state.public_url)
-            .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+        validate_redirect_uri(
+            &state.db_pool,
+            uri,
+            &project,
+            &state.public_url,
+            &state.deployment_backend,
+        )
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         uri.clone()
     } else {
         // Default to project's primary URL
