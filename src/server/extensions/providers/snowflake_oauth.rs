@@ -379,11 +379,6 @@ impl SnowflakeOAuthProvisioner {
                     password: password_bytes,
                 }
             }
-            SnowflakeAuth::Jwt { .. } => {
-                return Err(anyhow!(
-                    "JWT authentication is not supported by the Snowflake connector. Use password or private key authentication."
-                ));
-            }
         };
 
         // Parse account to extract account locator and cloud region

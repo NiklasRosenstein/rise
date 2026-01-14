@@ -821,10 +821,6 @@ pub enum SnowflakeAuth {
         #[serde(default)]
         private_key_password: Option<String>,
     },
-    Jwt {
-        #[allow(dead_code)]
-        jwt_token: String,
-    },
 }
 
 /// Private key source (path or inline PEM)
