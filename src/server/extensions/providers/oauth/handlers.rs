@@ -73,7 +73,7 @@ async fn validate_redirect_uri(
     redirect_uri: &str,
     project_id: uuid::Uuid,
     project_name: &str,
-    api_url: &str,
+    rise_public_url: &str,
 ) -> Result<(), String> {
     let redirect_url =
         Url::parse(redirect_uri).map_err(|e| format!("Invalid redirect URI: {}", e))?;
@@ -88,25 +88,23 @@ async fn validate_redirect_uri(
         return Ok(());
     }
 
-    // Parse the API URL to extract the base domain
-    let api_parsed = Url::parse(api_url).map_err(|e| format!("Invalid API URL: {}", e))?;
-    let api_host = api_parsed.host_str().ok_or("Missing host in API URL")?;
+    // Parse the Rise public URL to extract the base domain
+    let rise_url_parsed =
+        Url::parse(rise_public_url).map_err(|e| format!("Invalid Rise public URL: {}", e))?;
+    let rise_host = rise_url_parsed
+        .host_str()
+        .ok_or("Missing host in Rise public URL")?;
 
     // Construct allowed redirect domains
     let mut allowed_domains = vec![];
 
     // Allow the main Rise domain (where API and UI are hosted)
     // This is needed for the "Test OAuth Flow" button in the UI
-    allowed_domains.push(api_host.to_string());
+    allowed_domains.push(rise_host.to_string());
 
     // Allow project subdomain: {project}.{domain}
     // e.g., oauth-fragment-flow.rise.example.com
-    allowed_domains.push(format!("{}.{}", project_name, api_host));
-
-    // For localhost development: project.apps.rise.local
-    if api_host == "localhost" || api_host == "127.0.0.1" {
-        allowed_domains.push(format!("{}.apps.rise.local", project_name));
-    }
+    allowed_domains.push(format!("{}.{}", project_name, rise_host));
 
     // Fetch and allow project's custom domains
     match crate::db::custom_domains::list_project_custom_domains(pool, project_id).await {
