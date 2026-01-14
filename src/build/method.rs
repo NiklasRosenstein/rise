@@ -10,9 +10,15 @@ use crate::config::Config;
 /// Build method for container images
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub(crate) enum BuildMethod {
-    Docker,
+    Docker {
+        use_buildx: bool,
+    },
     Pack,
-    Railpack { use_buildctl: bool },
+    Railpack {
+        use_buildctl: bool,
+    },
+    /// Plain buildctl with Dockerfile (without railpack)
+    Buildctl,
 }
 
 /// Build-related CLI arguments that can be flattened into command structs
@@ -46,6 +52,10 @@ pub struct BuildArgs {
     /// Embed SSL certificate into Railpack build plan for build-time RUN command support
     #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
     pub railpack_embed_ssl_cert: Option<bool>,
+
+    /// Path to Dockerfile (relative to app path). Defaults to "Dockerfile" or "Containerfile"
+    #[arg(long)]
+    pub dockerfile: Option<String>,
 }
 
 /// Options for building container images
@@ -61,6 +71,8 @@ pub(crate) struct BuildOptions {
     pub managed_buildkit: bool,
     pub railpack_embed_ssl_cert: bool,
     pub push: bool,
+    /// Path to Dockerfile (relative to app path)
+    pub dockerfile: Option<String>,
 }
 
 impl BuildOptions {
@@ -152,6 +164,11 @@ impl BuildOptions {
                 })
                 .unwrap_or_else(|| config.get_railpack_embed_ssl_cert()),
 
+            dockerfile: build_args
+                .dockerfile
+                .clone()
+                .or_else(|| project_config.as_ref().and_then(|c| c.dockerfile.clone())),
+
             push: false,
         }
     }
@@ -167,14 +184,16 @@ impl BuildMethod {
     /// Parse backend string into BuildMethod
     pub(crate) fn from_backend_str(backend: &str) -> Result<Self> {
         match backend {
-            "docker" => Ok(BuildMethod::Docker),
+            "docker" | "docker:build" => Ok(BuildMethod::Docker { use_buildx: false }),
+            "docker:buildx" => Ok(BuildMethod::Docker { use_buildx: true }),
+            "buildctl" => Ok(BuildMethod::Buildctl),
             "pack" => Ok(BuildMethod::Pack),
             "railpack" | "railpack:buildx" => Ok(BuildMethod::Railpack {
                 use_buildctl: false,
             }),
             "railpack:buildctl" => Ok(BuildMethod::Railpack { use_buildctl: true }),
             _ => bail!(
-                "Invalid build backend '{}'. Supported: docker, pack, railpack, railpack:buildctl",
+                "Invalid build backend '{}'. Supported: docker, docker:build, docker:buildx, buildctl, pack, railpack, railpack:buildctl",
                 backend
             ),
         }
@@ -182,25 +201,59 @@ impl BuildMethod {
 }
 
 /// Select build method based on explicit backend or auto-detection
-/// Returns BuildMethod based on backend string or directory contents
-pub(crate) fn select_build_method(app_path: &str, backend: Option<&str>) -> Result<BuildMethod> {
+/// Returns (BuildMethod, Option<dockerfile_path>)
+pub(crate) fn select_build_method(
+    app_path: &str,
+    backend: Option<&str>,
+    dockerfile: Option<&str>,
+) -> Result<(BuildMethod, Option<String>)> {
+    // Determine dockerfile path
+    let (dockerfile_path, dockerfile_relative) = if let Some(df) = dockerfile {
+        let path = Path::new(app_path).join(df);
+        (path, Some(df.to_string()))
+    } else {
+        // Auto-detect: Dockerfile first, then Containerfile
+        let dockerfile = Path::new(app_path).join("Dockerfile");
+        let containerfile = Path::new(app_path).join("Containerfile");
+        if dockerfile.exists() && dockerfile.is_file() {
+            (dockerfile, Some("Dockerfile".to_string()))
+        } else if containerfile.exists() && containerfile.is_file() {
+            info!("Detected Containerfile");
+            (containerfile, Some("Containerfile".to_string()))
+        } else {
+            // No dockerfile found
+            (Path::new(app_path).join("Dockerfile"), None)
+        }
+    };
+
     if let Some(backend_str) = backend {
         // Explicit backend specified
-        BuildMethod::from_backend_str(backend_str)
+        let method = BuildMethod::from_backend_str(backend_str)?;
+        Ok((method, dockerfile_relative))
     } else {
-        // Auto-detect
-        let dockerfile_path = Path::new(app_path).join("Dockerfile");
+        // Auto-detect based on dockerfile presence
         if dockerfile_path.exists() && dockerfile_path.is_file() {
-            info!("Detected Dockerfile, using docker backend");
-            Ok(BuildMethod::Docker)
+            info!(
+                "Detected {}, using docker backend",
+                dockerfile_relative.as_deref().unwrap_or("Dockerfile")
+            );
+            Ok((
+                BuildMethod::Docker { use_buildx: false },
+                dockerfile_relative,
+            ))
         } else {
             info!("No Dockerfile found, using pack backend");
-            Ok(BuildMethod::Pack)
+            Ok((BuildMethod::Pack, None))
         }
     }
 }
 
 /// Check if a build method requires BuildKit
 pub(crate) fn requires_buildkit(method: &BuildMethod) -> bool {
-    matches!(method, BuildMethod::Docker | BuildMethod::Railpack { .. })
+    matches!(
+        method,
+        BuildMethod::Docker { use_buildx: true }
+            | BuildMethod::Railpack { .. }
+            | BuildMethod::Buildctl
+    )
 }

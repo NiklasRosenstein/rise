@@ -302,13 +302,12 @@ pub(crate) fn check_ssl_cert_and_warn(method: &BuildMethod, managed_buildkit: bo
         if requires_buildkit(method) && !managed_buildkit {
             warn!(
                 "SSL_CERT_FILE is set but managed BuildKit daemon is disabled. \
-                 Railpack builds may fail with SSL certificate errors in corporate environments."
+                 Builds may fail with SSL certificate errors in corporate environments."
             );
             warn!("To enable automatic BuildKit daemon management:");
             warn!("  rise build --managed-buildkit ...");
             warn!("Or set environment variable:");
             warn!("  export RISE_MANAGED_BUILDKIT=true");
-            warn!("For manual setup, see: https://github.com/NiklasRosenstein/rise/issues/18");
         }
     }
 }

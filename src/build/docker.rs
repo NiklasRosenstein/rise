@@ -1,61 +1,133 @@
 // Docker/Dockerfile builds
 
 use anyhow::{bail, Context, Result};
+use std::path::Path;
 use std::process::Command;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
+use super::dockerfile_ssl::preprocess_dockerfile_for_ssl;
 use super::registry::docker_push;
 
+/// Options for building with Docker/Podman
+pub(crate) struct DockerBuildOptions<'a> {
+    pub app_path: &'a str,
+    pub dockerfile: Option<&'a str>,
+    pub image_tag: &'a str,
+    pub container_cli: &'a str,
+    pub use_buildx: bool,
+    pub push: bool,
+    pub buildkit_host: Option<&'a str>,
+    pub env: &'a [String],
+}
+
 /// Build image using Docker or Podman with a Dockerfile
-pub(crate) fn build_image_with_dockerfile(
-    app_path: &str,
-    image_tag: &str,
-    container_cli: &str,
-    use_buildx: bool,
-    push: bool,
-    buildkit_host: Option<&str>,
-    env: &[String],
-) -> Result<()> {
+pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result<()> {
     // Check if container CLI is available
-    let cli_check = Command::new(container_cli).arg("--version").output();
+    let cli_check = Command::new(options.container_cli)
+        .arg("--version")
+        .output();
     if cli_check.is_err() {
         bail!(
             "{} CLI not found. Please install Docker or Podman.",
-            container_cli
+            options.container_cli
         );
     }
 
-    let mut cmd = Command::new(container_cli);
+    // Check for SSL certificate and determine if preprocessing is needed
+    let ssl_cert_file = std::env::var("SSL_CERT_FILE").ok();
+    let ssl_cert_path = ssl_cert_file.as_ref().and_then(|p| {
+        let path = Path::new(p);
+        if path.exists() {
+            Some(path.to_path_buf())
+        } else {
+            warn!("SSL_CERT_FILE set to '{}' but file not found", p);
+            None
+        }
+    });
+
+    // Warn if SSL cert is set but buildx is not being used
+    if ssl_cert_path.is_some() && !options.use_buildx {
+        warn!(
+            "SSL_CERT_FILE is set but docker:build does not support BuildKit secrets. \
+             Use 'docker:buildx' backend for SSL certificate support during builds."
+        );
+    }
+
+    // Preprocess Dockerfile for SSL if using buildx and SSL cert is available
+    let (_temp_dir, effective_dockerfile) = if options.use_buildx && ssl_cert_path.is_some() {
+        let original_dockerfile = options
+            .dockerfile
+            .map(|df| Path::new(options.app_path).join(df))
+            .unwrap_or_else(|| Path::new(options.app_path).join("Dockerfile"));
+
+        if original_dockerfile.exists() {
+            info!("SSL_CERT_FILE detected, preprocessing Dockerfile for secret mounts");
+            let (temp_dir, processed_path) = preprocess_dockerfile_for_ssl(&original_dockerfile)?;
+            (Some(temp_dir), Some(processed_path))
+        } else {
+            (
+                None,
+                options
+                    .dockerfile
+                    .map(|df| Path::new(options.app_path).join(df)),
+            )
+        }
+    } else {
+        (
+            None,
+            options
+                .dockerfile
+                .map(|df| Path::new(options.app_path).join(df)),
+        )
+    };
+
+    let mut cmd = Command::new(options.container_cli);
 
     // Only buildx supports --push during build
     // Regular docker build and podman build don't support --push
-    let supports_push_flag = use_buildx;
+    let supports_push_flag = options.use_buildx;
 
-    if use_buildx {
+    if options.use_buildx {
         // Check buildx availability
-        let buildx_check = Command::new(container_cli)
+        let buildx_check = Command::new(options.container_cli)
             .args(["buildx", "version"])
             .output();
         if buildx_check.is_err() {
             bail!(
-                "{} buildx not available. Install it or omit --use-buildx flag.",
-                container_cli
+                "{} buildx not available. Install it or use docker:build backend instead.",
+                options.container_cli
             );
         }
 
         cmd.arg("buildx");
         info!(
             "Building image with {} buildx: {}",
-            container_cli, image_tag
+            options.container_cli, options.image_tag
         );
     } else {
-        info!("Building image with {}: {}", container_cli, image_tag);
+        info!(
+            "Building image with {}: {}",
+            options.container_cli, options.image_tag
+        );
     }
 
-    cmd.arg("build").arg("-t").arg(image_tag);
+    cmd.arg("build").arg("-t").arg(options.image_tag);
+
+    // Add dockerfile path if specified or preprocessed
+    if let Some(ref df) = effective_dockerfile {
+        cmd.arg("-f").arg(df);
+    }
 
     // Add platform flag for consistent architecture
     cmd.arg("--platform").arg("linux/amd64");
+
+    // Add SSL certificate secret if using buildx and cert is available
+    if options.use_buildx {
+        if let Some(ref cert_path) = ssl_cert_path {
+            cmd.arg("--secret")
+                .arg(format!("id=SSL_CERT_FILE,src={}", cert_path.display()));
+        }
+    }
 
     // Add proxy build arguments
     let proxy_vars = super::proxy::read_and_transform_proxy_vars();
@@ -67,23 +139,23 @@ pub(crate) fn build_image_with_dockerfile(
     }
 
     // Add user-specified build arguments
-    for build_arg in env {
+    for build_arg in options.env {
         cmd.arg("--build-arg").arg(build_arg);
     }
 
-    cmd.arg(app_path);
+    cmd.arg(options.app_path);
 
     // Set BUILDKIT_HOST if provided and using buildx
-    if use_buildx {
-        if let Some(host) = buildkit_host {
+    if options.use_buildx {
+        if let Some(host) = options.buildkit_host {
             cmd.env("BUILDKIT_HOST", host);
         }
     }
 
-    if push && supports_push_flag {
+    if options.push && supports_push_flag {
         // Only use --push with buildx
         cmd.arg("--push");
-    } else if use_buildx && !push {
+    } else if options.use_buildx && !options.push {
         // For buildx without push, we need --load to get image into local daemon
         cmd.arg("--load");
     }
@@ -92,15 +164,19 @@ pub(crate) fn build_image_with_dockerfile(
 
     let status = cmd
         .status()
-        .with_context(|| format!("Failed to execute {} build", container_cli))?;
+        .with_context(|| format!("Failed to execute {} build", options.container_cli))?;
 
     if !status.success() {
-        bail!("{} build failed with status: {}", container_cli, status);
+        bail!(
+            "{} build failed with status: {}",
+            options.container_cli,
+            status
+        );
     }
 
     // If push was requested but --push flag wasn't supported, need separate push
-    if push && !supports_push_flag {
-        docker_push(container_cli, image_tag)?;
+    if options.push && !supports_push_flag {
+        docker_push(options.container_cli, options.image_tag)?;
     }
 
     Ok(())

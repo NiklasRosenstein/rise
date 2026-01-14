@@ -6,12 +6,31 @@ Rise CLI supports multiple build backends for creating container images from you
 
 ### Docker (Dockerfile)
 
-Uses `docker build` or `podman build` to build from a Dockerfile:
+Multiple Docker-based backends are available for building from a Dockerfile:
 
 ```bash
+# Standard docker/podman build (default)
 rise build myapp:latest --backend docker
-rise deployment create myproject --backend docker
+rise build myapp:latest --backend docker:build  # alias for docker
+
+# Docker buildx (with BuildKit features like secrets)
+rise build myapp:latest --backend docker:buildx
+
+# Plain buildctl (BuildKit directly, requires buildctl CLI)
+rise build myapp:latest --backend buildctl
 ```
+
+**Backend comparison:**
+| Backend | Build Tool | SSL Secrets | Push During Build |
+|---------|------------|-------------|-------------------|
+| `docker` / `docker:build` | docker build | No | No (separate push) |
+| `docker:buildx` | docker buildx build | Yes | Yes (`--push`) |
+| `buildctl` | buildctl | Yes | Yes |
+
+**When to use each:**
+- `docker:build` - Simple builds, maximum compatibility
+- `docker:buildx` - Need BuildKit features (secrets, caching, multi-platform)
+- `buildctl` - Direct BuildKit access, CI environments without Docker
 
 ### Pack (Cloud Native Buildpacks)
 
@@ -51,6 +70,7 @@ docker buildx create --use
 
 When `--backend` is omitted, the CLI automatically detects the build method:
 - If `Dockerfile` exists → uses `docker` backend
+- If `Containerfile` exists (and no Dockerfile) → uses `docker` backend
 - Otherwise → uses `pack` backend
 
 ```bash
@@ -62,6 +82,28 @@ rise build myapp:latest
 
 # Explicit backend selection
 rise build myapp:latest --backend railpack
+```
+
+### Custom Dockerfile Path
+
+By default, Rise looks for `Dockerfile` or `Containerfile` in the project directory. Use `--dockerfile` to specify a different file:
+
+```bash
+# Use a custom Dockerfile
+rise build myapp:latest --dockerfile Dockerfile.prod
+
+# Use Dockerfile from subdirectory
+rise build myapp:latest --dockerfile docker/Dockerfile.build
+
+# Works with all Docker-based backends
+rise build myapp:latest --backend docker:buildx --dockerfile Dockerfile.dev
+```
+
+**In `rise.toml`:**
+```toml
+[build]
+backend = "docker"
+dockerfile = "Dockerfile.prod"
 ```
 
 ## Build-Time Environment Variables
@@ -142,7 +184,8 @@ All CLI build flags can be specified in the `[build]` section:
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `backend` | String | Build backend: `docker`, `pack`, `railpack`, `railpack:buildctl` |
+| `backend` | String | Build backend: `docker`, `docker:build`, `docker:buildx`, `buildctl`, `pack`, `railpack`, `railpack:buildctl` |
+| `dockerfile` | String | Path to Dockerfile (relative to project root). Defaults to `Dockerfile` or `Containerfile` |
 | `builder` | String | Buildpack builder image (pack only) |
 | `buildpacks` | Array | List of buildpacks to use (pack only) |
 | `env` | Array | Environment variables for build (format: `KEY=VALUE` or `KEY`) |
@@ -281,7 +324,9 @@ Note: The managed BuildKit feature works with or without `SSL_CERT_FILE` - it si
 ### Affected Build Backends
 
 - ✅ `pack` - Already supports `SSL_CERT_FILE` natively (no managed daemon needed)
-- ⚠️ `docker` - Benefits from managed daemon when using BuildKit
+- ⚠️ `docker` / `docker:build` - Does not support BuildKit secrets (use `docker:buildx` instead)
+- ✅ `docker:buildx` - Full SSL support via BuildKit secrets (auto-injected into Dockerfile)
+- ✅ `buildctl` - Full SSL support via BuildKit secrets (auto-injected into Dockerfile)
 - ⚠️ `railpack` / `railpack:buildx` - Benefits from managed daemon
 - ⚠️ `railpack:buildctl` - Benefits from managed daemon
 
@@ -354,6 +399,51 @@ rise build myapp:latest --backend railpack
 ```
 
 **Precedence order:** CLI flag > Environment variable > Config file > Default (enabled if SSL_CERT_FILE is set)
+
+## Build-Time SSL Certificate Injection (Docker/Buildctl)
+
+When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise automatically injects SSL certificates into your Dockerfile's RUN commands using BuildKit secrets.
+
+**How it works:**
+1. Rise preprocesses your Dockerfile to add `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` to each RUN command
+2. The secret mount makes the certificate available at multiple standard system paths during RUN commands
+3. The certificate is passed to BuildKit via `--secret id=SSL_CERT_FILE,src=<path>`
+4. Certificates are NOT embedded in the final image (only available during build)
+
+**Supported certificate paths:**
+- `/etc/ssl/certs/ca-certificates.crt` (Debian, Ubuntu, Arch)
+- `/etc/pki/tls/certs/ca-bundle.crt` (RedHat, CentOS, Fedora)
+- `/etc/ssl/ca-bundle.pem` (OpenSUSE, SLES)
+- `/etc/ssl/cert.pem` (Alpine Linux)
+- `/usr/lib/ssl/cert.pem` (OpenSSL default)
+
+**Example:**
+```bash
+export SSL_CERT_FILE=/path/to/ca-certificates.crt
+
+# SSL certificates automatically available during RUN commands
+rise build myapp:latest --backend docker:buildx
+rise build myapp:latest --backend buildctl
+
+# Debug logging shows the preprocessed Dockerfile
+RUST_LOG=debug rise build myapp:latest --backend docker:buildx
+```
+
+**What your Dockerfile sees:**
+
+Original:
+```dockerfile
+RUN apt-get update && apt-get install -y curl
+RUN pip install -r requirements.txt
+```
+
+Processed (internal):
+```dockerfile
+RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... apt-get update && apt-get install -y curl
+RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... pip install -r requirements.txt
+```
+
+**Note:** The `docker:build` backend does not support BuildKit secrets. If SSL_CERT_FILE is set, you'll see a warning recommending `docker:buildx` instead.
 
 ## Proxy Support
 

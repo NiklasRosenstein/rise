@@ -47,7 +47,7 @@ fn default_access_class() -> String {
 /// Build configuration options for a project
 #[derive(Debug, Deserialize, Serialize, Default)]
 pub struct BuildConfig {
-    /// Build backend (docker, pack, railpack[:buildx], railpack:buildctl)
+    /// Build backend (docker, docker:build, docker:buildx, buildctl, pack, railpack[:buildx], railpack:buildctl)
     pub backend: Option<String>,
 
     /// Buildpack builder to use (only for pack backend)
@@ -68,6 +68,9 @@ pub struct BuildConfig {
 
     /// Embed SSL certificate into Railpack build plan
     pub railpack_embed_ssl_cert: Option<bool>,
+
+    /// Path to Dockerfile (relative to project root). Defaults to "Dockerfile" or "Containerfile"
+    pub dockerfile: Option<String>,
 }
 
 /// Load full project configuration from rise.toml or .rise.toml

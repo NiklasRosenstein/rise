@@ -10,6 +10,15 @@ use tracing::{debug, info, warn};
 use super::buildkit::ensure_buildx_builder;
 use super::ssl::embed_ssl_cert_in_plan;
 
+/// BuildKit frontend type for buildctl
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum BuildctlFrontend {
+    /// Standard Dockerfile frontend (dockerfile.v0)
+    Dockerfile,
+    /// Railpack gateway frontend (gateway.v0 + railpack-frontend)
+    Railpack,
+}
+
 /// Options for building with Railpacks
 pub(crate) struct RailpackBuildOptions<'a> {
     pub app_path: &'a str,
@@ -193,6 +202,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             options.push,
             options.buildkit_host,
             &all_secrets,
+            BuildctlFrontend::Railpack,
         )?;
     } else {
         build_with_buildx(
@@ -291,18 +301,27 @@ fn build_with_buildx(
 }
 
 /// Build with buildctl
-fn build_with_buildctl(
+///
+/// Supports both Dockerfile and Railpack frontends:
+/// - Dockerfile: Uses `--frontend=dockerfile.v0` for standard Dockerfiles
+/// - Railpack: Uses `--frontend=gateway.v0` with railpack-frontend
+///
+/// The `secrets` HashMap contains:
+/// - For regular secrets: key=env_var_name, value is ignored (reads from env)
+/// - For file secrets (like SSL_CERT_FILE): key=secret_id, value=file_path
+pub(crate) fn build_with_buildctl(
     app_path: &str,
-    plan_file: &Path,
+    dockerfile_or_plan: &Path,
     image_tag: &str,
     push: bool,
     buildkit_host: Option<&str>,
     secrets: &HashMap<String, String>,
+    frontend: BuildctlFrontend,
 ) -> Result<()> {
     // Check buildctl availability
     let buildctl_check = Command::new("buildctl").arg("--version").output();
     if buildctl_check.is_err() {
-        bail!("buildctl not found. Install buildctl or use railpack:buildx backend instead.");
+        bail!("buildctl not found. Install buildctl or use docker:buildx backend instead.");
     }
 
     info!("Building image with buildctl: {}", image_tag);
@@ -312,11 +331,34 @@ fn build_with_buildctl(
         .arg("--local")
         .arg(format!("context={}", app_path))
         .arg("--local")
-        .arg(format!("dockerfile={}", plan_file.display()))
-        .arg("--frontend=gateway.v0")
-        .arg("--opt")
-        .arg("source=ghcr.io/railwayapp/railpack-frontend")
-        .arg("--output");
+        .arg(format!(
+            "dockerfile={}",
+            dockerfile_or_plan
+                .parent()
+                .unwrap_or(Path::new(app_path))
+                .display()
+        ));
+
+    // Set frontend based on type
+    match frontend {
+        BuildctlFrontend::Dockerfile => {
+            cmd.arg("--frontend=dockerfile.v0");
+            // Add opt for filename if not the default "Dockerfile"
+            if let Some(filename) = dockerfile_or_plan.file_name() {
+                let filename_str = filename.to_string_lossy();
+                if filename_str != "Dockerfile" {
+                    cmd.arg("--opt").arg(format!("filename={}", filename_str));
+                }
+            }
+        }
+        BuildctlFrontend::Railpack => {
+            cmd.arg("--frontend=gateway.v0")
+                .arg("--opt")
+                .arg("source=ghcr.io/railwayapp/railpack-frontend");
+        }
+    }
+
+    cmd.arg("--output");
 
     // Set BUILDKIT_HOST if provided
     if let Some(host) = buildkit_host {
@@ -324,8 +366,14 @@ fn build_with_buildctl(
     }
 
     // Add secrets
-    for key in secrets.keys() {
-        cmd.arg("--secret").arg(format!("id={},env={}", key, key));
+    for (key, value) in secrets {
+        // Special handling for SSL_CERT_FILE - use src= to read from file
+        if key == "SSL_CERT_FILE" {
+            cmd.arg("--secret").arg(format!("id={},src={}", key, value));
+        } else {
+            // For other secrets, read from environment variable
+            cmd.arg("--secret").arg(format!("id={},env={}", key, key));
+        }
     }
 
     if push {
