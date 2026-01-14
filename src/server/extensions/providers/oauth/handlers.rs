@@ -91,73 +91,51 @@ async fn validate_redirect_uri(
         return Ok(());
     }
 
-    // Get project's default deployment URL from the deployment backend
-    // We need to find an active deployment in the default group, or construct the URL from templates
-    let project_urls = match crate::db::deployments::find_active_for_project_and_group(
-        pool,
-        project.id,
-        crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP,
-    )
-    .await
-    {
-        Ok(Some(deployment)) => {
-            // Get URLs for the active deployment
-            deployment_backend
-                .get_deployment_urls(&deployment, project)
-                .await
-                .map_err(|e| format!("Failed to get deployment URLs: {}", e))?
-        }
-        Ok(None) | Err(_) => {
-            // No active deployment, we can't validate against project URL
-            // Fall back to just checking custom domains
-            warn!(
-                "No active deployment found for project {} in default group, skipping project URL validation",
-                project.name
-            );
-            crate::server::deployment::controller::DeploymentUrls {
-                primary_url: String::new(),
-                custom_domain_urls: vec![],
+    // Get project's deployment URLs from the deployment backend
+    // Check all active deployments (including staging/non-default groups)
+    let all_deployments =
+        match crate::db::deployments::get_active_deployments_for_project(pool, project.id).await {
+            Ok(deployments) => deployments,
+            Err(e) => {
+                warn!(
+                    "Failed to fetch active deployments for project {}: {:?}",
+                    project.name, e
+                );
+                vec![]
             }
-        }
-    };
+        };
 
-    // Check if redirect URI starts with the project's primary URL
-    if !project_urls.primary_url.is_empty() && redirect_uri.starts_with(&project_urls.primary_url) {
-        return Ok(());
-    }
+    // Check if redirect URI starts with any deployment URL (primary or custom domain)
+    for deployment in &all_deployments {
+        match deployment_backend
+            .get_deployment_urls(deployment, project)
+            .await
+        {
+            Ok(urls) => {
+                // Check primary URL
+                if !urls.primary_url.is_empty() && redirect_uri.starts_with(&urls.primary_url) {
+                    return Ok(());
+                }
 
-    // Check if redirect URI starts with any of the project's custom domain URLs
-    for custom_url in &project_urls.custom_domain_urls {
-        if redirect_uri.starts_with(custom_url) {
-            return Ok(());
-        }
-    }
-
-    // Fetch custom domains from database and check them as well
-    match crate::db::custom_domains::list_project_custom_domains(pool, project.id).await {
-        Ok(custom_domains) => {
-            for custom_domain in custom_domains {
-                // Construct URL with both http and https schemes
-                for scheme in &["https", "http"] {
-                    let custom_url = format!("{}://{}", scheme, custom_domain.domain);
-                    if redirect_uri.starts_with(&custom_url) {
+                // Check custom domain URLs
+                for custom_url in &urls.custom_domain_urls {
+                    if redirect_uri.starts_with(custom_url) {
                         return Ok(());
                     }
                 }
             }
-        }
-        Err(e) => {
-            warn!(
-                "Failed to fetch custom domains for project validation: {:?}",
-                e
-            );
+            Err(e) => {
+                warn!(
+                    "Failed to get deployment URLs for deployment {}: {:?}",
+                    deployment.deployment_id, e
+                );
+            }
         }
     }
 
     Err(format!(
-        "Invalid redirect URI: not authorized for this project. Allowed: localhost, URLs starting with Rise public URL ({}), project URL ({}), or custom domains",
-        rise_public_url,
-        if project_urls.primary_url.is_empty() { "none" } else { &project_urls.primary_url }
+        "Invalid redirect URI: not authorized for this project. Allowed: localhost, URLs starting with Rise public URL ({}), or any active deployment URL",
+        rise_public_url
     ))
 }
 
