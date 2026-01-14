@@ -98,7 +98,7 @@ async fn validate_redirect_uri(
     // Pattern 1: api.domain.com -> project.domain.com
     if let Some(base_domain) = api_host.strip_prefix("api.") {
         allowed_domains.push(format!("{}.{}", project_name, base_domain));
-        
+
         // Also allow the main Rise domain (e.g., rise.example.com)
         // This is needed for the "Test OAuth Flow" button in the UI
         allowed_domains.push(base_domain.to_string());
@@ -124,7 +124,10 @@ async fn validate_redirect_uri(
             }
         }
         Err(e) => {
-            warn!("Failed to fetch custom domains for project validation: {:?}", e);
+            warn!(
+                "Failed to fetch custom domains for project validation: {:?}",
+                e
+            );
             // Continue without custom domains rather than failing the request
         }
     }
@@ -368,9 +371,15 @@ pub async fn authorize(
     // Determine final redirect URI
     let final_redirect_uri = if let Some(ref uri) = req.redirect_uri {
         // Validate redirect URI
-        validate_redirect_uri(&state.db_pool, uri, project.id, &project_name, &state.public_url)
-            .await
-            .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
+        validate_redirect_uri(
+            &state.db_pool,
+            uri,
+            project.id,
+            &project_name,
+            &state.public_url,
+        )
+        .await
+        .map_err(|e| (StatusCode::BAD_REQUEST, e))?;
         uri.clone()
     } else {
         // Default to project's primary URL
