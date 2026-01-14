@@ -593,7 +593,10 @@ impl KubernetesController {
 
     /// Get Ingress name for custom domains
     fn custom_domain_ingress_name(_project: &Project, deployment: &Deployment) -> String {
-        format!("{}-custom-domains", Self::escaped_group_name(&deployment.deployment_group))
+        format!(
+            "{}-custom-domains",
+            Self::escaped_group_name(&deployment.deployment_group)
+        )
     }
 
     /// Get hostname (without path) for deployment
@@ -1367,7 +1370,10 @@ impl KubernetesController {
                         "ingress",
                         result.metadata.resource_version,
                     );
-                    info!("Applied primary Ingress '{}' (drift detected)", ingress_name);
+                    info!(
+                        "Applied primary Ingress '{}' (drift detected)",
+                        ingress_name
+                    );
                 } else {
                     debug!("Primary Ingress '{}' is up-to-date", ingress_name);
                 }
@@ -1435,7 +1441,10 @@ impl KubernetesController {
                         "ingress-custom-domains",
                         result.metadata.resource_version,
                     );
-                    info!("Created custom domain Ingress '{}'", custom_domain_ingress_name);
+                    info!(
+                        "Created custom domain Ingress '{}'",
+                        custom_domain_ingress_name
+                    );
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -2098,8 +2107,9 @@ impl KubernetesController {
         match self.custom_domain_tls_mode {
             crate::server::settings::CustomDomainTlsMode::Shared => {
                 // All custom domains share the same TLS secret
-                let all_hosts: Vec<String> = custom_domains.iter().map(|d| d.domain.clone()).collect();
-                
+                let all_hosts: Vec<String> =
+                    custom_domains.iter().map(|d| d.domain.clone()).collect();
+
                 tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
                     hosts: Some(all_hosts),
                     secret_name: Some(shared_secret.clone()),
@@ -2890,12 +2900,14 @@ impl DeploymentBackend for KubernetesController {
 
                     // Apply both primary and custom domain ingresses
                     let ingress_name = Self::ingress_name(project, deployment);
-                    let custom_domain_ingress_name = Self::custom_domain_ingress_name(project, deployment);
+                    let custom_domain_ingress_name =
+                        Self::custom_domain_ingress_name(project, deployment);
                     let ingress_api: Api<Ingress> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
                     // 1. Apply primary ingress
-                    let primary_ingress = self.create_primary_ingress(project, deployment, &metadata);
+                    let primary_ingress =
+                        self.create_primary_ingress(project, deployment, &metadata);
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&primary_ingress);
                     let result = match ingress_api
@@ -4078,8 +4090,12 @@ mod tests {
             updated_at: chrono::Utc::now(),
         }];
 
-        let ingress =
-            controller.create_custom_domain_ingress(&project, &deployment, &metadata, &custom_domains);
+        let ingress = controller.create_custom_domain_ingress(
+            &project,
+            &deployment,
+            &metadata,
+            &custom_domains,
+        );
 
         // Verify the x-forwarded-prefix annotation is NOT present
         if let Some(annotations) = &ingress.metadata.annotations {
@@ -4096,7 +4112,11 @@ mod tests {
 
         // Verify there's one rule for the custom domain
         let rules = ingress.spec.unwrap().rules.unwrap();
-        assert_eq!(rules.len(), 1, "Custom domain ingress should have exactly 1 rule");
+        assert_eq!(
+            rules.len(),
+            1,
+            "Custom domain ingress should have exactly 1 rule"
+        );
         assert_eq!(
             rules[0].host,
             Some("compass-dev.example.com".to_string()),
