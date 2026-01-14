@@ -1,4 +1,5 @@
 use super::models::{AddCustomDomainRequest, CustomDomainResponse, CustomDomainsResponse};
+use super::validation;
 use crate::db::models::User;
 use crate::db::{custom_domains as db_custom_domains, deployments as db_deployments, projects};
 use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
@@ -54,6 +55,18 @@ pub async fn add_custom_domain(
             StatusCode::FORBIDDEN,
             "You do not have access to this project".to_string(),
         ));
+    }
+
+    // Validate that the custom domain doesn't overlap with project default domain patterns
+    if let Some(ref production_template) = state.production_ingress_url_template {
+        if let Err(reason) = validation::validate_custom_domain(
+            &payload.domain,
+            production_template,
+            state.staging_ingress_url_template.as_deref(),
+            Some(&state.public_url),
+        ) {
+            return Err((StatusCode::BAD_REQUEST, reason));
+        }
     }
 
     // Add the custom domain
