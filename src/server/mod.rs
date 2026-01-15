@@ -203,7 +203,6 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
     // Extract Kubernetes controller settings
     let (
         kubeconfig,
-        ingress_class,
         production_ingress_url_template,
         staging_ingress_url_template,
         ingress_port,
@@ -222,7 +221,6 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
     ) = match settings.deployment_controller.clone() {
         Some(settings::DeploymentControllerSettings::Kubernetes {
             kubeconfig,
-            ingress_class,
             production_ingress_url_template,
             staging_ingress_url_template,
             ingress_port,
@@ -240,7 +238,6 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             access_classes,
         }) => (
             kubeconfig,
-            ingress_class,
             production_ingress_url_template,
             staging_ingress_url_template,
             ingress_port,
@@ -288,11 +285,16 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
     // Extract backend_address from auth_backend_url
     let parsed_backend_address = settings::BackendAddress::from_url(&auth_backend_url)?;
 
+    // Filter out null access classes (used to remove inherited entries)
+    let access_classes: std::collections::HashMap<_, _> = access_classes
+        .into_iter()
+        .filter_map(|(k, v)| v.map(|ac| (k, ac)))
+        .collect();
+
     let backend = Arc::new(deployment::controller::KubernetesController::new(
         controller_state.clone(),
         kube_client,
         deployment::controller::KubernetesControllerConfig {
-            ingress_class,
             production_ingress_url_template,
             staging_ingress_url_template,
             ingress_port,

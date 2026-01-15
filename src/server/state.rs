@@ -165,7 +165,6 @@ async fn init_kubernetes_backend(
 
     if let Some(DeploymentControllerSettings::Kubernetes {
         kubeconfig,
-        ingress_class,
         production_ingress_url_template,
         staging_ingress_url_template,
         ingress_port,
@@ -206,11 +205,16 @@ async fn init_kubernetes_backend(
         let parsed_backend_address =
             crate::server::settings::BackendAddress::from_url(auth_backend_url)?;
 
+        // Filter out null access classes (used to remove inherited entries)
+        let filtered_access_classes: std::collections::HashMap<_, _> = access_classes
+            .iter()
+            .filter_map(|(k, v)| v.as_ref().map(|ac| (k.clone(), ac.clone())))
+            .collect();
+
         let k8s_backend = KubernetesController::new(
             (*controller_state).clone(),
             kube_client,
             KubernetesControllerConfig {
-                ingress_class: ingress_class.clone(),
                 production_ingress_url_template: production_ingress_url_template.clone(),
                 staging_ingress_url_template: staging_ingress_url_template.clone(),
                 ingress_port: *ingress_port,
@@ -226,7 +230,7 @@ async fn init_kubernetes_backend(
                 custom_domain_tls_mode: custom_domain_tls_mode.clone(),
                 node_selector: node_selector.clone(),
                 image_pull_secret_name: image_pull_secret_name.clone(),
-                access_classes: access_classes.clone(),
+                access_classes: filtered_access_classes,
             },
         )?;
 
@@ -694,6 +698,7 @@ impl AppState {
         tracing::info!("Initialized OAuth exchange token store for secure backend flow");
 
         // Extract access_classes from deployment controller settings
+        // Filter out null values (used to remove inherited access classes)
         let (access_classes, production_ingress_url_template, staging_ingress_url_template) =
             if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
                 access_classes,
@@ -702,8 +707,12 @@ impl AppState {
                 ..
             }) = &settings.deployment_controller
             {
+                let filtered: std::collections::HashMap<_, _> = access_classes
+                    .iter()
+                    .filter_map(|(k, v)| v.as_ref().map(|ac| (k.clone(), ac.clone())))
+                    .collect();
                 (
-                    Arc::new(access_classes.clone()),
+                    Arc::new(filtered),
                     Some(production_ingress_url_template.clone()),
                     staging_ingress_url_template.clone(),
                 )
@@ -910,6 +919,7 @@ impl AppState {
         );
 
         // Extract access_classes from deployment controller settings
+        // Filter out null values (used to remove inherited access classes)
         let (access_classes, production_ingress_url_template, staging_ingress_url_template) =
             if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
                 access_classes,
@@ -918,8 +928,12 @@ impl AppState {
                 ..
             }) = &settings.deployment_controller
             {
+                let filtered: std::collections::HashMap<_, _> = access_classes
+                    .iter()
+                    .filter_map(|(k, v)| v.as_ref().map(|ac| (k.clone(), ac.clone())))
+                    .collect();
                 (
-                    Arc::new(access_classes.clone()),
+                    Arc::new(filtered),
                     Some(production_ingress_url_template.clone()),
                     staging_ingress_url_template.clone(),
                 )
