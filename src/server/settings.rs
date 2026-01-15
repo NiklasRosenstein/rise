@@ -326,26 +326,30 @@ pub enum DeploymentControllerSettings {
         namespace_annotations: std::collections::HashMap<String, String>,
 
         /// Ingress annotations to apply to all deployed application ingresses
-        /// Example: {"cert-manager.io/cluster-issuer": "letsencrypt-prod"}
+        /// These apply to both primary ingresses and custom domain ingresses
+        /// For annotations specific to custom domains only, use custom_domain_ingress_annotations
+        /// Example: {"nginx.ingress.kubernetes.io/proxy-body-size": "10m"}
         #[serde(default)]
         ingress_annotations: std::collections::HashMap<String, String>,
 
-        /// TLS secret name for ingress certificates
-        /// If set, enables TLS on all ingresses with this secret
+        /// TLS secret name for primary ingress certificates
+        /// If set, enables TLS on primary ingresses with this secret
+        /// For custom domain TLS, see custom_domain_tls_mode and custom_domain_ingress_annotations
         /// Example: "rise-apps-tls" (secret must exist in each namespace)
         #[serde(default)]
         ingress_tls_secret_name: Option<String>,
 
         /// TLS mode for custom domains
-        /// - "shared": All hosts use ingress_tls_secret_name
-        /// - "per-domain": Each custom domain uses tls-{domain} secret (for cert-manager)
+        /// - "shared": All custom domains share ingress_tls_secret_name (requires it to be set)
+        /// - "per-domain": Each custom domain gets its own tls-{domain} secret
+        ///   (works with cert-manager when custom_domain_ingress_annotations are configured)
         ///
         /// Defaults to "per-domain"
         #[serde(default = "default_custom_domain_tls_mode")]
         custom_domain_tls_mode: CustomDomainTlsMode,
 
-        /// Annotations to apply to custom domain ingresses (for cert-manager integration)
-        /// These annotations are ONLY applied to the separate custom domain ingress
+        /// Annotations to apply ONLY to custom domain ingresses (not primary ingresses)
+        /// Use this for cert-manager integration or other custom domain-specific configuration
         /// Example: {"cert-manager.io/cluster-issuer": "letsencrypt-prod"}
         #[serde(default)]
         custom_domain_ingress_annotations: std::collections::HashMap<String, String>,
