@@ -84,7 +84,6 @@ controller: {}
 # For local development with Minikube, run: mise minikube:launch
 deployment_controller:
   type: "kubernetes"
-  ingress_class: "nginx"
   production_ingress_url_template: "{project_name}.rise.local"
   staging_ingress_url_template: "{project_name}-{deployment_group}.preview.rise.local"
   namespace_format: "rise-{project_name}"
@@ -138,6 +137,17 @@ deployment_controller:
 
   # Access classes define ingress authentication levels
   # Each project must be assigned to one of these access classes
+  # Each access class specifies its own ingress_class (e.g., "nginx", "nginx-internal")
+  #
+  # To remove an inherited access class in environment-specific configs, set it to null:
+  #   access_classes:
+  #     authenticated: null  # Remove this class
+  #     private: null        # Remove this class
+  #     internal:            # Add a new class
+  #       display_name: "Internal"
+  #       description: "Internal access only"
+  #       ingress_class: "nginx-internal"
+  #       access_requirement: Authenticated
   access_classes:
     public:
       display_name: "Public"

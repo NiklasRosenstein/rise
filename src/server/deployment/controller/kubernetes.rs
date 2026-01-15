@@ -104,7 +104,6 @@ struct IngressUrl {
 
 /// Configuration parameters for the Kubernetes controller
 pub struct KubernetesControllerConfig {
-    pub ingress_class: String,
     pub production_ingress_url_template: String,
     pub staging_ingress_url_template: Option<String>,
     pub ingress_port: Option<u16>,
@@ -128,7 +127,6 @@ pub struct KubernetesControllerConfig {
 pub struct KubernetesController {
     state: ControllerState,
     kube_client: Client,
-    ingress_class: String,
     production_ingress_url_template: String,
     staging_ingress_url_template: Option<String>,
     ingress_port: Option<u16>,
@@ -163,7 +161,6 @@ impl KubernetesController {
         Ok(Self {
             state,
             kube_client,
-            ingress_class: config.ingress_class,
             production_ingress_url_template: config.production_ingress_url_template,
             staging_ingress_url_template: config.staging_ingress_url_template,
             ingress_port: config.ingress_port,
@@ -1944,6 +1941,26 @@ impl KubernetesController {
         annotations
     }
 
+    /// Get the ingress class for a project based on its access class
+    fn get_ingress_class_for_project(&self, project: &Project) -> &str {
+        let access_class = self
+            .access_classes
+            .get(&project.access_class)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Access class '{}' not configured in deployment controller. Available: {}. \
+                     This should have been validated on project creation.",
+                    project.access_class,
+                    self.access_classes
+                        .keys()
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
+        &access_class.ingress_class
+    }
+
     /// Build HTTP paths for an ingress rule, including optional backend service routing
     fn build_ingress_paths(
         &self,
@@ -2054,7 +2071,7 @@ impl KubernetesController {
                 ..Default::default()
             },
             spec: Some(IngressSpec {
-                ingress_class_name: Some(self.ingress_class.clone()),
+                ingress_class_name: Some(self.get_ingress_class_for_project(project).to_string()),
                 tls,
                 rules: Some(rules),
                 ..Default::default()
@@ -2105,7 +2122,7 @@ impl KubernetesController {
                 ..Default::default()
             },
             spec: Some(IngressSpec {
-                ingress_class_name: Some(self.ingress_class.clone()),
+                ingress_class_name: Some(self.get_ingress_class_for_project(project).to_string()),
                 tls,
                 rules: Some(rules),
                 ..Default::default()
@@ -3836,7 +3853,6 @@ mod tests {
         KubernetesController {
             state,
             kube_client,
-            ingress_class: "nginx".to_string(),
             production_ingress_url_template: "{project_name}.test.local".to_string(),
             staging_ingress_url_template: None,
             ingress_port: None,
@@ -4302,7 +4318,6 @@ mod tests {
         KubernetesController {
             state,
             kube_client,
-            ingress_class: "nginx".to_string(),
             // Path-based routing template: rise.dev/{project_name}
             production_ingress_url_template: "rise.dev/{project_name}".to_string(),
             staging_ingress_url_template: None,

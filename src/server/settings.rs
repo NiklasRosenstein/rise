@@ -155,10 +155,6 @@ fn default_repo_prefix() -> String {
     "rise/".to_string()
 }
 
-fn default_ingress_class() -> String {
-    "nginx".to_string()
-}
-
 fn default_ingress_schema() -> String {
     "https".to_string()
 }
@@ -270,10 +266,6 @@ pub enum DeploymentControllerSettings {
         #[serde(default)]
         kubeconfig: Option<String>,
 
-        /// Ingress class to use (e.g., "nginx")
-        #[serde(default = "default_ingress_class")]
-        ingress_class: String,
-
         /// Ingress URL template for production (default) deployment group
         /// Supports both subdomain and sub-path routing:
         ///   Subdomain: "{project_name}.apps.rise.dev"
@@ -376,7 +368,8 @@ pub enum DeploymentControllerSettings {
         /// Access classes defining ingress authentication levels
         /// Key: access class identifier (e.g., "public", "private")
         /// Value: access class configuration (display info, ingress settings)
-        access_classes: std::collections::HashMap<String, AccessClass>,
+        /// Use `null` in YAML to remove an inherited access class from parent configs
+        access_classes: std::collections::HashMap<String, Option<AccessClass>>,
     },
 }
 
@@ -637,15 +630,21 @@ impl Settings {
                 )?;
             }
 
-            // Validate access classes
-            if access_classes.is_empty() {
+            // Filter out null access classes (used to remove inherited entries)
+            // and validate the remaining ones
+            let active_classes: Vec<_> = access_classes
+                .iter()
+                .filter_map(|(id, class)| class.as_ref().map(|c| (id, c)))
+                .collect();
+
+            if active_classes.is_empty() {
                 return Err(ConfigError::Message(
                     "Kubernetes deployment_controller requires at least one access class to be configured. \
                      Add access_classes to your configuration file.".to_string()
                 ));
             }
 
-            for (id, class) in access_classes {
+            for (id, class) in active_classes {
                 if class.display_name.is_empty() {
                     return Err(ConfigError::Message(format!(
                         "Access class '{}' has empty display_name",
