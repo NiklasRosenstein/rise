@@ -344,6 +344,12 @@ pub enum DeploymentControllerSettings {
         #[serde(default = "default_custom_domain_tls_mode")]
         custom_domain_tls_mode: CustomDomainTlsMode,
 
+        /// Annotations to apply to custom domain ingresses (for cert-manager integration)
+        /// These annotations are ONLY applied to the separate custom domain ingress
+        /// Example: {"cert-manager.io/cluster-issuer": "letsencrypt-prod"}
+        #[serde(default)]
+        custom_domain_ingress_annotations: std::collections::HashMap<String, String>,
+
         /// Node selector for pod placement (controls which nodes pods can run on)
         /// Default: {"kubernetes.io/arch": "amd64"}
         /// Example: {"kubernetes.io/arch": "amd64", "node-type": "compute"}
