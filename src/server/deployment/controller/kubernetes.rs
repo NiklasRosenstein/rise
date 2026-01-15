@@ -111,7 +111,7 @@ pub struct KubernetesControllerConfig {
     pub registry_provider: Option<Arc<dyn RegistryProvider>>,
     pub auth_backend_url: String,
     pub auth_signin_url: String,
-    /// Backend address for routing /.rise/* traffic to the Rise backend
+    /// Backend address for routing /.rise path prefix traffic to the Rise backend
     pub backend_address: Option<crate::server::settings::BackendAddress>,
     pub namespace_labels: std::collections::HashMap<String, String>,
     pub namespace_annotations: std::collections::HashMap<String, String>,
@@ -134,7 +134,7 @@ pub struct KubernetesController {
     registry_provider: Option<Arc<dyn RegistryProvider>>,
     auth_backend_url: String,
     auth_signin_url: String,
-    /// Backend address for routing /.rise/* traffic to the Rise backend
+    /// Backend address for routing /.rise path prefix traffic to the Rise backend
     backend_address: Option<crate::server::settings::BackendAddress>,
     namespace_labels: std::collections::HashMap<String, String>,
     namespace_annotations: std::collections::HashMap<String, String>,
@@ -1983,10 +1983,10 @@ impl KubernetesController {
             },
         }];
 
-        // Add /.rise/ path routing if backend service exists
+        // Add /.rise path routing if backend service exists
         if let Some(ref backend_addr) = self.backend_address {
             paths.push(HTTPIngressPath {
-                path: Some("/.rise/".to_string()),
+                path: Some("/.rise".to_string()),
                 path_type: "Prefix".to_string(),
                 backend: IngressBackend {
                     service: Some(IngressServiceBackend {
