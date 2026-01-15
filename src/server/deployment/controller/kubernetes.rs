@@ -2096,7 +2096,7 @@ impl KubernetesController {
         // NOTE: We do NOT add x-forwarded-prefix annotation here
         // Custom domains always serve from root path (/) without any path prefix
         let mut annotations = self.build_ingress_annotations(project);
-        
+
         // Add custom domain specific annotations (e.g., cert-manager annotations)
         for (k, v) in &self.custom_domain_ingress_annotations {
             annotations.insert(k.clone(), v.clone());
@@ -2169,7 +2169,7 @@ impl KubernetesController {
                 // All custom domains share the same TLS secret
                 // Requires ingress_tls_secret_name to be configured
                 let shared_secret = self.ingress_tls_secret_name.as_ref()?;
-                
+
                 let all_hosts: Vec<String> =
                     custom_domains.iter().map(|d| d.domain.clone()).collect();
 
