@@ -118,6 +118,7 @@ pub struct KubernetesControllerConfig {
     pub ingress_annotations: std::collections::HashMap<String, String>,
     pub ingress_tls_secret_name: Option<String>,
     pub custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
+    pub custom_domain_ingress_annotations: std::collections::HashMap<String, String>,
     pub node_selector: std::collections::HashMap<String, String>,
     pub image_pull_secret_name: Option<String>,
     pub access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
@@ -141,6 +142,7 @@ pub struct KubernetesController {
     ingress_annotations: std::collections::HashMap<String, String>,
     ingress_tls_secret_name: Option<String>,
     custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode,
+    custom_domain_ingress_annotations: std::collections::HashMap<String, String>,
     node_selector: std::collections::HashMap<String, String>,
     image_pull_secret_name: Option<String>,
     access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
@@ -174,6 +176,7 @@ impl KubernetesController {
             ingress_annotations: config.ingress_annotations,
             ingress_tls_secret_name: config.ingress_tls_secret_name,
             custom_domain_tls_mode: config.custom_domain_tls_mode,
+            custom_domain_ingress_annotations: config.custom_domain_ingress_annotations,
             node_selector: config.node_selector,
             image_pull_secret_name: config.image_pull_secret_name,
             access_classes: config.access_classes,
@@ -2092,7 +2095,12 @@ impl KubernetesController {
         // Build common annotations (auth for private projects)
         // NOTE: We do NOT add x-forwarded-prefix annotation here
         // Custom domains always serve from root path (/) without any path prefix
-        let annotations = self.build_ingress_annotations(project);
+        let mut annotations = self.build_ingress_annotations(project);
+
+        // Add custom domain specific annotations (e.g., cert-manager annotations)
+        for (k, v) in &self.custom_domain_ingress_annotations {
+            annotations.insert(k.clone(), v.clone());
+        }
 
         let service_name = Self::service_name(project, deployment);
 
@@ -2149,8 +2157,6 @@ impl KubernetesController {
         &self,
         custom_domains: &[crate::db::models::CustomDomain],
     ) -> Option<Vec<k8s_openapi::api::networking::v1::IngressTLS>> {
-        let shared_secret = self.ingress_tls_secret_name.as_ref()?;
-
         // Early return if no custom domains
         if custom_domains.is_empty() {
             return None;
@@ -2161,6 +2167,9 @@ impl KubernetesController {
         match self.custom_domain_tls_mode {
             crate::server::settings::CustomDomainTlsMode::Shared => {
                 // All custom domains share the same TLS secret
+                // Requires ingress_tls_secret_name to be configured
+                let shared_secret = self.ingress_tls_secret_name.as_ref()?;
+
                 let all_hosts: Vec<String> =
                     custom_domains.iter().map(|d| d.domain.clone()).collect();
 
@@ -2171,6 +2180,8 @@ impl KubernetesController {
             }
             crate::server::settings::CustomDomainTlsMode::PerDomain => {
                 // Each custom domain gets its own tls-{domain} secret
+                // This works with cert-manager to automatically provision certificates
+                // Does not require ingress_tls_secret_name to be configured
                 for domain in custom_domains {
                     tls_configs.push(k8s_openapi::api::networking::v1::IngressTLS {
                         hosts: Some(vec![domain.domain.clone()]),
@@ -3866,6 +3877,7 @@ mod tests {
             ingress_annotations: std::collections::HashMap::new(),
             ingress_tls_secret_name: None,
             custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
+            custom_domain_ingress_annotations: std::collections::HashMap::new(),
             node_selector: std::collections::HashMap::new(),
             image_pull_secret_name: None,
             access_classes,
@@ -4332,6 +4344,7 @@ mod tests {
             ingress_annotations: std::collections::HashMap::new(),
             ingress_tls_secret_name: None,
             custom_domain_tls_mode: crate::server::settings::CustomDomainTlsMode::PerDomain,
+            custom_domain_ingress_annotations: std::collections::HashMap::new(),
             node_selector: std::collections::HashMap::new(),
             image_pull_secret_name: None,
             access_classes,

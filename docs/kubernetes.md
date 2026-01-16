@@ -37,6 +37,15 @@ staging_ingress_url_template = "{project_name}-{deployment_group}.preview.rise.l
 
 # Namespace format (must contain {project_name})
 namespace_format = "rise-{project_name}"
+
+# Custom domain TLS mode
+# - "per-domain": Each custom domain gets its own tls-{domain} secret (for cert-manager)
+# - "shared": All custom domains share ingress_tls_secret_name
+custom_domain_tls_mode = "per-domain"  # Default
+
+# Annotations for custom domain ingresses (e.g., cert-manager integration)
+[kubernetes.custom_domain_ingress_annotations]
+"cert-manager.io/cluster-issuer" = "letsencrypt-prod"
 ```
 
 ### Kubeconfig Options
@@ -371,6 +380,150 @@ labels:
   rise.dev/deployment-id: "20251207-143022"
   rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
 ```
+
+### Custom Domains and TLS
+
+Rise supports custom domains for projects, allowing you to serve your application at your own domain names (e.g., `app.example.com`) instead of or in addition to the default project URL pattern.
+
+#### Overview
+
+When custom domains are configured for a project:
+- Rise creates a separate Ingress resource specifically for custom domains
+- Custom domains always route to the root path (`/`) regardless of the default ingress URL pattern
+- TLS certificates can be automatically provisioned using cert-manager integration
+
+#### TLS Certificate Management
+
+Rise provides two modes for TLS certificate management on custom domains:
+
+**Per-Domain Mode (Recommended for cert-manager)**
+
+When `custom_domain_tls_mode` is set to `per-domain` (the default), each custom domain gets its own TLS secret named `tls-{domain}`. This mode is designed to work with cert-manager for automatic certificate provisioning:
+
+```yaml
+deployment_controller:
+  type: kubernetes
+  # ... other settings ...
+  
+  # TLS mode - per-domain creates separate secrets for each custom domain
+  custom_domain_tls_mode: "per-domain"  # Default
+  
+  # Annotations to apply to custom domain ingresses (for cert-manager)
+  custom_domain_ingress_annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    # Or use a specific issuer per namespace:
+    # cert-manager.io/issuer: "letsencrypt-prod"
+```
+
+With this configuration:
+- Each custom domain (e.g., `app.example.com`) will have its own TLS secret (`tls-app.example.com`)
+- cert-manager will automatically provision Let's Encrypt certificates
+- Certificates are automatically renewed by cert-manager
+- No manual TLS secret management required
+
+**Shared Mode**
+
+When `custom_domain_tls_mode` is set to `shared`, all custom domains share the same TLS secret specified by `ingress_tls_secret_name`:
+
+```yaml
+deployment_controller:
+  type: kubernetes
+  # ... other settings ...
+  
+  # Shared TLS secret for all hosts (primary + custom domains)
+  ingress_tls_secret_name: "my-wildcard-cert"
+  
+  # Use shared mode
+  custom_domain_tls_mode: "shared"
+```
+
+This mode is useful when you have a wildcard certificate or want to manage certificates externally.
+
+#### Cert-Manager Setup
+
+To use cert-manager with Rise custom domains:
+
+1. **Install cert-manager in your cluster:**
+
+```bash
+kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/v1.13.0/cert-manager.yaml
+```
+
+2. **Create a ClusterIssuer for Let's Encrypt:**
+
+```yaml
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt-prod
+spec:
+  acme:
+    # Let's Encrypt production server
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: your-email@example.com
+    privateKeySecretRef:
+      name: letsencrypt-prod-key
+    solvers:
+      - http01:
+          ingress:
+            class: nginx
+```
+
+3. **Configure Rise to use cert-manager:**
+
+```yaml
+deployment_controller:
+  type: kubernetes
+  # ... other settings ...
+  
+  custom_domain_tls_mode: "per-domain"
+  custom_domain_ingress_annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+```
+
+4. **Add a custom domain to your project:**
+
+```bash
+rise domain add my-project custom-domain.example.com
+```
+
+cert-manager will automatically:
+- Create an ACME challenge
+- Validate domain ownership
+- Issue a Let's Encrypt certificate
+- Store it in the `tls-custom-domain.example.com` secret
+- Automatically renew certificates before expiration
+
+#### DNS Configuration
+
+For custom domains to work, you must configure DNS records to point to your Kubernetes ingress:
+
+```
+custom-domain.example.com.  A  <ingress-ip-address>
+```
+
+Or for CNAMEs:
+
+```
+custom-domain.example.com.  CNAME  <ingress-hostname>
+```
+
+#### Troubleshooting Custom Domain TLS
+
+**Certificate not being issued:**
+- Check cert-manager logs: `kubectl logs -n cert-manager deployment/cert-manager`
+- Check certificate status: `kubectl get certificate -n rise-<project>`
+- Verify DNS is correctly configured and resolves to your ingress
+- Check ClusterIssuer/Issuer status: `kubectl describe clusterissuer letsencrypt-prod`
+
+**"Certificate not ready" error:**
+- cert-manager is still working on the challenge - wait a few minutes
+- Check challenge status: `kubectl get challenges -n rise-<project>`
+- Verify ingress controller can handle ACME challenges
+
+**Multiple certificate requests:**
+- Check that `custom_domain_ingress_annotations` are correctly configured
+- Verify you're not mixing cert-manager annotations in `ingress_annotations` and `custom_domain_ingress_annotations`
 
 ## Kubernetes Resources
 
