@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% if success %}CLI Authentication Successful{% else %}CLI Authentication Failed{% endif %} - Rise</title>
+    <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
+    <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</head>
+<body class="bg-gray-950 text-gray-100">
+    <div class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-black">
+        <div class="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl text-center">
+            {% if success %}
+            <div>
+                <div class="text-6xl text-green-500 mb-4">✓</div>
+                <h2 class="text-2xl font-bold text-white mb-4">CLI Authentication Successful</h2>
+
+                <p class="text-gray-300 mb-6">
+                    You have been successfully authenticated with the Rise CLI.
+                </p>
+
+                <p class="text-gray-400 mb-6">
+                    You can now close this window and return to your terminal.
+                </p>
+
+                <div class="bg-gray-800 border border-gray-700 rounded-lg p-4 text-left">
+                    <p class="text-sm text-gray-400 mb-2">Next steps:</p>
+                    <ul class="text-sm text-gray-300 space-y-1">
+                        <li>• Run <code class="bg-gray-700 px-1.5 py-0.5 rounded font-mono text-xs">rise project list</code> to see your projects</li>
+                        <li>• Run <code class="bg-gray-700 px-1.5 py-0.5 rounded font-mono text-xs">rise deploy</code> to deploy an application</li>
+                    </ul>
+                </div>
+            </div>
+            {% else %}
+            <div>
+                <div class="text-6xl text-red-500 mb-4">✗</div>
+                <h2 class="text-2xl font-bold text-white mb-4">CLI Authentication Failed</h2>
+
+                <p class="text-gray-300 mb-4">
+                    Failed to authenticate with the Rise CLI.
+                </p>
+
+                {% if error_message %}
+                <p class="bg-red-900/50 border border-red-500 text-red-200 px-4 py-2 rounded mb-4">
+                    {{ error_message }}
+                </p>
+                {% endif %}
+
+                <p class="text-gray-400 text-sm mb-4">
+                    Please try running <code class="bg-gray-700 px-1.5 py-0.5 rounded font-mono text-xs">rise login</code> again.
+                </p>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</body>
+</html>
