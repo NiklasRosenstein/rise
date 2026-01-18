@@ -1432,13 +1432,13 @@ pub struct CliAuthSuccessQuery {
 ///
 /// This endpoint is used to show a styled success or error page when CLI login completes.
 /// The CLI callback redirects to this endpoint instead of showing a basic HTML page.
-#[instrument(skip(state))]
+#[instrument(skip(_state))]
 pub async fn cli_auth_success(
-    State(state): State<AppState>,
+    State(_state): State<AppState>,
     Query(params): Query<CliAuthSuccessQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     let success = params.success.unwrap_or(true);
-    
+
     // Load CLI success template
     let template_content = StaticAssets::get("cli-auth-success.html.tera")
         .ok_or_else(|| {

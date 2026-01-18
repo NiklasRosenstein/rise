@@ -1,7 +1,7 @@
 use crate::config::Config;
 use crate::login::token_utils::format_token_expiration;
 use anyhow::{Context, Result};
-use axum::{extract::Query, response::Html, routing::get, Router};
+use axum::{extract::Query, response::IntoResponse, routing::get, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -46,52 +46,57 @@ async fn start_callback_server(
         let (tx, rx) = oneshot::channel();
         let tx = Arc::new(tokio::sync::Mutex::new(Some(tx)));
 
-        let app = Router::new().route("/callback", get({
-            let tx = Arc::clone(&tx);
-            let backend_url = backend_url.clone();
-            move |Query(params): Query<CallbackParams>| async move {
-                use axum::response::Redirect;
-                
-                let (result, response) = if let Some(code) = params.code {
-                    // Success - redirect to backend success page
-                    let success_url = format!("{}/api/v1/auth/cli-success?success=true", backend_url);
-                    (
-                        Ok(code),
-                        Redirect::to(&success_url).into_response()
-                    )
-                } else if let Some(error) = params.error {
-                    // Error - redirect to backend error page
-                    let error_msg = format!("{} - {}", error, params.error_description.unwrap_or_default());
-                    let error_url = format!(
-                        "{}/api/v1/auth/cli-success?success=false&error={}",
-                        backend_url,
-                        urlencoding::encode(&error_msg)
-                    );
-                    (
-                        Err(anyhow::anyhow!("OAuth error: {}", error_msg)),
-                        Redirect::to(&error_url).into_response()
-                    )
-                } else {
-                    // No code or error - redirect to backend error page
-                    let error_url = format!(
-                        "{}/api/v1/auth/cli-success?success=false&error={}",
-                        backend_url,
-                        urlencoding::encode("No code or error in callback")
-                    );
-                    (
-                        Err(anyhow::anyhow!("No code or error in callback")),
-                        Redirect::to(&error_url).into_response()
-                    )
-                };
+        let app = Router::new().route(
+            "/callback",
+            get({
+                let tx = Arc::clone(&tx);
+                let backend_url = backend_url.clone();
+                move |Query(params): Query<CallbackParams>| async move {
+                    use axum::response::Redirect;
 
-                // Send result through channel
-                if let Some(sender) = tx.lock().await.take() {
-                    let _ = sender.send(result);
+                    let (result, response) = if let Some(code) = params.code {
+                        // Success - redirect to backend success page
+                        let success_url =
+                            format!("{}/api/v1/auth/cli-success?success=true", backend_url);
+                        (Ok(code), Redirect::to(&success_url).into_response())
+                    } else if let Some(error) = params.error {
+                        // Error - redirect to backend error page
+                        let error_msg = format!(
+                            "{} - {}",
+                            error,
+                            params.error_description.unwrap_or_default()
+                        );
+                        let error_url = format!(
+                            "{}/api/v1/auth/cli-success?success=false&error={}",
+                            backend_url,
+                            urlencoding::encode(&error_msg)
+                        );
+                        (
+                            Err(anyhow::anyhow!("OAuth error: {}", error_msg)),
+                            Redirect::to(&error_url).into_response(),
+                        )
+                    } else {
+                        // No code or error - redirect to backend error page
+                        let error_url = format!(
+                            "{}/api/v1/auth/cli-success?success=false&error={}",
+                            backend_url,
+                            urlencoding::encode("No code or error in callback")
+                        );
+                        (
+                            Err(anyhow::anyhow!("No code or error in callback")),
+                            Redirect::to(&error_url).into_response(),
+                        )
+                    };
+
+                    // Send result through channel
+                    if let Some(sender) = tx.lock().await.take() {
+                        let _ = sender.send(result);
+                    }
+
+                    response
                 }
-
-                response
-            }
-        }));
+            }),
+        );
 
         // Try to bind to this port
         let addr = format!("localhost:{}", port);
