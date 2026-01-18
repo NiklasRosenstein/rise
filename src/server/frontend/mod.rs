@@ -26,6 +26,10 @@ mod tests {
             "auth-success.html.tera should be embedded"
         );
         assert!(
+            StaticAssets::get("cli-auth-success.html.tera").is_some(),
+            "cli-auth-success.html.tera should be embedded"
+        );
+        assert!(
             StaticAssets::get("auth-warning.html.tera").is_some(),
             "auth-warning.html.tera should be embedded"
         );

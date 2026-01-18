@@ -31,13 +31,15 @@ struct CallbackParams {
 }
 
 /// Start local HTTP server to receive OAuth callback
-async fn start_callback_server() -> Result<(String, tokio::sync::oneshot::Receiver<Result<String>>)>
-{
+async fn start_callback_server(
+    backend_url: &str,
+) -> Result<(String, tokio::sync::oneshot::Receiver<Result<String>>)> {
     use std::sync::Arc;
 
     // Try multiple ports in case one is in use
     let ports = vec![8765, 8766, 8767];
     let mut last_error = None;
+    let backend_url = backend_url.to_string();
 
     for port in ports {
         let redirect_uri = format!("http://localhost:{}/callback", port);
@@ -46,22 +48,39 @@ async fn start_callback_server() -> Result<(String, tokio::sync::oneshot::Receiv
 
         let app = Router::new().route("/callback", get({
             let tx = Arc::clone(&tx);
+            let backend_url = backend_url.clone();
             move |Query(params): Query<CallbackParams>| async move {
-                let (result, html_response) = if let Some(code) = params.code {
+                use axum::response::Redirect;
+                
+                let (result, response) = if let Some(code) = params.code {
+                    // Success - redirect to backend success page
+                    let success_url = format!("{}/api/v1/auth/cli-success?success=true", backend_url);
                     (
                         Ok(code),
-                        Html("<html><body><h1>✓ Authentication Successful!</h1><p>You can close this window and return to the terminal.</p></body></html>".to_string())
+                        Redirect::to(&success_url).into_response()
                     )
                 } else if let Some(error) = params.error {
-                    let error_msg = format!("OAuth error: {} - {}", error, params.error_description.unwrap_or_default());
+                    // Error - redirect to backend error page
+                    let error_msg = format!("{} - {}", error, params.error_description.unwrap_or_default());
+                    let error_url = format!(
+                        "{}/api/v1/auth/cli-success?success=false&error={}",
+                        backend_url,
+                        urlencoding::encode(&error_msg)
+                    );
                     (
-                        Err(anyhow::anyhow!("{}", error_msg)),
-                        Html(format!("<html><body><h1>✗ Authentication Failed</h1><p>{}</p></body></html>", error_msg))
+                        Err(anyhow::anyhow!("OAuth error: {}", error_msg)),
+                        Redirect::to(&error_url).into_response()
                     )
                 } else {
+                    // No code or error - redirect to backend error page
+                    let error_url = format!(
+                        "{}/api/v1/auth/cli-success?success=false&error={}",
+                        backend_url,
+                        urlencoding::encode("No code or error in callback")
+                    );
                     (
                         Err(anyhow::anyhow!("No code or error in callback")),
-                        Html("<html><body><h1>✗ Authentication Failed</h1><p>No code or error in callback</p></body></html>".to_string())
+                        Redirect::to(&error_url).into_response()
                     )
                 };
 
@@ -70,7 +89,7 @@ async fn start_callback_server() -> Result<(String, tokio::sync::oneshot::Receiv
                     let _ = sender.send(result);
                 }
 
-                html_response
+                response
             }
         }));
 
@@ -135,7 +154,7 @@ pub async fn handle_authorization_code_flow(
     let (code_verifier, code_challenge) = generate_pkce_challenge();
 
     // Step 2: Start local callback server
-    let (redirect_uri, code_receiver) = start_callback_server()
+    let (redirect_uri, code_receiver) = start_callback_server(backend_url)
         .await
         .context("Failed to start local callback server")?;
 

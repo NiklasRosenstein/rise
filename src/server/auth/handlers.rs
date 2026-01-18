@@ -1421,3 +1421,72 @@ pub async fn oauth_logout(
 
     Ok(response)
 }
+
+#[derive(Debug, Deserialize)]
+pub struct CliAuthSuccessQuery {
+    pub success: Option<bool>,
+    pub error: Option<String>,
+}
+
+/// Handler for CLI authentication success/failure page
+///
+/// This endpoint is used to show a styled success or error page when CLI login completes.
+/// The CLI callback redirects to this endpoint instead of showing a basic HTML page.
+#[instrument(skip(state))]
+pub async fn cli_auth_success(
+    State(state): State<AppState>,
+    Query(params): Query<CliAuthSuccessQuery>,
+) -> Result<Response, (StatusCode, String)> {
+    let success = params.success.unwrap_or(true);
+    
+    // Load CLI success template
+    let template_content = StaticAssets::get("cli-auth-success.html.tera")
+        .ok_or_else(|| {
+            tracing::error!("cli-auth-success.html.tera template not found");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template not found".to_string(),
+            )
+        })?
+        .data;
+
+    let template_str = std::str::from_utf8(&template_content).map_err(|e| {
+        tracing::error!("Failed to parse template as UTF-8: {:#}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Template encoding error".to_string(),
+        )
+    })?;
+
+    // Create Tera instance and add template
+    let mut tera = Tera::default();
+    tera.add_raw_template("cli-auth-success.html.tera", template_str)
+        .map_err(|e| {
+            tracing::error!("Failed to parse template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template error".to_string(),
+            )
+        })?;
+
+    // Render success template
+    let mut context = tera::Context::new();
+    context.insert("success", &success);
+    if let Some(error) = params.error {
+        context.insert("error_message", &error);
+    }
+
+    let html = tera
+        .render("cli-auth-success.html.tera", &context)
+        .map_err(|e| {
+            tracing::error!("Failed to render template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template rendering error".to_string(),
+            )
+        })?;
+
+    tracing::info!("Showing CLI auth success page (success={})", success);
+
+    Ok(Html(html).into_response())
+}
