@@ -20,6 +20,32 @@ use std::collections::HashMap;
 use tera::Tera;
 use tracing::instrument;
 
+/// Extract project URL (scheme + host + port) from a redirect URL
+///
+/// This is used to set the `aud` claim in Rise JWTs for project authentication.
+/// Falls back to public_url if the redirect_url cannot be parsed.
+///
+/// # Arguments
+/// * `redirect_url` - Full URL or relative path to extract base URL from
+/// * `fallback_url` - URL to use if parsing fails (typically Rise public URL)
+///
+/// # Returns
+/// Base URL in the format "https://host:port" (port omitted for 80/443)
+fn extract_project_url_from_redirect(redirect_url: &str, fallback_url: &str) -> String {
+    if let Ok(parsed_url) = url::Url::parse(redirect_url) {
+        if let Some(host) = parsed_url.host_str() {
+            let port_part = match parsed_url.port() {
+                Some(port) if port != 80 && port != 443 => format!(":{}", port),
+                _ => String::new(),
+            };
+            return format!("{}://{}{}", parsed_url.scheme(), host, port_part);
+        }
+    }
+
+    // Fallback: use provided URL if parsing fails or host missing
+    fallback_url.trim_end_matches('/').to_string()
+}
+
 /// Helper function to sync IdP groups after login
 ///
 /// This validates the token and syncs the user's team memberships from IdP groups.
@@ -921,42 +947,6 @@ pub async fn oauth_callback(
     // Determine redirect URL
     let redirect_url = oauth_state.redirect_url.unwrap_or_else(|| "/".to_string());
 
-    // Check if this is an ingress auth flow (has project context) vs UI login flow
-    let is_ingress_auth = oauth_state.project_name.is_some();
-
-    // For UI login flow (no project), return an HTML page that stores the token in localStorage
-    if !is_ingress_auth {
-        tracing::info!("UI login flow - returning token storage page");
-
-        // Create a simple HTML page that stores the token and redirects
-        let html = format!(
-            r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Login Successful</title>
-</head>
-<body>
-    <script>
-        // Store token in localStorage
-        localStorage.setItem('rise_token', {});
-
-        // Clean up OAuth params and redirect
-        window.history.replaceState({{}}, document.title, '/');
-        window.location.href = '{}';
-    </script>
-    <noscript>
-        <p>JavaScript is required to complete the login process.</p>
-    </noscript>
-</body>
-</html>"#,
-            serde_json::to_string(&token_info.id_token).unwrap(),
-            redirect_url
-        );
-
-        return Ok(Html(html).into_response());
-    }
-
     // Determine cookie domain based on request host
     // For Rise subdomains, use the configured cookie domain for subdomain sharing
     // Otherwise, use current host only (empty domain)
@@ -1008,9 +998,12 @@ pub async fn oauth_callback(
             })?;
 
         // Issue Rise JWT with user's team memberships
+        // Extract project URL from redirect_url for the aud claim
+        let project_url = extract_project_url_from_redirect(&redirect_url, &state.public_url);
+
         let rise_jwt = state
             .jwt_signer
-            .sign_ingress_jwt(&claims, user.id, &state.db_pool, Some(exp))
+            .sign_ingress_jwt(&claims, user.id, &state.db_pool, &project_url, Some(exp))
             .await
             .map_err(|e| {
                 tracing::error!("Failed to sign Rise JWT: {:#}", e);
@@ -1052,7 +1045,7 @@ pub async fn oauth_callback(
         }
 
         // Normal flow: set cookie directly on main domain
-        let cookie = cookie_helpers::create_ingress_jwt_cookie(
+        let cookie = cookie_helpers::create_rise_jwt_cookie(
             &rise_jwt,
             &cookie_settings_for_response,
             max_age,
@@ -1062,23 +1055,82 @@ pub async fn oauth_callback(
     }
 
     // Regular OAuth flow (not ingress auth) - UI login
-    tracing::info!("Using IdP token for session");
-    let cookie = cookie_helpers::create_session_cookie(
-        &token_info.id_token,
-        &cookie_settings_for_response,
-        max_age,
+    tracing::info!("Using Rise JWT for UI session");
+
+    // Get claims from IdP token (use existing validation from earlier in the function)
+    let mut expected_claims = HashMap::new();
+    expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+
+    let claims = state
+        .jwt_validator
+        .validate(
+            &token_info.id_token,
+            &state.auth_settings.issuer,
+            &expected_claims,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to validate ID token: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate token".to_string(),
+            )
+        })?;
+
+    let email = claims
+        .get("email")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            tracing::error!("Email claim missing from ID token");
+            (
+                StatusCode::BAD_REQUEST,
+                "Email claim missing from token".to_string(),
+            )
+        })?;
+
+    // Find or create user
+    let user = users::find_or_create(&state.db_pool, email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find or create user: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to process user".to_string(),
+            )
+        })?;
+
+    // Sync groups after login
+    sync_groups_after_login(&state, &token_info.id_token).await?;
+
+    // Issue Rise HS256 JWT for UI authentication
+    let rise_jwt = state
+        .jwt_signer
+        .sign_ui_jwt(
+            &claims,
+            user.id,
+            &state.db_pool,
+            &state.public_url,
+            Some(exp),
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to sign UI JWT: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create authentication token".to_string(),
+            )
+        })?;
+
+    let cookie =
+        cookie_helpers::create_rise_jwt_cookie(&rise_jwt, &cookie_settings_for_response, max_age);
+
+    tracing::info!(
+        "Setting Rise JWT cookie and redirecting to {}",
+        redirect_url
     );
 
-    tracing::info!("Setting session cookie and redirecting to {}", redirect_url);
-
-    // For regular OAuth flow, immediate redirect
-    let response = (
-        StatusCode::FOUND,
-        [("Location", redirect_url.as_str()), ("Set-Cookie", &cookie)],
-    )
-        .into_response();
-
-    Ok(response)
+    // Use success page with delayed redirect to ensure cookie is properly persisted
+    render_ui_login_success_page(&redirect_url, &cookie)
 }
 
 /// Helper function to render the success page with cookie
@@ -1145,6 +1197,64 @@ fn render_success_page(
     Ok(response)
 }
 
+/// Helper function to render the UI login success page with cookie
+fn render_ui_login_success_page(
+    redirect_url: &str,
+    cookie: &str,
+) -> Result<Response, (StatusCode, String)> {
+    // Load UI success template
+    let template_content = StaticAssets::get("auth-ui-success.html.tera").ok_or_else(|| {
+        tracing::error!("auth-ui-success.html.tera template not found");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Template not found".to_string(),
+        )
+    })?;
+
+    let template_str = std::str::from_utf8(&template_content.data).map_err(|e| {
+        tracing::error!("Failed to decode template: {:#}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Template encoding error".to_string(),
+        )
+    })?;
+
+    // Create Tera instance and add template
+    let mut tera = Tera::default();
+    tera.add_raw_template("auth-ui-success.html.tera", template_str)
+        .map_err(|e| {
+            tracing::error!("Failed to parse template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template error".to_string(),
+            )
+        })?;
+
+    // Render success template
+    let mut context = tera::Context::new();
+    context.insert("redirect_url", redirect_url);
+
+    let html = tera
+        .render("auth-ui-success.html.tera", &context)
+        .map_err(|e| {
+            tracing::error!("Failed to render template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template rendering error".to_string(),
+            )
+        })?;
+
+    tracing::info!(
+        "Setting UI JWT cookie and showing success page, redirecting to: {}",
+        redirect_url
+    );
+
+    // Build response with cookie and HTML
+    let response = (StatusCode::OK, [("Set-Cookie", cookie)], Html(html)).into_response();
+
+    Ok(response)
+}
+
 #[derive(Debug, Deserialize)]
 pub struct CompleteQuery {
     pub token: String,
@@ -1180,7 +1290,7 @@ pub async fn oauth_complete(
         secure: state.cookie_settings.secure,
     };
 
-    let cookie = cookie_helpers::create_ingress_jwt_cookie(
+    let cookie = cookie_helpers::create_rise_jwt_cookie(
         &session.rise_jwt,
         &cookie_settings,
         session.max_age,
@@ -1244,14 +1354,14 @@ pub async fn ingress_auth(
     }
 
     // Extract and validate Rise JWT (required)
-    let rise_jwt = cookie_helpers::extract_ingress_jwt_cookie(&headers).ok_or_else(|| {
-        tracing::debug!("No ingress JWT cookie found");
+    let rise_jwt = cookie_helpers::extract_rise_jwt_cookie(&headers).ok_or_else(|| {
+        tracing::debug!("No Rise JWT cookie found");
         (StatusCode::UNAUTHORIZED, "No session cookie".to_string())
     })?;
 
     let ingress_claims = state
         .jwt_signer
-        .verify_ingress_jwt(&rise_jwt)
+        .verify_jwt_skip_aud(&rise_jwt)
         .map_err(|e| {
             tracing::warn!("Invalid or expired ingress JWT: {:#}", e);
             (
@@ -1401,14 +1511,14 @@ pub async fn oauth_logout(
 ) -> Result<Response, (StatusCode, String)> {
     tracing::info!("Logout initiated");
 
-    // Clear the session cookie
-    let cookie = cookie_helpers::clear_session_cookie(&state.cookie_settings);
+    // Clear the Rise JWT cookie
+    let cookie = cookie_helpers::clear_rise_jwt_cookie(&state.cookie_settings);
 
     // Determine redirect URL
     let redirect_url = params.redirect.unwrap_or_else(|| "/".to_string());
 
     tracing::info!(
-        "Clearing session cookie and redirecting to {}",
+        "Clearing Rise JWT cookie and redirecting to {}",
         redirect_url
     );
 
@@ -1489,4 +1599,25 @@ pub async fn cli_auth_success(
     tracing::info!("Showing CLI auth success page (success={})", success);
 
     Ok(Html(html).into_response())
+}
+
+/// JWKS (JSON Web Key Set) endpoint
+///
+/// Returns the public keys used to sign Rise-issued RS256 JWTs.
+/// Deployed applications can use this endpoint to validate Rise-issued tokens.
+#[instrument(skip(state))]
+pub async fn jwks(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    tracing::debug!("JWKS endpoint called");
+
+    let jwks = state.jwt_signer.generate_jwks().map_err(|e| {
+        tracing::error!("Failed to generate JWKS: {:#}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to generate JWKS".to_string(),
+        )
+    })?;
+
+    Ok(Json(jwks))
 }

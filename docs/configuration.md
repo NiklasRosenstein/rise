@@ -212,7 +212,19 @@ port = 3000                    # HTTP port
 public_url = "http://..."      # Public URL (for OAuth redirects)
 cookie_domain = ""             # Cookie domain ("" = current host only)
 cookie_secure = false          # Set true for HTTPS
+jwt_signing_secret = "..."     # JWT signing secret (base64-encoded, min 32 bytes)
+jwt_expiry_seconds = 86400     # JWT expiry duration in seconds (default: 24 hours)
+jwt_claims = ["sub", "email", "name"]  # Claims to include from IdP
+rs256_private_key_pem = "..."  # Optional: RS256 private key (persists JWTs across restarts)
+rs256_public_key_pem = "..."   # Optional: RS256 public key (derived if not provided)
 ```
+
+**JWT Configuration:**
+- `jwt_signing_secret`: Base64-encoded secret for HS256 JWT signing (generate with `openssl rand -base64 32`)
+- `jwt_expiry_seconds`: Duration in seconds before JWTs expire (default: 86400 = 24 hours)
+- `jwt_claims`: Claims to include from IdP token in Rise JWTs
+- `rs256_private_key_pem`: Optional pre-configured RS256 private key (prevents JWT invalidation on restart)
+- `rs256_public_key_pem`: Optional RS256 public key (automatically derived from private key if omitted)
 
 ### Auth Settings
 

@@ -160,6 +160,7 @@ async fn init_kubernetes_backend(
     settings: &Settings,
     controller_state: Arc<ControllerState>,
     registry_provider: Option<Arc<dyn RegistryProvider>>,
+    jwks_json: String,
 ) -> Result<Arc<dyn DeploymentBackend>> {
     use crate::server::settings::DeploymentControllerSettings;
 
@@ -233,6 +234,7 @@ async fn init_kubernetes_backend(
                 node_selector: node_selector.clone(),
                 image_pull_secret_name: image_pull_secret_name.clone(),
                 access_classes: filtered_access_classes,
+                rise_jwks_json: jwks_json,
             },
         )?;
 
@@ -311,12 +313,24 @@ impl AppState {
             JwtSigner::new(
                 &settings.server.jwt_signing_secret,
                 settings.server.public_url.clone(),
-                3600, // Default 1 hour expiry (matches typical IdP token expiry)
+                settings.server.jwt_expiry_seconds,
                 settings.server.jwt_claims.clone(),
+                settings.server.rs256_private_key_pem.as_deref(),
+                settings.server.rs256_public_key_pem.as_deref(),
             )
             .context("Failed to initialize JWT signer for ingress authentication")?,
         );
-        tracing::info!("Initialized JWT signer for ingress authentication");
+        tracing::info!(
+            "Initialized JWT signer for ingress authentication (expiry: {}s)",
+            settings.server.jwt_expiry_seconds
+        );
+
+        // Generate JWKS JSON for RS256 public keys to pass to deployed applications
+        let jwks = jwt_signer
+            .generate_jwks()
+            .context("Failed to generate JWKS for deployment controller")?;
+        let jwks_json = serde_json::to_string(&jwks).context("Failed to serialize JWKS to JSON")?;
+        tracing::info!("Generated JWKS for RS256 JWT verification in deployed apps");
 
         // Initialize OAuth2 client
         let oauth_client = Arc::new(
@@ -505,7 +519,13 @@ impl AppState {
                 db_pool: db_pool.clone(),
                 encryption_provider: encryption_provider.clone(),
             });
-            init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
+            init_kubernetes_backend(
+                settings,
+                controller_state,
+                registry_provider.clone(),
+                jwks_json,
+            )
+            .await?
         };
 
         // Initialize extension registry
@@ -853,8 +873,10 @@ impl AppState {
             JwtSigner::new(
                 &settings.server.jwt_signing_secret,
                 settings.server.public_url.clone(),
-                3600,
+                settings.server.jwt_expiry_seconds,
                 settings.server.jwt_claims.clone(),
+                settings.server.rs256_private_key_pem.as_deref(),
+                settings.server.rs256_public_key_pem.as_deref(),
             )
             .context("Failed to initialize JWT signer")?,
         );
@@ -897,7 +919,16 @@ impl AppState {
                 db_pool: db_pool.clone(),
                 encryption_provider: encryption_provider.clone(),
             });
-            init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
+            // Controller doesn't have JWT signer, pass empty JWKS for now
+            // This is only used when running in controller-only mode (without HTTP server)
+            let jwks_json = r#"{"keys":[]}"#.to_string();
+            init_kubernetes_backend(
+                settings,
+                controller_state,
+                registry_provider.clone(),
+                jwks_json,
+            )
+            .await?
         };
 
         // Initialize empty extension registry for controller (not used)

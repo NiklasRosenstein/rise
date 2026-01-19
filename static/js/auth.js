@@ -13,7 +13,6 @@ if (!window.CONFIG) {
 
 // Initiate OAuth2 authorization code flow (server-side PKCE)
 // The backend handles PKCE generation, state management, and token exchange
-// to avoid sessionStorage issues on first login
 async function login() {
     try {
         // Redirect to backend's OAuth start endpoint
@@ -21,7 +20,7 @@ async function login() {
         // 1. Generate PKCE params and store state server-side
         // 2. Redirect to OIDC provider
         // 3. Handle callback and token exchange
-        // 4. Return an HTML page that stores token in localStorage
+        // 4. Set rise_jwt HttpOnly cookie
         window.location.href = `${CONFIG.backendUrl}/api/v1/auth/signin/start`;
     } catch (error) {
         console.error('Login error:', error);
@@ -29,18 +28,17 @@ async function login() {
     }
 }
 
-// Logout
-function logout() {
-    localStorage.removeItem('rise_token');
+// Logout - calls backend to clear cookie
+async function logout() {
+    try {
+        // Call backend logout endpoint to clear the rise_jwt cookie
+        await fetch(`${CONFIG.backendUrl}/api/v1/auth/logout`, {
+            method: 'GET',
+            credentials: 'include'  // Include cookies
+        });
+    } catch (error) {
+        console.error('Logout error:', error);
+    }
+    // Redirect regardless of success/failure
     window.location.href = '/';
-}
-
-// Check if user is authenticated
-function isAuthenticated() {
-    return !!localStorage.getItem('rise_token');
-}
-
-// Get stored token
-function getToken() {
-    return localStorage.getItem('rise_token');
 }

@@ -532,7 +532,6 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
         setError(null);
         setStreaming(true);
 
-        const token = localStorage.getItem('rise_token');
         const baseUrl = window.API_BASE_URL || '';
         const url = `${baseUrl}/api/v1/projects/${projectName}/deployments/${deploymentId}/logs?follow=true&tail=${tailLines}`;
 
@@ -540,12 +539,12 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
         const abortController = new AbortController();
         abortControllerRef.current = abortController;
 
-        // Use fetch for SSE with authorization header
+        // Use fetch for SSE with cookies
         fetch(url, {
             headers: {
-                'Authorization': `Bearer ${token}`,
                 'Accept': 'text/event-stream',
             },
+            credentials: 'include',  // Include cookies (rise_jwt)
             signal: abortController.signal,
         })
         .then(response => {
@@ -611,16 +610,15 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
     }, []);
 
     const loadInitialLogs = useCallback(async () => {
-        const token = localStorage.getItem('rise_token');
         const baseUrl = window.API_BASE_URL || '';
         const url = `${baseUrl}/api/v1/projects/${projectName}/deployments/${deploymentId}/logs?tail=${tailLines}`;
 
         try {
             const response = await fetch(url, {
                 headers: {
-                    'Authorization': `Bearer ${token}`,
                     'Accept': 'text/event-stream',
                 },
+                credentials: 'include',  // Include cookies (rise_jwt)
             });
 
             if (!response.ok) {

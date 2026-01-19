@@ -315,6 +315,8 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             node_selector,
             image_pull_secret_name,
             access_classes,
+            // Controller-only mode doesn't have JWT signer, use empty JWKS
+            rise_jwks_json: r#"{"keys":[]}"#.to_string(),
         },
     )?);
 
