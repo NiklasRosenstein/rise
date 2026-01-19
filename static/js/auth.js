@@ -29,18 +29,29 @@ async function login() {
     }
 }
 
-// Logout
-function logout() {
-    localStorage.removeItem('rise_token');
+// Logout - calls backend to clear cookie
+async function logout() {
+    try {
+        // Call backend logout endpoint to clear the rise_jwt cookie
+        await fetch(`${CONFIG.backendUrl}/api/v1/auth/logout`, {
+            method: 'GET',
+            credentials: 'include'  // Include cookies
+        });
+    } catch (error) {
+        console.error('Logout error:', error);
+    }
+    // Redirect regardless of success/failure
     window.location.href = '/';
 }
 
-// Check if user is authenticated
-function isAuthenticated() {
-    return !!localStorage.getItem('rise_token');
-}
-
-// Get stored token
-function getToken() {
-    return localStorage.getItem('rise_token');
+// Check if user is authenticated - must be async as cookies are HttpOnly
+async function isAuthenticated() {
+    try {
+        const response = await fetch(`${CONFIG.backendUrl}/api/v1/users/me`, {
+            credentials: 'include'  // Include cookies
+        });
+        return response.ok;
+    } catch (error) {
+        return false;
+    }
 }

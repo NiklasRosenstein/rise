@@ -6,25 +6,19 @@ class RiseAPI {
     }
 
     async request(endpoint, options = {}) {
-        const token = localStorage.getItem('rise_token');
-        if (!token && !options.skipAuth) {
-            throw new Error('Not authenticated');
-        }
-
         const headers = {
             'Content-Type': 'application/json',
-            ...(token && { 'Authorization': `Bearer ${token}` }),
             ...options.headers,
         };
 
         const response = await fetch(`${this.baseUrl}/api/v1${endpoint}`, {
             ...options,
             headers,
+            credentials: 'include',  // Always include cookies (rise_jwt)
         });
 
         if (response.status === 401) {
-            // Token expired, redirect to login
-            localStorage.removeItem('rise_token');
+            // Authentication expired, redirect to login
             window.location.href = '/';
             throw new Error('Authentication expired');
         }

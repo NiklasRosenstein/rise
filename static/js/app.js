@@ -58,18 +58,6 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
         }
     }, [isProfileOpen]);
 
-    const handleCopyJWT = () => {
-        const token = localStorage.getItem('rise_token');
-        if (token) {
-            navigator.clipboard.writeText(token).then(() => {
-                showToast('JWT token copied to clipboard', 'success');
-                setIsProfileOpen(false);
-            }).catch(() => {
-                showToast('Failed to copy JWT token', 'error');
-            });
-        }
-    };
-
     return (
         <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
             <nav className="container mx-auto px-4 py-4">
@@ -126,18 +114,6 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                                     <div className="p-4 border-b border-gray-200 dark:border-gray-700">
                                         <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Signed in as</p>
                                         <p className="text-gray-900 dark:text-white font-medium break-all">{user?.email}</p>
-                                    </div>
-                                    <div className="p-2">
-                                        <button
-                                            onClick={handleCopyJWT}
-                                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-                                        >
-                                            <div className="w-4 h-4 svg-mask" style={{
-                                                maskImage: 'url(/assets/copy.svg)',
-                                                WebkitMaskImage: 'url(/assets/copy.svg)'
-                                            }}></div>
-                                            Copy JWT Token
-                                        </button>
                                     </div>
                                     <div className="p-2 border-t border-gray-200 dark:border-gray-700">
                                         <div className="px-3 py-2">
