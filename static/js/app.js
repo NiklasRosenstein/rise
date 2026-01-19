@@ -329,18 +329,14 @@ function App() {
             // This ensures the user stays logged in after OAuth extension callback
         }
 
-        if (!isAuthenticated()) {
-            setAuthChecked(true);
-            return;
-        }
-
         async function loadUser() {
             try {
                 const userData = await api.getMe();
                 setUser(userData);
             } catch (err) {
                 console.error('Failed to load user:', err);
-                logout();
+                // If getMe fails, user is not authenticated - show login
+                setUser(null);
             } finally {
                 setAuthChecked(true);
             }
@@ -373,7 +369,7 @@ function App() {
         );
     }
 
-    if (!isAuthenticated() || !user) {
+    if (!user) {
         return <LoginPage />;
     }
 
