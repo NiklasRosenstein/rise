@@ -334,8 +334,9 @@ function App() {
                 const userData = await api.getMe();
                 setUser(userData);
             } catch (err) {
+                // If getMe fails with 401, user is not authenticated
+                // For other errors, also show login as we can't proceed without user data
                 console.error('Failed to load user:', err);
-                // If getMe fails, user is not authenticated - show login
                 setUser(null);
             } finally {
                 setAuthChecked(true);
