@@ -54,6 +54,11 @@ pub struct ServerSettings {
     /// Default: ["sub", "email", "name"]
     #[serde(default = "default_jwt_claims")]
     pub jwt_claims: Vec<String>,
+
+    /// JWT token expiry duration in seconds
+    /// Default: 86400 (24 hours)
+    #[serde(default = "default_jwt_expiry_seconds")]
+    pub jwt_expiry_seconds: u64,
 }
 
 fn default_cookie_secure() -> bool {
@@ -62,6 +67,10 @@ fn default_cookie_secure() -> bool {
 
 fn default_jwt_claims() -> Vec<String> {
     vec!["sub".to_string(), "email".to_string(), "name".to_string()]
+}
+
+fn default_jwt_expiry_seconds() -> u64 {
+    86400 // 24 hours
 }
 
 fn default_reconcile_interval() -> u64 {

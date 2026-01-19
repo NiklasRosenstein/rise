@@ -313,14 +313,14 @@ impl AppState {
             JwtSigner::new(
                 &settings.server.jwt_signing_secret,
                 settings.server.public_url.clone(),
-                3600, // Default 1 hour expiry (matches typical IdP token expiry)
+                settings.server.jwt_expiry_seconds,
                 settings.server.jwt_claims.clone(),
                 settings.server.rs256_private_key_pem.as_deref(),
                 settings.server.rs256_public_key_pem.as_deref(),
             )
             .context("Failed to initialize JWT signer for ingress authentication")?,
         );
-        tracing::info!("Initialized JWT signer for ingress authentication");
+        tracing::info!("Initialized JWT signer for ingress authentication (expiry: {}s)", settings.server.jwt_expiry_seconds);
 
         // Generate JWKS JSON for RS256 public keys to pass to deployed applications
         let jwks = jwt_signer
@@ -865,7 +865,7 @@ impl AppState {
             JwtSigner::new(
                 &settings.server.jwt_signing_secret,
                 settings.server.public_url.clone(),
-                3600,
+                settings.server.jwt_expiry_seconds,
                 settings.server.jwt_claims.clone(),
                 settings.server.rs256_private_key_pem.as_deref(),
                 settings.server.rs256_public_key_pem.as_deref(),

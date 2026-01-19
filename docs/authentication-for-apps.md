@@ -45,9 +45,11 @@ The `rise_jwt` cookie contains a JWT token with the following structure:
 - **name**: User's display name (optional)
 - **groups**: List of Rise teams the user belongs to
 - **iat**: Issued at timestamp (Unix epoch)
-- **exp**: Expiration timestamp (Unix epoch)
+- **exp**: Expiration timestamp (Unix epoch, default: 24 hours from issue time)
 - **iss**: Issuer (Rise backend URL)
 - **aud**: Audience (your application's URL)
+
+**Note**: The JWT expiration time is configurable via the `jwt_expiry_seconds` server setting (default: 86400 seconds = 24 hours).
 
 ## Validating the JWT
 
