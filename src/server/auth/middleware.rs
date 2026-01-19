@@ -13,6 +13,26 @@ use crate::db::{service_accounts, users, User};
 use crate::server::auth::cookie_helpers;
 use crate::server::state::AppState;
 
+/// Check if a JWT issuer is a Rise-issued JWT
+/// 
+/// Rise JWTs have `iss` set to the Rise public URL (e.g., "https://rise.example.com").
+/// This helper checks for exact match or scheme prefix match.
+fn is_rise_issued_jwt(issuer: &str, public_url: &str) -> bool {
+    // Exact match
+    if issuer == public_url {
+        return true;
+    }
+    
+    // Check if issuer starts with the public_url's base (handles port differences)
+    if let Some(public_base) = public_url.strip_suffix(|c: char| c.is_ascii_digit() || c == ':') {
+        if issuer.starts_with(public_base) {
+            return true;
+        }
+    }
+    
+    false
+}
+
 /// Extract Bearer token from Authorization header
 fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let auth_header = headers
@@ -219,7 +239,7 @@ pub async fn auth_middleware(
         state.public_url
     );
 
-    let user = if issuer == state.public_url || issuer.starts_with(&format!("{}://", state.public_url.split("://").next().unwrap_or("https"))) {
+    let user = if is_rise_issued_jwt(&issuer, &state.public_url) {
         // Rise-issued JWT (HS256 or RS256) - validate with JwtSigner
         tracing::debug!("Auth middleware: authenticating with Rise-issued JWT");
 
@@ -328,7 +348,7 @@ pub async fn optional_auth_middleware(
                 if let Ok(decoded) = general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
                     if let Ok(claims) = serde_json::from_slice::<MinimalClaims>(&decoded) {
                         // Check if it's a Rise-issued JWT
-                        if claims.iss == state.public_url || claims.iss.starts_with(&format!("{}://", state.public_url.split("://").next().unwrap_or("https"))) {
+                        if is_rise_issued_jwt(&claims.iss, &state.public_url) {
                             // Try to validate Rise JWT
                             if let Ok(rise_claims) = state.jwt_signer.verify_jwt_skip_aud(&token) {
                                 let email = &rise_claims.email;
