@@ -1,4 +1,4 @@
-use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD as BASE64URL};
 use base64::Engine;
 use jsonwebtoken::{decode, encode, Algorithm, DecodingKey, EncodingKey, Header, Validation};
 use rsa::traits::PublicKeyParts;
@@ -171,13 +171,9 @@ impl JwtSigner {
         let public_key = RsaPublicKey::from_public_key_pem(&self.rs256_public_key_pem)
             .map_err(|e| JwtSignerError::PemError(e.to_string()))?;
         
-        // Extract n (modulus) and e (exponent) as base64url
-        let n = BASE64.encode(public_key.n().to_bytes_be());
-        let e = BASE64.encode(public_key.e().to_bytes_be());
-
-        // Convert base64 to base64url (RFC 7515 standard for JWK)
-        let n_base64url = n.replace('+', "-").replace('/', "_").trim_end_matches('=').to_string();
-        let e_base64url = e.replace('+', "-").replace('/', "_").trim_end_matches('=').to_string();
+        // Extract n (modulus) and e (exponent) as base64url (RFC 7515 standard for JWK)
+        let n = BASE64URL.encode(public_key.n().to_bytes_be());
+        let e = BASE64URL.encode(public_key.e().to_bytes_be());
 
         Ok(serde_json::json!({
             "keys": [{
@@ -185,8 +181,8 @@ impl JwtSigner {
                 "use": "sig",
                 "alg": "RS256",
                 "kid": self.rs256_key_id,
-                "n": n_base64url,
-                "e": e_base64url,
+                "n": n,
+                "e": e,
             }]
         }))
     }
@@ -369,11 +365,17 @@ impl JwtSigner {
 
     /// Verify and decode an ingress JWT (backward compatibility wrapper)
     ///
-    /// This is a backward compatibility wrapper that verifies RS256 tokens
-    /// with a legacy "rise-ingress" audience.
+    /// This is a backward compatibility wrapper that verifies tokens
+    /// without strict audience validation.
+    ///
+    /// # Security Note
+    /// This method skips audience validation for backward compatibility during migration.
+    /// It should only be used in the ingress_auth handler where project access is
+    /// validated separately. For new code, use `verify_jwt` with explicit audience.
     ///
     /// # Deprecated
     /// Use `verify_jwt` with the actual project URL as audience instead.
+    /// This method will be removed after all existing tokens have expired (2024-Q2).
     #[deprecated(note = "Use verify_jwt with project URL as audience")]
     pub fn verify_ingress_jwt(&self, token: &str) -> Result<RiseClaims, JwtSignerError> {
         // Try with new project URL audience first, then fall back to legacy "rise-ingress"

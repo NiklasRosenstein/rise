@@ -20,6 +20,32 @@ use std::collections::HashMap;
 use tera::Tera;
 use tracing::instrument;
 
+/// Extract project URL (scheme + host + port) from a redirect URL
+///
+/// This is used to set the `aud` claim in Rise JWTs for project authentication.
+/// Falls back to public_url if the redirect_url cannot be parsed.
+///
+/// # Arguments
+/// * `redirect_url` - Full URL or relative path to extract base URL from
+/// * `fallback_url` - URL to use if parsing fails (typically Rise public URL)
+///
+/// # Returns
+/// Base URL in the format "https://host:port" (port omitted for 80/443)
+fn extract_project_url_from_redirect(redirect_url: &str, fallback_url: &str) -> String {
+    if let Ok(parsed_url) = url::Url::parse(redirect_url) {
+        if let Some(host) = parsed_url.host_str() {
+            let port_part = match parsed_url.port() {
+                Some(port) if port != 80 && port != 443 => format!(":{}", port),
+                _ => String::new(),
+            };
+            return format!("{}://{}{}", parsed_url.scheme(), host, port_part);
+        }
+    }
+    
+    // Fallback: use provided URL if parsing fails or host missing
+    fallback_url.trim_end_matches('/').to_string()
+}
+
 /// Helper function to sync IdP groups after login
 ///
 /// This validates the token and syncs the user's team memberships from IdP groups.
@@ -1009,22 +1035,7 @@ pub async fn oauth_callback(
 
         // Issue Rise JWT with user's team memberships
         // Extract project URL from redirect_url for the aud claim
-        let project_url = if let Ok(parsed_url) = url::Url::parse(&redirect_url) {
-            // Use scheme + host as the project URL
-            if let Some(host) = parsed_url.host_str() {
-                let port_part = match parsed_url.port() {
-                    Some(port) if port != 80 && port != 443 => format!(":{}", port),
-                    _ => String::new(),
-                };
-                format!("{}://{}{}", parsed_url.scheme(), host, port_part)
-            } else {
-                // Fallback: use public_url if parsing fails
-                state.public_url.trim_end_matches('/').to_string()
-            }
-        } else {
-            // If redirect_url is relative or invalid, use public_url
-            state.public_url.trim_end_matches('/').to_string()
-        };
+        let project_url = extract_project_url_from_redirect(&redirect_url, &state.public_url);
 
         let rise_jwt = state
             .jwt_signer
