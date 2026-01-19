@@ -1091,14 +1091,73 @@ pub async fn oauth_callback(
     }
 
     // Regular OAuth flow (not ingress auth) - UI login
-    tracing::info!("Using IdP token for session");
-    let cookie = cookie_helpers::create_session_cookie(
-        &token_info.id_token,
+    tracing::info!("Using Rise JWT for UI session");
+    
+    // Get claims from IdP token (use existing validation from earlier in the function)
+    let mut expected_claims = HashMap::new();
+    expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+    
+    let claims = state
+        .jwt_validator
+        .validate(
+            &token_info.id_token,
+            &state.auth_settings.issuer,
+            &expected_claims,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to validate ID token: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to validate token".to_string(),
+            )
+        })?;
+
+    let email = claims
+        .get("email")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            tracing::error!("Email claim missing from ID token");
+            (
+                StatusCode::BAD_REQUEST,
+                "Email claim missing from token".to_string(),
+            )
+        })?;
+
+    // Find or create user
+    let user = users::find_or_create(&state.db_pool, email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find or create user: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to process user".to_string(),
+            )
+        })?;
+
+    // Sync groups after login
+    sync_groups_after_login(&state, &token_info.id_token).await?;
+
+    // Issue Rise HS256 JWT for UI authentication
+    let rise_jwt = state
+        .jwt_signer
+        .sign_ui_jwt(&claims, user.id, &state.db_pool, &state.public_url, Some(exp))
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to sign UI JWT: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create authentication token".to_string(),
+            )
+        })?;
+
+    let cookie = cookie_helpers::create_rise_jwt_cookie(
+        &rise_jwt,
         &cookie_settings_for_response,
         max_age,
     );
 
-    tracing::info!("Setting session cookie and redirecting to {}", redirect_url);
+    tracing::info!("Setting Rise JWT cookie and redirecting to {}", redirect_url);
 
     // For regular OAuth flow, immediate redirect
     let response = (
@@ -1430,14 +1489,14 @@ pub async fn oauth_logout(
 ) -> Result<Response, (StatusCode, String)> {
     tracing::info!("Logout initiated");
 
-    // Clear the session cookie
-    let cookie = cookie_helpers::clear_session_cookie(&state.cookie_settings);
+    // Clear the Rise JWT cookie
+    let cookie = cookie_helpers::clear_rise_jwt_cookie(&state.cookie_settings);
 
     // Determine redirect URL
     let redirect_url = params.redirect.unwrap_or_else(|| "/".to_string());
 
     tracing::info!(
-        "Clearing session cookie and redirecting to {}",
+        "Clearing Rise JWT cookie and redirecting to {}",
         redirect_url
     );
 

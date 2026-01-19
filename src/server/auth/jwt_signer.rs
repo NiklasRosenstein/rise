@@ -42,6 +42,7 @@ pub struct RiseClaims {
 /// The RS256 keys can be exposed via JWKS for deployed apps to validate tokens.
 pub struct JwtSigner {
     // HS256 symmetric key for UI authentication
+    hs256_encoding_key: EncodingKey,
     hs256_decoding_key: DecodingKey,
     
     // RS256 asymmetric key pair for ingress authentication
@@ -101,7 +102,7 @@ impl JwtSigner {
             ));
         }
 
-        let _hs256_encoding_key = EncodingKey::from_secret(&secret);
+        let hs256_encoding_key = EncodingKey::from_secret(&secret);
         let hs256_decoding_key = DecodingKey::from_secret(&secret);
 
         // Set up RS256 key pair - either from config or generate new
@@ -194,6 +195,7 @@ impl JwtSigner {
             };
 
         Ok(Self {
+            hs256_encoding_key,
             hs256_decoding_key,
             rs256_encoding_key: Arc::new(rs256_encoding_key),
             rs256_decoding_key: Arc::new(rs256_decoding_key),
@@ -230,6 +232,73 @@ impl JwtSigner {
                 "e": e,
             }]
         }))
+    }
+
+    /// Sign a new Rise JWT for UI authentication (HS256)
+    ///
+    /// This JWT is used for authenticating to the Rise UI itself.
+    /// Uses HS256 symmetric encryption and sets aud to the Rise public URL.
+    ///
+    /// # Arguments
+    /// * `idp_claims` - Claims from the IdP JWT (must contain at least "sub" and "email")
+    /// * `user_id` - UUID of the user (for fetching team memberships)
+    /// * `db_pool` - Database connection pool (for fetching team memberships)
+    /// * `rise_public_url` - The Rise public URL (used as aud claim)
+    /// * `expiry_override` - Optional expiry timestamp (if None, uses default_expiry_seconds)
+    pub async fn sign_ui_jwt(
+        &self,
+        idp_claims: &serde_json::Value,
+        user_id: uuid::Uuid,
+        db_pool: &sqlx::PgPool,
+        rise_public_url: &str,
+        expiry_override: Option<u64>,
+    ) -> Result<String, JwtSignerError> {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH)?.as_secs();
+        let exp = expiry_override.unwrap_or_else(|| now + self.default_expiry_seconds);
+
+        // Extract required claims
+        let sub = idp_claims
+            .get("sub")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JwtSignerError::MissingClaim("sub".to_string()))?
+            .to_string();
+
+        let email = idp_claims
+            .get("email")
+            .and_then(|v| v.as_str())
+            .ok_or_else(|| JwtSignerError::MissingClaim("email".to_string()))?
+            .to_string();
+
+        // Extract optional name claim if requested
+        let name = if self.claims_to_include.contains(&"name".to_string()) {
+            idp_claims
+                .get("name")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        } else {
+            None
+        };
+
+        // Fetch user's team memberships for groups claim
+        let groups = crate::db::teams::get_team_names_for_user(db_pool, user_id)
+            .await
+            .ok();
+
+        let claims = RiseClaims {
+            sub,
+            email,
+            name,
+            groups,
+            iat: now,
+            exp,
+            iss: self.issuer.clone(),
+            aud: rise_public_url.to_string(),
+        };
+
+        let header = Header::new(Algorithm::HS256);
+        let token = encode(&header, &claims, &self.hs256_encoding_key)?;
+
+        Ok(token)
     }
 
     /// Sign a new Rise JWT for project ingress authentication (RS256)
