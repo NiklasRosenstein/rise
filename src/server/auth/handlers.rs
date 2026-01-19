@@ -1508,3 +1508,25 @@ pub async fn cli_auth_success(
 
     Ok(Html(html).into_response())
 }
+
+/// JWKS (JSON Web Key Set) endpoint
+///
+/// Returns the public keys used to sign Rise-issued RS256 JWTs.
+/// Deployed applications can use this endpoint to validate Rise-issued tokens.
+#[instrument(skip(state))]
+pub async fn jwks(State(state): State<AppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    tracing::debug!("JWKS endpoint called");
+
+    let jwks = state
+        .jwt_signer
+        .generate_jwks()
+        .map_err(|e| {
+            tracing::error!("Failed to generate JWKS: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to generate JWKS".to_string(),
+            )
+        })?;
+
+    Ok(Json(jwks))
+}

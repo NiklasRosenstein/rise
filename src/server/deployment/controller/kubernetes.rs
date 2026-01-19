@@ -122,6 +122,8 @@ pub struct KubernetesControllerConfig {
     pub node_selector: std::collections::HashMap<String, String>,
     pub image_pull_secret_name: Option<String>,
     pub access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
+    /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
+    pub rise_jwks_json: String,
 }
 
 /// Kubernetes controller implementation
@@ -151,6 +153,8 @@ pub struct KubernetesController {
     /// Value: last observed resourceVersion from Kubernetes API
     /// Lost on controller restart → causes one re-apply, then cached again
     resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
+    /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
+    rise_jwks_json: String,
 }
 
 impl KubernetesController {
@@ -181,6 +185,7 @@ impl KubernetesController {
             image_pull_secret_name: config.image_pull_secret_name,
             access_classes: config.access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            rise_jwks_json: config.rise_jwks_json,
         })
     }
 
@@ -1724,6 +1729,16 @@ impl KubernetesController {
             k8s_env_vars.push(EnvVar {
                 name: "PORT".to_string(),
                 value: Some(http_port.to_string()),
+                ..Default::default()
+            });
+        }
+
+        // Inject RISE_JWKS environment variable with RS256 public keys for JWT verification
+        // Only add if not already set by user (allows override for testing)
+        if !k8s_env_vars.iter().any(|env| env.name == "RISE_JWKS") {
+            k8s_env_vars.push(EnvVar {
+                name: "RISE_JWKS".to_string(),
+                value: Some(self.rise_jwks_json.clone()),
                 ..Default::default()
             });
         }
