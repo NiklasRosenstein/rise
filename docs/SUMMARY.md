@@ -8,6 +8,7 @@
 - [Local Development](development.md)
 - [CLI Guide](cli.md)
 - [Authentication](authentication.md)
+- [Authentication for Applications](authentication-for-apps.md)
 - [Deployments](deployments.md)
 - [Building Images](builds.md)
 - [Configuration](configuration.md)
