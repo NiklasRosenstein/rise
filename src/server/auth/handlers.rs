@@ -41,7 +41,7 @@ fn extract_project_url_from_redirect(redirect_url: &str, fallback_url: &str) -> 
             return format!("{}://{}{}", parsed_url.scheme(), host, port_part);
         }
     }
-    
+
     // Fallback: use provided URL if parsing fails or host missing
     fallback_url.trim_end_matches('/').to_string()
 }
@@ -1056,11 +1056,11 @@ pub async fn oauth_callback(
 
     // Regular OAuth flow (not ingress auth) - UI login
     tracing::info!("Using Rise JWT for UI session");
-    
+
     // Get claims from IdP token (use existing validation from earlier in the function)
     let mut expected_claims = HashMap::new();
     expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
-    
+
     let claims = state
         .jwt_validator
         .validate(
@@ -1105,7 +1105,13 @@ pub async fn oauth_callback(
     // Issue Rise HS256 JWT for UI authentication
     let rise_jwt = state
         .jwt_signer
-        .sign_ui_jwt(&claims, user.id, &state.db_pool, &state.public_url, Some(exp))
+        .sign_ui_jwt(
+            &claims,
+            user.id,
+            &state.db_pool,
+            &state.public_url,
+            Some(exp),
+        )
         .await
         .map_err(|e| {
             tracing::error!("Failed to sign UI JWT: {:#}", e);
@@ -1115,13 +1121,13 @@ pub async fn oauth_callback(
             )
         })?;
 
-    let cookie = cookie_helpers::create_rise_jwt_cookie(
-        &rise_jwt,
-        &cookie_settings_for_response,
-        max_age,
-    );
+    let cookie =
+        cookie_helpers::create_rise_jwt_cookie(&rise_jwt, &cookie_settings_for_response, max_age);
 
-    tracing::info!("Setting Rise JWT cookie and redirecting to {}", redirect_url);
+    tracing::info!(
+        "Setting Rise JWT cookie and redirecting to {}",
+        redirect_url
+    );
 
     // Use success page with delayed redirect to ensure cookie is properly persisted
     render_ui_login_success_page(&redirect_url, &cookie)
@@ -1197,14 +1203,13 @@ fn render_ui_login_success_page(
     cookie: &str,
 ) -> Result<Response, (StatusCode, String)> {
     // Load UI success template
-    let template_content = StaticAssets::get("auth-ui-success.html.tera")
-        .ok_or_else(|| {
-            tracing::error!("auth-ui-success.html.tera template not found");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Template not found".to_string(),
-            )
-        })?;
+    let template_content = StaticAssets::get("auth-ui-success.html.tera").ok_or_else(|| {
+        tracing::error!("auth-ui-success.html.tera template not found");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Template not found".to_string(),
+        )
+    })?;
 
     let template_str = std::str::from_utf8(&template_content.data).map_err(|e| {
         tracing::error!("Failed to decode template: {:#}", e);
@@ -1601,19 +1606,18 @@ pub async fn cli_auth_success(
 /// Returns the public keys used to sign Rise-issued RS256 JWTs.
 /// Deployed applications can use this endpoint to validate Rise-issued tokens.
 #[instrument(skip(state))]
-pub async fn jwks(State(state): State<AppState>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+pub async fn jwks(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     tracing::debug!("JWKS endpoint called");
 
-    let jwks = state
-        .jwt_signer
-        .generate_jwks()
-        .map_err(|e| {
-            tracing::error!("Failed to generate JWKS: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to generate JWKS".to_string(),
-            )
-        })?;
+    let jwks = state.jwt_signer.generate_jwks().map_err(|e| {
+        tracing::error!("Failed to generate JWKS: {:#}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to generate JWKS".to_string(),
+        )
+    })?;
 
     Ok(Json(jwks))
 }

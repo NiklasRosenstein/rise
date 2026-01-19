@@ -320,14 +320,16 @@ impl AppState {
             )
             .context("Failed to initialize JWT signer for ingress authentication")?,
         );
-        tracing::info!("Initialized JWT signer for ingress authentication (expiry: {}s)", settings.server.jwt_expiry_seconds);
+        tracing::info!(
+            "Initialized JWT signer for ingress authentication (expiry: {}s)",
+            settings.server.jwt_expiry_seconds
+        );
 
         // Generate JWKS JSON for RS256 public keys to pass to deployed applications
         let jwks = jwt_signer
             .generate_jwks()
             .context("Failed to generate JWKS for deployment controller")?;
-        let jwks_json = serde_json::to_string(&jwks)
-            .context("Failed to serialize JWKS to JSON")?;
+        let jwks_json = serde_json::to_string(&jwks).context("Failed to serialize JWKS to JSON")?;
         tracing::info!("Generated JWKS for RS256 JWT verification in deployed apps");
 
         // Initialize OAuth2 client
@@ -517,7 +519,13 @@ impl AppState {
                 db_pool: db_pool.clone(),
                 encryption_provider: encryption_provider.clone(),
             });
-            init_kubernetes_backend(settings, controller_state, registry_provider.clone(), jwks_json).await?
+            init_kubernetes_backend(
+                settings,
+                controller_state,
+                registry_provider.clone(),
+                jwks_json,
+            )
+            .await?
         };
 
         // Initialize extension registry
@@ -914,7 +922,13 @@ impl AppState {
             // Controller doesn't have JWT signer, pass empty JWKS for now
             // This is only used when running in controller-only mode (without HTTP server)
             let jwks_json = r#"{"keys":[]}"#.to_string();
-            init_kubernetes_backend(settings, controller_state, registry_provider.clone(), jwks_json).await?
+            init_kubernetes_backend(
+                settings,
+                controller_state,
+                registry_provider.clone(),
+                jwks_json,
+            )
+            .await?
         };
 
         // Initialize empty extension registry for controller (not used)

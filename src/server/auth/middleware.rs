@@ -14,7 +14,7 @@ use crate::server::auth::cookie_helpers;
 use crate::server::state::AppState;
 
 /// Check if a JWT issuer is a Rise-issued JWT
-/// 
+///
 /// Rise JWTs have `iss` set to the Rise public URL (e.g., "https://rise.example.com").
 /// This helper checks for exact match or scheme prefix match.
 fn is_rise_issued_jwt(issuer: &str, public_url: &str) -> bool {
@@ -22,23 +22,20 @@ fn is_rise_issued_jwt(issuer: &str, public_url: &str) -> bool {
     if issuer == public_url {
         return true;
     }
-    
+
     // Check if issuer starts with the public_url's base (handles port differences)
     if let Some(public_base) = public_url.strip_suffix(|c: char| c.is_ascii_digit() || c == ':') {
         if issuer.starts_with(public_base) {
             return true;
         }
     }
-    
+
     false
 }
 
 /// Extract Bearer token from Authorization header
 fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
-    let auth_header = headers
-        .get("Authorization")?
-        .to_str()
-        .ok()?;
+    let auth_header = headers.get("Authorization")?.to_str().ok()?;
 
     if !auth_header.starts_with("Bearer ") {
         return None;
@@ -166,7 +163,7 @@ async fn authenticate_service_account(
 
 /// Authentication middleware that validates JWT and injects User into request extensions
 /// Supports both user authentication (via configured OIDC provider) and service account authentication (via external OIDC providers)
-/// 
+///
 /// Authentication methods (in order of precedence):
 /// 1. Rise JWT from `rise_jwt` cookie (HS256 for UI, RS256 for ingress)
 /// 2. IdP token from Authorization Bearer header (for backward compatibility)
@@ -183,10 +180,16 @@ pub async fn auth_middleware(
 
     // Try to extract token from cookie first (new primary method)
     let token = if let Some(cookie_token) = extract_rise_jwt_from_cookie(&headers) {
-        tracing::debug!("Auth middleware: found Rise JWT in cookie (length={})", cookie_token.len());
+        tracing::debug!(
+            "Auth middleware: found Rise JWT in cookie (length={})",
+            cookie_token.len()
+        );
         cookie_token
     } else if let Some(bearer_token) = extract_bearer_token(&headers) {
-        tracing::debug!("Auth middleware: found Bearer token in Authorization header (length={})", bearer_token.len());
+        tracing::debug!(
+            "Auth middleware: found Bearer token in Authorization header (length={})",
+            bearer_token.len()
+        );
         bearer_token
     } else {
         tracing::warn!("Auth middleware: no authentication token found");
@@ -244,13 +247,10 @@ pub async fn auth_middleware(
         tracing::debug!("Auth middleware: authenticating with Rise-issued JWT");
 
         // Verify Rise JWT (skips audience validation for now - we trust our own JWTs)
-        let claims = state
-            .jwt_signer
-            .verify_jwt_skip_aud(&token)
-            .map_err(|e| {
-                tracing::warn!("Auth middleware: Rise JWT validation failed: {:#}", e);
-                (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
-            })?;
+        let claims = state.jwt_signer.verify_jwt_skip_aud(&token).map_err(|e| {
+            tracing::warn!("Auth middleware: Rise JWT validation failed: {:#}", e);
+            (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+        })?;
 
         tracing::debug!("Auth middleware: Rise JWT validation successful");
 
@@ -337,8 +337,7 @@ pub async fn optional_auth_middleware(
     next: Next,
 ) -> Response {
     // Try to extract token from cookie first, then Authorization header
-    let token = extract_rise_jwt_from_cookie(&headers)
-        .or_else(|| extract_bearer_token(&headers));
+    let token = extract_rise_jwt_from_cookie(&headers).or_else(|| extract_bearer_token(&headers));
 
     if let Some(token) = token {
         // Peek at issuer
@@ -352,24 +351,29 @@ pub async fn optional_auth_middleware(
                             // Try to validate Rise JWT
                             if let Ok(rise_claims) = state.jwt_signer.verify_jwt_skip_aud(&token) {
                                 let email = &rise_claims.email;
-                                if let Ok(user) = users::find_or_create(&state.db_pool, email).await {
+                                if let Ok(user) = users::find_or_create(&state.db_pool, email).await
+                                {
                                     req.extensions_mut().insert(user);
                                 }
                             }
                         } else if claims.iss == state.auth_settings.issuer {
                             // Try to validate IdP token
                             let mut expected_claims = HashMap::new();
-                            expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+                            expected_claims
+                                .insert("aud".to_string(), state.auth_settings.client_id.clone());
 
                             if let Ok(claims_value) = state
                                 .jwt_validator
                                 .validate(&token, &state.auth_settings.issuer, &expected_claims)
                                 .await
                             {
-                                if let Ok(claims) =
-                                    serde_json::from_value::<crate::server::auth::jwt::Claims>(claims_value)
+                                if let Ok(claims) = serde_json::from_value::<
+                                    crate::server::auth::jwt::Claims,
+                                >(claims_value)
                                 {
-                                    if let Ok(user) = users::find_or_create(&state.db_pool, &claims.email).await {
+                                    if let Ok(user) =
+                                        users::find_or_create(&state.db_pool, &claims.email).await
+                                    {
                                         req.extensions_mut().insert(user);
                                     }
                                 }

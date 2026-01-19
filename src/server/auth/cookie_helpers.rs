@@ -66,7 +66,7 @@ pub fn create_rise_jwt_cookie(
 /// Uses proper cookie parsing per RFC 6265.
 pub fn extract_rise_jwt_cookie(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get("cookie")?.to_str().ok()?;
-    
+
     parse_cookies(cookie_header)
         .find(|(name, _)| *name == RISE_JWT_COOKIE_NAME)
         .map(|(_, value)| value.to_string())
@@ -95,8 +95,6 @@ pub fn clear_rise_jwt_cookie(settings: &CookieSettings) -> String {
 
     cookie_parts.join("; ")
 }
-
-
 
 #[cfg(test)]
 mod tests {

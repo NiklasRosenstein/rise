@@ -44,13 +44,13 @@ pub struct JwtSigner {
     // HS256 symmetric key for UI authentication
     hs256_encoding_key: EncodingKey,
     hs256_decoding_key: DecodingKey,
-    
+
     // RS256 asymmetric key pair for ingress authentication
     rs256_encoding_key: Arc<EncodingKey>,
     rs256_decoding_key: Arc<DecodingKey>,
     rs256_public_key_pem: String,
     rs256_key_id: String,
-    
+
     issuer: String,
     default_expiry_seconds: u64,
     claims_to_include: Vec<String>,
@@ -106,93 +106,100 @@ impl JwtSigner {
         let hs256_decoding_key = DecodingKey::from_secret(&secret);
 
         // Set up RS256 key pair - either from config or generate new
-        let (rs256_encoding_key, rs256_decoding_key, rs256_public_key_pem, rs256_key_id) =
-            if let (Some(private_pem), Some(public_pem)) = (rs256_private_key_pem, rs256_public_key_pem) {
-                // Use provided keys
-                tracing::info!("Using pre-configured RS256 key pair");
-                
-                let encoding_key = EncodingKey::from_rsa_pem(private_pem.as_bytes())
-                    .map_err(|e| JwtSignerError::RsaKeyError(format!("Invalid RS256 private key: {}", e)))?;
-                
-                let decoding_key = DecodingKey::from_rsa_pem(public_pem.as_bytes())
-                    .map_err(|e| JwtSignerError::RsaKeyError(format!("Invalid RS256 public key: {}", e)))?;
-                
-                // Generate key ID from public key
-                use sha2::{Sha256, Digest};
-                let mut hasher = Sha256::new();
-                hasher.update(public_pem.as_bytes());
-                let hash = hasher.finalize();
-                let key_id = format!("{:x}", hash)[..16].to_string();
-                
-                (encoding_key, decoding_key, public_pem.to_string(), key_id)
-            } else if let Some(private_pem) = rs256_private_key_pem {
-                // Derive public key from private key
-                tracing::info!("Using pre-configured RS256 private key, deriving public key");
-                
-                use rsa::pkcs8::{DecodePrivateKey, EncodePublicKey};
-                use rsa::RsaPrivateKey;
-                
-                let private_key = RsaPrivateKey::from_pkcs8_pem(private_pem)
-                    .map_err(|e| JwtSignerError::RsaKeyError(format!("Invalid RS256 private key PEM: {}", e)))?;
-                
-                let public_key = rsa::RsaPublicKey::from(&private_key);
-                let public_key_pem = public_key
-                    .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
-                    .map_err(|e| JwtSignerError::PemError(e.to_string()))?;
-                
-                let encoding_key = EncodingKey::from_rsa_pem(private_pem.as_bytes())
-                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
-                
-                let decoding_key = DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
-                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
-                
-                // Generate key ID from public key
-                use sha2::{Sha256, Digest};
-                let mut hasher = Sha256::new();
-                hasher.update(public_key_pem.as_bytes());
-                let hash = hasher.finalize();
-                let key_id = format!("{:x}", hash)[..16].to_string();
-                
-                (encoding_key, decoding_key, public_key_pem, key_id)
-            } else {
-                // Generate new RS256 key pair (2048-bit RSA key)
-                tracing::warn!("No RS256 keys configured - generating new key pair. JWTs will be invalidated on restart. Configure rs256_private_key_pem to persist keys.");
-                
-                use rsa::{RsaPrivateKey, RsaPublicKey};
-                use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
-                
-                let mut rng = rand::thread_rng();
-                let bits = 2048;
-                let private_key = RsaPrivateKey::new(&mut rng, bits)
-                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
-                let public_key = RsaPublicKey::from(&private_key);
+        let (rs256_encoding_key, rs256_decoding_key, rs256_public_key_pem, rs256_key_id) = if let (
+            Some(private_pem),
+            Some(public_pem),
+        ) =
+            (rs256_private_key_pem, rs256_public_key_pem)
+        {
+            // Use provided keys
+            tracing::info!("Using pre-configured RS256 key pair");
 
-                // Encode keys to PEM format
-                let private_key_pem = private_key
-                    .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-                    .map_err(|e| JwtSignerError::PemError(e.to_string()))?
-                    .to_string();
-                
-                let public_key_pem = public_key
-                    .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
-                    .map_err(|e| JwtSignerError::PemError(e.to_string()))?;
+            let encoding_key = EncodingKey::from_rsa_pem(private_pem.as_bytes()).map_err(|e| {
+                JwtSignerError::RsaKeyError(format!("Invalid RS256 private key: {}", e))
+            })?;
 
-                // Create encoding and decoding keys
-                let encoding_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
-                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
-                
-                let decoding_key = DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
-                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+            let decoding_key = DecodingKey::from_rsa_pem(public_pem.as_bytes()).map_err(|e| {
+                JwtSignerError::RsaKeyError(format!("Invalid RS256 public key: {}", e))
+            })?;
 
-                // Generate key ID (SHA-256 hash of the public key)
-                use sha2::{Sha256, Digest};
-                let mut hasher = Sha256::new();
-                hasher.update(public_key_pem.as_bytes());
-                let hash = hasher.finalize();
-                let key_id = format!("{:x}", hash)[..16].to_string();
-                
-                (encoding_key, decoding_key, public_key_pem, key_id)
-            };
+            // Generate key ID from public key
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(public_pem.as_bytes());
+            let hash = hasher.finalize();
+            let key_id = format!("{:x}", hash)[..16].to_string();
+
+            (encoding_key, decoding_key, public_pem.to_string(), key_id)
+        } else if let Some(private_pem) = rs256_private_key_pem {
+            // Derive public key from private key
+            tracing::info!("Using pre-configured RS256 private key, deriving public key");
+
+            use rsa::pkcs8::{DecodePrivateKey, EncodePublicKey};
+            use rsa::RsaPrivateKey;
+
+            let private_key = RsaPrivateKey::from_pkcs8_pem(private_pem).map_err(|e| {
+                JwtSignerError::RsaKeyError(format!("Invalid RS256 private key PEM: {}", e))
+            })?;
+
+            let public_key = rsa::RsaPublicKey::from(&private_key);
+            let public_key_pem = public_key
+                .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+                .map_err(|e| JwtSignerError::PemError(e.to_string()))?;
+
+            let encoding_key = EncodingKey::from_rsa_pem(private_pem.as_bytes())
+                .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+
+            let decoding_key = DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
+                .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+
+            // Generate key ID from public key
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(public_key_pem.as_bytes());
+            let hash = hasher.finalize();
+            let key_id = format!("{:x}", hash)[..16].to_string();
+
+            (encoding_key, decoding_key, public_key_pem, key_id)
+        } else {
+            // Generate new RS256 key pair (2048-bit RSA key)
+            tracing::warn!("No RS256 keys configured - generating new key pair. JWTs will be invalidated on restart. Configure rs256_private_key_pem to persist keys.");
+
+            use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
+            use rsa::{RsaPrivateKey, RsaPublicKey};
+
+            let mut rng = rand::thread_rng();
+            let bits = 2048;
+            let private_key = RsaPrivateKey::new(&mut rng, bits)
+                .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+            let public_key = RsaPublicKey::from(&private_key);
+
+            // Encode keys to PEM format
+            let private_key_pem = private_key
+                .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+                .map_err(|e| JwtSignerError::PemError(e.to_string()))?
+                .to_string();
+
+            let public_key_pem = public_key
+                .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+                .map_err(|e| JwtSignerError::PemError(e.to_string()))?;
+
+            // Create encoding and decoding keys
+            let encoding_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
+                .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+
+            let decoding_key = DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
+                .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+
+            // Generate key ID (SHA-256 hash of the public key)
+            use sha2::{Digest, Sha256};
+            let mut hasher = Sha256::new();
+            hasher.update(public_key_pem.as_bytes());
+            let hash = hasher.finalize();
+            let key_id = format!("{:x}", hash)[..16].to_string();
+
+            (encoding_key, decoding_key, public_key_pem, key_id)
+        };
 
         Ok(Self {
             hs256_encoding_key,
@@ -214,10 +221,10 @@ impl JwtSigner {
         // Parse the public key to extract n and e components
         use rsa::pkcs8::DecodePublicKey;
         use rsa::RsaPublicKey;
-        
+
         let public_key = RsaPublicKey::from_public_key_pem(&self.rs256_public_key_pem)
             .map_err(|e| JwtSignerError::PemError(e.to_string()))?;
-        
+
         // Extract n (modulus) and e (exponent) as base64url (RFC 7515 standard for JWK)
         let n = BASE64URL.encode(public_key.n().to_bytes_be());
         let e = BASE64URL.encode(public_key.e().to_bytes_be());
@@ -382,14 +389,15 @@ impl JwtSigner {
     /// The decoded claims if the JWT signature and issuer are valid
     pub fn verify_jwt_skip_aud(&self, token: &str) -> Result<RiseClaims, JwtSignerError> {
         let header = jsonwebtoken::decode_header(token)?;
-        
+
         match header.alg {
             Algorithm::HS256 => {
                 let mut validation = Validation::new(Algorithm::HS256);
                 validation.set_issuer(&[&self.issuer]);
                 validation.validate_aud = false;
 
-                let token_data = decode::<RiseClaims>(token, &self.hs256_decoding_key, &validation)?;
+                let token_data =
+                    decode::<RiseClaims>(token, &self.hs256_decoding_key, &validation)?;
                 Ok(token_data.claims)
             }
             Algorithm::RS256 => {
@@ -397,13 +405,14 @@ impl JwtSigner {
                 validation.set_issuer(&[&self.issuer]);
                 validation.validate_aud = false;
 
-                let token_data = decode::<RiseClaims>(token, &self.rs256_decoding_key, &validation)?;
+                let token_data =
+                    decode::<RiseClaims>(token, &self.rs256_decoding_key, &validation)?;
                 Ok(token_data.claims)
             }
             _ => Err(JwtSignerError::SigningFailed(
                 jsonwebtoken::errors::Error::from(
-                    jsonwebtoken::errors::ErrorKind::InvalidAlgorithm
-                )
+                    jsonwebtoken::errors::ErrorKind::InvalidAlgorithm,
+                ),
             )),
         }
     }
@@ -433,7 +442,7 @@ mod tests {
     #[test]
     fn test_create_signer() {
         let signer = create_test_signer();
-        
+
         // Verify RS256 keys were generated
         assert!(!signer.rs256_public_key_pem.is_empty());
         assert!(!signer.rs256_key_id.is_empty());
@@ -443,19 +452,22 @@ mod tests {
     #[test]
     fn test_generate_jwks() {
         let signer = create_test_signer();
-        
+
         let jwks = signer.generate_jwks().unwrap();
-        
+
         // Verify JWKS structure
         assert!(jwks.get("keys").is_some());
         let keys = jwks.get("keys").unwrap().as_array().unwrap();
         assert_eq!(keys.len(), 1);
-        
+
         let key = &keys[0];
         assert_eq!(key.get("kty").unwrap().as_str().unwrap(), "RSA");
         assert_eq!(key.get("use").unwrap().as_str().unwrap(), "sig");
         assert_eq!(key.get("alg").unwrap().as_str().unwrap(), "RS256");
-        assert_eq!(key.get("kid").unwrap().as_str().unwrap(), &signer.rs256_key_id);
+        assert_eq!(
+            key.get("kid").unwrap().as_str().unwrap(),
+            &signer.rs256_key_id
+        );
         assert!(key.get("n").is_some());
         assert!(key.get("e").is_some());
     }
