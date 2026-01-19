@@ -1,0 +1,15 @@
+{
+  "name": "rise-jwt-viewer",
+  "version": "1.0.0",
+  "description": "Example showing how to decode and display rise_jwt cookie claims",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

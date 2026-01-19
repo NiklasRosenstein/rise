@@ -24,30 +24,30 @@ The `rise_jwt` cookie contains a JWT token with the following structure:
 }
 ```
 
-### JWT Claims
+### JWT Claims (Example)
 ```json
 {
-  "sub": "<user-id>",
-  "email": "user@example.com",
-  "name": "User Name",
-  "groups": ["team1", "team2"],
-  "iat": 1234567890,
-  "exp": 1234571490,
-  "iss": "<rise-backend-url>",
-  "aud": "<your-app-url>"
+  "sub": "CiQwOGE4Njg0Yi1kYjg4LTRiNzMtOTBhOS0zY2QxNjYxZjU0NjYSBWxvY2Fs",
+  "email": "admin@example.com",
+  "name": "admin",
+  "groups": [],
+  "iat": 1768858875,
+  "exp": 1768945275,
+  "iss": "http://localhost:3000",
+  "aud": "http://test.rise.local:8080"
 }
 ```
 
 ### Claim Descriptions
 
-- **sub**: Unique user identifier from the identity provider
+- **sub**: Unique user identifier from the identity provider (typically a base64-encoded UUID)
 - **email**: User's email address
-- **name**: User's display name (optional)
-- **groups**: List of Rise teams the user belongs to
-- **iat**: Issued at timestamp (Unix epoch)
-- **exp**: Expiration timestamp (Unix epoch, default: 24 hours from issue time)
-- **iss**: Issuer (Rise backend URL)
-- **aud**: Audience (your application's URL)
+- **name**: User's display name (optional, included if available from IdP)
+- **groups**: Array of Rise team names the user belongs to (empty array if user has no team memberships)
+- **iat**: Issued at timestamp (Unix epoch seconds)
+- **exp**: Expiration timestamp (Unix epoch seconds, default: 24 hours from issue time)
+- **iss**: Issuer (Rise backend URL, e.g., `http://localhost:3000`)
+- **aud**: Audience (your deployed application's URL, e.g., `http://test.rise.local:8080`)
 
 **Note**: The JWT expiration time is configurable via the `jwt_expiry_seconds` server setting (default: 86400 seconds = 24 hours).
 
