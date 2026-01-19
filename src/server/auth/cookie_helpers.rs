@@ -1,7 +1,7 @@
 use axum::http::HeaderMap;
 
-/// Cookie name for the session token (IdP JWT, fallback - deprecated)
-pub const COOKIE_NAME: &str = "_rise_session";
+/// Cookie name for the session token (IdP JWT, used during OAuth flow)
+const COOKIE_NAME: &str = "_rise_session";
 
 /// Cookie name for Rise-issued JWT tokens (used for both UI and ingress auth)
 pub const RISE_JWT_COOKIE_NAME: &str = "rise_jwt";
@@ -61,17 +61,7 @@ pub fn create_session_cookie(
     cookie_parts.join("; ")
 }
 
-/// Extract the session cookie value from request headers
-///
-/// Parses the Cookie header and extracts the _rise_session value if present
-#[cfg_attr(not(test), allow(dead_code))]
-pub fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
-    let cookie_header = headers.get("cookie")?.to_str().ok()?;
-    
-    parse_cookies(cookie_header)
-        .find(|(name, _)| *name == COOKIE_NAME)
-        .map(|(_, value)| value.to_string())
-}
+
 
 /// Create a cookie that clears the session
 ///
@@ -142,6 +132,18 @@ pub fn extract_rise_jwt_cookie(headers: &HeaderMap) -> Option<String> {
     
     parse_cookies(cookie_header)
         .find(|(name, _)| *name == RISE_JWT_COOKIE_NAME)
+        .map(|(_, value)| value.to_string())
+}
+
+/// Extract the session cookie value from request headers
+///
+/// Parses the Cookie header and extracts the _rise_session value if present
+#[cfg_attr(not(test), allow(dead_code))]
+fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
+    let cookie_header = headers.get("cookie")?.to_str().ok()?;
+    
+    parse_cookies(cookie_header)
+        .find(|(name, _)| *name == COOKIE_NAME)
         .map(|(_, value)| value.to_string())
 }
 

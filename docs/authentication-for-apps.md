@@ -58,7 +58,6 @@ Rise provides the public keys needed to validate JWTs through the `RISE_JWKS` en
 Your deployed application automatically receives:
 
 - **RISE_JWKS**: JSON Web Key Set (JWKS) containing RS256 public keys for JWT verification
-- **PORT**: The port your application should listen on
 
 ### Example: Node.js/JavaScript
 
@@ -277,6 +276,103 @@ func authMiddleware(next http.Handler) http.Handler {
         ctx := context.WithValue(r.Context(), "user", claims)
         next.ServeHTTP(w, r.WithContext(ctx))
     })
+}
+```
+
+### Example: Rust
+
+```rust
+use axum::{
+    extract::Request,
+    http::StatusCode,
+    middleware::Next,
+    response::Response,
+};
+use jsonwebtoken::{decode, decode_header, Algorithm, DecodingKey, Validation};
+use serde::{Deserialize, Serialize};
+use std::env;
+
+#[derive(Debug, Serialize, Deserialize)]
+struct RiseClaims {
+    sub: String,
+    email: String,
+    name: Option<String>,
+    groups: Option<Vec<String>>,
+    iat: u64,
+    exp: u64,
+    iss: String,
+    aud: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct Jwks {
+    keys: Vec<Jwk>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Jwk {
+    kid: String,
+    n: String,
+    e: String,
+}
+
+fn get_jwks() -> Result<Jwks, Box<dyn std::error::Error>> {
+    let jwks_json = env::var("RISE_JWKS").unwrap_or_else(|_| r#"{"keys":[]}"#.to_string());
+    Ok(serde_json::from_str(&jwks_json)?)
+}
+
+fn verify_rise_jwt(token: &str) -> Result<RiseClaims, Box<dyn std::error::Error>> {
+    let jwks = get_jwks()?;
+    let header = decode_header(token)?;
+    
+    let kid = header.kid.ok_or("Missing kid in JWT header")?;
+    
+    // Find matching key in JWKS
+    let jwk = jwks
+        .keys
+        .iter()
+        .find(|k| k.kid == kid)
+        .ok_or("Key not found in JWKS")?;
+    
+    // Decode the JWK components and create DecodingKey
+    // Note: This requires the `rsa` crate and proper JWK-to-PEM conversion
+    // For production use, consider using a library like `jsonwebtoken-jwks`
+    
+    // Simplified version - in production, properly convert JWK to DecodingKey
+    let decoding_key = DecodingKey::from_rsa_components(&jwk.n, &jwk.e)?;
+    
+    let mut validation = Validation::new(Algorithm::RS256);
+    validation.set_issuer(&[env::var("RISE_ISSUER").unwrap_or_else(|_| "https://rise.example.com".to_string())]);
+    validation.set_audience(&[env::var("APP_URL").unwrap_or_else(|_| "https://myapp.apps.rise.example.com".to_string())]);
+    
+    let token_data = decode::<RiseClaims>(token, &decoding_key, &validation)?;
+    Ok(token_data.claims)
+}
+
+async fn auth_middleware(
+    request: Request,
+    next: Next,
+) -> Result<Response, StatusCode> {
+    // Extract rise_jwt cookie
+    let token = request
+        .headers()
+        .get("cookie")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|cookies| {
+            cookies.split(';').find_map(|cookie| {
+                let cookie = cookie.trim();
+                cookie.strip_prefix("rise_jwt=").map(|v| v.to_string())
+            })
+        })
+        .ok_or(StatusCode::UNAUTHORIZED)?;
+    
+    // Verify JWT
+    let claims = verify_rise_jwt(&token).map_err(|_| StatusCode::UNAUTHORIZED)?;
+    
+    // Add user info to request extensions
+    // (You can access this in your handlers)
+    
+    Ok(next.run(request).await)
 }
 ```
 

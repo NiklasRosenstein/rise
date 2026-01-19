@@ -1280,7 +1280,7 @@ pub async fn ingress_auth(
 
     let ingress_claims = state
         .jwt_signer
-        .verify_ingress_jwt(&rise_jwt)
+        .verify_jwt_skip_aud(&rise_jwt)
         .map_err(|e| {
             tracing::warn!("Invalid or expired ingress JWT: {:#}", e);
             (
