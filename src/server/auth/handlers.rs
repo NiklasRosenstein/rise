@@ -947,42 +947,6 @@ pub async fn oauth_callback(
     // Determine redirect URL
     let redirect_url = oauth_state.redirect_url.unwrap_or_else(|| "/".to_string());
 
-    // Check if this is an ingress auth flow (has project context) vs UI login flow
-    let is_ingress_auth = oauth_state.project_name.is_some();
-
-    // For UI login flow (no project), return an HTML page that stores the token in localStorage
-    if !is_ingress_auth {
-        tracing::info!("UI login flow - returning token storage page");
-
-        // Create a simple HTML page that stores the token and redirects
-        let html = format!(
-            r#"<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="UTF-8">
-    <title>Login Successful</title>
-</head>
-<body>
-    <script>
-        // Store token in localStorage
-        localStorage.setItem('rise_token', {});
-
-        // Clean up OAuth params and redirect
-        window.history.replaceState({{}}, document.title, '/');
-        window.location.href = '{}';
-    </script>
-    <noscript>
-        <p>JavaScript is required to complete the login process.</p>
-    </noscript>
-</body>
-</html>"#,
-            serde_json::to_string(&token_info.id_token).unwrap(),
-            redirect_url
-        );
-
-        return Ok(Html(html).into_response());
-    }
-
     // Determine cookie domain based on request host
     // For Rise subdomains, use the configured cookie domain for subdomain sharing
     // Otherwise, use current host only (empty domain)

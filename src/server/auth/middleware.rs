@@ -10,32 +10,26 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 use crate::db::{service_accounts, users, User};
+use crate::server::auth::cookie_helpers;
 use crate::server::state::AppState;
 
 /// Extract Bearer token from Authorization header
-fn extract_bearer_token(headers: &HeaderMap) -> Result<String, (StatusCode, String)> {
+fn extract_bearer_token(headers: &HeaderMap) -> Option<String> {
     let auth_header = headers
-        .get("Authorization")
-        .ok_or((
-            StatusCode::UNAUTHORIZED,
-            "Missing Authorization header".to_string(),
-        ))?
+        .get("Authorization")?
         .to_str()
-        .map_err(|_| {
-            (
-                StatusCode::UNAUTHORIZED,
-                "Invalid Authorization header".to_string(),
-            )
-        })?;
+        .ok()?;
 
     if !auth_header.starts_with("Bearer ") {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            "Invalid Authorization header format".to_string(),
-        ));
+        return None;
     }
 
-    Ok(auth_header[7..].to_string())
+    Some(auth_header[7..].to_string())
+}
+
+/// Extract Rise JWT from cookie
+fn extract_rise_jwt_from_cookie(headers: &HeaderMap) -> Option<String> {
+    cookie_helpers::extract_rise_jwt_cookie(headers)
 }
 
 /// Minimal JWT claims structure just to peek at the issuer
@@ -152,6 +146,10 @@ async fn authenticate_service_account(
 
 /// Authentication middleware that validates JWT and injects User into request extensions
 /// Supports both user authentication (via configured OIDC provider) and service account authentication (via external OIDC providers)
+/// 
+/// Authentication methods (in order of precedence):
+/// 1. Rise JWT from `rise_jwt` cookie (HS256 for UI, RS256 for ingress)
+/// 2. IdP token from Authorization Bearer header (for backward compatibility)
 pub async fn auth_middleware(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -163,12 +161,20 @@ pub async fn auth_middleware(
         req.uri().path()
     );
 
-    // Extract token from Authorization header
-    let token = extract_bearer_token(&headers)?;
-    tracing::debug!(
-        "Auth middleware: extracted bearer token (length={})",
-        token.len()
-    );
+    // Try to extract token from cookie first (new primary method)
+    let token = if let Some(cookie_token) = extract_rise_jwt_from_cookie(&headers) {
+        tracing::debug!("Auth middleware: found Rise JWT in cookie (length={})", cookie_token.len());
+        cookie_token
+    } else if let Some(bearer_token) = extract_bearer_token(&headers) {
+        tracing::debug!("Auth middleware: found Bearer token in Authorization header (length={})", bearer_token.len());
+        bearer_token
+    } else {
+        tracing::warn!("Auth middleware: no authentication token found");
+        return Err((
+            StatusCode::UNAUTHORIZED,
+            "Missing authentication token (cookie or Authorization header)".to_string(),
+        ));
+    };
 
     // Peek at the issuer to determine authentication method
     let issuer = {
@@ -207,13 +213,43 @@ pub async fn auth_middleware(
     };
 
     tracing::debug!(
-        "Auth middleware: token issuer='{}', configured issuer='{}'",
+        "Auth middleware: token issuer='{}', configured issuer='{}', rise public_url='{}'",
         issuer,
-        state.auth_settings.issuer
+        state.auth_settings.issuer,
+        state.public_url
     );
 
-    let user = if issuer == state.auth_settings.issuer {
-        // User authentication via configured OIDC provider
+    let user = if issuer == state.public_url || issuer.starts_with(&format!("{}://", state.public_url.split("://").next().unwrap_or("https"))) {
+        // Rise-issued JWT (HS256 or RS256) - validate with JwtSigner
+        tracing::debug!("Auth middleware: authenticating with Rise-issued JWT");
+
+        // Verify Rise JWT (skips audience validation for now - we trust our own JWTs)
+        let claims = state
+            .jwt_signer
+            .verify_jwt_skip_aud(&token)
+            .map_err(|e| {
+                tracing::warn!("Auth middleware: Rise JWT validation failed: {:#}", e);
+                (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+            })?;
+
+        tracing::debug!("Auth middleware: Rise JWT validation successful");
+
+        // Extract email from Rise JWT claims
+        let email = &claims.email;
+
+        tracing::debug!("Rise JWT validated for user: {}", email);
+
+        users::find_or_create(&state.db_pool, email)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to find/create user: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?
+    } else if issuer == state.auth_settings.issuer {
+        // User authentication via configured OIDC provider (IdP token)
         tracing::debug!("Auth middleware: authenticating as user via configured OIDC provider");
 
         // Build expected claims for user auth (just validate aud matches client_id)
@@ -280,23 +316,46 @@ pub async fn optional_auth_middleware(
     mut req: Request,
     next: Next,
 ) -> Response {
-    // Try to extract token
-    if let Ok(token) = extract_bearer_token(&headers) {
-        // Build expected claims for user auth
-        let mut expected_claims = HashMap::new();
-        expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+    // Try to extract token from cookie first, then Authorization header
+    let token = extract_rise_jwt_from_cookie(&headers)
+        .or_else(|| extract_bearer_token(&headers));
 
-        // Try to validate token and find/create user
-        if let Ok(claims_value) = state
-            .jwt_validator
-            .validate(&token, &state.auth_settings.issuer, &expected_claims)
-            .await
-        {
-            if let Ok(claims) =
-                serde_json::from_value::<crate::server::auth::jwt::Claims>(claims_value)
-            {
-                if let Ok(user) = users::find_or_create(&state.db_pool, &claims.email).await {
-                    req.extensions_mut().insert(user);
+    if let Some(token) = token {
+        // Peek at issuer
+        if decode_header(&token).is_ok() {
+            let parts: Vec<&str> = token.split('.').collect();
+            if parts.len() == 3 {
+                if let Ok(decoded) = general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
+                    if let Ok(claims) = serde_json::from_slice::<MinimalClaims>(&decoded) {
+                        // Check if it's a Rise-issued JWT
+                        if claims.iss == state.public_url || claims.iss.starts_with(&format!("{}://", state.public_url.split("://").next().unwrap_or("https"))) {
+                            // Try to validate Rise JWT
+                            if let Ok(rise_claims) = state.jwt_signer.verify_jwt_skip_aud(&token) {
+                                let email = &rise_claims.email;
+                                if let Ok(user) = users::find_or_create(&state.db_pool, email).await {
+                                    req.extensions_mut().insert(user);
+                                }
+                            }
+                        } else if claims.iss == state.auth_settings.issuer {
+                            // Try to validate IdP token
+                            let mut expected_claims = HashMap::new();
+                            expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+
+                            if let Ok(claims_value) = state
+                                .jwt_validator
+                                .validate(&token, &state.auth_settings.issuer, &expected_claims)
+                                .await
+                            {
+                                if let Ok(claims) =
+                                    serde_json::from_value::<crate::server::auth::jwt::Claims>(claims_value)
+                                {
+                                    if let Ok(user) = users::find_or_create(&state.db_pool, &claims.email).await {
+                                        req.extensions_mut().insert(user);
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -319,15 +378,15 @@ mod tests {
             HeaderValue::from_static("Bearer my-token-here"),
         );
 
-        let token = extract_bearer_token(&headers).unwrap();
-        assert_eq!(token, "my-token-here");
+        let token = extract_bearer_token(&headers);
+        assert_eq!(token, Some("my-token-here".to_string()));
     }
 
     #[test]
     fn test_extract_bearer_token_missing_header() {
         let headers = HeaderMap::new();
         let result = extract_bearer_token(&headers);
-        assert!(result.is_err());
+        assert_eq!(result, None);
     }
 
     #[test]
@@ -336,6 +395,6 @@ mod tests {
         headers.insert("Authorization", HeaderValue::from_static("Basic user:pass"));
 
         let result = extract_bearer_token(&headers);
-        assert!(result.is_err());
+        assert_eq!(result, None);
     }
 }
