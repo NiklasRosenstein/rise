@@ -1052,7 +1052,7 @@ pub async fn oauth_callback(
         }
 
         // Normal flow: set cookie directly on main domain
-        let cookie = cookie_helpers::create_ingress_jwt_cookie(
+        let cookie = cookie_helpers::create_rise_jwt_cookie(
             &rise_jwt,
             &cookie_settings_for_response,
             max_age,
@@ -1180,7 +1180,7 @@ pub async fn oauth_complete(
         secure: state.cookie_settings.secure,
     };
 
-    let cookie = cookie_helpers::create_ingress_jwt_cookie(
+    let cookie = cookie_helpers::create_rise_jwt_cookie(
         &session.rise_jwt,
         &cookie_settings,
         session.max_age,
@@ -1244,8 +1244,8 @@ pub async fn ingress_auth(
     }
 
     // Extract and validate Rise JWT (required)
-    let rise_jwt = cookie_helpers::extract_ingress_jwt_cookie(&headers).ok_or_else(|| {
-        tracing::debug!("No ingress JWT cookie found");
+    let rise_jwt = cookie_helpers::extract_rise_jwt_cookie(&headers).ok_or_else(|| {
+        tracing::debug!("No Rise JWT cookie found");
         (StatusCode::UNAUTHORIZED, "No session cookie".to_string())
     })?;
 
