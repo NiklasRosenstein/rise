@@ -4,7 +4,8 @@
 
 server:
   cookie_secure: false
-  cookie_domain: ".rise.local"
+  cookie_domain: ""  # Empty = current host only (for localhost:3000 access)
+  # If you access via rise.local:3000, use ".rise.local" instead
   jwt_signing_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" # Generate with: openssl rand -base64 32
 
 encryption:

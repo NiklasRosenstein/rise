@@ -18,9 +18,8 @@ class RiseAPI {
         });
 
         if (response.status === 401) {
-            // Authentication expired, redirect to login
-            window.location.href = '/';
-            throw new Error('Authentication expired');
+            // Authentication required - let the app handle showing login page
+            throw new Error('Authentication required');
         }
 
         if (!response.ok) {
