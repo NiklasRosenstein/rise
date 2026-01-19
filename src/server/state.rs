@@ -315,6 +315,8 @@ impl AppState {
                 settings.server.public_url.clone(),
                 3600, // Default 1 hour expiry (matches typical IdP token expiry)
                 settings.server.jwt_claims.clone(),
+                settings.server.rs256_private_key_pem.as_deref(),
+                settings.server.rs256_public_key_pem.as_deref(),
             )
             .context("Failed to initialize JWT signer for ingress authentication")?,
         );
@@ -865,6 +867,8 @@ impl AppState {
                 settings.server.public_url.clone(),
                 3600,
                 settings.server.jwt_claims.clone(),
+                settings.server.rs256_private_key_pem.as_deref(),
+                settings.server.rs256_public_key_pem.as_deref(),
             )
             .context("Failed to initialize JWT signer")?,
         );

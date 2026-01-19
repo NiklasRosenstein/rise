@@ -83,13 +83,18 @@ impl JwtSigner {
     /// * `issuer` - Issuer URL (typically the Rise backend URL)
     /// * `default_expiry_seconds` - Default expiration duration in seconds
     /// * `claims_to_include` - List of claim names to include from IdP token (e.g., ["sub", "email", "name"])
+    /// * `rs256_private_key_pem` - Optional pre-configured RS256 private key in PEM format
+    /// * `rs256_public_key_pem` - Optional pre-configured RS256 public key in PEM format
     ///
-    /// This will generate a new RS256 key pair on initialization.
+    /// If RS256 keys are not provided, a new key pair will be generated on initialization.
+    /// To persist JWTs across restarts, provide pre-configured keys.
     pub fn new(
         hs256_secret_base64: &str,
         issuer: String,
         default_expiry_seconds: u64,
         claims_to_include: Vec<String>,
+        rs256_private_key_pem: Option<&str>,
+        rs256_public_key_pem: Option<&str>,
     ) -> Result<Self, JwtSignerError> {
         // Set up HS256 symmetric key
         let secret = BASE64.decode(hs256_secret_base64)?;
@@ -103,46 +108,101 @@ impl JwtSigner {
         let hs256_encoding_key = EncodingKey::from_secret(&secret);
         let hs256_decoding_key = DecodingKey::from_secret(&secret);
 
-        // Generate RS256 key pair (2048-bit RSA key)
-        use rsa::{RsaPrivateKey, RsaPublicKey};
-        use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
-        
-        let mut rng = rand::thread_rng();
-        let bits = 2048;
-        let private_key = RsaPrivateKey::new(&mut rng, bits)
-            .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
-        let public_key = RsaPublicKey::from(&private_key);
+        // Set up RS256 key pair - either from config or generate new
+        let (rs256_encoding_key, rs256_decoding_key, rs256_public_key_pem, rs256_key_id) =
+            if let (Some(private_pem), Some(public_pem)) = (rs256_private_key_pem, rs256_public_key_pem) {
+                // Use provided keys
+                tracing::info!("Using pre-configured RS256 key pair");
+                
+                let encoding_key = EncodingKey::from_rsa_pem(private_pem.as_bytes())
+                    .map_err(|e| JwtSignerError::RsaKeyError(format!("Invalid RS256 private key: {}", e)))?;
+                
+                let decoding_key = DecodingKey::from_rsa_pem(public_pem.as_bytes())
+                    .map_err(|e| JwtSignerError::RsaKeyError(format!("Invalid RS256 public key: {}", e)))?;
+                
+                // Generate key ID from public key
+                use sha2::{Sha256, Digest};
+                let mut hasher = Sha256::new();
+                hasher.update(public_pem.as_bytes());
+                let hash = hasher.finalize();
+                let key_id = format!("{:x}", hash)[..16].to_string();
+                
+                (encoding_key, decoding_key, public_pem.to_string(), key_id)
+            } else if let Some(private_pem) = rs256_private_key_pem {
+                // Derive public key from private key
+                tracing::info!("Using pre-configured RS256 private key, deriving public key");
+                
+                use rsa::pkcs8::{DecodePrivateKey, EncodePublicKey};
+                use rsa::RsaPrivateKey;
+                
+                let private_key = RsaPrivateKey::from_pkcs8_pem(private_pem)
+                    .map_err(|e| JwtSignerError::RsaKeyError(format!("Invalid RS256 private key PEM: {}", e)))?;
+                
+                let public_key = rsa::RsaPublicKey::from(&private_key);
+                let public_key_pem = public_key
+                    .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+                    .map_err(|e| JwtSignerError::PemError(e.to_string()))?;
+                
+                let encoding_key = EncodingKey::from_rsa_pem(private_pem.as_bytes())
+                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+                
+                let decoding_key = DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
+                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+                
+                // Generate key ID from public key
+                use sha2::{Sha256, Digest};
+                let mut hasher = Sha256::new();
+                hasher.update(public_key_pem.as_bytes());
+                let hash = hasher.finalize();
+                let key_id = format!("{:x}", hash)[..16].to_string();
+                
+                (encoding_key, decoding_key, public_key_pem, key_id)
+            } else {
+                // Generate new RS256 key pair (2048-bit RSA key)
+                tracing::warn!("No RS256 keys configured - generating new key pair. JWTs will be invalidated on restart. Configure rs256_private_key_pem to persist keys.");
+                
+                use rsa::{RsaPrivateKey, RsaPublicKey};
+                use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
+                
+                let mut rng = rand::thread_rng();
+                let bits = 2048;
+                let private_key = RsaPrivateKey::new(&mut rng, bits)
+                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+                let public_key = RsaPublicKey::from(&private_key);
 
-        // Encode keys to PEM format
-        let private_key_pem = private_key
-            .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
-            .map_err(|e| JwtSignerError::PemError(e.to_string()))?
-            .to_string();
-        
-        let public_key_pem = public_key
-            .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
-            .map_err(|e| JwtSignerError::PemError(e.to_string()))?;
+                // Encode keys to PEM format
+                let private_key_pem = private_key
+                    .to_pkcs8_pem(rsa::pkcs8::LineEnding::LF)
+                    .map_err(|e| JwtSignerError::PemError(e.to_string()))?
+                    .to_string();
+                
+                let public_key_pem = public_key
+                    .to_public_key_pem(rsa::pkcs8::LineEnding::LF)
+                    .map_err(|e| JwtSignerError::PemError(e.to_string()))?;
 
-        // Create encoding and decoding keys
-        let rs256_encoding_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
-            .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
-        
-        let rs256_decoding_key = DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
-            .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+                // Create encoding and decoding keys
+                let encoding_key = EncodingKey::from_rsa_pem(private_key_pem.as_bytes())
+                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
+                
+                let decoding_key = DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
+                    .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
 
-        // Generate a key ID (SHA-256 hash of the public key)
-        use sha2::{Sha256, Digest};
-        let mut hasher = Sha256::new();
-        hasher.update(public_key_pem.as_bytes());
-        let hash = hasher.finalize();
-        let rs256_key_id = format!("{:x}", hash)[..16].to_string();
+                // Generate key ID (SHA-256 hash of the public key)
+                use sha2::{Sha256, Digest};
+                let mut hasher = Sha256::new();
+                hasher.update(public_key_pem.as_bytes());
+                let hash = hasher.finalize();
+                let key_id = format!("{:x}", hash)[..16].to_string();
+                
+                (encoding_key, decoding_key, public_key_pem, key_id)
+            };
 
         Ok(Self {
             hs256_encoding_key,
             hs256_decoding_key,
             rs256_encoding_key: Arc::new(rs256_encoding_key),
             rs256_decoding_key: Arc::new(rs256_decoding_key),
-            rs256_public_key_pem: public_key_pem,
+            rs256_public_key_pem,
             rs256_key_id,
             issuer,
             default_expiry_seconds,
@@ -426,6 +486,8 @@ mod tests {
             "https://rise.test".to_string(),
             3600,
             vec!["sub".to_string(), "email".to_string(), "name".to_string()],
+            None, // No pre-configured RS256 keys for tests
+            None,
         )
         .unwrap()
     }
@@ -569,6 +631,8 @@ mod tests {
             "https://rise.test".to_string(),
             3600,
             vec!["sub".to_string(), "email".to_string()],
+            None,
+            None,
         );
 
         assert!(result.is_err());

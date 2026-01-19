@@ -3897,6 +3897,7 @@ mod tests {
             image_pull_secret_name: None,
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            rise_jwks_json: r#"{"keys":[]}"#.to_string(),
         }
     }
 
@@ -4364,6 +4365,7 @@ mod tests {
             image_pull_secret_name: None,
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
+            rise_jwks_json: r#"{"keys":[]}"#.to_string(),
         }
     }
 }

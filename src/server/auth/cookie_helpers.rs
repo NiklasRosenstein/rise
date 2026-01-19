@@ -6,6 +6,19 @@ pub const COOKIE_NAME: &str = "_rise_session";
 /// Cookie name for Rise-issued JWT tokens (used for both UI and ingress auth)
 pub const RISE_JWT_COOKIE_NAME: &str = "rise_jwt";
 
+/// Parse cookies from a Cookie header value
+///
+/// This implements RFC 6265 cookie parsing:
+/// - Cookies are separated by semicolons
+/// - Leading/trailing whitespace is trimmed
+/// - Cookie format is "name=value"
+fn parse_cookies(cookie_header: &str) -> impl Iterator<Item = (&str, &str)> {
+    cookie_header.split(';').filter_map(|cookie| {
+        let cookie = cookie.trim();
+        cookie.split_once('=')
+    })
+}
+
 /// Settings for session cookies
 #[derive(Debug, Clone)]
 pub struct CookieSettings {
@@ -53,17 +66,11 @@ pub fn create_session_cookie(
 /// Parses the Cookie header and extracts the _rise_session value if present
 #[cfg_attr(not(test), allow(dead_code))]
 pub fn extract_session_cookie(headers: &HeaderMap) -> Option<String> {
-    headers
-        .get("cookie")?
-        .to_str()
-        .ok()?
-        .split(';')
-        .find_map(|cookie| {
-            let cookie = cookie.trim();
-            cookie
-                .strip_prefix(&format!("{}=", COOKIE_NAME))
-                .map(|value| value.to_string())
-        })
+    let cookie_header = headers.get("cookie")?.to_str().ok()?;
+    
+    parse_cookies(cookie_header)
+        .find(|(name, _)| *name == COOKIE_NAME)
+        .map(|(_, value)| value.to_string())
 }
 
 /// Create a cookie that clears the session
@@ -127,46 +134,15 @@ pub fn create_rise_jwt_cookie(
     cookie_parts.join("; ")
 }
 
-/// Alias for backward compatibility during migration
-#[deprecated(note = "Use create_rise_jwt_cookie instead")]
-pub fn create_ingress_jwt_cookie(
-    jwt: &str,
-    settings: &CookieSettings,
-    max_age_seconds: u64,
-) -> String {
-    create_rise_jwt_cookie(jwt, settings, max_age_seconds)
-}
-
 /// Extract the Rise JWT cookie value from request headers
 ///
-/// Parses the Cookie header and extracts the rise_jwt value if present.
-/// Also checks legacy _rise_ingress cookie name for backward compatibility.
+/// Uses proper cookie parsing per RFC 6265.
 pub fn extract_rise_jwt_cookie(headers: &HeaderMap) -> Option<String> {
     let cookie_header = headers.get("cookie")?.to_str().ok()?;
     
-    // Try new cookie name first
-    for cookie in cookie_header.split(';') {
-        let cookie = cookie.trim();
-        if let Some(value) = cookie.strip_prefix(&format!("{}=", RISE_JWT_COOKIE_NAME)) {
-            return Some(value.to_string());
-        }
-    }
-    
-    // Fall back to legacy cookie name (_rise_ingress) for backward compatibility
-    for cookie in cookie_header.split(';') {
-        let cookie = cookie.trim();
-        if let Some(value) = cookie.strip_prefix("_rise_ingress=") {
-            return Some(value.to_string());
-        }
-    }
-    
-    None
-}
-
-/// Alias for backward compatibility during migration
-#[deprecated(note = "Use extract_rise_jwt_cookie instead")]
-pub fn extract_ingress_jwt_cookie(headers: &HeaderMap) -> Option<String> {
-    extract_rise_jwt_cookie(headers)
+    parse_cookies(cookie_header)
+        .find(|(name, _)| *name == RISE_JWT_COOKIE_NAME)
+        .map(|(_, value)| value.to_string())
 }
 
 /// Create a cookie that clears the Rise JWT
@@ -193,12 +169,7 @@ pub fn clear_rise_jwt_cookie(settings: &CookieSettings) -> String {
     cookie_parts.join("; ")
 }
 
-/// Alias for backward compatibility during migration
-#[deprecated(note = "Use clear_rise_jwt_cookie instead")]
-#[allow(dead_code)]
-pub fn clear_ingress_jwt_cookie(settings: &CookieSettings) -> String {
-    clear_rise_jwt_cookie(settings)
-}
+
 
 #[cfg(test)]
 mod tests {
@@ -326,19 +297,6 @@ mod tests {
     }
 
     #[test]
-    fn test_extract_rise_jwt_cookie_legacy_name() {
-        // Test backward compatibility with old _rise_ingress name
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "cookie",
-            HeaderValue::from_static("_rise_ingress=legacy_jwt; other_cookie=value"),
-        );
-
-        let jwt = extract_rise_jwt_cookie(&headers);
-        assert_eq!(jwt, Some("legacy_jwt".to_string()));
-    }
-
-    #[test]
     fn test_extract_rise_jwt_cookie_not_present() {
         let mut headers = HeaderMap::new();
         headers.insert("cookie", HeaderValue::from_static("other_cookie=value"));
@@ -355,66 +313,6 @@ mod tests {
         };
 
         let cookie = clear_rise_jwt_cookie(&settings);
-
-        assert!(cookie.contains("rise_jwt="));
-        assert!(cookie.contains("Max-Age=0"));
-        assert!(cookie.contains("HttpOnly"));
-        assert!(cookie.contains("Domain=.rise.dev"));
-        assert!(cookie.contains("Secure"));
-    }
-
-    // Deprecated function tests for backward compatibility
-    #[test]
-    #[allow(deprecated)]
-    fn test_create_ingress_jwt_cookie_deprecated() {
-        let settings = CookieSettings {
-            domain: ".rise.dev".to_string(),
-            secure: true,
-        };
-
-        let cookie = create_ingress_jwt_cookie("jwt_token_xyz", &settings, 3600);
-
-        assert!(cookie.contains("rise_jwt=jwt_token_xyz"));
-        assert!(cookie.contains("Max-Age=3600"));
-        assert!(cookie.contains("Path=/"));
-        assert!(cookie.contains("HttpOnly"));
-        assert!(cookie.contains("SameSite=Lax"));
-        assert!(cookie.contains("Domain=.rise.dev"));
-        assert!(cookie.contains("Secure"));
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_extract_ingress_jwt_cookie_deprecated() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "cookie",
-            HeaderValue::from_static("rise_jwt=my_jwt; other_cookie=value"),
-        );
-
-        let jwt = extract_ingress_jwt_cookie(&headers);
-        assert_eq!(jwt, Some("my_jwt".to_string()));
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_extract_ingress_jwt_cookie_not_present_deprecated() {
-        let mut headers = HeaderMap::new();
-        headers.insert("cookie", HeaderValue::from_static("other_cookie=value"));
-
-        let jwt = extract_ingress_jwt_cookie(&headers);
-        assert_eq!(jwt, None);
-    }
-
-    #[test]
-    #[allow(deprecated)]
-    fn test_clear_ingress_jwt_cookie_deprecated() {
-        let settings = CookieSettings {
-            domain: ".rise.dev".to_string(),
-            secure: true,
-        };
-
-        let cookie = clear_ingress_jwt_cookie(&settings);
 
         assert!(cookie.contains("rise_jwt="));
         assert!(cookie.contains("Max-Age=0"));

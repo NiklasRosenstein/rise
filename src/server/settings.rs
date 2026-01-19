@@ -38,6 +38,18 @@ pub struct ServerSettings {
     /// Required for ingress authentication
     pub jwt_signing_secret: String,
 
+    /// Optional RS256 private key in PEM format for JWT signing
+    /// If not provided, a new key pair will be generated on startup (tokens will be invalidated on restart)
+    /// To persist keys across restarts, generate with: openssl genrsa -out rs256.key 2048
+    #[serde(default)]
+    pub rs256_private_key_pem: Option<String>,
+
+    /// Optional RS256 public key in PEM format for JWT verification
+    /// If not provided, will be derived from rs256_private_key_pem or generated
+    /// Generate from private key with: openssl rsa -in rs256.key -pubout -out rs256.pub
+    #[serde(default)]
+    pub rs256_public_key_pem: Option<String>,
+
     /// JWT claims to include from IdP token when issuing Rise JWTs
     /// Default: ["sub", "email", "name"]
     #[serde(default = "default_jwt_claims")]
