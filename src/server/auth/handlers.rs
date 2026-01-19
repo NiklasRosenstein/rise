@@ -1008,9 +1008,27 @@ pub async fn oauth_callback(
             })?;
 
         // Issue Rise JWT with user's team memberships
+        // Extract project URL from redirect_url for the aud claim
+        let project_url = if let Ok(parsed_url) = url::Url::parse(&redirect_url) {
+            // Use scheme + host as the project URL
+            if let Some(host) = parsed_url.host_str() {
+                let port_part = match parsed_url.port() {
+                    Some(port) if port != 80 && port != 443 => format!(":{}", port),
+                    _ => String::new(),
+                };
+                format!("{}://{}{}", parsed_url.scheme(), host, port_part)
+            } else {
+                // Fallback: use public_url if parsing fails
+                state.public_url.trim_end_matches('/').to_string()
+            }
+        } else {
+            // If redirect_url is relative or invalid, use public_url
+            state.public_url.trim_end_matches('/').to_string()
+        };
+
         let rise_jwt = state
             .jwt_signer
-            .sign_ingress_jwt(&claims, user.id, &state.db_pool, Some(exp))
+            .sign_ingress_jwt(&claims, user.id, &state.db_pool, &project_url, Some(exp))
             .await
             .map_err(|e| {
                 tracing::error!("Failed to sign Rise JWT: {:#}", e);
