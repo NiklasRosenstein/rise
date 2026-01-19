@@ -1123,14 +1123,8 @@ pub async fn oauth_callback(
 
     tracing::info!("Setting Rise JWT cookie and redirecting to {}", redirect_url);
 
-    // For regular OAuth flow, immediate redirect
-    let response = (
-        StatusCode::FOUND,
-        [("Location", redirect_url.as_str()), ("Set-Cookie", &cookie)],
-    )
-        .into_response();
-
-    Ok(response)
+    // Use success page with delayed redirect to ensure cookie is properly persisted
+    render_ui_login_success_page(&redirect_url, &cookie)
 }
 
 /// Helper function to render the success page with cookie
@@ -1189,6 +1183,65 @@ fn render_success_page(
     tracing::info!(
         "Setting ingress JWT cookie and showing success page for project: {}",
         project_name
+    );
+
+    // Build response with cookie and HTML
+    let response = (StatusCode::OK, [("Set-Cookie", cookie)], Html(html)).into_response();
+
+    Ok(response)
+}
+
+/// Helper function to render the UI login success page with cookie
+fn render_ui_login_success_page(
+    redirect_url: &str,
+    cookie: &str,
+) -> Result<Response, (StatusCode, String)> {
+    // Load UI success template
+    let template_content = StaticAssets::get("auth-ui-success.html.tera")
+        .ok_or_else(|| {
+            tracing::error!("auth-ui-success.html.tera template not found");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template not found".to_string(),
+            )
+        })?;
+
+    let template_str = std::str::from_utf8(&template_content.data).map_err(|e| {
+        tracing::error!("Failed to decode template: {:#}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Template encoding error".to_string(),
+        )
+    })?;
+
+    // Create Tera instance and add template
+    let mut tera = Tera::default();
+    tera.add_raw_template("auth-ui-success.html.tera", template_str)
+        .map_err(|e| {
+            tracing::error!("Failed to parse template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template error".to_string(),
+            )
+        })?;
+
+    // Render success template
+    let mut context = tera::Context::new();
+    context.insert("redirect_url", redirect_url);
+
+    let html = tera
+        .render("auth-ui-success.html.tera", &context)
+        .map_err(|e| {
+            tracing::error!("Failed to render template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template rendering error".to_string(),
+            )
+        })?;
+
+    tracing::info!(
+        "Setting UI JWT cookie and showing success page, redirecting to: {}",
+        redirect_url
     );
 
     // Build response with cookie and HTML
