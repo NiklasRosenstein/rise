@@ -37,6 +37,11 @@ rules:
   resources: ["services"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
+# Endpoints management (for ClusterIP services pointing to IP addresses)
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
 # Ingress management
 - apiGroups: ["networking.k8s.io"]
   resources: ["ingresses"]
