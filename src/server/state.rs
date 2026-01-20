@@ -25,6 +25,8 @@ use std::time::Duration;
 use crate::server::deployment::controller::{
     DeploymentBackend, KubernetesController, KubernetesControllerConfig,
 };
+#[cfg(feature = "k8s")]
+use async_trait::async_trait;
 
 /// Minimal state for controllers - database access and encryption
 #[derive(Clone)]
@@ -152,6 +154,57 @@ async fn test_encryption_provider(provider: &dyn EncryptionProvider) -> Result<(
     }
 
     Ok(())
+}
+
+/// Mock deployment backend for local development without Kubernetes
+#[cfg(feature = "k8s")]
+struct MockDeploymentBackend;
+
+#[cfg(feature = "k8s")]
+#[async_trait]
+impl DeploymentBackend for MockDeploymentBackend {
+    async fn reconcile(
+        &self,
+        _deployment: &crate::db::models::Deployment,
+        _project: &crate::db::models::Project,
+    ) -> anyhow::Result<crate::server::deployment::controller::ReconcileResult> {
+        anyhow::bail!("Deployment backend not available - Kubernetes not configured")
+    }
+
+    async fn health_check(
+        &self,
+        _deployment: &crate::db::models::Deployment,
+    ) -> anyhow::Result<crate::server::deployment::controller::HealthStatus> {
+        anyhow::bail!("Deployment backend not available - Kubernetes not configured")
+    }
+
+    async fn cancel(&self, _deployment: &crate::db::models::Deployment) -> anyhow::Result<()> {
+        anyhow::bail!("Deployment backend not available - Kubernetes not configured")
+    }
+
+    async fn terminate(&self, _deployment: &crate::db::models::Deployment) -> anyhow::Result<()> {
+        anyhow::bail!("Deployment backend not available - Kubernetes not configured")
+    }
+
+    async fn get_deployment_urls(
+        &self,
+        _deployment: &crate::db::models::Deployment,
+        _project: &crate::db::models::Project,
+    ) -> anyhow::Result<crate::server::deployment::controller::DeploymentUrls> {
+        anyhow::bail!("Deployment backend not available - Kubernetes not configured")
+    }
+
+    async fn stream_logs(
+        &self,
+        _deployment: &crate::db::models::Deployment,
+        _follow: bool,
+        _tail_lines: Option<i64>,
+        _timestamps: bool,
+        _since_seconds: Option<i64>,
+    ) -> anyhow::Result<futures::stream::BoxStream<'static, Result<bytes::Bytes, anyhow::Error>>>
+    {
+        anyhow::bail!("Deployment backend not available - Kubernetes not configured")
+    }
 }
 
 /// Initialize Kubernetes deployment backend from settings
@@ -520,13 +573,29 @@ impl AppState {
                 db_pool: db_pool.clone(),
                 encryption_provider: encryption_provider.clone(),
             });
-            init_kubernetes_backend(
+            match init_kubernetes_backend(
                 settings,
                 controller_state,
                 registry_provider.clone(),
                 jwks_json,
             )
-            .await?
+            .await
+            {
+                Ok(backend) => backend,
+                Err(e) => {
+                    tracing::warn!(
+                        "Failed to initialize Kubernetes deployment backend: {:#}",
+                        e
+                    );
+                    tracing::info!(
+                        "Using mock backend - deployment functionality will not be available"
+                    );
+                    tracing::info!("This is expected for local development without Kubernetes");
+                    // Use mock backend to allow server to continue for HTTP endpoints
+                    Arc::new(MockDeploymentBackend)
+                        as Arc<dyn crate::server::deployment::controller::DeploymentBackend>
+                }
+            }
         };
 
         // Initialize extension registry
