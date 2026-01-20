@@ -612,9 +612,15 @@ pub async fn create_deployment(
     if deploy_opts.image.is_some() || deploy_opts.from_deployment.is_some() {
         // Pre-built image path or redeploy from existing deployment: Skip build/push, backend already marked as Pushed
         if deploy_opts.from_deployment.is_some() {
-            info!("✓ Deployment created from existing deployment '{}' with {} environment variables",
+            info!(
+                "✓ Deployment created from existing deployment '{}' with {} environment variables",
                 deploy_opts.from_deployment.unwrap(),
-                if deploy_opts.use_source_env_vars { "source" } else { "current project" });
+                if deploy_opts.use_source_env_vars {
+                    "source"
+                } else {
+                    "current project"
+                }
+            );
         } else {
             info!("✓ Pre-built image deployment created");
         }

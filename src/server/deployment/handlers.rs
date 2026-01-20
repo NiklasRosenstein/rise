@@ -565,7 +565,7 @@ pub async fn create_deployment(
                 deployment_group: &payload.group, // Use requested group (may be different from source)
                 expires_at,                       // expires_at
                 http_port: payload.http_port as i32, // Use requested http_port (may be different from source)
-                is_active: false, // Deployments start as inactive
+                is_active: false,                    // Deployments start as inactive
             },
             &project,
         )
