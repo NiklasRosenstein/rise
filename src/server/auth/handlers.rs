@@ -1503,7 +1503,7 @@ pub struct LogoutQuery {
 
 /// Logout endpoint
 ///
-/// Clears the session cookie and redirects the user.
+/// Clears the session cookie. Returns 200 OK to let the frontend handle the redirect.
 #[instrument(skip(state))]
 pub async fn oauth_logout(
     State(state): State<AppState>,
@@ -1514,20 +1514,19 @@ pub async fn oauth_logout(
     // Clear the Rise JWT cookie
     let cookie = cookie_helpers::clear_rise_jwt_cookie(&state.cookie_settings);
 
-    // Determine redirect URL
-    let redirect_url = params.redirect.unwrap_or_else(|| "/".to_string());
+    // Log the redirect URL if provided (for debugging)
+    if let Some(redirect_url) = params.redirect {
+        tracing::info!(
+            "Clearing Rise JWT cookie (redirect handled by frontend: {})",
+            redirect_url
+        );
+    } else {
+        tracing::info!("Clearing Rise JWT cookie (redirect handled by frontend)");
+    }
 
-    tracing::info!(
-        "Clearing Rise JWT cookie and redirecting to {}",
-        redirect_url
-    );
-
-    // Build response with Set-Cookie header and redirect
-    let response = (
-        StatusCode::FOUND,
-        [("Location", redirect_url.as_str()), ("Set-Cookie", &cookie)],
-    )
-        .into_response();
+    // Return 200 OK with Set-Cookie header
+    // Let the frontend handle the redirect to avoid race conditions with cookie clearing
+    let response = (StatusCode::OK, [("Set-Cookie", cookie.as_str())]).into_response();
 
     Ok(response)
 }
