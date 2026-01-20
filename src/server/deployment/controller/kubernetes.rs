@@ -108,7 +108,7 @@ pub struct KubernetesControllerConfig {
     pub staging_ingress_url_template: Option<String>,
     pub ingress_port: Option<u16>,
     pub ingress_schema: String,
-    pub registry_provider: Option<Arc<dyn RegistryProvider>>,
+    pub registry_provider: Arc<dyn RegistryProvider>,
     pub auth_backend_url: String,
     pub auth_signin_url: String,
     /// Backend address for routing /.rise path prefix traffic to the Rise backend
@@ -136,7 +136,7 @@ pub struct KubernetesController {
     staging_ingress_url_template: Option<String>,
     ingress_port: Option<u16>,
     ingress_schema: String,
-    registry_provider: Option<Arc<dyn RegistryProvider>>,
+    registry_provider: Arc<dyn RegistryProvider>,
     auth_backend_url: String,
     auth_signin_url: String,
     /// Backend address for routing /.rise path prefix traffic to the Rise backend
@@ -379,10 +379,7 @@ impl KubernetesController {
         }
 
         // Get registry provider
-        let Some(ref provider) = self.registry_provider else {
-            // No registry provider configured, skip refresh
-            return Ok(());
-        };
+        let provider = &self.registry_provider;
 
         // Find all projects that have active Kubernetes deployments
         // We'll refresh the secret for each namespace (one per project)
@@ -985,11 +982,14 @@ impl KubernetesController {
             .await?;
 
         // 2. Apply ImagePullSecret (if needed)
-        if let Some(ref registry_provider) = self.registry_provider {
-            if self.image_pull_secret_name.is_none() {
-                self.apply_image_pull_secret(deployment.id, project, &namespace, registry_provider)
-                    .await?;
-            }
+        if self.image_pull_secret_name.is_none() {
+            self.apply_image_pull_secret(
+                deployment.id,
+                project,
+                &namespace,
+                &self.registry_provider,
+            )
+            .await?;
         }
 
         // 3. Apply BackendService (if configured)
@@ -1848,15 +1848,11 @@ impl KubernetesController {
             };
 
             // Build-from-source: construct from registry config using the appropriate deployment_id
-            if let Some(ref registry_provider) = self.registry_provider {
-                registry_provider.get_image_tag(
-                    &project.name,
-                    &deployment_id_for_tag,
-                    crate::server::registry::ImageTagType::Internal,
-                )
-            } else {
-                format!("{}:{}", project.name, deployment_id_for_tag)
-            }
+            self.registry_provider.get_image_tag(
+                &project.name,
+                &deployment_id_for_tag,
+                crate::server::registry::ImageTagType::Internal,
+            )
         };
 
         K8sDeployment {
@@ -1892,15 +1888,10 @@ impl KubernetesController {
                     spec: Some(PodSpec {
                         image_pull_secrets: {
                             // Determine which secret to use (if any)
-                            let secret_name =
-                                self.image_pull_secret_name.as_deref().or_else(|| {
-                                    // Use default name if registry provider is configured
-                                    if self.registry_provider.is_some() {
-                                        Some(IMAGE_PULL_SECRET_NAME)
-                                    } else {
-                                        None
-                                    }
-                                });
+                            let secret_name = self
+                                .image_pull_secret_name
+                                .as_deref()
+                                .or(Some(IMAGE_PULL_SECRET_NAME));
 
                             secret_name.map(|name| {
                                 vec![LocalObjectReference {
@@ -2527,47 +2518,43 @@ impl DeploymentBackend for KubernetesController {
                     }
 
                     // Using registry provider - create/update secret dynamically
-                    if let Some(ref provider) = self.registry_provider {
-                        let (username, password) = provider.get_pull_credentials().await?;
-                        let secret_api: Api<Secret> =
-                            Api::namespaced(self.kube_client.clone(), namespace);
+                    let provider = &self.registry_provider;
+                    let (username, password) = provider.get_pull_credentials().await?;
+                    let secret_api: Api<Secret> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
 
-                        let secret = self.create_dockerconfigjson_secret(
+                    let secret = self.create_dockerconfigjson_secret(
+                        IMAGE_PULL_SECRET_NAME,
+                        provider.registry_host(),
+                        &username,
+                        &password,
+                    )?;
+
+                    // Use server-side apply to upsert the secret (creates or updates as needed)
+                    match secret_api
+                        .patch(
                             IMAGE_PULL_SECRET_NAME,
-                            provider.registry_host(),
-                            &username,
-                            &password,
-                        )?;
-
-                        // Use server-side apply to upsert the secret (creates or updates as needed)
-                        match secret_api
-                            .patch(
-                                IMAGE_PULL_SECRET_NAME,
-                                &PatchParams::apply("rise-controller").force(),
-                                &Patch::Apply(&secret),
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                info!(
-                                    project = project.name,
-                                    namespace = namespace,
-                                    "ImagePullSecret applied (created or updated)"
-                                );
-                            }
-                            Err(e) if is_namespace_not_found_error(&e) => {
-                                warn!(
+                            &PatchParams::apply("rise-controller").force(),
+                            &Patch::Apply(&secret),
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                project = project.name,
+                                namespace = namespace,
+                                "ImagePullSecret applied (created or updated)"
+                            );
+                        }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!(
                                     "Namespace missing during ImagePullSecret apply, resetting to CreatingNamespace"
                                 );
-                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
-                                metadata.namespace = None;
-                                continue;
-                            }
-                            Err(e) => return Err(e.into()),
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
                         }
-                    } else {
-                        // No registry provider and no external secret - skip secret creation
-                        debug!("No registry provider or external secret configured, skipping image pull secret creation");
+                        Err(e) => return Err(e.into()),
                     }
 
                     metadata.reconcile_phase = ReconcilePhase::CreatingBackendService;

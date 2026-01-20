@@ -161,7 +161,7 @@ fn normalize_image_reference(image: &str) -> String {
 ///
 /// # Arguments
 /// * `oci_client` - OCI client for registry interaction
-/// * `registry_provider` - Optional registry provider for credentials
+/// * `registry_provider` - Registry provider for credentials
 /// * `normalized_image` - Normalized image reference (e.g., "docker.io/library/nginx:latest")
 ///
 /// # Returns
@@ -171,31 +171,29 @@ fn normalize_image_reference(image: &str) -> String {
 /// Returns error if image doesn't exist, requires authentication, or registry is unreachable
 async fn resolve_image_digest(
     oci_client: &crate::server::oci::OciClient,
-    registry_provider: Option<&std::sync::Arc<dyn crate::server::registry::RegistryProvider>>,
+    registry_provider: &std::sync::Arc<dyn crate::server::registry::RegistryProvider>,
     normalized_image: &str,
 ) -> anyhow::Result<String> {
     // Build credentials map from registry provider
     let mut credentials = crate::server::oci::RegistryCredentialsMap::new();
 
-    if let Some(provider) = registry_provider {
-        match provider.get_pull_credentials().await {
-            Ok((user, pass)) if !user.is_empty() => {
-                debug!(
-                    "Adding credentials for registry host: {}",
-                    provider.registry_host()
-                );
-                credentials.insert(provider.registry_host().to_string(), (user, pass));
-            }
-            Ok(_) => {
-                debug!("Registry provider returned empty credentials, using anonymous auth");
-            }
-            Err(e) => {
-                error!(
-                    "Failed to get pull credentials from registry provider: {}",
-                    e
-                );
-                // Continue with anonymous auth
-            }
+    match registry_provider.get_pull_credentials().await {
+        Ok((user, pass)) if !user.is_empty() => {
+            debug!(
+                "Adding credentials for registry host: {}",
+                registry_provider.registry_host()
+            );
+            credentials.insert(registry_provider.registry_host().to_string(), (user, pass));
+        }
+        Ok(_) => {
+            debug!("Registry provider returned empty credentials, using anonymous auth");
+        }
+        Err(e) => {
+            error!(
+                "Failed to get pull credentials from registry provider: {}",
+                e
+            );
+            // Continue with anonymous auth
         }
     }
 
@@ -513,7 +511,7 @@ pub async fn create_deployment(
         info!("Resolving image '{}' to digest...", normalized_image);
         let image_digest = resolve_image_digest(
             &state.oci_client,
-            state.registry_provider.as_ref(),
+            &state.registry_provider,
             &normalized_image,
         )
         .await
@@ -590,12 +588,8 @@ pub async fn create_deployment(
     } else {
         // Path 2: Build from source (current behavior)
         // Get registry credentials
-        let registry_provider = state.registry_provider.as_ref().ok_or((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "No registry configured".to_string(),
-        ))?;
-
-        let credentials = registry_provider
+        let credentials = state
+            .registry_provider
             .get_credentials(&payload.project)
             .await
             .map_err(|e| {
@@ -606,7 +600,7 @@ pub async fn create_deployment(
             })?;
 
         // Get full image tag from provider for CLI client (uses client_registry_url if configured)
-        let image_tag = registry_provider.get_image_tag(
+        let image_tag = state.registry_provider.get_image_tag(
             &payload.project,
             &deployment_id,
             ImageTagType::ClientFacing,

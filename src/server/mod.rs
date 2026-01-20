@@ -27,7 +27,13 @@ use tracing::info;
 
 /// Run the HTTP server process with all enabled controllers
 pub async fn run_server(settings: settings::Settings) -> Result<()> {
-    let state = AppState::new_for_server(&settings).await?;
+    let state = AppState::new(&settings).await?;
+
+    // Construct ControllerState from AppState components for sharing with controllers
+    let controller_state = ControllerState {
+        db_pool: state.db_pool.clone(),
+        encryption_provider: state.encryption_provider.clone(),
+    };
 
     // Spawn enabled controllers as background tasks
     let mut controller_handles = vec![];
@@ -36,10 +42,20 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     info!("Starting Kubernetes deployment controller");
 
     let settings_clone = settings.clone();
+    let controller_state_clone = controller_state.clone();
+    let registry_provider = state.registry_provider.clone();
+    let jwks_json = state.jwks_json.clone();
     let handle = tokio::spawn(async move {
         #[cfg(feature = "k8s")]
         {
-            if let Err(e) = run_kubernetes_controller_loop(settings_clone).await {
+            if let Err(e) = run_kubernetes_controller_loop(
+                controller_state_clone,
+                registry_provider,
+                jwks_json,
+                settings_clone,
+            )
+            .await
+            {
                 tracing::error!("Deployment controller error: {:#}", e);
             }
         }
@@ -56,8 +72,9 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     // Start project controller (always enabled)
     info!("Starting project controller");
     let settings_clone = settings.clone();
+    let controller_state_clone = controller_state.clone();
     let handle = tokio::spawn(async move {
-        if let Err(e) = run_project_controller_loop(settings_clone).await {
+        if let Err(e) = run_project_controller_loop(controller_state_clone, settings_clone).await {
             tracing::error!("Project controller error: {:#}", e);
         }
     });
@@ -68,8 +85,9 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     if let Some(settings::RegistrySettings::Ecr { .. }) = &settings.registry {
         info!("Starting ECR controller");
         let settings_clone = settings.clone();
+        let controller_state_clone = controller_state.clone();
         let handle = tokio::spawn(async move {
-            if let Err(e) = run_ecr_controller_loop(settings_clone).await {
+            if let Err(e) = run_ecr_controller_loop(controller_state_clone, settings_clone).await {
                 tracing::error!("ECR controller error: {:#}", e);
             }
         });
@@ -130,11 +148,11 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 }
 
 /// Run the project controller loop (for embedding in server process)
-async fn run_project_controller_loop(settings: settings::Settings) -> Result<()> {
-    let state =
-        ControllerState::new(&settings.database.url, 2, settings.encryption.as_ref()).await?;
-
-    let controller = Arc::new(project::ProjectController::new(Arc::new(state)));
+async fn run_project_controller_loop(
+    controller_state: ControllerState,
+    _settings: settings::Settings,
+) -> Result<()> {
+    let controller = Arc::new(project::ProjectController::new(Arc::new(controller_state)));
     controller.start();
     info!("Project controller started");
 
@@ -150,7 +168,10 @@ async fn run_project_controller_loop(settings: settings::Settings) -> Result<()>
 /// - Creates repositories for new projects
 /// - Cleans up repositories when projects are deleted
 #[cfg(feature = "aws")]
-async fn run_ecr_controller_loop(settings: settings::Settings) -> Result<()> {
+async fn run_ecr_controller_loop(
+    controller_state: ControllerState,
+    settings: settings::Settings,
+) -> Result<()> {
     use crate::server::registry::models::EcrConfig;
     use crate::server::settings::RegistrySettings;
 
@@ -177,12 +198,9 @@ async fn run_ecr_controller_loop(settings: settings::Settings) -> Result<()> {
             anyhow::bail!("ECR controller requires ECR registry configuration");
         }
     };
-
-    let state =
-        ControllerState::new(&settings.database.url, 2, settings.encryption.as_ref()).await?;
     let manager = Arc::new(ecr::EcrRepoManager::new(ecr_config).await?);
 
-    let controller = Arc::new(ecr::EcrController::new(Arc::new(state), manager));
+    let controller = Arc::new(ecr::EcrController::new(Arc::new(controller_state), manager));
     controller.start();
     info!("ECR controller started");
 
@@ -194,7 +212,12 @@ async fn run_ecr_controller_loop(settings: settings::Settings) -> Result<()> {
 
 /// Run the Kubernetes deployment controller loop (for embedding in server process)
 #[cfg(feature = "k8s")]
-async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<()> {
+async fn run_kubernetes_controller_loop(
+    controller_state: ControllerState,
+    registry_provider: Arc<dyn crate::server::registry::RegistryProvider>,
+    jwks_json: String,
+    settings: settings::Settings,
+) -> Result<()> {
     // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -262,11 +285,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
         }
     };
 
-    let app_state = state::AppState::new_for_controller(&settings).await?;
-    let controller_state = ControllerState {
-        db_pool: app_state.db_pool.clone(),
-        encryption_provider: app_state.encryption_provider.clone(),
-    };
+    // Use components passed from main server (no initialization needed)
 
     // Create kube client
     let kube_config = if kubeconfig.is_some() {
@@ -281,9 +300,6 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
         kube::Config::infer().await? // In-cluster or ~/.kube/config
     };
     let kube_client = kube::Client::try_from(kube_config)?;
-
-    // Get registry provider
-    let registry_provider = app_state.registry_provider.clone();
 
     // Extract backend_address from auth_backend_url
     let parsed_backend_address = settings::BackendAddress::from_url(&auth_backend_url)?;
@@ -315,9 +331,9 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             node_selector,
             image_pull_secret_name,
             access_classes,
-            // Controller-only mode doesn't have JWT signer, use empty JWKS
-            rise_jwks_json: r#"{"keys":[]}"#.to_string(),
-            // Use public_url as issuer (controller-only mode doesn't generate JWTs, but apps may need to know the expected issuer)
+            // Use JWKS from main server
+            rise_jwks_json: jwks_json,
+            // Use public_url as issuer
             rise_issuer: settings.server.public_url.clone(),
         },
     )?);
