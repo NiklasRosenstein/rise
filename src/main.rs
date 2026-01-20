@@ -56,6 +56,12 @@ struct DeployArgs {
     /// Pre-built image to deploy (e.g., nginx:latest). Skips build if provided.
     #[arg(long, short)]
     image: Option<String>,
+    /// Create deployment from an existing deployment (e.g., '20240101-120000'). Skips build and reuses the image.
+    #[arg(long)]
+    from: Option<String>,
+    /// When used with --from, copy environment variables from source deployment instead of using current project vars
+    #[arg(long)]
+    use_source_env_vars: bool,
     /// Deployment group (e.g., 'default', 'mr/27'). Defaults to 'default' if not specified.
     #[arg(long, short)]
     group: Option<String>,
@@ -313,17 +319,6 @@ enum DeploymentCommands {
         /// Timeout for following deployment
         #[arg(long, default_value = "5m")]
         timeout: String,
-    },
-    /// Rollback to a previous deployment
-    Rollback {
-        /// Project name (optional if rise.toml contains [project] section)
-        #[arg(long, short = 'p')]
-        project: Option<String>,
-        /// Path to rise.toml (defaults to current directory)
-        #[arg(long, default_value = ".")]
-        path: String,
-        /// Deployment ID to rollback to
-        deployment_id: String,
     },
     /// Stop all deployments in a group
     Stop {
@@ -849,28 +844,41 @@ async fn main() -> Result<()> {
             DeploymentCommands::Create { args } => {
                 let project_name = resolve_project_name(args.project.clone(), &args.path)?;
                 // Validate http_port requirements
-                let port = match (args.image.as_ref(), args.http_port) {
-                    // If using pre-built image, http_port is required
-                    (Some(_), None) => {
-                        eprintln!("Error: --http-port is required when using --image");
-                        eprintln!(
-                            "Example: rise deployment create {} --image {} --http-port 80",
-                            project_name,
-                            args.image.as_ref().unwrap()
-                        );
+                let port = match (args.image.as_ref(), args.from.as_ref(), args.http_port) {
+                    // If using pre-built image or from deployment, http_port is required
+                    (Some(_), None, None) | (None, Some(_), None) => {
+                        if let Some(image_ref) = args.image.as_ref() {
+                            eprintln!("Error: --http-port is required when using --image");
+                            eprintln!(
+                                "Example: rise deployment create {} --image {} --http-port 80",
+                                project_name, image_ref
+                            );
+                        } else {
+                            eprintln!("Error: --http-port is required when using --from");
+                            eprintln!(
+                                "Example: rise deployment create {} --from {} --http-port 80",
+                                project_name,
+                                args.from.as_ref().unwrap()
+                            );
+                        }
                         std::process::exit(1);
                     }
-                    // If using pre-built image with port specified, use it
-                    (Some(_), Some(p)) => p,
+                    // If using pre-built image or from deployment with port specified, use it
+                    (Some(_), None, Some(p)) | (None, Some(_), Some(p)) => p,
                     // If building from source without port specified, default to 8080 (Paketo buildpack default)
-                    (None, None) => {
+                    (None, None, None) => {
                         info!(
                             "No --http-port specified, defaulting to 8080 (Paketo buildpack default)"
                         );
                         8080
                     }
                     // If building from source with port specified, use it
-                    (None, Some(p)) => p,
+                    (None, None, Some(p)) => p,
+                    // Both --image and --from cannot be specified together
+                    (Some(_), Some(_), _) => {
+                        eprintln!("Error: Cannot specify both --image and --from");
+                        std::process::exit(1);
+                    }
                 };
 
                 deployment::create_deployment(
@@ -885,6 +893,8 @@ async fn main() -> Result<()> {
                         expires_in: args.expire.as_deref(),
                         http_port: port,
                         build_args: &args.build_args,
+                        from_deployment: args.from.as_deref(),
+                        use_source_env_vars: args.use_source_env_vars,
                     },
                 )
                 .await?;
@@ -922,21 +932,6 @@ async fn main() -> Result<()> {
                     deployment_id,
                     *follow,
                     timeout,
-                )
-                .await?;
-            }
-            DeploymentCommands::Rollback {
-                project,
-                path,
-                deployment_id,
-            } => {
-                let project_name = resolve_project_name(project.clone(), path)?;
-                deployment::rollback_deployment(
-                    &http_client,
-                    &backend_url,
-                    &config,
-                    &project_name,
-                    deployment_id,
                 )
                 .await?;
             }

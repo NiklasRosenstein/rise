@@ -525,6 +525,8 @@ pub struct DeploymentOptions<'a> {
     pub expires_in: Option<&'a str>,
     pub http_port: u16,
     pub build_args: &'a build::BuildArgs,
+    pub from_deployment: Option<&'a str>,
+    pub use_source_env_vars: bool,
 }
 
 pub async fn create_deployment(
@@ -533,7 +535,14 @@ pub async fn create_deployment(
     config: &Config,
     deploy_opts: DeploymentOptions<'_>,
 ) -> Result<()> {
-    if let Some(image_ref) = deploy_opts.image {
+    if let Some(from_deployment_id) = deploy_opts.from_deployment {
+        info!(
+            "Creating deployment for project '{}' from deployment '{}' with {} environment variables",
+            deploy_opts.project_name,
+            from_deployment_id,
+            if deploy_opts.use_source_env_vars { "source" } else { "current project" }
+        );
+    } else if let Some(image_ref) = deploy_opts.image {
         info!(
             "Deploying project '{}' with pre-built image '{}'",
             deploy_opts.project_name, image_ref
@@ -564,6 +573,8 @@ pub async fn create_deployment(
         deploy_opts.group,
         deploy_opts.expires_in,
         deploy_opts.http_port,
+        deploy_opts.from_deployment,
+        deploy_opts.use_source_env_vars,
     )
     .await?;
 
@@ -598,9 +609,15 @@ pub async fn create_deployment(
         }
     });
 
-    if deploy_opts.image.is_some() {
-        // Pre-built image path: Skip build/push, backend already marked as Pushed
-        info!("✓ Pre-built image deployment created");
+    if deploy_opts.image.is_some() || deploy_opts.from_deployment.is_some() {
+        // Pre-built image path or redeploy from existing deployment: Skip build/push, backend already marked as Pushed
+        if deploy_opts.from_deployment.is_some() {
+            info!("✓ Deployment created from existing deployment '{}' with {} environment variables",
+                deploy_opts.from_deployment.unwrap(),
+                if deploy_opts.use_source_env_vars { "source" } else { "current project" });
+        } else {
+            info!("✓ Pre-built image deployment created");
+        }
     } else {
         // Build from source path: Execute build and push
         // Step 2: Login to registry if credentials provided
@@ -705,6 +722,8 @@ async fn call_create_deployment_api(
     group: Option<&str>,
     expires_in: Option<&str>,
     http_port: u16,
+    from_deployment: Option<&str>,
+    use_source_env_vars: bool,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
@@ -725,6 +744,12 @@ async fn call_create_deployment_api(
     // Add expires_in field if provided
     if let Some(expiration) = expires_in {
         payload["expires_in"] = serde_json::json!(expiration);
+    }
+
+    // Add from_deployment field if provided
+    if let Some(source_deployment_id) = from_deployment {
+        payload["from_deployment"] = serde_json::json!(source_deployment_id);
+        payload["use_source_env_vars"] = serde_json::json!(use_source_env_vars);
     }
 
     let response = http_client
