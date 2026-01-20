@@ -497,6 +497,159 @@ pub async fn create_deployment(
     let deployment_id = generate_deployment_id();
     debug!("Generated deployment ID: {}", deployment_id);
 
+    // Handle deployment creation from an existing deployment (redeploy/rollback)
+    if let Some(ref from_deployment_id) = payload.from_deployment {
+        info!(
+            "Creating deployment from existing deployment '{}'",
+            from_deployment_id
+        );
+
+        // Find the source deployment
+        let source_deployment = db_deployments::find_by_project_and_deployment_id(
+            &state.db_pool,
+            project.id,
+            from_deployment_id,
+        )
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find source deployment: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!(
+                    "Source deployment '{}' not found for project '{}'",
+                    from_deployment_id, payload.project
+                ),
+            )
+        })?;
+
+        // Verify source deployment is in a valid state for creating from
+        // Allow Healthy (currently active), Superseded (previously active), and Stopped
+        if !state_machine::is_rollbackable(&source_deployment.status) {
+            return Err((StatusCode::BAD_REQUEST, format!("Cannot create deployment from '{}' with status '{:?}'. Only Healthy, Superseded, or Stopped deployments can be used as source.", from_deployment_id, source_deployment.status)));
+        }
+
+        // For chained redeployments, follow the chain to find the original source
+        // This ensures we use the correct image tag from the original deployment that built the image
+        let original_source_id =
+            if let Some(chained_source) = source_deployment.rolled_back_from_deployment_id {
+                // Source is itself a redeploy - use its source instead
+                debug!(
+                    "Source deployment {} is a redeploy, following chain to original source {}",
+                    from_deployment_id, chained_source
+                );
+                chained_source
+            } else {
+                // Source is the original - use it directly
+                source_deployment.id
+            };
+
+        // Create new deployment with Pushed status and invoke extension hooks
+        // Copy image and image_digest from source - the helper function will determine the tag
+        // For pre-built images: image_digest is copied, helper returns it
+        // For build-from-source: rolled_back_from_deployment_id is used to find the original source deployment's image
+        let new_deployment = create_deployment_with_hooks(
+            &state,
+            db_deployments::CreateDeploymentParams {
+                deployment_id: &deployment_id,
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
+                image: source_deployment.image.as_deref(), // Copy image from source if present
+                image_digest: source_deployment.image_digest.as_deref(), // Copy digest from source if present
+                rolled_back_from_deployment_id: Some(original_source_id), // Track original source for image tag calculation
+                deployment_group: &payload.group, // Use requested group (may be different from source)
+                expires_at,                       // expires_at
+                http_port: payload.http_port as i32, // Use requested http_port (may be different from source)
+                is_active: false, // Deployments start as inactive
+            },
+            &project,
+        )
+        .await?;
+
+        // Handle environment variables based on use_source_env_vars flag
+        if payload.use_source_env_vars {
+            // Copy environment variables from source deployment
+            info!(
+                "Copying environment variables from source deployment '{}'",
+                from_deployment_id
+            );
+            crate::db::env_vars::copy_deployment_env_vars_to_deployment(
+                &state.db_pool,
+                source_deployment.id,
+                new_deployment.id,
+            )
+            .await
+            .map_err(|e| {
+                error!(
+                    "Failed to copy environment variables from deployment {}: {}",
+                    from_deployment_id, e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to copy environment variables: {}", e),
+                )
+            })?;
+        } else {
+            // Copy current project environment variables to deployment
+            info!("Using current project environment variables");
+            crate::db::env_vars::copy_project_env_vars_to_deployment(
+                &state.db_pool,
+                project.id,
+                new_deployment.id,
+            )
+            .await
+            .map_err(|e| {
+                error!(
+                    "Failed to copy environment variables for deployment {}: {}",
+                    deployment_id, e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to copy environment variables: {}", e),
+                )
+            })?;
+        }
+
+        // Insert Rise-provided environment variables
+        insert_rise_env_vars(&state, &new_deployment, &project).await?;
+
+        // Use helper to determine image tag (for logging/response only)
+        let image_tag = crate::server::deployment::utils::get_deployment_image_tag(
+            &state,
+            &new_deployment,
+            &project,
+        )
+        .await;
+
+        info!(
+            "Created deployment {} from {} (image: {}, env vars: {})",
+            deployment_id,
+            from_deployment_id,
+            image_tag,
+            if payload.use_source_env_vars {
+                "from source"
+            } else {
+                "from project"
+            }
+        );
+
+        // Return response with image tag and empty credentials (no push needed)
+        return Ok(Json(CreateDeploymentResponse {
+            deployment_id,
+            image_tag,
+            credentials: crate::server::registry::models::RegistryCredentials {
+                registry_url: String::new(),
+                username: String::new(),
+                password: String::new(),
+            },
+        }));
+    }
+
     // Branch based on whether user provided a pre-built image
     if let Some(ref user_image) = payload.image {
         // Path 1: Pre-built image deployment

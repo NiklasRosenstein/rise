@@ -106,6 +106,10 @@ pub struct CreateDeploymentRequest {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>, // Expiration duration (e.g., '7d', '2h', '30m')
     pub http_port: u16,  // HTTP port the application listens on
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_deployment: Option<String>, // Optional source deployment ID to create from
+    #[serde(default)]
+    pub use_source_env_vars: bool, // If true and from_deployment is set, copy env vars from source (default: false = use current project env vars)
 }
 
 // Response from creating a deployment
