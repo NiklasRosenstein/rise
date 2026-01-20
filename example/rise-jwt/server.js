@@ -1,6 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
-const jwksClient = require('jwks-rsa');
+const jwkToPem = require('jwk-to-pem');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
@@ -21,19 +21,13 @@ function getKey(header, callback) {
     return callback(new Error(`Key with kid "${header.kid}" not found in JWKS`));
   }
 
-  // Convert JWK to PEM format using jwks-rsa
-  const client = jwksClient({
-    jwksUri: null,  // Not needed - we have the keys directly
-    cache: false
-  });
-
-  // Use jwks-rsa to convert the JWK to a signing key
-  const signingKey = client.getSigningKey(key.kid, (err, result) => {
-    if (err) {
-      return callback(err);
-    }
-    callback(null, result.getPublicKey());
-  });
+  try {
+    // Convert JWK to PEM format using jwk-to-pem
+    const pem = jwkToPem(key);
+    callback(null, pem);
+  } catch (err) {
+    callback(err);
+  }
 }
 
 // Utility: Validate and decode JWT
@@ -54,7 +48,7 @@ async function validateJWT(token) {
 
     // Verify JWT signature using JWKS
     jwt.verify(token, getKey, {
-      algorithms: ['RS256', 'HS256'],
+      algorithms: ['RS256'],
       issuer: RISE_ISSUER,
       // Note: We skip audience validation here since the audience varies by deployment
       // In production, you should validate the audience matches your app's URL

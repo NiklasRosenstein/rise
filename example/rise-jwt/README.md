@@ -29,7 +29,7 @@ When you authenticate with Rise:
 - The `rise_jwt` cookie is HttpOnly (JavaScript cannot access it - XSS protection)
 - JWTs are signed with RS256 (asymmetric cryptography)
 - You should **always validate** the JWT signature using `RISE_JWKS` before trusting the claims
-- This example includes proper validation using the `jsonwebtoken` and `jwks-rsa` libraries
+- This example includes proper validation using the `jsonwebtoken` and `jwk-to-pem` libraries
 
 ## Deploying This Example
 
