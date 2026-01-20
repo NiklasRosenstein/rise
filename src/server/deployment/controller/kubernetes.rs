@@ -1766,14 +1766,19 @@ impl KubernetesController {
             let primary_url = self.full_ingress_url(project, deployment);
 
             // Load custom domains for this project
-            let custom_domains = crate::db::custom_domains::list_project_custom_domains(&self.state.db_pool, project.id)
-                .await?;
+            let custom_domains = crate::db::custom_domains::list_project_custom_domains(
+                &self.state.db_pool,
+                project.id,
+            )
+            .await?;
 
             // Build all URLs (primary + custom domains)
             let mut app_urls = vec![primary_url];
             for domain in custom_domains {
-                let schema = if self.ingress_tls_secret_name.is_some() ||
-                             (self.custom_domain_tls_mode == crate::server::settings::CustomDomainTlsMode::PerDomain) {
+                let schema = if self.ingress_tls_secret_name.is_some()
+                    || (self.custom_domain_tls_mode
+                        == crate::server::settings::CustomDomainTlsMode::PerDomain)
+                {
                     "https"
                 } else {
                     &self.ingress_schema
@@ -3951,6 +3956,7 @@ mod tests {
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             rise_jwks_json: r#"{"keys":[]}"#.to_string(),
+            rise_issuer: "http://localhost:3000".to_string(),
         }
     }
 
@@ -4419,6 +4425,7 @@ mod tests {
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             rise_jwks_json: r#"{"keys":[]}"#.to_string(),
+            rise_issuer: "http://localhost:3000".to_string(),
         }
     }
 }

@@ -243,16 +243,13 @@ async fn insert_rise_env_vars(
     project: &crate::db::models::Project,
 ) -> Result<(), (StatusCode, String)> {
     // 1. Generate RISE_JWKS
-    let jwks = state
-        .jwt_signer
-        .generate_jwks()
-        .map_err(|e| {
-            error!("Failed to generate JWKS: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to generate JWKS: {}", e),
-            )
-        })?;
+    let jwks = state.jwt_signer.generate_jwks().map_err(|e| {
+        error!("Failed to generate JWKS: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to generate JWKS: {}", e),
+        )
+    })?;
     let jwks_json = serde_json::to_string(&jwks).map_err(|e| {
         error!("Failed to serialize JWKS: {}", e);
         (
