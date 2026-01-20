@@ -1495,34 +1495,17 @@ pub async fn ingress_auth(
     }
 }
 
-#[derive(Debug, Deserialize)]
-pub struct LogoutQuery {
-    /// Optional redirect URL after logout
-    pub redirect: Option<String>,
-}
-
 /// Logout endpoint
 ///
 /// Clears the session cookie. Returns 200 OK to let the frontend handle the redirect.
 #[instrument(skip(state))]
-pub async fn oauth_logout(
-    State(state): State<AppState>,
-    Query(params): Query<LogoutQuery>,
-) -> Result<Response, (StatusCode, String)> {
+pub async fn oauth_logout(State(state): State<AppState>) -> Result<Response, (StatusCode, String)> {
     tracing::info!("Logout initiated");
 
     // Clear the Rise JWT cookie
     let cookie = cookie_helpers::clear_rise_jwt_cookie(&state.cookie_settings);
 
-    // Log the redirect URL if provided (for debugging)
-    if let Some(redirect_url) = params.redirect {
-        tracing::info!(
-            "Clearing Rise JWT cookie (redirect handled by frontend: {})",
-            redirect_url
-        );
-    } else {
-        tracing::info!("Clearing Rise JWT cookie (redirect handled by frontend)");
-    }
+    tracing::info!("Clearing Rise JWT cookie");
 
     // Return 200 OK with Set-Cookie header
     // Let the frontend handle the redirect to avoid race conditions with cookie clearing
