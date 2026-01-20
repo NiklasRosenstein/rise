@@ -133,6 +133,24 @@ class RiseAPI {
         });
     }
 
+    // Create a new deployment from an existing deployment (redeploy/rollback)
+    async createDeploymentFrom(projectName, sourceDeploymentId, useSourceEnvVars = false) {
+        // Get the source deployment to extract its configuration
+        const sourceDeployment = await this.request(`/projects/${projectName}/deployments/${sourceDeploymentId}`);
+        
+        return this.request(`/deployments`, {
+            method: 'POST',
+            body: JSON.stringify({
+                project: projectName,
+                from_deployment: sourceDeploymentId,
+                use_source_env_vars: useSourceEnvVars,
+                group: sourceDeployment.deployment_group || 'default',
+                http_port: sourceDeployment.controller_metadata?.http_port || 8080,
+            })
+        });
+    }
+
+    // Legacy rollback endpoint (deprecated - use createDeploymentFrom instead)
     async rollbackDeployment(projectName, deploymentId) {
         return this.request(`/projects/${projectName}/deployments/${deploymentId}/rollback`, {
             method: 'POST'
