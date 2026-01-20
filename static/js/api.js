@@ -150,13 +150,6 @@ class RiseAPI {
         });
     }
 
-    // Legacy rollback endpoint (deprecated - use createDeploymentFrom instead)
-    async rollbackDeployment(projectName, deploymentId) {
-        return this.request(`/projects/${projectName}/deployments/${deploymentId}/rollback`, {
-            method: 'POST'
-        });
-    }
-
     // Service account endpoints
     async getProjectServiceAccounts(projectName) {
         return this.request(`/projects/${projectName}/workload-identities`);

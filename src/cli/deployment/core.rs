@@ -13,13 +13,6 @@ use crate::config::Config;
 // Re-export models from API module (always available)
 pub use crate::api::models::{Deployment, DeploymentStatus};
 
-#[derive(Debug, Deserialize)]
-struct RollbackResponse {
-    new_deployment_id: String,
-    rolled_back_from: String,
-    image_tag: String,
-}
-
 /// Parse duration string (e.g., "5m", "30s", "1h")
 pub(super) fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
@@ -331,104 +324,6 @@ pub async fn show_deployment(
 /// Rollback to a previous deployment
 ///
 /// Creates a new deployment with the same image as the reference deployment
-pub async fn rollback_deployment(
-    http_client: &Client,
-    backend_url: &str,
-    config: &Config,
-    project: &str,
-    deployment_id: &str,
-) -> Result<()> {
-    let token = config
-        .get_token()
-        .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
-
-    info!(
-        "Rolling back project '{}' to deployment '{}'",
-        project, deployment_id
-    );
-
-    println!(
-        "Initiating rollback for project '{}' to deployment '{}'...",
-        project, deployment_id
-    );
-
-    // Call the rollback endpoint
-    let url = format!(
-        "{}/api/v1/projects/{}/deployments/{}/rollback",
-        backend_url, project, deployment_id
-    );
-    let response = http_client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .await
-        .context("Failed to send rollback request")?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-
-        match status {
-            reqwest::StatusCode::NOT_FOUND => {
-                bail!(
-                    "Deployment '{}' not found for project '{}'",
-                    deployment_id,
-                    project
-                );
-            }
-            reqwest::StatusCode::UNAUTHORIZED => {
-                bail!("Authentication failed. Please run 'rise login' again.");
-            }
-            reqwest::StatusCode::FORBIDDEN => {
-                bail!(
-                    "You don't have permission to rollback project '{}'",
-                    project
-                );
-            }
-            reqwest::StatusCode::BAD_REQUEST => {
-                bail!("Cannot rollback: {}", error_text);
-            }
-            _ => {
-                bail!("Rollback failed ({}): {}", status, error_text);
-            }
-        }
-    }
-
-    let rollback_response: RollbackResponse = response
-        .json()
-        .await
-        .context("Failed to parse rollback response")?;
-
-    println!();
-    println!("✓ Rollback initiated successfully!");
-    println!(
-        "  New deployment ID: {}",
-        rollback_response.new_deployment_id
-    );
-    println!(
-        "  Rolled back from:  {}",
-        rollback_response.rolled_back_from
-    );
-    println!("  Using image:       {}", rollback_response.image_tag);
-    println!();
-
-    // Follow the new deployment to completion
-    show_deployment(
-        http_client,
-        backend_url,
-        config,
-        project,
-        &rollback_response.new_deployment_id,
-        true,  // follow
-        "10m", // timeout
-    )
-    .await?;
-
-    Ok(())
-}
 
 #[derive(Debug, Deserialize)]
 struct StopDeploymentsResponse {
