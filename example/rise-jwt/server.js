@@ -1,24 +1,70 @@
 const express = require('express');
+const jwt = require('jsonwebtoken');
+const jwksClient = require('jwks-rsa');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Utility: Decode JWT and extract claims (server-side)
-function decodeJWT(token) {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) {
-      throw new Error('Invalid JWT format (expected 3 parts)');
+// Load JWKS from environment variable (provided by Rise)
+const RISE_JWKS = process.env.RISE_JWKS ? JSON.parse(process.env.RISE_JWKS) : null;
+const RISE_ISSUER = process.env.RISE_ISSUER || 'http://localhost:3000';
+const RISE_APP_URLS = process.env.RISE_APP_URLS ? JSON.parse(process.env.RISE_APP_URLS) : null;
+
+// Convert JWKS to a key lookup function for jsonwebtoken
+function getKey(header, callback) {
+  if (!RISE_JWKS || !RISE_JWKS.keys) {
+    return callback(new Error('RISE_JWKS not configured - JWT validation unavailable'));
+  }
+
+  const key = RISE_JWKS.keys.find(k => k.kid === header.kid);
+  if (!key) {
+    return callback(new Error(`Key with kid "${header.kid}" not found in JWKS`));
+  }
+
+  // Convert JWK to PEM format using jwks-rsa
+  const client = jwksClient({
+    jwksUri: null,  // Not needed - we have the keys directly
+    cache: false
+  });
+
+  // Use jwks-rsa to convert the JWK to a signing key
+  const signingKey = client.getSigningKey(key.kid, (err, result) => {
+    if (err) {
+      return callback(err);
+    }
+    callback(null, result.getPublicKey());
+  });
+}
+
+// Utility: Validate and decode JWT
+async function validateJWT(token) {
+  return new Promise((resolve, reject) => {
+    // If JWKS is not available, fall back to decode-only (insecure, for demo)
+    if (!RISE_JWKS) {
+      console.warn('WARNING: RISE_JWKS not set - JWT signature validation is DISABLED');
+      console.warn('This is INSECURE and should only be used for local testing');
+
+      // Decode without verification (INSECURE - for demo only)
+      const decoded = jwt.decode(token, { complete: false });
+      if (!decoded) {
+        return reject(new Error('Failed to decode JWT'));
+      }
+      return resolve({ claims: decoded, verified: false });
     }
 
-    // Decode the payload (second part)
-    const payload = parts[1];
-    // URL-safe base64 decoding
-    const decoded = Buffer.from(payload.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('utf-8');
-    return JSON.parse(decoded);
-  } catch (e) {
-    throw new Error(`Failed to decode JWT: ${e.message}`);
-  }
+    // Verify JWT signature using JWKS
+    jwt.verify(token, getKey, {
+      algorithms: ['RS256', 'HS256'],
+      issuer: RISE_ISSUER,
+      // Note: We skip audience validation here since the audience varies by deployment
+      // In production, you should validate the audience matches your app's URL
+    }, (err, decoded) => {
+      if (err) {
+        return reject(new Error(`JWT validation failed: ${err.message}`));
+      }
+      resolve({ claims: decoded, verified: true });
+    });
+  });
 }
 
 // Utility: Extract rise_jwt cookie from request
@@ -48,8 +94,8 @@ function formatTimestamp(unixTimestamp) {
   return `${date.toLocaleString()} <span class="timestamp">(${diffStr})</span>`;
 }
 
-// Home route - decode and display JWT claims
-app.get('/', (req, res) => {
+// Home route - validate and display JWT claims
+app.get('/', async (req, res) => {
   const token = getRiseJwtCookie(req);
 
   if (!token) {
@@ -57,8 +103,8 @@ app.get('/', (req, res) => {
   }
 
   try {
-    const claims = decodeJWT(token);
-    res.send(renderClaimsPage(claims));
+    const { claims, verified } = await validateJWT(token);
+    res.send(renderClaimsPage(claims, verified));
   } catch (error) {
     res.send(renderErrorPage(error.message));
   }
@@ -113,10 +159,24 @@ function renderNoTokenPage() {
   `;
 }
 
-function renderClaimsPage(claims) {
+function renderClaimsPage(claims, verified) {
   const groupsHtml = claims.groups && claims.groups.length > 0 ?
     claims.groups.map(g => `<span class="badge">${escapeHtml(g)}</span>`).join('') :
     '<span class="text-muted">No teams</span>';
+
+  // Status message based on verification
+  const statusHtml = verified ?
+    `<div class="status success">
+        ✓ JWT signature verified successfully using RISE_JWKS
+    </div>` :
+    `<div class="status error">
+        ⚠ JWT decoded but signature NOT verified (RISE_JWKS not configured)
+    </div>
+    <div class="info" style="margin-top: 10px;">
+        <strong>Security Warning:</strong> This JWT has been decoded but the signature has not been verified.
+        In production, you should always validate JWTs using the RISE_JWKS environment variable.
+        This is currently running in insecure mode for demonstration purposes only.
+    </div>`;
 
   return `
     <!DOCTYPE html>
@@ -132,9 +192,7 @@ function renderClaimsPage(claims) {
             <h1>🔐 Rise JWT Claims Viewer</h1>
             <p class="subtitle">Decode and inspect the <code>rise_jwt</code> cookie set by Rise authentication</p>
 
-            <div class="status success">
-                ✓ Successfully decoded <code>rise_jwt</code> cookie
-            </div>
+            ${statusHtml}
 
             <div class="claims-section">
                 <h2>📋 JWT Claims</h2>
@@ -184,12 +242,19 @@ function renderClaimsPage(claims) {
             <div class="footer">
                 <strong>About this example:</strong><br>
                 This server-side application reads the HttpOnly <code>rise_jwt</code> cookie from the request headers,
-                decodes it, and displays the claims. The cookie is automatically sent by the browser when you make requests
-                to the same domain where it was set.
+                validates the JWT signature using the <code>RISE_JWKS</code> environment variable, and displays the claims.
                 <br><br>
-                <strong>Security:</strong> The <code>rise_jwt</code> cookie is HttpOnly, which prevents JavaScript access
-                and provides protection against XSS attacks. Only server-side code can read this cookie.
-                <br><br>
+                <strong>Security:</strong><br>
+                • The <code>rise_jwt</code> cookie is HttpOnly (XSS protection)<br>
+                • JWT signature is verified using RS256 public keys from <code>RISE_JWKS</code><br>
+                • Issuer (<code>iss</code>) is validated against <code>RISE_ISSUER</code><br>
+                • Only server-side code can read this cookie<br>
+                <br>
+                <strong>Environment Variables:</strong><br>
+                • <code>RISE_JWKS</code>: JSON Web Key Set for signature verification (auto-injected by Rise)<br>
+                • <code>RISE_ISSUER</code>: Expected JWT issuer (defaults to <code>http://localhost:3000</code>)<br>
+                • <code>RISE_APP_URLS</code>: JSON array of all app URLs - primary + custom domains${RISE_APP_URLS ? ` (current: <code>${JSON.stringify(RISE_APP_URLS)}</code>)` : ''}<br>
+                <br>
                 Learn more: <a href="https://github.com/NiklasRosenstein/rise" target="_blank">Rise Documentation</a>
             </div>
         </div>

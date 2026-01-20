@@ -317,6 +317,8 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
             access_classes,
             // Controller-only mode doesn't have JWT signer, use empty JWKS
             rise_jwks_json: r#"{"keys":[]}"#.to_string(),
+            // Use public_url as issuer (controller-only mode doesn't generate JWTs, but apps may need to know the expected issuer)
+            rise_issuer: settings.server.public_url.clone(),
         },
     )?);
 

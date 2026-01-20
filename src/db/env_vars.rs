@@ -120,7 +120,6 @@ pub async fn list_deployment_env_vars(
 }
 
 /// Create or update a deployment environment variable (upsert)
-#[allow(dead_code)]
 pub async fn upsert_deployment_env_var(
     pool: &PgPool,
     deployment_id: Uuid,

@@ -228,6 +228,121 @@ fn convert_status_to_db(status: DeploymentStatus) -> DbDeploymentStatus {
     }
 }
 
+/// Insert Rise-provided environment variables into a deployment
+///
+/// This function adds the following environment variables:
+/// - RISE_JWKS: JSON Web Key Set for JWT validation
+/// - RISE_ISSUER: The Rise backend URL (issuer of JWTs)
+/// - RISE_APP_URLS: JSON array of URLs where the app can be accessed
+///
+/// These environment variables are visible in the Rise UI and allow deployed applications
+/// to validate Rise-issued JWTs and know their own URLs.
+async fn insert_rise_env_vars(
+    state: &AppState,
+    deployment: &crate::db::models::Deployment,
+    project: &crate::db::models::Project,
+) -> Result<(), (StatusCode, String)> {
+    // 1. Generate RISE_JWKS
+    let jwks = state
+        .jwt_signer
+        .generate_jwks()
+        .map_err(|e| {
+            error!("Failed to generate JWKS: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to generate JWKS: {}", e),
+            )
+        })?;
+    let jwks_json = serde_json::to_string(&jwks).map_err(|e| {
+        error!("Failed to serialize JWKS: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize JWKS: {}", e),
+        )
+    })?;
+
+    // Insert RISE_JWKS
+    crate::db::env_vars::upsert_deployment_env_var(
+        &state.db_pool,
+        deployment.id,
+        "RISE_JWKS",
+        &jwks_json,
+        false, // Not a secret - public keys
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to insert RISE_JWKS env var: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to insert RISE_JWKS: {}", e),
+        )
+    })?;
+
+    // 2. Insert RISE_ISSUER
+    crate::db::env_vars::upsert_deployment_env_var(
+        &state.db_pool,
+        deployment.id,
+        "RISE_ISSUER",
+        &state.public_url,
+        false, // Not a secret
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to insert RISE_ISSUER env var: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to insert RISE_ISSUER: {}", e),
+        )
+    })?;
+
+    // 3. Generate RISE_APP_URLS
+    let deployment_urls = state
+        .deployment_backend
+        .get_deployment_urls(deployment, project)
+        .await
+        .map_err(|e| {
+            error!("Failed to get deployment URLs: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get deployment URLs: {}", e),
+            )
+        })?;
+
+    let mut app_urls = vec![deployment_urls.primary_url];
+    app_urls.extend(deployment_urls.custom_domain_urls);
+
+    let app_urls_json = serde_json::to_string(&app_urls).map_err(|e| {
+        error!("Failed to serialize RISE_APP_URLS: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to serialize RISE_APP_URLS: {}", e),
+        )
+    })?;
+
+    // Insert RISE_APP_URLS
+    crate::db::env_vars::upsert_deployment_env_var(
+        &state.db_pool,
+        deployment.id,
+        "RISE_APP_URLS",
+        &app_urls_json,
+        false, // Not a secret
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to insert RISE_APP_URLS env var: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to insert RISE_APP_URLS: {}", e),
+        )
+    })?;
+
+    info!(
+        "Inserted Rise environment variables for deployment {}",
+        deployment.id
+    );
+    Ok(())
+}
+
 /// Convert DB DeploymentStatus to API DeploymentStatus
 fn convert_status_from_db(status: DbDeploymentStatus) -> DeploymentStatus {
     match status {
@@ -461,6 +576,9 @@ pub async fn create_deployment(
             )
         })?;
 
+        // Insert Rise-provided environment variables
+        insert_rise_env_vars(&state, &deployment, &project).await?;
+
         // Return response with digest as image_tag and empty credentials
         Ok(Json(CreateDeploymentResponse {
             deployment_id,
@@ -541,6 +659,9 @@ pub async fn create_deployment(
                 format!("Failed to copy environment variables: {}", e),
             )
         })?;
+
+        // Insert Rise-provided environment variables
+        insert_rise_env_vars(&state, &deployment, &project).await?;
 
         // Return response
         Ok(Json(CreateDeploymentResponse {

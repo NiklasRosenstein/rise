@@ -235,6 +235,7 @@ async fn init_kubernetes_backend(
                 image_pull_secret_name: image_pull_secret_name.clone(),
                 access_classes: filtered_access_classes,
                 rise_jwks_json: jwks_json,
+                rise_issuer: settings.server.public_url.clone(),
             },
         )?;
 

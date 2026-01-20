@@ -60,6 +60,8 @@ Rise provides the public keys needed to validate JWTs through the `RISE_JWKS` en
 Your deployed application automatically receives:
 
 - **RISE_JWKS**: JSON Web Key Set (JWKS) containing RS256 public keys for JWT verification
+- **RISE_ISSUER**: The expected JWT issuer (`iss` claim), typically the Rise backend URL (e.g., `http://localhost:3000`)
+- **RISE_APP_URLS**: JSON array of all URLs your app is accessible at (primary ingress + custom domains), e.g., `["http://myapp.rise.local:8080", "https://myapp.example.com"]`
 
 ### Example: Node.js/JavaScript
 

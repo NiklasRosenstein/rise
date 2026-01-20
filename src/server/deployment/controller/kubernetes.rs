@@ -124,6 +124,8 @@ pub struct KubernetesControllerConfig {
     pub access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
     /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
     pub rise_jwks_json: String,
+    /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
+    pub rise_issuer: String,
 }
 
 /// Kubernetes controller implementation
@@ -155,6 +157,8 @@ pub struct KubernetesController {
     resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
     rise_jwks_json: String,
+    /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
+    rise_issuer: String,
 }
 
 impl KubernetesController {
@@ -186,6 +190,7 @@ impl KubernetesController {
             access_classes: config.access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             rise_jwks_json: config.rise_jwks_json,
+            rise_issuer: config.rise_issuer,
         })
     }
 
@@ -1700,7 +1705,8 @@ impl KubernetesController {
     /// Load and decrypt environment variables for a deployment
     async fn load_env_vars(
         &self,
-        deployment_id: uuid::Uuid,
+        project: &crate::db::Project,
+        deployment: &crate::db::Deployment,
         http_port: u16,
     ) -> Result<Vec<k8s_openapi::api::core::v1::EnvVar>> {
         use k8s_openapi::api::core::v1::EnvVar;
@@ -1708,7 +1714,7 @@ impl KubernetesController {
         // Load and decrypt environment variables using shared helper
         let env_vars = crate::db::env_vars::load_deployment_env_vars_decrypted(
             &self.state.db_pool,
-            deployment_id,
+            deployment.id,
             self.state.encryption_provider.as_deref(),
         )
         .await?;
@@ -1739,6 +1745,53 @@ impl KubernetesController {
             k8s_env_vars.push(EnvVar {
                 name: "RISE_JWKS".to_string(),
                 value: Some(self.rise_jwks_json.clone()),
+                ..Default::default()
+            });
+        }
+
+        // Inject RISE_ISSUER environment variable for JWT issuer validation
+        // Only add if not already set by user (allows override for testing)
+        if !k8s_env_vars.iter().any(|env| env.name == "RISE_ISSUER") {
+            k8s_env_vars.push(EnvVar {
+                name: "RISE_ISSUER".to_string(),
+                value: Some(self.rise_issuer.clone()),
+                ..Default::default()
+            });
+        }
+
+        // Inject RISE_APP_URLS environment variable with all app URLs (primary + custom domains)
+        // Only add if not already set by user (allows override for testing)
+        if !k8s_env_vars.iter().any(|env| env.name == "RISE_APP_URLS") {
+            // Build primary URL
+            let primary_url = self.full_ingress_url(project, deployment);
+
+            // Load custom domains for this project
+            let custom_domains = crate::db::custom_domains::list_project_custom_domains(&self.state.db_pool, project.id)
+                .await?;
+
+            // Build all URLs (primary + custom domains)
+            let mut app_urls = vec![primary_url];
+            for domain in custom_domains {
+                let schema = if self.ingress_tls_secret_name.is_some() ||
+                             (self.custom_domain_tls_mode == crate::server::settings::CustomDomainTlsMode::PerDomain) {
+                    "https"
+                } else {
+                    &self.ingress_schema
+                };
+                let url = if let Some(port) = self.ingress_port {
+                    format!("{}://{}:{}", schema, domain.domain, port)
+                } else {
+                    format!("{}://{}", schema, domain.domain)
+                };
+                app_urls.push(url);
+            }
+
+            // Serialize as JSON array
+            let app_urls_json = serde_json::to_string(&app_urls)?;
+
+            k8s_env_vars.push(EnvVar {
+                name: "RISE_APP_URLS".to_string(),
+                value: Some(app_urls_json),
                 ..Default::default()
             });
         }
@@ -2777,7 +2830,7 @@ impl DeploymentBackend for KubernetesController {
 
                     // Load and decrypt environment variables
                     let env_vars = self
-                        .load_env_vars(deployment.id, metadata.http_port)
+                        .load_env_vars(project, deployment, metadata.http_port)
                         .await?;
 
                     // deploy_name already calculated above for migration check
@@ -3184,7 +3237,7 @@ impl DeploymentBackend for KubernetesController {
                 ReconcilePhase::Completed => {
                     // Load and decrypt environment variables for drift detection
                     let env_vars = self
-                        .load_env_vars(deployment.id, metadata.http_port)
+                        .load_env_vars(project, deployment, metadata.http_port)
                         .await?;
 
                     // Apply all supporting resources with drift detection

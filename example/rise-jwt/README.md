@@ -5,6 +5,8 @@ This example demonstrates how to decode and display the `rise_jwt` cookie that R
 ## What This Example Shows
 
 - How to read the `rise_jwt` HttpOnly cookie server-side
+- **How to validate JWT signatures using the `RISE_JWKS` environment variable**
+- How to verify JWT issuer and expiration
 - How to decode a JWT token (Base64 URL decoding)
 - How to extract and display JWT claims
 - JWT claim structure including:
@@ -17,12 +19,17 @@ This example demonstrates how to decode and display the `rise_jwt` cookie that R
 When you authenticate with Rise:
 
 1. Rise performs OAuth authentication with your identity provider (e.g., Dex, Azure AD)
-2. Rise issues its own JWT token containing user information
+2. Rise issues its own JWT token containing user information (signed with RS256)
 3. The JWT is stored in an **HttpOnly** `rise_jwt` cookie
-4. The browser automatically sends this cookie with requests to your deployed app
-5. Your server-side code can read the cookie from request headers and decode it
+4. Rise automatically injects the `RISE_JWKS` environment variable into your deployment
+5. The browser automatically sends this cookie with requests to your deployed app
+6. Your server-side code reads the cookie, validates the signature using `RISE_JWKS`, and extracts claims
 
-**Important:** The `rise_jwt` cookie is HttpOnly, which means JavaScript cannot access it via `document.cookie`. This is a security feature that protects against XSS attacks. Only server-side code can read this cookie.
+**Important:**
+- The `rise_jwt` cookie is HttpOnly (JavaScript cannot access it - XSS protection)
+- JWTs are signed with RS256 (asymmetric cryptography)
+- You should **always validate** the JWT signature using `RISE_JWKS` before trusting the claims
+- This example includes proper validation using the `jsonwebtoken` and `jwks-rsa` libraries
 
 ## Deploying This Example
 
@@ -63,21 +70,58 @@ After deployment, navigate to your app's URL. If you're already logged in to Ris
 
 - **`groups`**: Array of Rise team names the user belongs to
 
+## Environment Variables
+
+When deployed on Rise, your application automatically receives:
+
+- **`RISE_JWKS`**: JSON Web Key Set containing RS256 public keys for JWT signature validation
+  ```json
+  {
+    "keys": [
+      {
+        "kty": "RSA",
+        "kid": "unique-key-id",
+        "n": "...",
+        "e": "AQAB"
+      }
+    ]
+  }
+  ```
+
+- **`RISE_ISSUER`**: The Rise backend URL (used to validate the `iss` claim)
+  - Example: `http://localhost:3000` or `https://rise.example.com`
+
+- **`RISE_APP_URLS`**: JSON array of all URLs your app is accessible at
+  - Example: `["http://myapp.rise.local:8080", "https://custom.example.com"]`
+  - Includes the primary ingress URL and all custom domains
+  - Useful for CORS configuration, redirect validation, etc.
+
+For local testing without Rise deployment, the example will fall back to insecure decode-only mode with a warning.
+
 ## Security Notes
 
-1. **HttpOnly Cookie**: The `rise_jwt` cookie is marked HttpOnly, which means:
-   - JavaScript cannot access it via `document.cookie` in production
-   - This protects against XSS attacks
-   - For this example to work when deployed, you'd need server-side access to the cookie
+1. **JWT Signature Validation**: This example properly validates JWTs using RS256:
+   - Signature is verified using public keys from `RISE_JWKS`
+   - Issuer (`iss`) is validated against `RISE_ISSUER`
+   - Expiration (`exp`) is automatically checked by `jsonwebtoken`
+   - **Never trust JWT claims without signature validation!**
 
-2. **Client-Side Decoding**: This example decodes the JWT client-side for demonstration.
-   In a real application, you'd typically:
-   - Validate the JWT signature server-side
-   - Verify the expiration time
-   - Check the audience (`aud`) matches your app
+2. **HttpOnly Cookie**: The `rise_jwt` cookie is marked HttpOnly:
+   - JavaScript cannot access it via `document.cookie` (XSS protection)
+   - Only server-side code can read this cookie
+   - Cookie is automatically sent by the browser with same-domain requests
 
-3. **No Secret Required**: JWT verification only requires the public key (for RS256) or the shared secret (for HS256).
-   Rise provides the public keys via the `RISE_JWKS` environment variable for deployed apps.
+3. **RS256 (Asymmetric Cryptography)**:
+   - JWTs are signed with a private key (held by Rise backend)
+   - Verification uses public keys (distributed via `RISE_JWKS`)
+   - No shared secrets needed in your application
+   - Public keys can be safely exposed to your application
+
+4. **Local Testing**: When running locally without Rise deployment:
+   - `RISE_JWKS` will not be set
+   - Example falls back to decode-only mode (INSECURE)
+   - A warning is displayed and logged
+   - **Never deploy without proper JWT validation!**
 
 ## Learn More
 
