@@ -1505,7 +1505,7 @@ pub async fn oauth_logout(State(state): State<AppState>) -> Result<Response, (St
     // Clear the Rise JWT cookie
     let cookie = cookie_helpers::clear_rise_jwt_cookie(&state.cookie_settings);
 
-    tracing::info!("Clearing Rise JWT cookie");
+    tracing::debug!("Clearing Rise JWT cookie");
 
     // Return 200 OK with Set-Cookie header
     // Let the frontend handle the redirect to avoid race conditions with cookie clearing
