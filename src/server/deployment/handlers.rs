@@ -646,6 +646,7 @@ pub async fn create_deployment(
                 registry_url: String::new(),
                 username: String::new(),
                 password: String::new(),
+                expires_in: None,
             },
         }));
     }
