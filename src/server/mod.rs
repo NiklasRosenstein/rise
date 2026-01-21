@@ -195,8 +195,6 @@ async fn run_ecr_controller_loop(settings: settings::Settings) -> Result<()> {
 /// Run the Kubernetes deployment controller loop (for embedding in server process)
 #[cfg(feature = "k8s")]
 async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<()> {
-    tracing::info!("Kubernetes controller loop starting...");
-
     // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
     rustls::crypto::ring::default_provider()
         .install_default()
@@ -273,43 +271,16 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
     // Create kube client
     let kube_config = if kubeconfig.is_some() {
         // Use explicit kubeconfig if provided
-        match kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
+        kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
             context: None,
             cluster: None,
             user: None,
         })
-        .await
-        {
-            Ok(config) => config,
-            Err(e) => {
-                tracing::warn!("Failed to load Kubernetes kubeconfig: {}", e);
-                tracing::info!("Skipping Kubernetes deployment controller");
-                return Ok(());
-            }
-        }
+        .await?
     } else {
-        match kube::Config::infer().await {
-            Ok(config) => {
-                tracing::info!("Successfully inferred Kubernetes configuration");
-                config
-            }
-            Err(e) => {
-                tracing::warn!("Failed to infer Kubernetes configuration: {}", e);
-                tracing::info!("Skipping Kubernetes deployment controller");
-                return Ok(());
-            }
-        }
+        kube::Config::infer().await? // In-cluster or ~/.kube/config
     };
-    let kube_client = match kube::Client::try_from(kube_config) {
-        Ok(client) => client,
-        Err(e) => {
-            tracing::warn!("Failed to create Kubernetes client: {}", e);
-            tracing::info!("Will continue but deployment controller may not function properly");
-            // Return early from this task since we can't proceed without a client
-            // The HTTP server will still be running
-            return Ok(());
-        }
-    };
+    let kube_client = kube::Client::try_from(kube_config)?;
 
     // Get registry provider
     let registry_provider = app_state.registry_provider.clone();
@@ -352,13 +323,7 @@ async fn run_kubernetes_controller_loop(settings: settings::Settings) -> Result<
     )?);
 
     // Test Kubernetes API connection before proceeding
-    // Make it non-blocking for local development: log errors but continue
-    if let Err(e) = backend.test_connection().await {
-        tracing::warn!("Kubernetes API connection test failed: {:#}", e);
-        tracing::info!(
-            "Continuing with deployment controller without initial connection verification"
-        );
-    }
+    backend.test_connection().await?;
 
     let controller = Arc::new(deployment::controller::DeploymentController::new(
         Arc::new(controller_state),

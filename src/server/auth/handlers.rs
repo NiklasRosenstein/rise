@@ -1500,8 +1500,6 @@ pub async fn ingress_auth(
 /// Clears the session cookie. Returns 200 OK to let the frontend handle the redirect.
 #[instrument(skip(state))]
 pub async fn oauth_logout(State(state): State<AppState>) -> Result<Response, (StatusCode, String)> {
-    tracing::info!("Logout initiated");
-
     // Clear the Rise JWT cookie
     let cookie = cookie_helpers::clear_rise_jwt_cookie(&state.cookie_settings);
 
