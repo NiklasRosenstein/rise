@@ -96,6 +96,30 @@ pub async fn copy_project_env_vars_to_deployment(
     Ok(result.rows_affected())
 }
 
+/// Copy all environment variables from one deployment to another
+/// This is used when creating a deployment from an existing deployment (e.g., redeploy with same env vars)
+pub async fn copy_deployment_env_vars_to_deployment(
+    pool: &PgPool,
+    source_deployment_id: Uuid,
+    target_deployment_id: Uuid,
+) -> Result<u64> {
+    let result = sqlx::query!(
+        r#"
+        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret)
+        SELECT $1, key, value, is_secret
+        FROM deployment_env_vars
+        WHERE deployment_id = $2
+        "#,
+        target_deployment_id,
+        source_deployment_id
+    )
+    .execute(pool)
+    .await
+    .context("Failed to copy deployment environment variables to deployment")?;
+
+    Ok(result.rows_affected())
+}
+
 /// List all environment variables for a deployment
 /// This is used by the controller to get env vars for container injection
 pub async fn list_deployment_env_vars(
