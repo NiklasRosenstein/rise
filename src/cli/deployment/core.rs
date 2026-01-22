@@ -42,7 +42,7 @@ pub(super) fn parse_duration(s: &str) -> Result<Duration> {
 }
 
 /// Fetch deployment by project name and deployment_id
-pub(super) async fn fetch_deployment(
+pub async fn fetch_deployment(
     http_client: &Client,
     backend_url: &str,
     token: &str,

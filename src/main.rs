@@ -843,25 +843,48 @@ async fn main() -> Result<()> {
         Commands::Deployment(deployment_cmd) => match deployment_cmd {
             DeploymentCommands::Create { args } => {
                 let project_name = resolve_project_name(args.project.clone(), &args.path)?;
+
+                // Both --image and --from cannot be specified together
+                if args.image.is_some() && args.from.is_some() {
+                    eprintln!("Error: Cannot specify both --image and --from");
+                    std::process::exit(1);
+                }
+
                 // Validate http_port requirements
                 let port = match (args.image.as_ref(), args.from.as_ref(), args.http_port) {
-                    // If using pre-built image or from deployment, http_port is required
-                    (Some(_), None, None) | (None, Some(_), None) => {
-                        if let Some(image_ref) = args.image.as_ref() {
-                            eprintln!("Error: --http-port is required when using --image");
-                            eprintln!(
-                                "Example: rise deployment create {} --image {} --http-port 80",
-                                project_name, image_ref
-                            );
-                        } else {
-                            eprintln!("Error: --http-port is required when using --from");
-                            eprintln!(
-                                "Example: rise deployment create {} --from {} --http-port 80",
-                                project_name,
-                                args.from.as_ref().unwrap()
-                            );
-                        }
+                    // If using pre-built image without port, require it
+                    (Some(image_ref), None, None) => {
+                        eprintln!("Error: --http-port is required when using --image");
+                        eprintln!(
+                            "Example: rise deployment create {} --image {} --http-port 80",
+                            project_name, image_ref
+                        );
                         std::process::exit(1);
+                    }
+                    // If using --from without port, fetch from source deployment
+                    (None, Some(from_id), None) => {
+                        let token = config.get_token().ok_or_else(|| {
+                            anyhow::anyhow!("Not logged in. Please run 'rise login' first.")
+                        })?;
+                        let source_deployment = deployment::fetch_deployment(
+                            &http_client,
+                            &backend_url,
+                            &token,
+                            &project_name,
+                            from_id,
+                        )
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "Failed to fetch source deployment '{}' to get http_port",
+                                from_id
+                            )
+                        })?;
+                        info!(
+                            "Using http_port {} from source deployment '{}'",
+                            source_deployment.http_port, from_id
+                        );
+                        source_deployment.http_port
                     }
                     // If using pre-built image or from deployment with port specified, use it
                     (Some(_), None, Some(p)) | (None, Some(_), Some(p)) => p,
@@ -874,11 +897,8 @@ async fn main() -> Result<()> {
                     }
                     // If building from source with port specified, use it
                     (None, None, Some(p)) => p,
-                    // Both --image and --from cannot be specified together
-                    (Some(_), Some(_), _) => {
-                        eprintln!("Error: Cannot specify both --image and --from");
-                        std::process::exit(1);
-                    }
+                    // Both --image and --from cannot be specified together (handled above)
+                    (Some(_), Some(_), _) => unreachable!(),
                 };
 
                 deployment::create_deployment(

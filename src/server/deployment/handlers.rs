@@ -406,6 +406,7 @@ async fn convert_deployment(
         custom_domain_urls,
         image,
         image_digest: deployment.image_digest,
+        http_port: deployment.http_port as u16,
         is_active: deployment.is_active,
         created: deployment.created_at.to_rfc3339(),
         updated: deployment.updated_at.to_rfc3339(),
