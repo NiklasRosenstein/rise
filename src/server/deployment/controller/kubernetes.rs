@@ -1707,7 +1707,6 @@ impl KubernetesController {
         &self,
         project: &crate::db::Project,
         deployment: &crate::db::Deployment,
-        http_port: u16,
     ) -> Result<Vec<k8s_openapi::api::core::v1::EnvVar>> {
         use k8s_openapi::api::core::v1::EnvVar;
 
@@ -1720,6 +1719,7 @@ impl KubernetesController {
         .await?;
 
         // Format as Kubernetes EnvVar objects
+        // Note: PORT is now stored in deployment_env_vars and loaded from the database
         let mut k8s_env_vars: Vec<EnvVar> = env_vars
             .into_iter()
             .map(|(key, value)| EnvVar {
@@ -1728,16 +1728,6 @@ impl KubernetesController {
                 ..Default::default()
             })
             .collect();
-
-        // Always inject PORT environment variable using http_port (with default 8080)
-        // Only add if not already set by user
-        if !k8s_env_vars.iter().any(|env| env.name == "PORT") {
-            k8s_env_vars.push(EnvVar {
-                name: "PORT".to_string(),
-                value: Some(http_port.to_string()),
-                ..Default::default()
-            });
-        }
 
         // Inject RISE_JWKS environment variable with RS256 public keys for JWT verification
         // Only add if not already set by user (allows override for testing)
@@ -2834,9 +2824,7 @@ impl DeploymentBackend for KubernetesController {
                     }
 
                     // Load and decrypt environment variables
-                    let env_vars = self
-                        .load_env_vars(project, deployment, metadata.http_port)
-                        .await?;
+                    let env_vars = self.load_env_vars(project, deployment).await?;
 
                     // deploy_name already calculated above for migration check
                     let deploy_api: Api<K8sDeployment> =
@@ -3241,9 +3229,7 @@ impl DeploymentBackend for KubernetesController {
 
                 ReconcilePhase::Completed => {
                     // Load and decrypt environment variables for drift detection
-                    let env_vars = self
-                        .load_env_vars(project, deployment, metadata.http_port)
-                        .await?;
+                    let env_vars = self.load_env_vars(project, deployment).await?;
 
                     // Apply all supporting resources with drift detection
                     // This reconciles: Namespace, ImagePullSecret, BackendService, Service, Ingress
