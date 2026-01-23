@@ -18,46 +18,32 @@
                 <h2 class="text-2xl font-bold text-white mb-4">Authentication Successful</h2>
 
                 <p class="text-gray-300 mb-4">
-                    You have been successfully authenticated for project
-                    <strong class="font-mono text-white bg-gray-800 px-2 py-1 rounded">{{ project_name }}</strong>.
-                </p>
-
-                <p class="text-gray-400 mb-2">
-                    Redirecting in <span class="font-bold text-indigo-400" id="countdown">3</span> seconds...
+                    Signing you in to project
+                    <strong class="font-mono text-white bg-gray-800 px-2 py-1 rounded">{{ project_name }}</strong>...
                 </p>
 
                 <div class="w-full bg-gray-800 rounded-full h-2 mb-4">
                     <div class="bg-indigo-600 h-2 rounded-full transition-all duration-1000" id="progress-bar" style="width: 0%"></div>
                 </div>
 
-                {% if redirect_url %}
                 <p class="text-xs text-gray-500 mb-4">
-                    <small>Redirecting to: <code class="bg-gray-800 px-1 rounded">{{ redirect_url }}</code></small>
+                    <small>You will be redirected shortly.</small>
                 </p>
-                {% endif %}
 
                 <a href="{{ redirect_url }}" class="text-sm text-indigo-400 hover:text-indigo-300">Click here if not redirected automatically</a>
             </div>
 
             <script>
-                let secondsLeft = 3;
-                const countdownElement = document.getElementById('countdown');
-                const progressBar = document.getElementById('progress-bar');
                 const redirectUrl = "{{ redirect_url }}";
-
-                const intervalId = setInterval(() => {
-                    secondsLeft--;
-                    countdownElement.textContent = secondsLeft;
-                    progressBar.style.width = ((3 - secondsLeft) / 3 * 100) + '%';
-
-                    if (secondsLeft <= 0) {
-                        clearInterval(intervalId);
-                        window.location.href = redirectUrl;
-                    }
-                }, 1000);
+                const progressBar = document.getElementById('progress-bar');
 
                 // Start progress bar animation
-                setTimeout(() => progressBar.style.width = '33.33%', 100);
+                setTimeout(() => progressBar.style.width = '100%', 100);
+
+                // Redirect after 1 second to ensure cookie is set
+                setTimeout(() => {
+                    window.location.href = redirectUrl;
+                }, 1000);
             </script>
             {% else %}
             <div>
