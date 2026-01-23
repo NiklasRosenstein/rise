@@ -914,7 +914,7 @@ pub async fn oauth_callback(
         // Don't fail the login if group sync fails
     }
 
-    // Validate the JWT to extract expiry time
+    // Validate the IdP JWT to extract claims
     let mut expected_claims = HashMap::new();
     expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
 
@@ -931,18 +931,9 @@ pub async fn oauth_callback(
             (StatusCode::UNAUTHORIZED, "Invalid token".to_string())
         })?;
 
-    // Calculate cookie max age from JWT expiry
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
-
-    let exp = claims["exp"].as_u64().unwrap_or(now + 3600);
-    let max_age = if exp > now {
-        exp - now
-    } else {
-        3600 // Default to 1 hour if exp is in the past
-    };
+    // Use configured JWT expiry for Rise tokens and cookies
+    // (Don't inherit the short-lived IdP token's expiry)
+    let max_age = state.jwt_signer.default_expiry_seconds;
 
     // Determine redirect URL
     let redirect_url = oauth_state.redirect_url.unwrap_or_else(|| "/".to_string());
@@ -1003,7 +994,7 @@ pub async fn oauth_callback(
 
         let rise_jwt = state
             .jwt_signer
-            .sign_ingress_jwt(&claims, user.id, &state.db_pool, &project_url, Some(exp))
+            .sign_ingress_jwt(&claims, user.id, &state.db_pool, &project_url, None)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to sign Rise JWT: {:#}", e);
@@ -1105,13 +1096,7 @@ pub async fn oauth_callback(
     // Issue Rise HS256 JWT for UI authentication
     let rise_jwt = state
         .jwt_signer
-        .sign_ui_jwt(
-            &claims,
-            user.id,
-            &state.db_pool,
-            &state.public_url,
-            Some(exp),
-        )
+        .sign_ui_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
         .await
         .map_err(|e| {
             tracing::error!("Failed to sign UI JWT: {:#}", e);
