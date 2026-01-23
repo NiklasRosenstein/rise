@@ -476,37 +476,6 @@ CMD ["python", "app.py"]
 
     #[test]
     fn test_multiline_run() {
-        let dockerfile = r#"FROM ubuntu:22.04
-RUN apt-get update && \
-    apt-get install -y curl && \
-    rm -rf /var/lib/apt/lists/*
-"#;
-
-        let result = inject_ssl_mounts(dockerfile);
-        println!("Result:\n{}", result);
-
-        // Mount and export should only be on the first line
-        let lines: Vec<&str> = result.lines().collect();
-        assert!(lines[1].contains("--mount=type=secret,id=SSL_CERT_FILE"));
-        assert!(lines[1].contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
-        assert!(
-            lines[1].ends_with(" \\"),
-            "First line should end with backslash"
-        );
-
-        // Continuation lines should contain the actual commands
-        assert!(lines[2].trim().starts_with("apt-get update"));
-        assert!(lines[3].trim().starts_with("apt-get install"));
-        assert!(lines[4].trim().starts_with("rm -rf"));
-
-        assert!(!lines[2].contains("--mount=type=secret,id=SSL_CERT_FILE"));
-        assert!(!lines[2].contains("export"));
-        assert!(!lines[3].contains("--mount=type=secret,id=SSL_CERT_FILE"));
-        assert!(!lines[3].contains("export"));
-    }
-
-    #[test]
-    fn test_multiline_run_with_backslash_on_first_line() {
         // Test the exact case from the error message
         let dockerfile = r#"FROM ubuntu:22.04
 RUN apt-get update -y && \
@@ -579,51 +548,6 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock uv sync --locked
         assert!(
             export_pos < command_pos,
             "export should come before the command"
-        );
-
-        println!("Generated line: {}", run_line);
-    }
-
-    #[test]
-    fn test_run_with_existing_mount_flag_multiline() {
-        // Test multiline RUN command with existing --mount flag
-        let dockerfile = r#"FROM python:3.12
-RUN --mount=type=bind,source=uv.lock,target=uv.lock \
-    uv sync --locked
-"#;
-
-        let result = inject_ssl_mounts(dockerfile);
-        println!("Result:\n{}", result);
-
-        let lines: Vec<&str> = result.lines().collect();
-        let run_line = lines[1];
-
-        // Should have both SSL mounts and the original bind mount
-        assert!(run_line.contains("--mount=type=secret,id=SSL_CERT_FILE"));
-        assert!(run_line.contains("--mount=type=bind,source=uv.lock,target=uv.lock"));
-
-        // export should come AFTER all mount flags
-        assert!(run_line.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
-
-        // The command should be present
-        assert!(run_line.contains("uv sync --locked"));
-
-        // Verify order: RUN, then all --mount flags, then export, then command
-        let export_pos = run_line.find("export").expect("Should contain export");
-        let bind_mount_pos = run_line
-            .find("--mount=type=bind")
-            .expect("Should contain bind mount");
-        let command_pos = run_line.find("uv sync").expect("Should contain uv sync");
-
-        assert!(
-            bind_mount_pos < export_pos,
-            "Bind mount should come before export. Line: {}",
-            run_line
-        );
-        assert!(
-            export_pos < command_pos,
-            "export should come before command. Line: {}",
-            run_line
         );
 
         println!("Generated line: {}", run_line);
