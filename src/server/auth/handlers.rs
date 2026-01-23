@@ -162,15 +162,15 @@ fn validate_redirect_url(redirect_url: &str, public_url: &str) -> String {
     }
 
     // Allow localhost and 127.0.0.1 for development (only if public_url is also local)
-    if (redirect_host == "localhost"
-        || redirect_host == "127.0.0.1"
-        || redirect_host.starts_with("localhost:")
-        || redirect_host.starts_with("127.0.0.1:"))
-        && (public_host == "localhost"
-            || public_host == "127.0.0.1"
-            || public_host.starts_with("localhost:")
-            || public_host.starts_with("127.0.0.1:"))
-    {
+    // Extract host without port for comparison
+    let redirect_host_base = redirect_host.split(':').next().unwrap_or(redirect_host);
+    let public_host_base = public_host.split(':').next().unwrap_or(public_host);
+
+    let is_redirect_localhost =
+        redirect_host_base == "localhost" || redirect_host_base == "127.0.0.1";
+    let is_public_localhost = public_host_base == "localhost" || public_host_base == "127.0.0.1";
+
+    if is_redirect_localhost && is_public_localhost {
         return redirect_url.to_string();
     }
 
@@ -1890,6 +1890,13 @@ mod tests {
         assert_eq!(
             validate_redirect_url("http://127.0.0.1:3000/dashboard", public_url),
             "http://127.0.0.1:3000/dashboard"
+        );
+
+        // Malicious localhost URLs with invalid ports should be rejected during parsing
+        // The URL parser will fail to parse "localhost:evil.com" as a valid port
+        assert_eq!(
+            validate_redirect_url("http://localhost:evil.com/path", public_url),
+            "/"
         );
 
         // But external URLs should still be blocked even when public_url is localhost
