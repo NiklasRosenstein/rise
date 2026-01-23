@@ -74,7 +74,10 @@ fn inject_mount_into_run(line: &str, mount_spec: &str) -> String {
             // No command yet (continuation expected)
             String::new()
         } else {
-            format!("SSL_CERT_FILE={} && ( {} )", ssl_cert_path, actual_command)
+            format!(
+                "export SSL_CERT_FILE={} && {}",
+                ssl_cert_path, actual_command
+            )
         };
 
         format!(
@@ -97,7 +100,10 @@ fn inject_mount_into_run(line: &str, mount_spec: &str) -> String {
         let wrapped_command = if actual_command.is_empty() {
             String::new()
         } else {
-            format!("SSL_CERT_FILE={} && ( {} )", ssl_cert_path, actual_command)
+            format!(
+                "export SSL_CERT_FILE={} && {}",
+                ssl_cert_path, actual_command
+            )
         };
 
         format!(
@@ -178,10 +184,13 @@ fn inject_ssl_mounts(dockerfile_content: &str) -> String {
 /// 1. Reads the original Dockerfile
 /// 2. Injects `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` into each RUN command
 ///    for all common SSL certificate paths
-/// 3. Sets SSL_CERT_FILE environment variable and wraps the command in parentheses:
-///    `RUN --mount=... SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && ( original_command )`
+/// 3. Exports SSL_CERT_FILE environment variable before the command:
+///    `RUN --mount=... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && original_command`
 /// 4. Writes the processed Dockerfile to a temporary directory
 /// 5. Returns the temp directory (for lifetime) and the path to the processed file
+///
+/// Using `export` ensures the variable is available for all commands in the RUN instruction,
+/// including multiline commands with backslash continuations.
 ///
 /// The caller should pass `--secret id=SSL_CERT_FILE,src=<path>` to the build command.
 pub(crate) fn preprocess_dockerfile_for_ssl(
@@ -233,9 +242,9 @@ mod tests {
         // Simple RUN command
         let result = inject_mount_into_run("RUN apt-get update", mount_spec);
         assert!(result.contains(mount_spec));
-        assert!(result.contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
-        assert!(result.contains("( apt-get update )"));
-        assert!(result.contains("&&"));
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("&& apt-get update"));
+        assert!(!result.contains("("));
 
         // RUN with existing mount (should not duplicate)
         let line_with_mount =
@@ -247,15 +256,15 @@ mod tests {
         let result = inject_mount_into_run("    RUN apt-get update", mount_spec);
         assert!(result.starts_with("    RUN"));
         assert!(result.contains(mount_spec));
-        assert!(result.contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
-        assert!(result.contains("( apt-get update )"));
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("&& apt-get update"));
 
         // RUN with existing flags
         let result = inject_mount_into_run("RUN --network=host apt-get update", mount_spec);
         assert!(result.contains(mount_spec));
         assert!(result.contains("--network=host"));
-        assert!(result.contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
-        assert!(result.contains("( apt-get update )"));
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("&& apt-get update"));
     }
 
     #[test]
@@ -297,12 +306,13 @@ CMD ["python", "app.py"]
         // Should contain mount spec in RUN lines
         assert!(result.contains("--mount=type=secret,id=SSL_CERT_FILE"));
 
-        // Should contain SSL_CERT_FILE env var
-        assert!(result.contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        // Should contain export SSL_CERT_FILE env var
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
 
-        // Should wrap commands in parentheses
-        assert!(result.contains("( apt-get update && apt-get install -y curl )"));
-        assert!(result.contains("( pip install -r requirements.txt )"));
+        // Should not wrap commands in parentheses
+        assert!(!result.contains("("));
+        assert!(result.contains("&& apt-get update && apt-get install -y curl"));
+        assert!(result.contains("&& pip install -r requirements.txt"));
 
         // Should preserve FROM and COPY
         assert!(result.contains("FROM ubuntu:22.04"));
@@ -328,14 +338,49 @@ RUN apt-get update && \
 
         let result = inject_ssl_mounts(dockerfile);
 
-        // Mount and env var should only be on the first line
+        // Mount and export should only be on the first line
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines[1].contains("--mount=type=secret,id=SSL_CERT_FILE"));
-        assert!(lines[1].contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
-        assert!(lines[1].contains("( apt-get update &&"));
+        assert!(lines[1].contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(lines[1].contains("&& apt-get update &&"));
+        assert!(!lines[1].contains("("));
         assert!(!lines[2].contains("--mount=type=secret,id=SSL_CERT_FILE"));
-        assert!(!lines[2].contains("SSL_CERT_FILE="));
+        assert!(!lines[2].contains("SSL_CERT_FILE"));
         assert!(!lines[3].contains("--mount=type=secret,id=SSL_CERT_FILE"));
-        assert!(!lines[3].contains("SSL_CERT_FILE="));
+        assert!(!lines[3].contains("SSL_CERT_FILE"));
+    }
+
+    #[test]
+    fn test_multiline_run_with_backslash_on_first_line() {
+        // Test the exact case from the error message
+        let dockerfile = r#"FROM ubuntu:22.04
+RUN apt-get update -y && \
+    apt-get install -y gzip zip jq git less && \
+    apt-get clean
+"#;
+
+        let result = inject_ssl_mounts(dockerfile);
+
+        let lines: Vec<&str> = result.lines().collect();
+
+        // First line should have mount, export, and the backslash at the end
+        assert!(lines[1].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(lines[1].contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(lines[1].contains("&& apt-get update -y &&"));
+        assert!(
+            lines[1].ends_with(" \\"),
+            "First line should end with backslash continuation"
+        );
+
+        // Continuation lines should be unchanged
+        assert_eq!(
+            lines[2],
+            "    apt-get install -y gzip zip jq git less && \\"
+        );
+        assert_eq!(lines[3], "    apt-get clean");
+
+        // Verify no parentheses anywhere
+        assert!(!result.contains("("));
+        assert!(!result.contains(")"));
     }
 }
