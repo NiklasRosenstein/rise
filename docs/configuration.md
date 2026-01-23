@@ -336,3 +336,104 @@ Run with `RUST_LOG=debug` to see configuration loading details:
 ```bash
 RUST_LOG=debug cargo run --bin rise -- backend server
 ```
+
+## Custom Domains
+
+Rise supports custom domains for projects, allowing you to serve your applications from your own domain names instead of (or in addition to) the default project URL.
+
+### Primary Custom Domains
+
+Each project can designate one custom domain as **primary**. The primary domain is used as the canonical URL for the application and is exposed via the `RISE_APP_URL` environment variable.
+
+### RISE_APP_URL Environment Variable
+
+Rise automatically injects a `RISE_APP_URL` environment variable into every deployment containing the canonical URL for the application:
+
+- **If a primary custom domain is set**: `RISE_APP_URL` contains the primary custom domain URL (e.g., `https://example.com`)
+- **If no primary domain is set**: `RISE_APP_URL` contains the default project URL (e.g., `https://my-app.rise.dev`)
+
+This environment variable is useful for:
+- Generating absolute URLs in your application (e.g., for email links, OAuth redirects)
+- Implementing canonical URL redirects (redirect all traffic to the primary domain)
+- Setting the correct domain for cookies and CORS headers
+
+**Example usage in your application:**
+
+```javascript
+// Node.js
+const canonicalUrl = process.env.RISE_APP_URL;
+
+// Redirect to canonical domain
+app.use((req, res, next) => {
+  const requestUrl = `${req.protocol}://${req.get('host')}`;
+  if (requestUrl !== canonicalUrl) {
+    return res.redirect(301, `${canonicalUrl}${req.url}`);
+  }
+  next();
+});
+```
+
+```python
+# Python
+import os
+
+canonical_url = os.environ.get('RISE_APP_URL')
+
+# Flask: Set SERVER_NAME
+app.config['SERVER_NAME'] = canonical_url.replace('https://', '').replace('http://', '')
+```
+
+### Managing Custom Domains
+
+**Via Frontend:**
+1. Navigate to your project's Domains tab
+2. Add custom domains using the "Add Domain" button
+3. Click the star icon next to a domain to set it as primary
+4. The primary domain will show a filled yellow star and a "Primary" badge
+
+**Via API:**
+
+```bash
+# List custom domains
+curl https://rise.dev/api/projects/my-app/domains
+
+# Add a custom domain
+curl -X POST https://rise.dev/api/projects/my-app/domains \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"domain": "example.com"}'
+
+# Set domain as primary
+curl -X PUT https://rise.dev/api/projects/my-app/domains/example.com/primary \
+  -H "Authorization: Bearer $TOKEN"
+
+# Unset primary status
+curl -X DELETE https://rise.dev/api/projects/my-app/domains/example.com/primary \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### DNS Configuration
+
+Before adding a custom domain, you must configure your DNS to point to your Rise deployment:
+
+```
+# A record for root domain
+example.com.  IN  A  <rise-ingress-ip>
+
+# CNAME for subdomain
+www.example.com.  IN  CNAME  <rise-ingress-hostname>
+```
+
+Custom domains are added to the ingress for the default deployment group only.
+
+### TLS/SSL
+
+Custom domains use the same TLS configuration as the default project URL:
+- If your Rise deployment uses a wildcard certificate, custom domains will use HTTP unless configured with per-domain TLS
+- Configure `custom_domain_tls_mode` in the Kubernetes controller settings for automatic HTTPS on custom domains
+
+### Behavior
+
+- **Automatic reconciliation**: Setting or unsetting a primary domain triggers reconciliation of the active deployment to update the `RISE_APP_URL` environment variable
+- **Deletion protection**: You can delete a primary domain; `RISE_APP_URL` will fall back to the default project URL
+- **Multiple domains**: You can add multiple custom domains to a project, but only one can be primary
+- **Environment variable list**: All custom domains (primary and non-primary) are also available in the `RISE_APP_URLS` environment variable as a JSON array
