@@ -138,6 +138,9 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
         }
     }
 
+    cmd.arg("--add-host")
+        .arg("host.docker.internal:host-gateway");
+
     // Add user-specified build arguments
     for build_arg in options.env {
         cmd.arg("--build-arg").arg(build_arg);
