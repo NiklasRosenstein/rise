@@ -347,10 +347,12 @@ Each project can designate one custom domain as **primary**. The primary domain 
 
 ### RISE_APP_URL Environment Variable
 
-Rise automatically injects a `RISE_APP_URL` environment variable into every deployment containing the canonical URL for the application:
+Rise automatically creates a `RISE_APP_URL` deployment environment variable containing the canonical URL for the application. This variable is determined at deployment creation time and persisted in the database:
 
 - **If a primary custom domain is set**: `RISE_APP_URL` contains the primary custom domain URL (e.g., `https://example.com`)
 - **If no primary domain is set**: `RISE_APP_URL` contains the default project URL (e.g., `https://my-app.rise.dev`)
+
+Since this is a deployment environment variable, you can view it via the API or CLI along with your other environment variables.
 
 This environment variable is useful for:
 - Generating absolute URLs in your application (e.g., for email links, OAuth redirects)
