@@ -1024,6 +1024,17 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                         </p>
                     </div>
                 </section>
+
+                <section>
+                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Secondary Roles</h2>
+                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-600 dark:border-green-700 rounded-lg p-3">
+                        <p className="text-xs text-green-800 dark:text-green-200">
+                            <strong>Enabled by default.</strong> The integration is created with
+                            OAUTH_USE_SECONDARY_ROLES = IMPLICIT, allowing users to use multiple roles
+                            in their session.
+                        </p>
+                    </div>
+                </section>
             </div>
         </div>
     );
