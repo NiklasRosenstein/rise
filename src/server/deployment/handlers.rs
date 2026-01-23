@@ -413,6 +413,52 @@ async fn convert_deployment(
     }
 }
 
+/// Resolve the effective HTTP port for a deployment.
+///
+/// Priority:
+/// 1. Explicit http_port from request (if provided)
+/// 2. PORT env var from project (if set and valid)
+/// 3. Default: 8080
+async fn resolve_effective_http_port(
+    state: &AppState,
+    project_id: uuid::Uuid,
+    explicit_port: Option<u16>,
+) -> Result<u16, (StatusCode, String)> {
+    // 1. Explicit port takes precedence
+    if let Some(port) = explicit_port {
+        return Ok(port);
+    }
+
+    // 2. Check project's PORT env var
+    let project_env_vars = crate::db::env_vars::list_project_env_vars(&state.db_pool, project_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to list project env vars: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to list project environment variables: {}", e),
+            )
+        })?;
+
+    if let Some(port_var) = project_env_vars.iter().find(|v| v.key == "PORT") {
+        if let Ok(port) = port_var.value.parse::<u16>() {
+            if port > 0 {
+                debug!("Using PORT {} from project environment variable", port);
+                return Ok(port);
+            }
+        }
+        // Invalid PORT value - warn but fall through to default
+        debug!(
+            "Project PORT env var '{}' is not a valid port number, using default",
+            port_var.value
+        );
+    }
+
+    // 3. Default to 8080
+    debug!("No explicit port or PORT env var, defaulting to 8080");
+    Ok(8080)
+}
+
 /// POST /deployments - Create a new deployment
 pub async fn create_deployment(
     State(state): State<AppState>,
@@ -432,12 +478,14 @@ pub async fn create_deployment(
         ));
     }
 
-    // Validate http_port (should be 1-65535)
-    if payload.http_port == 0 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "HTTP port must be between 1 and 65535".to_string(),
-        ));
+    // Validate http_port if provided (should be 1-65535)
+    if let Some(port) = payload.http_port {
+        if port == 0 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "HTTP port must be between 1 and 65535".to_string(),
+            ));
+        }
     }
 
     // Parse expiration duration if provided
@@ -498,6 +546,18 @@ pub async fn create_deployment(
     let deployment_id = generate_deployment_id();
     debug!("Generated deployment ID: {}", deployment_id);
 
+    // Resolve effective http_port:
+    // 1. Explicit http_port from request (if provided)
+    // 2. Source deployment's http_port (if --from is used, handled below)
+    // 3. PORT env var from project (if set and valid)
+    // 4. Default: 8080
+    let effective_http_port =
+        resolve_effective_http_port(&state, project.id, payload.http_port).await?;
+    info!(
+        "Using http_port {} for deployment {}",
+        effective_http_port, deployment_id
+    );
+
     // Handle deployment creation from an existing deployment (redeploy/rollback)
     if let Some(ref from_deployment_id) = payload.from_deployment {
         info!(
@@ -549,6 +609,15 @@ pub async fn create_deployment(
                 source_deployment.id
             };
 
+        // Determine http_port for the new deployment:
+        // - If explicit http_port was provided in request, use it (already in effective_http_port)
+        // - If no explicit port, inherit from source deployment
+        let final_http_port = if payload.http_port.is_some() {
+            effective_http_port
+        } else {
+            source_deployment.http_port as u16
+        };
+
         // Create new deployment with Pushed status and invoke extension hooks
         // Copy image and image_digest from source - the helper function will determine the tag
         // For pre-built images: image_digest is copied, helper returns it
@@ -565,8 +634,8 @@ pub async fn create_deployment(
                 rolled_back_from_deployment_id: Some(original_source_id), // Track original source for image tag calculation
                 deployment_group: &payload.group, // Use requested group (may be different from source)
                 expires_at,                       // expires_at
-                http_port: payload.http_port as i32, // Use requested http_port (may be different from source)
-                is_active: false,                    // Deployments start as inactive
+                http_port: final_http_port as i32, // Use determined http_port
+                is_active: false,                 // Deployments start as inactive
             },
             &project,
         )
@@ -615,6 +684,23 @@ pub async fn create_deployment(
                 )
             })?;
         }
+
+        // Upsert PORT env var with the final http_port value
+        crate::db::env_vars::upsert_deployment_env_var(
+            &state.db_pool,
+            new_deployment.id,
+            "PORT",
+            &final_http_port.to_string(),
+            false, // not a secret
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to insert PORT env var: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to insert PORT env var: {}", e),
+            )
+        })?;
 
         // Insert Rise-provided environment variables
         insert_rise_env_vars(&state, &new_deployment, &project).await?;
@@ -698,7 +784,7 @@ pub async fn create_deployment(
                 rolled_back_from_deployment_id: None, // Not a rollback
                 deployment_group: &payload.group,   // deployment_group
                 expires_at,                         // expires_at
-                http_port: payload.http_port as i32, // http_port
+                http_port: effective_http_port as i32, // http_port
                 is_active: false,                   // Deployments start as inactive
             },
             &project,
@@ -725,6 +811,24 @@ pub async fn create_deployment(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to copy environment variables: {}", e),
+            )
+        })?;
+
+        // Upsert PORT env var with the resolved effective value
+        // This overwrites any user-set PORT with the resolved value (which may be the same)
+        crate::db::env_vars::upsert_deployment_env_var(
+            &state.db_pool,
+            deployment.id,
+            "PORT",
+            &effective_http_port.to_string(),
+            false, // not a secret
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to insert PORT env var: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to insert PORT env var: {}", e),
             )
         })?;
 
@@ -782,7 +886,7 @@ pub async fn create_deployment(
                 rolled_back_from_deployment_id: None, // Not a rollback
                 deployment_group: &payload.group, // deployment_group
                 expires_at,         // expires_at
-                http_port: payload.http_port as i32, // http_port
+                http_port: effective_http_port as i32, // http_port
                 is_active: false,   // Deployments start as inactive
             },
             &project,
@@ -809,6 +913,24 @@ pub async fn create_deployment(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to copy environment variables: {}", e),
+            )
+        })?;
+
+        // Upsert PORT env var with the resolved effective value
+        // This overwrites any user-set PORT with the resolved value (which may be the same)
+        crate::db::env_vars::upsert_deployment_env_var(
+            &state.db_pool,
+            deployment.id,
+            "PORT",
+            &effective_http_port.to_string(),
+            false, // not a secret
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to insert PORT env var: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to insert PORT env var: {}", e),
             )
         })?;
 
@@ -1489,6 +1611,7 @@ pub async fn list_deployment_groups(
 
     Ok(Json(groups))
 }
+
 /// Query parameters for log streaming
 #[derive(serde::Deserialize)]
 pub struct LogStreamParams {

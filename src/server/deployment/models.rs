@@ -107,7 +107,10 @@ pub struct CreateDeploymentRequest {
     pub group: String, // Deployment group (e.g., 'default', 'mr/27')
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>, // Expiration duration (e.g., '7d', '2h', '30m')
-    pub http_port: u16,  // HTTP port the application listens on
+    /// HTTP port the application listens on.
+    /// If not provided, uses the project's PORT env var or defaults to 8080.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_port: Option<u16>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub from_deployment: Option<String>, // Optional source deployment ID to create from
     #[serde(default)]

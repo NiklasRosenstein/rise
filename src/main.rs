@@ -1,7 +1,6 @@
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 use reqwest::Client;
-use tracing::info;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 // Module declarations with feature gates
@@ -851,57 +850,22 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 }
 
-                // Validate http_port requirements
-                let port = match (args.image.as_ref(), args.from.as_ref(), args.http_port) {
-                    // If using pre-built image without port, require it
-                    (Some(image_ref), None, None) => {
-                        eprintln!("Error: --http-port is required when using --image");
-                        eprintln!(
-                            "Example: rise deployment create {} --image {} --http-port 80",
-                            project_name, image_ref
-                        );
-                        std::process::exit(1);
-                    }
-                    // If using --from without port, fetch from source deployment
-                    (None, Some(from_id), None) => {
-                        let token = config.get_token().ok_or_else(|| {
-                            anyhow::anyhow!("Not logged in. Please run 'rise login' first.")
-                        })?;
-                        let source_deployment = deployment::fetch_deployment(
-                            &http_client,
-                            &backend_url,
-                            &token,
-                            &project_name,
-                            from_id,
-                        )
-                        .await
-                        .with_context(|| {
-                            format!(
-                                "Failed to fetch source deployment '{}' to get http_port",
-                                from_id
-                            )
-                        })?;
-                        info!(
-                            "Using http_port {} from source deployment '{}'",
-                            source_deployment.http_port, from_id
-                        );
-                        source_deployment.http_port
-                    }
-                    // If using pre-built image or from deployment with port specified, use it
-                    (Some(_), None, Some(p)) | (None, Some(_), Some(p)) => p,
-                    // If building from source without port specified, default to 8080 (Paketo buildpack default)
-                    (None, None, None) => {
-                        info!(
-                            "No --http-port specified, defaulting to 8080 (Paketo buildpack default)"
-                        );
-                        8080
-                    }
-                    // If building from source with port specified, use it
-                    (None, None, Some(p)) => p,
-                    // Both --image and --from cannot be specified together (handled above)
-                    (Some(_), Some(_), _) => unreachable!(),
-                };
+                // For pre-built images, --http-port is required since we can't infer it
+                if args.image.is_some() && args.http_port.is_none() {
+                    eprintln!("Error: --http-port is required when using --image");
+                    eprintln!(
+                        "Example: rise deployment create {} --image {} --http-port 80",
+                        project_name,
+                        args.image.as_ref().unwrap()
+                    );
+                    std::process::exit(1);
+                }
 
+                // Pass through the http_port option - server will resolve from:
+                // 1. Explicit http_port (if provided)
+                // 2. Source deployment's http_port (if --from is used)
+                // 3. Project's PORT env var (if set)
+                // 4. Default 8080
                 deployment::create_deployment(
                     &http_client,
                     &backend_url,
@@ -912,7 +876,7 @@ async fn main() -> Result<()> {
                         image: args.image.as_deref(),
                         group: args.group.as_deref(),
                         expires_in: args.expire.as_deref(),
-                        http_port: port,
+                        http_port: args.http_port,
                         build_args: &args.build_args,
                         from_deployment: args.from.as_deref(),
                         use_source_env_vars: args.use_source_env_vars,
