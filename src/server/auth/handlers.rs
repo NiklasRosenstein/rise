@@ -1096,13 +1096,7 @@ pub async fn oauth_callback(
     // Issue Rise HS256 JWT for UI authentication
     let rise_jwt = state
         .jwt_signer
-        .sign_ui_jwt(
-            &claims,
-            user.id,
-            &state.db_pool,
-            &state.public_url,
-            None,
-        )
+        .sign_ui_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
         .await
         .map_err(|e| {
             tracing::error!("Failed to sign UI JWT: {:#}", e);
