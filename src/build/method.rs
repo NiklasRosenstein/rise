@@ -53,17 +53,18 @@ pub struct BuildArgs {
     #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
     pub railpack_embed_ssl_cert: Option<bool>,
 
-    /// Path to Dockerfile (relative to app path). Defaults to "Dockerfile" or "Containerfile"
+    /// Path to Dockerfile (relative to app path / rise.toml location). Defaults to "Dockerfile" or "Containerfile"
     #[arg(long)]
     pub dockerfile: Option<String>,
 
     /// Default build context (docker/podman only) - the context directory for the build.
     /// This is the path argument to `docker build <path>`. Defaults to app path.
+    /// Path is relative to the app path / rise.toml location.
     #[arg(long = "context")]
     pub build_context: Option<String>,
 
     /// Build contexts for multi-stage builds (docker/podman only). Can be specified multiple times.
-    /// Format: name=path where path is relative to app directory
+    /// Format: name=path where path is relative to app path / rise.toml location
     #[arg(long = "build-context")]
     pub build_contexts: Vec<String>,
 }
@@ -81,13 +82,15 @@ pub(crate) struct BuildOptions {
     pub managed_buildkit: bool,
     pub railpack_embed_ssl_cert: bool,
     pub push: bool,
-    /// Path to Dockerfile (relative to app path)
+    /// Path to Dockerfile (relative to app_path / rise.toml location)
     pub dockerfile: Option<String>,
-    /// Default build context (relative to app path)
+    /// Default build context (relative to app_path / rise.toml location)
     /// This is the path argument to `docker build <path>`. Defaults to app_path if None.
+    /// Note: This value is resolved to an absolute path in build_image() before use.
     pub build_context: Option<String>,
     /// Build contexts for multi-stage builds (docker/podman only)
-    /// Format: name -> path (relative to app_path)
+    /// Format: name -> path (relative to app_path / rise.toml location)
+    /// Note: These paths are resolved to absolute paths in build_image() before use.
     pub build_contexts: std::collections::HashMap<String, String>,
 }
 

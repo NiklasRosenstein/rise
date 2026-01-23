@@ -78,6 +78,22 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
         None
     };
 
+    // Resolve build_context relative to app_path
+    let resolved_build_context = options.build_context.as_ref().map(|ctx| {
+        let resolved = app_path.join(ctx);
+        resolved.to_string_lossy().to_string()
+    });
+
+    // Resolve build_contexts paths relative to app_path
+    let resolved_build_contexts: std::collections::HashMap<String, String> = options
+        .build_contexts
+        .iter()
+        .map(|(name, path)| {
+            let resolved = app_path.join(path);
+            (name.clone(), resolved.to_string_lossy().to_string())
+        })
+        .collect();
+
     // Execute build based on selected method
     match build_method {
         BuildMethod::Docker { use_buildx } => {
@@ -100,8 +116,8 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 push: options.push,
                 buildkit_host: buildkit_host.as_deref(),
                 env: &options.env,
-                build_context: options.build_context.as_deref(),
-                build_contexts: &options.build_contexts,
+                build_context: resolved_build_context.as_deref(),
+                build_contexts: &resolved_build_contexts,
             })?;
         }
         BuildMethod::Pack => {

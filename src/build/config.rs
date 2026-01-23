@@ -69,15 +69,16 @@ pub struct BuildConfig {
     /// Embed SSL certificate into Railpack build plan
     pub railpack_embed_ssl_cert: Option<bool>,
 
-    /// Path to Dockerfile (relative to project root). Defaults to "Dockerfile" or "Containerfile"
+    /// Path to Dockerfile (relative to rise.toml location). Defaults to "Dockerfile" or "Containerfile"
     pub dockerfile: Option<String>,
 
     /// Default build context (docker/podman only) - the context directory for the build
-    /// This is the path argument to `docker build <path>`. Defaults to project root.
+    /// This is the path argument to `docker build <path>`. Defaults to rise.toml location.
+    /// Path is relative to the rise.toml file location.
     pub build_context: Option<String>,
 
     /// Build contexts (docker/podman only) - additional named contexts for multi-stage builds
-    /// Format: { "name" = "path" } where path is relative to project root
+    /// Format: { "name" = "path" } where path is relative to the rise.toml file location
     #[serde(default)]
     pub build_contexts: Option<HashMap<String, String>>,
 }

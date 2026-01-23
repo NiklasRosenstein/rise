@@ -169,7 +169,7 @@ COPY --from=mylib /package.json /app/lib/package.json
 
 **Notes:**
 - Build contexts are only supported by Docker and Podman backends
-- Paths are relative to the project directory
+- Paths are relative to the `rise.toml` file location (typically the project root directory)
 - Available with all Docker-based backends: `docker`, `docker:buildx`, `buildctl`
 
 ## Build-Time Environment Variables
@@ -251,9 +251,9 @@ All CLI build flags can be specified in the `[build]` section:
 | Field | Type | Description |
 |-------|------|-------------|
 | `backend` | String | Build backend: `docker`, `docker:build`, `docker:buildx`, `buildctl`, `pack`, `railpack`, `railpack:buildctl` |
-| `dockerfile` | String | Path to Dockerfile (relative to project root). Defaults to `Dockerfile` or `Containerfile` |
-| `build_context` | String | Default build context (docker/podman only). The path argument to `docker build <path>`. Defaults to project root. |
-| `build_contexts` | Object | Named build contexts for multi-stage builds (docker/podman only). Format: `{ "name" = "path" }` |
+| `dockerfile` | String | Path to Dockerfile (relative to `rise.toml` location). Defaults to `Dockerfile` or `Containerfile` |
+| `build_context` | String | Default build context (docker/podman only). The path argument to `docker build <path>`. Defaults to `rise.toml` location. Path is relative to `rise.toml` location. |
+| `build_contexts` | Object | Named build contexts for multi-stage builds (docker/podman only). Format: `{ "name" = "path" }`. Paths are relative to `rise.toml` location. |
 | `builder` | String | Buildpack builder image (pack only) |
 | `buildpacks` | Array | List of buildpacks to use (pack only) |
 | `env` | Array | Environment variables for build (format: `KEY=VALUE` or `KEY`) |
