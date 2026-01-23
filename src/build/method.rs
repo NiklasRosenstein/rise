@@ -59,7 +59,7 @@ pub struct BuildArgs {
 
     /// Default build context (docker/podman only) - the context directory for the build.
     /// This is the path argument to `docker build <path>`. Defaults to app path.
-    #[arg(long)]
+    #[arg(long = "context")]
     pub build_context: Option<String>,
 
     /// Build contexts for multi-stage builds (docker/podman only). Can be specified multiple times.
