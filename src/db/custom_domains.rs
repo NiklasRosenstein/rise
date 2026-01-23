@@ -13,10 +13,10 @@ pub async fn list_project_custom_domains(
     let domains = sqlx::query_as!(
         CustomDomain,
         r#"
-        SELECT id, project_id, domain, created_at, updated_at
+        SELECT id, project_id, domain, is_primary, created_at, updated_at
         FROM project_custom_domains
         WHERE project_id = $1
-        ORDER BY domain ASC
+        ORDER BY is_primary DESC, domain ASC
         "#,
         project_id
     )
@@ -36,7 +36,7 @@ pub async fn get_custom_domain(
     let domain = sqlx::query_as!(
         CustomDomain,
         r#"
-        SELECT id, project_id, domain, created_at, updated_at
+        SELECT id, project_id, domain, is_primary, created_at, updated_at
         FROM project_custom_domains
         WHERE project_id = $1 AND domain = $2
         "#,
@@ -61,7 +61,7 @@ pub async fn add_custom_domain(
         r#"
         INSERT INTO project_custom_domains (project_id, domain)
         VALUES ($1, $2)
-        RETURNING id, project_id, domain, created_at, updated_at
+        RETURNING id, project_id, domain, is_primary, created_at, updated_at
         "#,
         project_id,
         domain
@@ -100,10 +100,10 @@ pub async fn get_custom_domains_batch(
     let domains = sqlx::query_as!(
         CustomDomain,
         r#"
-        SELECT id, project_id, domain, created_at, updated_at
+        SELECT id, project_id, domain, is_primary, created_at, updated_at
         FROM project_custom_domains
         WHERE project_id = ANY($1)
-        ORDER BY project_id, domain
+        ORDER BY project_id, is_primary DESC, domain
         "#,
         project_ids
     )
@@ -117,4 +117,83 @@ pub async fn get_custom_domains_batch(
     }
 
     Ok(map)
+}
+
+/// Get the primary custom domain for a project
+pub async fn get_primary_domain(pool: &PgPool, project_id: Uuid) -> Result<Option<CustomDomain>> {
+    let domain = sqlx::query_as!(
+        CustomDomain,
+        r#"
+        SELECT id, project_id, domain, is_primary, created_at, updated_at
+        FROM project_custom_domains
+        WHERE project_id = $1 AND is_primary = true
+        "#,
+        project_id
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to get primary custom domain")?;
+
+    Ok(domain)
+}
+
+/// Set a custom domain as primary for a project
+/// Unsets any existing primary domain in the same transaction
+pub async fn set_primary_domain(
+    pool: &PgPool,
+    project_id: Uuid,
+    domain: &str,
+) -> Result<CustomDomain> {
+    let mut tx = pool.begin().await.context("Failed to begin transaction")?;
+
+    // Unset any existing primary domain
+    sqlx::query!(
+        r#"
+        UPDATE project_custom_domains
+        SET is_primary = false
+        WHERE project_id = $1 AND is_primary = true
+        "#,
+        project_id
+    )
+    .execute(&mut *tx)
+    .await
+    .context("Failed to unset existing primary domain")?;
+
+    // Set the new primary domain
+    let domain = sqlx::query_as!(
+        CustomDomain,
+        r#"
+        UPDATE project_custom_domains
+        SET is_primary = true
+        WHERE project_id = $1 AND domain = $2
+        RETURNING id, project_id, domain, is_primary, created_at, updated_at
+        "#,
+        project_id,
+        domain
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .context("Failed to set primary domain")?;
+
+    tx.commit().await.context("Failed to commit transaction")?;
+
+    Ok(domain)
+}
+
+/// Unset the primary status of a custom domain
+pub async fn unset_primary_domain(pool: &PgPool, project_id: Uuid, domain: &str) -> Result<bool> {
+    let result = sqlx::query!(
+        r#"
+        UPDATE project_custom_domains
+        SET is_primary = false
+        WHERE project_id = $1 AND domain = $2 AND is_primary = true
+        "#,
+        project_id,
+        domain
+    )
+    .execute(pool)
+    .await
+    .context("Failed to unset primary domain")?;
+
+    Ok(result.rows_affected() > 0)
 }
