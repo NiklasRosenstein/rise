@@ -16,7 +16,7 @@ pub async fn list_project_custom_domains(
         SELECT id, project_id, domain, is_primary, created_at, updated_at
         FROM project_custom_domains
         WHERE project_id = $1
-        ORDER BY is_primary DESC, domain ASC
+        ORDER BY domain ASC
         "#,
         project_id
     )
@@ -103,7 +103,7 @@ pub async fn get_custom_domains_batch(
         SELECT id, project_id, domain, is_primary, created_at, updated_at
         FROM project_custom_domains
         WHERE project_id = ANY($1)
-        ORDER BY project_id, is_primary DESC, domain
+        ORDER BY project_id, domain ASC
         "#,
         project_ids
     )

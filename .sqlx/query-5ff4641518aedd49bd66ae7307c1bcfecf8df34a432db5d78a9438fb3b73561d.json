@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, project_id, domain, is_primary, created_at, updated_at\n        FROM project_custom_domains\n        WHERE project_id = ANY($1)\n        ORDER BY project_id, is_primary DESC, domain\n        ",
+  "query": "\n        SELECT id, project_id, domain, is_primary, created_at, updated_at\n        FROM project_custom_domains\n        WHERE project_id = $1\n        ORDER BY domain ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -36,7 +36,7 @@
     ],
     "parameters": {
       "Left": [
-        "UuidArray"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -48,5 +48,5 @@
       false
     ]
   },
-  "hash": "df3dd0e727758b5592391829efc8e17859c24b7bb8f10ef99144e8c260eedc2b"
+  "hash": "5ff4641518aedd49bd66ae7307c1bcfecf8df34a432db5d78a9438fb3b73561d"
 }
