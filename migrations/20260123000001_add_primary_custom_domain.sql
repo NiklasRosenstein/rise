@@ -9,7 +9,3 @@ CREATE UNIQUE INDEX idx_custom_domains_primary_unique
     ON project_custom_domains(project_id)
     WHERE is_primary = true;
 
--- Create index for optimized primary domain lookups
-CREATE INDEX idx_custom_domains_primary
-    ON project_custom_domains(project_id, is_primary)
-    WHERE is_primary = true;

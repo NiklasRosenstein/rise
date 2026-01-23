@@ -1787,7 +1787,16 @@ impl KubernetesController {
                 }
                 None => {
                     // Use default project URL
-                    self.full_ingress_url(project, deployment)
+                    let schema = if self.ingress_tls_secret_name.is_some()
+                        || (self.custom_domain_tls_mode
+                            == crate::server::settings::CustomDomainTlsMode::PerDomain)
+                    {
+                        "https"
+                    } else {
+                        &self.ingress_schema
+                    };
+                    let base_url = self.full_ingress_url(project, deployment);
+                    format!("{}://{}", schema, base_url)
                 }
             };
 
