@@ -63,24 +63,88 @@ fn inject_mount_into_run(line: &str, mount_spec: &str) -> String {
             return line.to_string();
         }
 
+        // Separate existing RUN flags from the actual command
+        let (flags, actual_command) = extract_run_flags(command);
+
+        // Use the first SSL_CERT_PATH as the environment variable
+        let ssl_cert_path = SSL_CERT_PATHS[0];
+
+        // Build the new command with SSL_CERT_FILE env var
+        let wrapped_command = if actual_command.is_empty() {
+            // No command yet (continuation expected)
+            String::new()
+        } else {
+            format!("SSL_CERT_FILE={} && ( {} )", ssl_cert_path, actual_command)
+        };
+
         format!(
             "{}{}{}{} {}",
             leading_ws,
             &trimmed[..after_run],
             ws,
             mount_spec,
-            command
+            if flags.is_empty() {
+                wrapped_command
+            } else {
+                format!("{} {}", flags, wrapped_command)
+            }
         )
     } else {
         // No whitespace after RUN (unusual but handle it)
+        let (flags, actual_command) = extract_run_flags(rest);
+        let ssl_cert_path = SSL_CERT_PATHS[0];
+
+        let wrapped_command = if actual_command.is_empty() {
+            String::new()
+        } else {
+            format!("SSL_CERT_FILE={} && ( {} )", ssl_cert_path, actual_command)
+        };
+
         format!(
             "{}{} {} {}",
             leading_ws,
             &trimmed[..after_run],
             mount_spec,
-            rest
+            if flags.is_empty() {
+                wrapped_command
+            } else {
+                format!("{} {}", flags, wrapped_command)
+            }
         )
     }
+}
+
+/// Extract RUN flags from a command string
+/// Returns (flags, command) where flags are the --mount and other RUN options
+fn extract_run_flags(command: &str) -> (String, String) {
+    let mut flags = Vec::new();
+    let mut parts = command.split_whitespace().peekable();
+    let mut actual_command_parts = Vec::new();
+
+    while let Some(part) = parts.peek() {
+        if part.starts_with("--") {
+            // This is a flag
+            let flag = parts.next().unwrap();
+            flags.push(flag.to_string());
+
+            // Check if this flag takes a value (e.g., --mount=... is one token, but --mount ... might be two)
+            if !flag.contains('=') && parts.peek().is_some() {
+                let next = parts.peek().unwrap();
+                if !next.starts_with("--") {
+                    // This is the flag's value
+                    flags.push(parts.next().unwrap().to_string());
+                }
+            }
+        } else {
+            // Rest is the actual command
+            break;
+        }
+    }
+
+    // Collect remaining parts as the actual command
+    actual_command_parts.extend(parts);
+
+    (flags.join(" "), actual_command_parts.join(" "))
 }
 
 /// Inject SSL certificate secret mounts into RUN commands in a Dockerfile
@@ -114,8 +178,10 @@ fn inject_ssl_mounts(dockerfile_content: &str) -> String {
 /// 1. Reads the original Dockerfile
 /// 2. Injects `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` into each RUN command
 ///    for all common SSL certificate paths
-/// 3. Writes the processed Dockerfile to a temporary directory
-/// 4. Returns the temp directory (for lifetime) and the path to the processed file
+/// 3. Sets SSL_CERT_FILE environment variable and wraps the command in parentheses:
+///    `RUN --mount=... SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && ( original_command )`
+/// 4. Writes the processed Dockerfile to a temporary directory
+/// 5. Returns the temp directory (for lifetime) and the path to the processed file
 ///
 /// The caller should pass `--secret id=SSL_CERT_FILE,src=<path>` to the build command.
 pub(crate) fn preprocess_dockerfile_for_ssl(
@@ -167,7 +233,9 @@ mod tests {
         // Simple RUN command
         let result = inject_mount_into_run("RUN apt-get update", mount_spec);
         assert!(result.contains(mount_spec));
-        assert!(result.contains("apt-get update"));
+        assert!(result.contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("( apt-get update )"));
+        assert!(result.contains("&&"));
 
         // RUN with existing mount (should not duplicate)
         let line_with_mount =
@@ -179,6 +247,40 @@ mod tests {
         let result = inject_mount_into_run("    RUN apt-get update", mount_spec);
         assert!(result.starts_with("    RUN"));
         assert!(result.contains(mount_spec));
+        assert!(result.contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("( apt-get update )"));
+
+        // RUN with existing flags
+        let result = inject_mount_into_run("RUN --network=host apt-get update", mount_spec);
+        assert!(result.contains(mount_spec));
+        assert!(result.contains("--network=host"));
+        assert!(result.contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("( apt-get update )"));
+    }
+
+    #[test]
+    fn test_extract_run_flags() {
+        // No flags
+        let (flags, command) = extract_run_flags("apt-get update");
+        assert_eq!(flags, "");
+        assert_eq!(command, "apt-get update");
+
+        // One flag with =
+        let (flags, command) = extract_run_flags("--network=host apt-get update");
+        assert_eq!(flags, "--network=host");
+        assert_eq!(command, "apt-get update");
+
+        // Multiple flags
+        let (flags, command) =
+            extract_run_flags("--network=host --mount=type=cache,target=/cache apt-get update");
+        assert_eq!(flags, "--network=host --mount=type=cache,target=/cache");
+        assert_eq!(command, "apt-get update");
+
+        // Command with multiple words
+        let (flags, command) =
+            extract_run_flags("--network=host apt-get update && apt-get install curl");
+        assert_eq!(flags, "--network=host");
+        assert_eq!(command, "apt-get update && apt-get install curl");
     }
 
     #[test]
@@ -194,6 +296,13 @@ CMD ["python", "app.py"]
 
         // Should contain mount spec in RUN lines
         assert!(result.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+
+        // Should contain SSL_CERT_FILE env var
+        assert!(result.contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+
+        // Should wrap commands in parentheses
+        assert!(result.contains("( apt-get update && apt-get install -y curl )"));
+        assert!(result.contains("( pip install -r requirements.txt )"));
 
         // Should preserve FROM and COPY
         assert!(result.contains("FROM ubuntu:22.04"));
@@ -219,10 +328,14 @@ RUN apt-get update && \
 
         let result = inject_ssl_mounts(dockerfile);
 
-        // Mount should only be on the first line
+        // Mount and env var should only be on the first line
         let lines: Vec<&str> = result.lines().collect();
         assert!(lines[1].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(lines[1].contains("SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(lines[1].contains("( apt-get update &&"));
         assert!(!lines[2].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(!lines[2].contains("SSL_CERT_FILE="));
         assert!(!lines[3].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(!lines[3].contains("SSL_CERT_FILE="));
     }
 }
