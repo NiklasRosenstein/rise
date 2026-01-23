@@ -1759,6 +1759,45 @@ impl KubernetesController {
             });
         }
 
+        // Inject RISE_APP_URL environment variable with canonical app URL
+        // If a primary custom domain is set, use it; otherwise use the default project URL
+        // Only add if not already set by user (allows override)
+        if !k8s_env_vars.iter().any(|env| env.name == "RISE_APP_URL") {
+            let canonical_url = match crate::db::custom_domains::get_primary_domain(
+                &self.state.db_pool,
+                project.id,
+            )
+            .await?
+            {
+                Some(primary_domain) => {
+                    // Use primary custom domain
+                    let schema = if self.ingress_tls_secret_name.is_some()
+                        || (self.custom_domain_tls_mode
+                            == crate::server::settings::CustomDomainTlsMode::PerDomain)
+                    {
+                        "https"
+                    } else {
+                        &self.ingress_schema
+                    };
+                    if let Some(port) = self.ingress_port {
+                        format!("{}://{}:{}", schema, primary_domain.domain, port)
+                    } else {
+                        format!("{}://{}", schema, primary_domain.domain)
+                    }
+                }
+                None => {
+                    // Use default project URL
+                    self.full_ingress_url(project, deployment)
+                }
+            };
+
+            k8s_env_vars.push(EnvVar {
+                name: "RISE_APP_URL".to_string(),
+                value: Some(canonical_url),
+                ..Default::default()
+            });
+        }
+
         // Inject RISE_APP_URLS environment variable with all app URLs (primary + custom domains)
         // Only add if not already set by user (allows override for testing)
         if !k8s_env_vars.iter().any(|env| env.name == "RISE_APP_URLS") {
@@ -4245,6 +4284,7 @@ mod tests {
             id: Uuid::new_v4(),
             domain: "compass-dev.example.com".to_string(),
             project_id: project.id,
+            is_primary: false,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }];
