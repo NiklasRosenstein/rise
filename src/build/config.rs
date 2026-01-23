@@ -71,6 +71,15 @@ pub struct BuildConfig {
 
     /// Path to Dockerfile (relative to project root). Defaults to "Dockerfile" or "Containerfile"
     pub dockerfile: Option<String>,
+
+    /// Default build context (docker/podman only) - the context directory for the build
+    /// This is the path argument to `docker build <path>`. Defaults to project root.
+    pub build_context: Option<String>,
+
+    /// Build contexts (docker/podman only) - additional named contexts for multi-stage builds
+    /// Format: { "name" = "path" } where path is relative to project root
+    #[serde(default)]
+    pub build_contexts: Option<HashMap<String, String>>,
 }
 
 /// Load full project configuration from rise.toml or .rise.toml
