@@ -56,6 +56,16 @@ pub struct BuildArgs {
     /// Path to Dockerfile (relative to app path). Defaults to "Dockerfile" or "Containerfile"
     #[arg(long)]
     pub dockerfile: Option<String>,
+
+    /// Default build context (docker/podman only) - the context directory for the build.
+    /// This is the path argument to `docker build <path>`. Defaults to app path.
+    #[arg(long)]
+    pub build_context: Option<String>,
+
+    /// Build contexts for multi-stage builds (docker/podman only). Can be specified multiple times.
+    /// Format: name=path where path is relative to app directory
+    #[arg(long = "build-context")]
+    pub build_contexts: Vec<String>,
 }
 
 /// Options for building container images
@@ -73,6 +83,12 @@ pub(crate) struct BuildOptions {
     pub push: bool,
     /// Path to Dockerfile (relative to app path)
     pub dockerfile: Option<String>,
+    /// Default build context (relative to app path)
+    /// This is the path argument to `docker build <path>`. Defaults to app_path if None.
+    pub build_context: Option<String>,
+    /// Build contexts for multi-stage builds (docker/podman only)
+    /// Format: name -> path (relative to app_path)
+    pub build_contexts: std::collections::HashMap<String, String>,
 }
 
 impl BuildOptions {
@@ -168,6 +184,34 @@ impl BuildOptions {
                 .dockerfile
                 .clone()
                 .or_else(|| project_config.as_ref().and_then(|c| c.dockerfile.clone())),
+
+            build_context: build_args.build_context.clone().or_else(|| {
+                project_config
+                    .as_ref()
+                    .and_then(|c| c.build_context.clone())
+            }),
+
+            // Build contexts - merge config + CLI values (CLI overrides config for same name)
+            build_contexts: {
+                let mut contexts = project_config
+                    .as_ref()
+                    .and_then(|c| c.build_contexts.clone())
+                    .unwrap_or_default();
+
+                // Parse and merge CLI build contexts (format: "name=path")
+                for ctx in &build_args.build_contexts {
+                    if let Some((name, path)) = ctx.split_once('=') {
+                        contexts.insert(name.to_string(), path.to_string());
+                    } else {
+                        warn!(
+                            "Invalid build context format '{}'. Expected 'name=path'. Ignoring.",
+                            ctx
+                        );
+                    }
+                }
+
+                contexts
+            },
 
             push: false,
         }

@@ -100,6 +100,8 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 push: options.push,
                 buildkit_host: buildkit_host.as_deref(),
                 env: &options.env,
+                build_context: options.build_context.as_deref(),
+                build_contexts: &options.build_contexts,
             })?;
         }
         BuildMethod::Pack => {

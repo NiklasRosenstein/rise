@@ -106,6 +106,72 @@ backend = "docker"
 dockerfile = "Dockerfile.prod"
 ```
 
+### Build Contexts (Docker/Podman Multi-Stage Builds)
+
+Build contexts allow you to use additional directories or files in your multi-stage Docker builds. This is useful when you need to access files outside the main build context or reference other directories.
+
+**CLI Usage:**
+
+```bash
+# Add a single build context
+rise build myapp:latest --build-context mylib=../my-library
+
+# Add multiple build contexts
+rise build myapp:latest \
+  --build-context mylib=../my-library \
+  --build-context tools=../build-tools
+
+# Specify custom default build context (the main context directory)
+rise build myapp:latest --build-context ./app
+
+# Combine with other options
+rise build myapp:latest \
+  --backend docker:buildx \
+  --build-context mylib=../my-library \
+  --dockerfile Dockerfile.prod
+```
+
+**In `rise.toml`:**
+```toml
+[build]
+backend = "docker"
+dockerfile = "Dockerfile"
+build_context = "./app"  # Optional: custom default build context
+
+[build.build_contexts]
+mylib = "../my-library"
+tools = "../build-tools"
+shared = "../shared-components"
+```
+
+**Using Build Contexts in Dockerfile:**
+
+Once defined, you can reference build contexts in your Dockerfile:
+
+```dockerfile
+# Copy files from a named build context
+FROM alpine AS base
+COPY --from=mylib /src /app/lib
+
+# Or use the context as a build stage
+FROM scratch AS mylib
+# This stage can access files from ../my-library
+
+FROM node:20 AS build
+# Copy from the mylib context
+COPY --from=mylib /package.json /app/lib/package.json
+```
+
+**Configuration Precedence:**
+- CLI `--build-context` flags override config file contexts with the same name
+- CLI `--build-context` (without `=`) overrides config file `build_context`
+- Default build context is the app path (project directory) if not specified
+
+**Notes:**
+- Build contexts are only supported by Docker and Podman backends
+- Paths are relative to the project directory
+- Available with all Docker-based backends: `docker`, `docker:buildx`, `buildctl`
+
 ## Build-Time Environment Variables
 
 You can pass environment variables to your build process using the `-e` or `--env` flag. This works consistently across all build backends:
@@ -186,6 +252,8 @@ All CLI build flags can be specified in the `[build]` section:
 |-------|------|-------------|
 | `backend` | String | Build backend: `docker`, `docker:build`, `docker:buildx`, `buildctl`, `pack`, `railpack`, `railpack:buildctl` |
 | `dockerfile` | String | Path to Dockerfile (relative to project root). Defaults to `Dockerfile` or `Containerfile` |
+| `build_context` | String | Default build context (docker/podman only). The path argument to `docker build <path>`. Defaults to project root. |
+| `build_contexts` | Object | Named build contexts for multi-stage builds (docker/podman only). Format: `{ "name" = "path" }` |
 | `builder` | String | Buildpack builder image (pack only) |
 | `buildpacks` | Array | List of buildpacks to use (pack only) |
 | `env` | Array | Environment variables for build (format: `KEY=VALUE` or `KEY`) |

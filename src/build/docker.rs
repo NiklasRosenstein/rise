@@ -18,6 +18,8 @@ pub(crate) struct DockerBuildOptions<'a> {
     pub push: bool,
     pub buildkit_host: Option<&'a str>,
     pub env: &'a [String],
+    pub build_context: Option<&'a str>,
+    pub build_contexts: &'a std::collections::HashMap<String, String>,
 }
 
 /// Build image using Docker or Podman with a Dockerfile
@@ -146,7 +148,18 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
         cmd.arg("--build-arg").arg(build_arg);
     }
 
-    cmd.arg(options.app_path);
+    // Add build contexts (additional named contexts for multi-stage builds)
+    if !options.build_contexts.is_empty() {
+        info!("Using {} build context(s)", options.build_contexts.len());
+        for (name, path) in options.build_contexts {
+            cmd.arg("--build-context").arg(format!("{}={}", name, path));
+            debug!("Build context: {}={}", name, path);
+        }
+    }
+
+    // Use custom build context or default to app_path
+    let context_path = options.build_context.unwrap_or(options.app_path);
+    cmd.arg(context_path);
 
     // Set BUILDKIT_HOST if provided and using buildx
     if options.use_buildx {

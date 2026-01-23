@@ -277,6 +277,7 @@ enum TeamCommands {
 }
 
 #[derive(Subcommand, Debug)]
+#[allow(clippy::large_enum_variant)]
 enum DeploymentCommands {
     /// Create a new deployment
     #[command(visible_alias = "c")]
