@@ -69,6 +69,8 @@ pub async fn run_locally(
     // Set PORT environment variable
     cmd.arg("-e").arg(format!("PORT={}", options.http_port));
 
+    cmd.arg("--add-host=host.docker.internal:host-gateway");
+
     // Fetch and set project environment variables if project is specified
     if let Some(project_name) = options.project_name {
         if let Some(token) = config.get_token() {
