@@ -292,7 +292,7 @@ async fn insert_rise_env_vars(
         )
     })?;
 
-    // 3. Generate RISE_APP_URLS
+    // 3. Generate RISE_APP_URL and RISE_APP_URLS
     let deployment_urls = state
         .deployment_backend
         .get_deployment_urls(deployment, project)
@@ -305,6 +305,31 @@ async fn insert_rise_env_vars(
             )
         })?;
 
+    // First, determine RISE_APP_URL (canonical URL)
+    // Use primary custom domain if set, otherwise use default project URL
+    let canonical_url =
+        match crate::db::custom_domains::get_primary_domain(&state.db_pool, project.id)
+            .await
+            .map_err(|e| {
+                error!("Failed to get primary custom domain: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get primary custom domain: {}", e),
+                )
+            })? {
+            Some(primary_domain) => {
+                // Find the URL for this domain in custom_domain_urls
+                deployment_urls
+                    .custom_domain_urls
+                    .iter()
+                    .find(|url| url.contains(&primary_domain.domain))
+                    .cloned()
+                    .unwrap_or_else(|| deployment_urls.primary_url.clone())
+            }
+            None => deployment_urls.primary_url.clone(),
+        };
+
+    // Then build RISE_APP_URLS (all URLs)
     let mut app_urls = vec![deployment_urls.primary_url];
     app_urls.extend(deployment_urls.custom_domain_urls);
 
@@ -330,6 +355,23 @@ async fn insert_rise_env_vars(
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to insert RISE_APP_URLS: {}", e),
+        )
+    })?;
+
+    // Insert RISE_APP_URL
+    crate::db::env_vars::upsert_deployment_env_var(
+        &state.db_pool,
+        deployment.id,
+        "RISE_APP_URL",
+        &canonical_url,
+        false, // Not a secret
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to insert RISE_APP_URL env var: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to insert RISE_APP_URL: {}", e),
         )
     })?;
 

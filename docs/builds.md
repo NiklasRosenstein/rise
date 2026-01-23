@@ -122,7 +122,7 @@ rise build myapp:latest \
   --build-context tools=../build-tools
 
 # Specify custom default build context (the main context directory)
-rise build myapp:latest --build-context ./app
+rise build myapp:latest --context ./app
 
 # Combine with other options
 rise build myapp:latest \
@@ -164,7 +164,7 @@ COPY --from=mylib /package.json /app/lib/package.json
 
 **Configuration Precedence:**
 - CLI `--build-context` flags override config file contexts with the same name
-- CLI `--build-context` (without `=`) overrides config file `build_context`
+- CLI `--context` flag overrides config file `build_context`
 - Default build context is the app path (project directory) if not specified
 
 **Notes:**

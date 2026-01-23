@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, project_id, domain, created_at, updated_at\n        FROM project_custom_domains\n        WHERE project_id = $1\n        ORDER BY domain ASC\n        ",
+  "query": "\n        SELECT id, project_id, domain, is_primary, created_at, updated_at\n        FROM project_custom_domains\n        WHERE project_id = $1\n        ORDER BY domain ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -20,11 +20,16 @@
       },
       {
         "ordinal": 3,
+        "name": "is_primary",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 4,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 4,
+        "ordinal": 5,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -39,8 +44,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "d3aa3b264b45f988438dfa8e7e32245c1b9421e1a270af24246a6e4f827d9637"
+  "hash": "5ff4641518aedd49bd66ae7307c1bcfecf8df34a432db5d78a9438fb3b73561d"
 }

@@ -156,8 +156,10 @@ pub struct KubernetesController {
     /// Lost on controller restart → causes one re-apply, then cached again
     resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
+    #[allow(dead_code)]
     rise_jwks_json: String,
     /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
+    #[allow(dead_code)]
     rise_issuer: String,
 }
 
@@ -1705,7 +1707,7 @@ impl KubernetesController {
     /// Load and decrypt environment variables for a deployment
     async fn load_env_vars(
         &self,
-        project: &crate::db::Project,
+        _project: &crate::db::Project,
         deployment: &crate::db::Deployment,
     ) -> Result<Vec<k8s_openapi::api::core::v1::EnvVar>> {
         use k8s_openapi::api::core::v1::EnvVar;
@@ -1719,8 +1721,9 @@ impl KubernetesController {
         .await?;
 
         // Format as Kubernetes EnvVar objects
-        // Note: PORT is now stored in deployment_env_vars and loaded from the database
-        let mut k8s_env_vars: Vec<EnvVar> = env_vars
+        // Note: PORT, RISE_JWKS, RISE_ISSUER, RISE_APP_URL, and RISE_APP_URLS are now
+        // persisted in deployment_env_vars and loaded from the database
+        let k8s_env_vars: Vec<EnvVar> = env_vars
             .into_iter()
             .map(|(key, value)| EnvVar {
                 name: key,
@@ -1728,68 +1731,6 @@ impl KubernetesController {
                 ..Default::default()
             })
             .collect();
-
-        // Inject RISE_JWKS environment variable with RS256 public keys for JWT verification
-        // Only add if not already set by user (allows override for testing)
-        if !k8s_env_vars.iter().any(|env| env.name == "RISE_JWKS") {
-            k8s_env_vars.push(EnvVar {
-                name: "RISE_JWKS".to_string(),
-                value: Some(self.rise_jwks_json.clone()),
-                ..Default::default()
-            });
-        }
-
-        // Inject RISE_ISSUER environment variable for JWT issuer validation
-        // Only add if not already set by user (allows override for testing)
-        if !k8s_env_vars.iter().any(|env| env.name == "RISE_ISSUER") {
-            k8s_env_vars.push(EnvVar {
-                name: "RISE_ISSUER".to_string(),
-                value: Some(self.rise_issuer.clone()),
-                ..Default::default()
-            });
-        }
-
-        // Inject RISE_APP_URLS environment variable with all app URLs (primary + custom domains)
-        // Only add if not already set by user (allows override for testing)
-        if !k8s_env_vars.iter().any(|env| env.name == "RISE_APP_URLS") {
-            // Build primary URL
-            let primary_url = self.full_ingress_url(project, deployment);
-
-            // Load custom domains for this project
-            let custom_domains = crate::db::custom_domains::list_project_custom_domains(
-                &self.state.db_pool,
-                project.id,
-            )
-            .await?;
-
-            // Build all URLs (primary + custom domains)
-            let mut app_urls = vec![primary_url];
-            for domain in custom_domains {
-                let schema = if self.ingress_tls_secret_name.is_some()
-                    || (self.custom_domain_tls_mode
-                        == crate::server::settings::CustomDomainTlsMode::PerDomain)
-                {
-                    "https"
-                } else {
-                    &self.ingress_schema
-                };
-                let url = if let Some(port) = self.ingress_port {
-                    format!("{}://{}:{}", schema, domain.domain, port)
-                } else {
-                    format!("{}://{}", schema, domain.domain)
-                };
-                app_urls.push(url);
-            }
-
-            // Serialize as JSON array
-            let app_urls_json = serde_json::to_string(&app_urls)?;
-
-            k8s_env_vars.push(EnvVar {
-                name: "RISE_APP_URLS".to_string(),
-                value: Some(app_urls_json),
-                ..Default::default()
-            });
-        }
 
         Ok(k8s_env_vars)
     }
@@ -4231,6 +4172,7 @@ mod tests {
             id: Uuid::new_v4(),
             domain: "compass-dev.example.com".to_string(),
             project_id: project.id,
+            is_primary: false,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }];
