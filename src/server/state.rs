@@ -622,6 +622,7 @@ impl AppState {
                         encryption,
                         access_mode,
                         deletion_policy,
+                        iam_user_boundary_policy_arn,
                         access_key_id,
                         secret_access_key,
                     } => {
@@ -667,6 +668,7 @@ impl AppState {
                                     encryption: encryption.clone(),
                                     access_mode: access_mode.clone(),
                                     deletion_policy: deletion_policy.clone(),
+                                    iam_user_boundary_policy_arn: iam_user_boundary_policy_arn.clone(),
                                 }
                             )
                             .await?;

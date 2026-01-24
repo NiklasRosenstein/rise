@@ -231,6 +231,7 @@ pub struct AwsS3ProvisionerConfig {
     pub encryption: S3EncryptionConfig,
     pub access_mode: S3AccessMode,
     pub deletion_policy: S3DeletionPolicy,
+    pub iam_user_boundary_policy_arn: Option<String>,
 }
 
 #[derive(Clone)]
@@ -244,6 +245,7 @@ pub struct AwsS3Provisioner {
     encryption: S3EncryptionConfig,
     access_mode: S3AccessMode,
     deletion_policy: S3DeletionPolicy,
+    iam_user_boundary_policy_arn: Option<String>,
 }
 
 impl AwsS3Provisioner {
@@ -258,6 +260,7 @@ impl AwsS3Provisioner {
             encryption: config.encryption,
             access_mode: config.access_mode,
             deletion_policy: config.deletion_policy,
+            iam_user_boundary_policy_arn: config.iam_user_boundary_policy_arn,
         })
     }
 
@@ -290,7 +293,6 @@ impl AwsS3Provisioner {
             }
         }
     }
-
 
     /// Reconcile a single S3 extension
     async fn reconcile_single(
@@ -506,13 +508,24 @@ impl AwsS3Provisioner {
                 let error_str = format!("{:?}", e);
                 if error_str.contains("NoSuchEntity") {
                     // User doesn't exist, create it
-                    match self
-                        .iam_client
-                        .create_user()
-                        .user_name(&username)
-                        .send()
-                        .await
-                    {
+                    let mut create_user_req = self.iam_client.create_user().user_name(&username);
+
+                    // Set permission boundary if configured (prevents privilege escalation)
+                    if let Some(ref boundary_arn) = self.iam_user_boundary_policy_arn {
+                        info!(
+                            "Setting permission boundary '{}' for IAM user '{}'",
+                            boundary_arn, username
+                        );
+                        create_user_req = create_user_req.permissions_boundary(boundary_arn);
+                    } else {
+                        warn!(
+                            "No permission boundary configured for IAM user '{}'. \
+                            Consider setting iam_user_boundary_policy_arn to prevent privilege escalation.",
+                            username
+                        );
+                    }
+
+                    match create_user_req.send().await {
                         Ok(_) => {
                             info!("Created IAM user '{}'", username);
 
@@ -1118,9 +1131,7 @@ impl AwsS3Provisioner {
                 .expiration(expiration);
 
             // Set filter with prefix (use empty prefix if not specified)
-            let filter = LifecycleRuleFilter::builder()
-                .prefix(&rule.prefix)
-                .build();
+            let filter = LifecycleRuleFilter::builder().prefix(&rule.prefix).build();
             s3_rule_builder = s3_rule_builder.filter(filter);
 
             s3_rules.push(s3_rule_builder.build()?);

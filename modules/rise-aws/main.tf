@@ -271,6 +271,33 @@ data "aws_iam_policy_document" "backend" {
       resources = [
         "arn:aws:iam::${local.account_id}:user/rise-s3-*"
       ]
+      # Require permission boundary when creating users to prevent privilege escalation
+      condition {
+        test     = "StringEquals"
+        variable = "iam:PermissionsBoundary"
+        values   = ["arn:aws:iam::${local.account_id}:policy/${var.name}-s3-user-boundary"]
+      }
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_s3 ? [1] : []
+    content {
+      sid    = "SetIAMUserBoundary"
+      effect = "Allow"
+      actions = [
+        "iam:PutUserPermissionsBoundary",
+        "iam:DeleteUserPermissionsBoundary"
+      ]
+      resources = [
+        "arn:aws:iam::${local.account_id}:user/rise-s3-*"
+      ]
+      # Only allow setting the specific boundary policy
+      condition {
+        test     = "StringEquals"
+        variable = "iam:PermissionsBoundary"
+        values   = ["arn:aws:iam::${local.account_id}:policy/${var.name}-s3-user-boundary"]
+      }
     }
   }
 
@@ -307,6 +334,54 @@ data "aws_iam_policy_document" "backend" {
     }
   }
 }
+
+# -----------------------------------------------------------------------------
+# S3 User Permission Boundary
+# -----------------------------------------------------------------------------
+# This policy acts as a permission boundary for IAM users created by the S3
+# provisioner. It prevents privilege escalation by limiting what permissions
+# can be granted via inline policies, even if the backend is compromised.
+
+data "aws_iam_policy_document" "s3_user_boundary" {
+  count = var.enable_s3 ? 1 : 0
+
+  # Allow S3 actions only on buckets with the naming prefix
+  statement {
+    sid    = "S3BucketAccess"
+    effect = "Allow"
+    actions = [
+      "s3:*"
+    ]
+    resources = [
+      "arn:aws:s3:::${var.name}-*",
+      "arn:aws:s3:::${var.name}-*/*"
+    ]
+  }
+
+  # Allow listing all buckets (needed for some S3 client libraries)
+  statement {
+    sid    = "S3ListBuckets"
+    effect = "Allow"
+    actions = [
+      "s3:ListAllMyBuckets",
+      "s3:GetBucketLocation"
+    ]
+    resources = ["*"]
+  }
+}
+
+resource "aws_iam_policy" "s3_user_boundary" {
+  count = var.enable_s3 ? 1 : 0
+
+  name        = "${var.name}-s3-user-boundary"
+  description = "Permission boundary for S3 IAM users created by Rise backend (prevents privilege escalation)"
+  policy      = data.aws_iam_policy_document.s3_user_boundary[0].json
+  tags        = local.tags
+}
+
+# -----------------------------------------------------------------------------
+# Backend IAM Policy
+# -----------------------------------------------------------------------------
 
 resource "aws_iam_policy" "backend" {
   name        = local.name

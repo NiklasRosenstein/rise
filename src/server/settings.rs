@@ -922,6 +922,10 @@ pub enum ExtensionProviderConfig {
         /// Deletion policy for all buckets (server-controlled)
         #[serde(default = "default_s3_deletion_policy")]
         deletion_policy: S3DeletionPolicy,
+        /// IAM permission boundary policy ARN for created IAM users (prevents privilege escalation)
+        /// This should match the boundary policy created by Terraform (e.g., "arn:aws:iam::123456789012:policy/rise-backend-s3-user-boundary")
+        #[serde(default)]
+        iam_user_boundary_policy_arn: Option<String>,
         #[serde(default)]
         access_key_id: Option<String>,
         #[serde(default)]
