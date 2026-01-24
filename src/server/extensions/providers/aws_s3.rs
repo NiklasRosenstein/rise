@@ -1654,7 +1654,13 @@ impl Extension for AwsS3Provisioner {
                         );
                     }
 
-                    match self.s3_client.head_bucket().bucket(&bucket_name).send().await {
+                    match self
+                        .s3_client
+                        .head_bucket()
+                        .bucket(&bucket_name)
+                        .send()
+                        .await
+                    {
                         Ok(_) => {
                             info!("Isolated S3 bucket '{}' is now available", bucket_name);
                             break;
