@@ -865,6 +865,7 @@ pub enum PrivateKeySource {
 /// Extension provider configuration
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
+#[allow(clippy::enum_variant_names)]
 pub enum ExtensionProviderConfig {
     #[cfg(feature = "aws")]
     AwsRdsProvisioner {
