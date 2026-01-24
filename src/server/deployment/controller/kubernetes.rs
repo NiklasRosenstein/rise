@@ -3774,6 +3774,7 @@ mod tests {
                 username: "test".to_string(),
                 password: "test".to_string(),
                 registry_url: "localhost:5000".to_string(),
+                expires_in: None,
             })
         }
 
