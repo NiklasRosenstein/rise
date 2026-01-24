@@ -190,11 +190,127 @@ data "aws_iam_policy_document" "backend" {
       ]
     }
   }
+
+  # S3 permissions for managing buckets (if enabled)
+  dynamic "statement" {
+    for_each = var.enable_s3 ? [1] : []
+    content {
+      sid    = "ListS3Buckets"
+      effect = "Allow"
+      actions = [
+        "s3:ListAllMyBuckets",
+        "s3:GetBucketLocation"
+      ]
+      resources = ["*"]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_s3 ? [1] : []
+    content {
+      sid    = "ManageS3Buckets"
+      effect = "Allow"
+      actions = [
+        "s3:CreateBucket",
+        "s3:DeleteBucket",
+        "s3:GetBucketVersioning",
+        "s3:PutBucketVersioning",
+        "s3:GetBucketLifecycleConfiguration",
+        "s3:PutBucketLifecycleConfiguration",
+        "s3:DeleteBucketLifecycleConfiguration",
+        "s3:GetBucketCors",
+        "s3:PutBucketCors",
+        "s3:DeleteBucketCors",
+        "s3:GetBucketPublicAccessBlock",
+        "s3:PutBucketPublicAccessBlock",
+        "s3:GetEncryptionConfiguration",
+        "s3:PutEncryptionConfiguration",
+        "s3:GetBucketTagging",
+        "s3:PutBucketTagging"
+      ]
+      resources = [
+        "arn:aws:s3:::${var.name}-*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_s3 ? [1] : []
+    content {
+      sid    = "ManageS3Objects"
+      effect = "Allow"
+      actions = [
+        "s3:ListBucket",
+        "s3:ListBucketVersions",
+        "s3:GetObject",
+        "s3:GetObjectVersion",
+        "s3:DeleteObject",
+        "s3:DeleteObjectVersion"
+      ]
+      resources = [
+        "arn:aws:s3:::${var.name}-*",
+        "arn:aws:s3:::${var.name}-*/*"
+      ]
+    }
+  }
+
+  # IAM permissions for managing users and access keys (if S3 enabled)
+  dynamic "statement" {
+    for_each = var.enable_s3 ? [1] : []
+    content {
+      sid    = "ManageIAMUsers"
+      effect = "Allow"
+      actions = [
+        "iam:CreateUser",
+        "iam:DeleteUser",
+        "iam:GetUser",
+        "iam:ListAccessKeys",
+        "iam:TagUser",
+        "iam:UntagUser"
+      ]
+      resources = [
+        "arn:aws:iam::${local.account_id}:user/rise-s3-*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_s3 ? [1] : []
+    content {
+      sid    = "ManageIAMAccessKeys"
+      effect = "Allow"
+      actions = [
+        "iam:CreateAccessKey",
+        "iam:DeleteAccessKey",
+        "iam:UpdateAccessKey"
+      ]
+      resources = [
+        "arn:aws:iam::${local.account_id}:user/rise-s3-*"
+      ]
+    }
+  }
+
+  dynamic "statement" {
+    for_each = var.enable_s3 ? [1] : []
+    content {
+      sid    = "ManageIAMUserPolicies"
+      effect = "Allow"
+      actions = [
+        "iam:PutUserPolicy",
+        "iam:DeleteUserPolicy",
+        "iam:GetUserPolicy",
+        "iam:ListUserPolicies"
+      ]
+      resources = [
+        "arn:aws:iam::${local.account_id}:user/rise-s3-*"
+      ]
+    }
+  }
 }
 
 resource "aws_iam_policy" "backend" {
   name        = local.name
-  description = "IAM policy for Rise backend to manage ECR repositories and RDS instances"
+  description = "IAM policy for Rise backend to manage ECR repositories, RDS instances, S3 buckets, and IAM users"
   policy      = data.aws_iam_policy_document.backend.json
   tags        = local.tags
 }

@@ -26,3 +26,10 @@ todo.txt
 buildpack-samples/
 tmp/
 .playwright-mcp/
+
+# Terraform
+**/.terraform/
+**/.terraform.lock.hcl
+**/*.tfstate
+**/*.tfstate.*
+**/.terraform.tfstate.lock.info
