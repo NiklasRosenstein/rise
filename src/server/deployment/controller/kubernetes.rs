@@ -2075,11 +2075,9 @@ impl KubernetesController {
                 name: Some(Self::ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
-                annotations: if !annotations.is_empty() {
-                    Some(annotations)
-                } else {
-                    None
-                },
+                // Always include annotations (even if empty) so SSA removes old keys
+                // when access_class changes from authenticated to public
+                annotations: Some(annotations),
                 ..Default::default()
             },
             spec: Some(IngressSpec {
@@ -2131,11 +2129,9 @@ impl KubernetesController {
                 name: Some(Self::custom_domain_ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
-                annotations: if !annotations.is_empty() {
-                    Some(annotations)
-                } else {
-                    None
-                },
+                // Always include annotations (even if empty) so SSA removes old keys
+                // when access_class changes from authenticated to public
+                annotations: Some(annotations),
                 ..Default::default()
             },
             spec: Some(IngressSpec {
