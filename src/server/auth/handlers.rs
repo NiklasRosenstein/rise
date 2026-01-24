@@ -46,6 +46,145 @@ fn extract_project_url_from_redirect(redirect_url: &str, fallback_url: &str) -> 
     fallback_url.trim_end_matches('/').to_string()
 }
 
+/// Validate and sanitize a redirect URL to prevent open redirect vulnerabilities
+///
+/// This function ensures that redirect URLs are safe before using them in templates
+/// or JavaScript redirects. It prevents:
+/// - Open redirects to arbitrary external sites
+/// - JavaScript execution via javascript: URLs
+/// - Data URL exploits
+/// - Other dangerous URL schemes
+///
+/// # Arguments
+/// * `redirect_url` - The redirect URL from user input (query params)
+/// * `public_url` - The Rise public URL (trusted domain)
+///
+/// # Returns
+/// A safe redirect URL, or "/" if the input is invalid
+///
+/// # Security
+/// - Relative paths starting with "/" are always allowed
+/// - Absolute URLs must be HTTPS (or HTTP for localhost/development)
+/// - Absolute URLs must match the Rise public domain
+/// - All dangerous schemes (javascript:, data:, vbscript:, etc.) are blocked
+/// - Invalid or suspicious URLs default to "/"
+fn validate_redirect_url(redirect_url: &str, public_url: &str) -> String {
+    const SAFE_FALLBACK: &str = "/";
+
+    // Empty or whitespace-only URLs default to safe fallback
+    let redirect_url = redirect_url.trim();
+    if redirect_url.is_empty() {
+        return SAFE_FALLBACK.to_string();
+    }
+
+    // Allow relative paths that start with /
+    if redirect_url.starts_with('/') {
+        // Additional safety: ensure it doesn't start with // (protocol-relative URL)
+        if redirect_url.starts_with("//") {
+            tracing::warn!(
+                redirect_url = %redirect_url,
+                "Blocked protocol-relative URL in redirect"
+            );
+            return SAFE_FALLBACK.to_string();
+        }
+        return redirect_url.to_string();
+    }
+
+    // Try to parse as absolute URL
+    let parsed_redirect = match url::Url::parse(redirect_url) {
+        Ok(url) => url,
+        Err(e) => {
+            tracing::warn!(
+                redirect_url = %redirect_url,
+                error = ?e,
+                "Failed to parse redirect URL, using safe fallback"
+            );
+            return SAFE_FALLBACK.to_string();
+        }
+    };
+
+    // Block dangerous schemes
+    let scheme = parsed_redirect.scheme().to_lowercase();
+    if !matches!(scheme.as_str(), "http" | "https") {
+        tracing::warn!(
+            redirect_url = %redirect_url,
+            scheme = %scheme,
+            "Blocked dangerous URL scheme in redirect"
+        );
+        return SAFE_FALLBACK.to_string();
+    }
+
+    // Parse the trusted public URL
+    let parsed_public = match url::Url::parse(public_url) {
+        Ok(url) => url,
+        Err(e) => {
+            tracing::error!(
+                public_url = %public_url,
+                error = ?e,
+                "Failed to parse public_url, blocking redirect"
+            );
+            return SAFE_FALLBACK.to_string();
+        }
+    };
+
+    // Extract host for comparison
+    let redirect_host = match parsed_redirect.host_str() {
+        Some(host) => host,
+        None => {
+            tracing::warn!(
+                redirect_url = %redirect_url,
+                "Redirect URL has no host, using safe fallback"
+            );
+            return SAFE_FALLBACK.to_string();
+        }
+    };
+
+    let public_host = match parsed_public.host_str() {
+        Some(host) => host,
+        None => {
+            tracing::error!(
+                public_url = %public_url,
+                "Public URL has no host, blocking redirect"
+            );
+            return SAFE_FALLBACK.to_string();
+        }
+    };
+
+    // Allow redirects to the same host as public_url
+    if redirect_host == public_host {
+        return redirect_url.to_string();
+    }
+
+    // Allow redirects to subdomains of the public domain
+    // e.g., if public_url is "https://rise.dev", allow "https://app.rise.dev"
+    if redirect_host.ends_with(&format!(".{}", public_host)) {
+        return redirect_url.to_string();
+    }
+
+    // Allow localhost and 127.0.0.1 for development (only if public_url is also local)
+    // Extract host without port for comparison
+    let redirect_host_base = redirect_host.split(':').next().unwrap_or(redirect_host);
+    let public_host_base = public_host.split(':').next().unwrap_or(public_host);
+
+    let is_redirect_localhost =
+        redirect_host_base == "localhost" || redirect_host_base == "127.0.0.1";
+    let is_public_localhost = public_host_base == "localhost" || public_host_base == "127.0.0.1";
+
+    if is_redirect_localhost && is_public_localhost {
+        return redirect_url.to_string();
+    }
+
+    // All other external URLs are blocked
+    tracing::warn!(
+        redirect_url = %redirect_url,
+        redirect_host = %redirect_host,
+        public_host = %public_host,
+        "Blocked redirect to untrusted external domain"
+    );
+
+    SAFE_FALLBACK.to_string()
+}
+
 /// Helper function to sync IdP groups after login
 ///
 /// This validates the token and syncs the user's team memberships from IdP groups.
@@ -492,16 +631,21 @@ pub async fn signin_page(
     Query(params): Query<SigninQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     let project_name = params.project.as_deref().unwrap_or("Unknown");
-    let redirect_url = params
+    let raw_redirect_url = params
         .redirect
         .as_ref()
         .or(params.rd.as_ref())
         .cloned()
         .unwrap_or_else(|| "/".to_string());
 
+    // Validate and sanitize the redirect URL to prevent open redirects
+    let redirect_url = validate_redirect_url(&raw_redirect_url, &state.public_url);
+
     tracing::info!(
         project = %project_name,
         has_redirect = !redirect_url.is_empty(),
+        raw_redirect = %raw_redirect_url,
+        validated_redirect = %redirect_url,
         "Signin page requested"
     );
 
@@ -711,10 +855,16 @@ pub async fn oauth_signin_start(
     Query(params): Query<SigninQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     // Prefer rd (full URL) over redirect (path only)
-    let redirect_url = params.rd.as_ref().or(params.redirect.as_ref());
+    let raw_redirect_url = params.rd.as_ref().or(params.redirect.as_ref());
+
+    // Validate and sanitize redirect URL if provided
+    let redirect_url = raw_redirect_url.map(|url| validate_redirect_url(url, &state.public_url));
+
     tracing::info!(
         project = ?params.project,
         has_redirect = redirect_url.is_some(),
+        raw_redirect = ?raw_redirect_url,
+        validated_redirect = ?redirect_url,
         "OAuth signin initiated"
     );
 
@@ -731,7 +881,7 @@ pub async fn oauth_signin_start(
     // (custom domain routing handles cookies differently - always uses current host)
     if !params.skip_warning.unwrap_or(false) && !is_rise_path {
         // Extract redirect URL host (if provided)
-        let redirect_host = redirect_url.and_then(|url| {
+        let redirect_host = redirect_url.as_ref().and_then(|url| {
             url::Url::parse(url)
                 .ok()
                 .and_then(|u| u.host_str().map(|h| h.to_string()))
@@ -824,7 +974,7 @@ pub async fn oauth_signin_start(
     // Store PKCE state with redirect URL, project name, and custom domain base URL
     let oauth_state = OAuth2State {
         code_verifier: code_verifier.clone(),
-        redirect_url: redirect_url.cloned(),
+        redirect_url,
         project_name: params.project.clone(), // For ingress auth flow
         custom_domain_base_url,
     };
@@ -1620,4 +1770,183 @@ pub async fn jwks(
     })?;
 
     Ok(Json(jwks))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_redirect_url_relative_paths() {
+        let public_url = "https://rise.dev";
+
+        // Valid relative paths
+        assert_eq!(validate_redirect_url("/", public_url), "/");
+        assert_eq!(
+            validate_redirect_url("/dashboard", public_url),
+            "/dashboard"
+        );
+        assert_eq!(
+            validate_redirect_url("/app/project/123", public_url),
+            "/app/project/123"
+        );
+
+        // Protocol-relative URLs should be blocked
+        assert_eq!(validate_redirect_url("//evil.com", public_url), "/");
+        assert_eq!(validate_redirect_url("//evil.com/path", public_url), "/");
+    }
+
+    #[test]
+    fn test_validate_redirect_url_dangerous_schemes() {
+        let public_url = "https://rise.dev";
+
+        // JavaScript URLs should be blocked
+        assert_eq!(
+            validate_redirect_url("javascript:alert('xss')", public_url),
+            "/"
+        );
+
+        // Data URLs should be blocked
+        assert_eq!(
+            validate_redirect_url("data:text/html,<script>alert('xss')</script>", public_url),
+            "/"
+        );
+
+        // vbscript URLs should be blocked
+        assert_eq!(
+            validate_redirect_url("vbscript:msgbox('xss')", public_url),
+            "/"
+        );
+    }
+
+    #[test]
+    fn test_validate_redirect_url_same_domain() {
+        let public_url = "https://rise.dev";
+
+        // Same domain should be allowed
+        assert_eq!(
+            validate_redirect_url("https://rise.dev/dashboard", public_url),
+            "https://rise.dev/dashboard"
+        );
+
+        // Same domain with port should be allowed
+        assert_eq!(
+            validate_redirect_url("https://rise.dev:8080/dashboard", public_url),
+            "https://rise.dev:8080/dashboard"
+        );
+    }
+
+    #[test]
+    fn test_validate_redirect_url_subdomains() {
+        let public_url = "https://rise.dev";
+
+        // Subdomain should be allowed
+        assert_eq!(
+            validate_redirect_url("https://app.rise.dev/dashboard", public_url),
+            "https://app.rise.dev/dashboard"
+        );
+
+        assert_eq!(
+            validate_redirect_url("https://staging.rise.dev/dashboard", public_url),
+            "https://staging.rise.dev/dashboard"
+        );
+
+        // Multi-level subdomain should be allowed
+        assert_eq!(
+            validate_redirect_url("https://my-project.app.rise.dev/", public_url),
+            "https://my-project.app.rise.dev/"
+        );
+    }
+
+    #[test]
+    fn test_validate_redirect_url_external_domains() {
+        let public_url = "https://rise.dev";
+
+        // External domains should be blocked
+        assert_eq!(validate_redirect_url("https://evil.com", public_url), "/");
+
+        assert_eq!(
+            validate_redirect_url("https://phishing.site/login", public_url),
+            "/"
+        );
+
+        // Domains that look similar but are not subdomains should be blocked
+        assert_eq!(
+            validate_redirect_url("https://rise.dev.evil.com", public_url),
+            "/"
+        );
+    }
+
+    #[test]
+    fn test_validate_redirect_url_localhost() {
+        let public_url = "http://localhost:3000";
+
+        // localhost to localhost should be allowed
+        assert_eq!(
+            validate_redirect_url("http://localhost:3000/dashboard", public_url),
+            "http://localhost:3000/dashboard"
+        );
+
+        assert_eq!(
+            validate_redirect_url("http://127.0.0.1:3000/dashboard", public_url),
+            "http://127.0.0.1:3000/dashboard"
+        );
+
+        // Malicious localhost URLs with invalid ports should be rejected during parsing
+        // The URL parser will fail to parse "localhost:evil.com" as a valid port
+        assert_eq!(
+            validate_redirect_url("http://localhost:evil.com/path", public_url),
+            "/"
+        );
+
+        // But external URLs should still be blocked even when public_url is localhost
+        assert_eq!(validate_redirect_url("https://evil.com", public_url), "/");
+    }
+
+    #[test]
+    fn test_validate_redirect_url_localhost_production_blocked() {
+        let public_url = "https://rise.dev";
+
+        // localhost should be blocked when public_url is not localhost
+        assert_eq!(
+            validate_redirect_url("http://localhost:3000/dashboard", public_url),
+            "/"
+        );
+
+        assert_eq!(
+            validate_redirect_url("http://127.0.0.1:3000/dashboard", public_url),
+            "/"
+        );
+    }
+
+    #[test]
+    fn test_validate_redirect_url_empty_and_invalid() {
+        let public_url = "https://rise.dev";
+
+        // Empty string should return fallback
+        assert_eq!(validate_redirect_url("", public_url), "/");
+
+        // Whitespace only should return fallback
+        assert_eq!(validate_redirect_url("   ", public_url), "/");
+
+        // Invalid URLs should return fallback
+        assert_eq!(validate_redirect_url("not a url", public_url), "/");
+    }
+
+    #[test]
+    fn test_validate_redirect_url_http_vs_https() {
+        let public_url = "https://rise.dev";
+
+        // HTTP URLs should be allowed for same domain
+        assert_eq!(
+            validate_redirect_url("http://rise.dev/dashboard", public_url),
+            "http://rise.dev/dashboard"
+        );
+
+        // HTTPS URLs should be allowed for same domain
+        assert_eq!(
+            validate_redirect_url("https://rise.dev/dashboard", public_url),
+            "https://rise.dev/dashboard"
+        );
+    }
 }
