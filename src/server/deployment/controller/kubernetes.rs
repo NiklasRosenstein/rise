@@ -220,16 +220,21 @@ impl KubernetesController {
     }
 
     /// Update cached resource version
+    ///
+    /// When `version` is `Some`, inserts/updates the cached version.
+    /// When `version` is `None`, removes the cache entry to force re-evaluation on next reconcile.
     fn update_version_cache(
         &self,
         deployment_id: uuid::Uuid,
         resource_type: &str,
         version: Option<String>,
     ) {
+        let key = Self::resource_cache_key(deployment_id, resource_type);
+        let mut cache = self.resource_versions.write().unwrap();
         if let Some(version) = version {
-            let key = Self::resource_cache_key(deployment_id, resource_type);
-            let mut cache = self.resource_versions.write().unwrap();
             cache.insert(key, version);
+        } else {
+            cache.remove(&key);
         }
     }
 
