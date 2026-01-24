@@ -70,18 +70,13 @@ pub async fn get_deployment_image_tag(
         };
 
     // Build-from-source: construct from registry config using the appropriate deployment_id
-    if let Some(ref registry_provider) = state.registry_provider {
-        let registry_url = registry_provider.registry_url();
-        format!(
-            "{}/{}:{}",
-            registry_url.trim_end_matches('/'),
-            project.name,
-            deployment_id_for_tag
-        )
-    } else {
-        // Fallback if no registry configured (shouldn't happen in practice)
-        format!("{}:{}", project.name, deployment_id_for_tag)
-    }
+    let registry_url = state.registry_provider.registry_url();
+    format!(
+        "{}/{}:{}",
+        registry_url.trim_end_matches('/'),
+        project.name,
+        deployment_id_for_tag
+    )
 }
 
 /// Create a deployment and invoke extension hooks

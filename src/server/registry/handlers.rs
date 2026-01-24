@@ -74,17 +74,12 @@ pub async fn get_registry_credentials(
         .await
         .map_err(|e| (StatusCode::FORBIDDEN, e))?;
 
-    // Check if registry is configured
-    let registry_provider = state.registry_provider.as_ref().ok_or((
-        StatusCode::SERVICE_UNAVAILABLE,
-        "No registry configured".to_string(),
-    ))?;
-
     // Get credentials from the registry provider
     // The repository name is typically the project name
     let repository = params.project.clone();
 
-    let credentials = registry_provider
+    let credentials = state
+        .registry_provider
         .get_credentials(&repository)
         .await
         .map_err(|e| {

@@ -39,8 +39,9 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub jwt_validator: Arc<JwtValidator>,
     pub jwt_signer: Arc<JwtSigner>,
+    pub jwks_json: String,
     pub oauth_client: Arc<OAuthClient>,
-    pub registry_provider: Option<Arc<dyn RegistryProvider>>,
+    pub registry_provider: Arc<dyn RegistryProvider>,
     pub oci_client: Arc<crate::server::oci::OciClient>,
     pub admin_users: Arc<Vec<String>>,
     pub auth_settings: Arc<AuthSettings>,
@@ -159,7 +160,7 @@ async fn test_encryption_provider(provider: &dyn EncryptionProvider) -> Result<(
 async fn init_kubernetes_backend(
     settings: &Settings,
     controller_state: Arc<ControllerState>,
-    registry_provider: Option<Arc<dyn RegistryProvider>>,
+    registry_provider: Arc<dyn RegistryProvider>,
     jwks_json: String,
 ) -> Result<Arc<dyn DeploymentBackend>> {
     use crate::server::settings::DeploymentControllerSettings;
@@ -249,35 +250,6 @@ async fn init_kubernetes_backend(
     }
 }
 
-impl ControllerState {
-    /// Create minimal controller state with database access and encryption
-    pub async fn new(
-        database_url: &str,
-        max_connections: u32,
-        encryption_settings: Option<&EncryptionSettings>,
-    ) -> Result<Self> {
-        tracing::info!(
-            "Connecting to PostgreSQL with {} max connections...",
-            max_connections
-        );
-
-        let db_pool = PgPoolOptions::new()
-            .max_connections(max_connections)
-            .connect(database_url)
-            .await
-            .context("Failed to connect to PostgreSQL")?;
-
-        tracing::info!("Successfully connected to PostgreSQL");
-
-        let encryption_provider = init_encryption_provider(encryption_settings).await?;
-
-        Ok(Self {
-            db_pool,
-            encryption_provider,
-        })
-    }
-}
-
 impl AppState {
     /// Run database migrations
     async fn run_migrations(pool: &PgPool) -> Result<()> {
@@ -291,7 +263,7 @@ impl AppState {
     }
 
     /// Initialize full state for HTTP server
-    pub async fn new_for_server(settings: &Settings) -> Result<Self> {
+    pub async fn new(settings: &Settings) -> Result<Self> {
         tracing::info!("Initializing AppState for HTTP server");
 
         // Connect to PostgreSQL with server-optimized pool size
@@ -345,12 +317,9 @@ impl AppState {
             .await?,
         );
 
-        // Initialize registry provider based on configuration
-        let registry_provider: Option<Arc<dyn RegistryProvider>> = if let Some(
-            ref registry_config,
-        ) = settings.registry
-        {
-            match registry_config {
+        // Initialize registry provider (required for server operation)
+        let registry_provider: Arc<dyn RegistryProvider> = match &settings.registry {
+            Some(registry_config) => match registry_config {
                 #[cfg(feature = "aws")]
                 RegistrySettings::Ecr {
                     region,
@@ -370,25 +339,19 @@ impl AppState {
                         access_key_id: access_key_id.clone(),
                         secret_access_key: secret_access_key.clone(),
                     };
-                    match EcrProvider::new(ecr_config).await {
-                        Ok(provider) => {
-                            tracing::info!("Initialized ECR registry provider");
-                            Some(Arc::new(provider))
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to initialize ECR provider: {:#}", e);
-                            None
-                        }
-                    }
+                    let provider = EcrProvider::new(ecr_config)
+                        .await
+                        .context("Failed to initialize ECR registry provider")?;
+                    tracing::info!("Initialized ECR registry provider");
+                    Arc::new(provider)
                 }
                 #[cfg(not(feature = "aws"))]
                 RegistrySettings::Ecr { account_id, .. } => {
-                    tracing::error!(
-                            "AWS ECR registry is configured (account: {}) but the 'aws' feature is not enabled. \
-                             Please rebuild with --features aws or use a pre-built binary with AWS support.",
-                            account_id
-                        );
-                    None
+                    anyhow::bail!(
+                        "AWS ECR registry is configured (account: {}) but the 'aws' feature is not enabled. \
+                         Please rebuild with --features aws or use a pre-built binary with AWS support.",
+                        account_id
+                    )
                 }
                 RegistrySettings::OciClientAuth {
                     registry_url,
@@ -400,29 +363,21 @@ impl AppState {
                         namespace: namespace.clone(),
                         client_registry_url: client_registry_url.clone(),
                     };
-                    match OciClientAuthProvider::new(oci_config) {
-                        Ok(provider) => {
-                            tracing::info!(
-                                "Initialized OCI client-auth registry provider at {}",
-                                registry_url
-                            );
-                            Some(Arc::new(provider))
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "Failed to initialize OCI client-auth provider: {:#}",
-                                e
-                            );
-                            None
-                        }
-                    }
+                    let provider = OciClientAuthProvider::new(oci_config)
+                        .context("Failed to initialize OCI client-auth registry provider")?;
+                    tracing::info!(
+                        "Initialized OCI client-auth registry provider at {}",
+                        registry_url
+                    );
+                    Arc::new(provider)
                 }
+            },
+            None => {
+                anyhow::bail!(
+                    "Registry provider is required for server operation. \
+                     Please configure a registry in settings (ECR or OCI client-auth)"
+                )
             }
-        } else {
-            tracing::warn!(
-                "No registry configured - registry credentials endpoint will not be available"
-            );
-            None
         };
 
         // Initialize OCI client for direct registry interaction
@@ -524,7 +479,7 @@ impl AppState {
                 settings,
                 controller_state,
                 registry_provider.clone(),
-                jwks_json,
+                jwks_json.clone(),
             )
             .await?
         };
@@ -747,238 +702,7 @@ impl AppState {
             db_pool,
             jwt_validator,
             jwt_signer,
-            oauth_client,
-            registry_provider,
-            oci_client,
-            admin_users,
-            auth_settings,
-            server_settings,
-            token_store,
-            cookie_settings,
-            public_url,
-            encryption_provider,
-            deployment_backend,
-            extension_registry,
-            oauth_state_store,
-            oauth_exchange_store,
-            access_classes,
-            production_ingress_url_template,
-            staging_ingress_url_template,
-        })
-    }
-
-    /// Initialize minimal state for deployment controller
-    ///
-    /// The deployment controller only needs database and registry access.
-    /// We use dummy values for auth components since they're not used.
-    pub async fn new_for_controller(settings: &Settings) -> Result<Self> {
-        tracing::info!("Initializing AppState for deployment controller");
-
-        // Connect to PostgreSQL with controller-optimized pool size
-        let db_pool = PgPoolOptions::new()
-            .max_connections(3)
-            .connect(&settings.database.url)
-            .await
-            .context("Failed to connect to PostgreSQL")?;
-
-        tracing::info!("Successfully connected to PostgreSQL");
-
-        // Initialize registry provider based on configuration
-        let registry_provider: Option<Arc<dyn RegistryProvider>> = if let Some(
-            ref registry_config,
-        ) = settings.registry
-        {
-            match registry_config {
-                #[cfg(feature = "aws")]
-                RegistrySettings::Ecr {
-                    region,
-                    account_id,
-                    repo_prefix,
-                    push_role_arn,
-                    auto_remove,
-                    access_key_id,
-                    secret_access_key,
-                } => {
-                    let ecr_config = EcrConfig {
-                        region: region.clone(),
-                        account_id: account_id.clone(),
-                        repo_prefix: repo_prefix.clone(),
-                        push_role_arn: push_role_arn.clone(),
-                        auto_remove: *auto_remove,
-                        access_key_id: access_key_id.clone(),
-                        secret_access_key: secret_access_key.clone(),
-                    };
-                    match EcrProvider::new(ecr_config).await {
-                        Ok(provider) => {
-                            tracing::info!("Initialized ECR registry provider");
-                            Some(Arc::new(provider))
-                        }
-                        Err(e) => {
-                            tracing::error!("Failed to initialize ECR provider: {:#}", e);
-                            None
-                        }
-                    }
-                }
-                #[cfg(not(feature = "aws"))]
-                RegistrySettings::Ecr { account_id, .. } => {
-                    tracing::error!(
-                            "AWS ECR registry is configured (account: {}) but the 'aws' feature is not enabled. \
-                             Please rebuild with --features aws or use a pre-built binary with AWS support.",
-                            account_id
-                        );
-                    None
-                }
-                RegistrySettings::OciClientAuth {
-                    registry_url,
-                    namespace,
-                    client_registry_url,
-                } => {
-                    let oci_config = OciClientAuthConfig {
-                        registry_url: registry_url.clone(),
-                        namespace: namespace.clone(),
-                        client_registry_url: client_registry_url.clone(),
-                    };
-                    match OciClientAuthProvider::new(oci_config) {
-                        Ok(provider) => {
-                            tracing::info!(
-                                "Initialized OCI client-auth registry provider at {}",
-                                registry_url
-                            );
-                            Some(Arc::new(provider))
-                        }
-                        Err(e) => {
-                            tracing::error!(
-                                "Failed to initialize OCI client-auth provider: {:#}",
-                                e
-                            );
-                            None
-                        }
-                    }
-                }
-            }
-        } else {
-            tracing::warn!("No registry configured - image tag construction will use fallback");
-            None
-        };
-
-        // Initialize OCI client (needed for pre-built image deployments)
-        let oci_client = Arc::new(
-            crate::server::oci::OciClient::new().context("Failed to initialize OCI client")?,
-        );
-
-        // Dummy auth components (not used by controller)
-        let jwt_validator = Arc::new(JwtValidator::new());
-
-        // Initialize dummy JWT signer (not used by controller, but required by AppState)
-        let jwt_signer = Arc::new(
-            JwtSigner::new(
-                &settings.server.jwt_signing_secret,
-                settings.server.public_url.clone(),
-                settings.server.jwt_expiry_seconds,
-                settings.server.jwt_claims.clone(),
-                settings.server.rs256_private_key_pem.as_deref(),
-                settings.server.rs256_public_key_pem.as_deref(),
-            )
-            .context("Failed to initialize JWT signer")?,
-        );
-
-        let oauth_client = Arc::new(
-            OAuthClient::new(
-                settings.auth.issuer.clone(),
-                settings.auth.client_id.clone(),
-                settings.auth.client_secret.clone(),
-                settings.auth.authorize_url.clone(),
-                settings.auth.token_url.clone(),
-            )
-            .await?,
-        );
-        let admin_users = Arc::new(Vec::new());
-        let auth_settings = Arc::new(settings.auth.clone());
-        let server_settings = Arc::new(settings.server.clone());
-
-        // Dummy OAuth proxy components (not used by controller)
-        let token_store: Arc<dyn TokenStore> =
-            Arc::new(InMemoryTokenStore::new(Duration::from_secs(600)));
-        let cookie_settings = CookieSettings {
-            domain: String::new(),
-            secure: true,
-        };
-        let public_url = "http://localhost:3000".to_string(); // Dummy value, not used by controller
-
-        // Initialize encryption provider
-        let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
-
-        // Initialize deployment backend
-        #[cfg(not(feature = "k8s"))]
-        compile_error!(
-            "At least one deployment backend must be enabled. Please build with --features k8s"
-        );
-
-        #[cfg(feature = "k8s")]
-        let deployment_backend = {
-            let controller_state = Arc::new(ControllerState {
-                db_pool: db_pool.clone(),
-                encryption_provider: encryption_provider.clone(),
-            });
-            // Controller doesn't have JWT signer, pass empty JWKS for now
-            // This is only used when running in controller-only mode (without HTTP server)
-            let jwks_json = r#"{"keys":[]}"#.to_string();
-            init_kubernetes_backend(
-                settings,
-                controller_state,
-                registry_provider.clone(),
-                jwks_json,
-            )
-            .await?
-        };
-
-        // Initialize empty extension registry for controller (not used)
-        let extension_registry =
-            Arc::new(crate::server::extensions::registry::ExtensionRegistry::new());
-
-        // Initialize OAuth state store (dummy for controller, not used)
-        let oauth_state_store = Arc::new(
-            moka::future::Cache::builder()
-                .time_to_live(Duration::from_secs(600))
-                .max_capacity(10_000)
-                .build(),
-        );
-
-        // Initialize OAuth exchange token store (dummy for controller, not used)
-        let oauth_exchange_store = Arc::new(
-            moka::future::Cache::builder()
-                .time_to_live(Duration::from_secs(300))
-                .max_capacity(10_000)
-                .build(),
-        );
-
-        // Extract access_classes from deployment controller settings
-        // Filter out null values (used to remove inherited access classes)
-        let (access_classes, production_ingress_url_template, staging_ingress_url_template) =
-            if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
-                access_classes,
-                production_ingress_url_template,
-                staging_ingress_url_template,
-                ..
-            }) = &settings.deployment_controller
-            {
-                let filtered: std::collections::HashMap<_, _> = access_classes
-                    .iter()
-                    .filter_map(|(k, v)| v.as_ref().map(|ac| (k.clone(), ac.clone())))
-                    .collect();
-                (
-                    Arc::new(filtered),
-                    Some(production_ingress_url_template.clone()),
-                    staging_ingress_url_template.clone(),
-                )
-            } else {
-                (Arc::new(std::collections::HashMap::new()), None, None)
-            };
-
-        Ok(Self {
-            db_pool,
-            jwt_validator,
-            jwt_signer,
+            jwks_json,
             oauth_client,
             registry_provider,
             oci_client,
