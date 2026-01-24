@@ -1410,7 +1410,26 @@ impl KubernetesController {
             Ok(existing_ingress) => {
                 let current_version = existing_ingress.metadata.resource_version.as_deref();
 
-                if self.needs_apply(deployment_id, "ingress", current_version) {
+                // When needs_reconcile is set (e.g., access_class changed), use replace
+                // to fully replace the resource including removing old annotations.
+                // SSA patch may not properly remove annotations when switching access classes.
+                if deployment.needs_reconcile {
+                    let mut ingress = self.create_primary_ingress(project, deployment, metadata);
+                    // Set resourceVersion for optimistic concurrency
+                    ingress.metadata.resource_version = current_version.map(String::from);
+                    let result = ingress_api
+                        .replace(&ingress_name, &PostParams::default(), &ingress)
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "ingress",
+                        result.metadata.resource_version,
+                    );
+                    info!(
+                        "Replaced primary Ingress '{}' with updated annotations (needs_reconcile)",
+                        ingress_name
+                    );
+                } else if self.needs_apply(deployment_id, "ingress", current_version) {
                     let ingress = self.create_primary_ingress(project, deployment, metadata);
                     let result = ingress_api
                         .patch(
@@ -1452,7 +1471,36 @@ impl KubernetesController {
                 Ok(existing_ingress) => {
                     let current_version = existing_ingress.metadata.resource_version.as_deref();
 
-                    if self.needs_apply(deployment_id, "ingress-custom-domains", current_version) {
+                    // When needs_reconcile is set, use replace to fully replace the resource
+                    if deployment.needs_reconcile {
+                        let mut ingress = self.create_custom_domain_ingress(
+                            project,
+                            deployment,
+                            metadata,
+                            &custom_domains,
+                        );
+                        ingress.metadata.resource_version = current_version.map(String::from);
+                        let result = ingress_api
+                            .replace(
+                                &custom_domain_ingress_name,
+                                &PostParams::default(),
+                                &ingress,
+                            )
+                            .await?;
+                        self.update_version_cache(
+                            deployment_id,
+                            "ingress-custom-domains",
+                            result.metadata.resource_version,
+                        );
+                        info!(
+                            "Replaced custom domain Ingress '{}' with updated annotations (needs_reconcile)",
+                            custom_domain_ingress_name
+                        );
+                    } else if self.needs_apply(
+                        deployment_id,
+                        "ingress-custom-domains",
+                        current_version,
+                    ) {
                         let ingress = self.create_custom_domain_ingress(
                             project,
                             deployment,
