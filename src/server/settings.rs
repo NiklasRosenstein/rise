@@ -979,7 +979,7 @@ pub enum S3EncryptionConfig {
 /// S3 access mode configuration (server-level setting)
 #[cfg(feature = "aws")]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "PascalCase")]
 pub enum S3AccessMode {
     IamUser,
     IamRole { role_arn: String },
@@ -989,13 +989,14 @@ pub enum S3AccessMode {
 /// S3 bucket deletion policy (server-level setting)
 #[cfg(feature = "aws")]
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "PascalCase")]
 pub enum S3DeletionPolicy {
     Retain,
     ForceEmpty,
     Delete,
 }
 
+#[cfg(feature = "aws")]
 #[allow(dead_code)]
 fn default_bucket_prefix() -> String {
     "rise".to_string()

@@ -254,19 +254,14 @@ data "aws_iam_policy_document" "backend" {
     }
   }
 
-  # IAM permissions for managing users and access keys (if S3 enabled)
+  # IAM permissions for creating users with permission boundary (if S3 enabled)
   dynamic "statement" {
     for_each = var.enable_s3 ? [1] : []
     content {
-      sid    = "ManageIAMUsers"
+      sid    = "CreateIAMUser"
       effect = "Allow"
       actions = [
-        "iam:CreateUser",
-        "iam:DeleteUser",
-        "iam:GetUser",
-        "iam:ListAccessKeys",
-        "iam:TagUser",
-        "iam:UntagUser"
+        "iam:CreateUser"
       ]
       resources = [
         "arn:aws:iam::${local.account_id}:user/rise-s3-*"
@@ -280,14 +275,32 @@ data "aws_iam_policy_document" "backend" {
     }
   }
 
+  # IAM permissions for managing existing users (if S3 enabled)
+  dynamic "statement" {
+    for_each = var.enable_s3 ? [1] : []
+    content {
+      sid    = "ManageIAMUsers"
+      effect = "Allow"
+      actions = [
+        "iam:DeleteUser",
+        "iam:GetUser",
+        "iam:ListAccessKeys",
+        "iam:TagUser",
+        "iam:UntagUser"
+      ]
+      resources = [
+        "arn:aws:iam::${local.account_id}:user/rise-s3-*"
+      ]
+    }
+  }
+
   dynamic "statement" {
     for_each = var.enable_s3 ? [1] : []
     content {
       sid    = "SetIAMUserBoundary"
       effect = "Allow"
       actions = [
-        "iam:PutUserPermissionsBoundary",
-        "iam:DeleteUserPermissionsBoundary"
+        "iam:PutUserPermissionsBoundary"
       ]
       resources = [
         "arn:aws:iam::${local.account_id}:user/rise-s3-*"

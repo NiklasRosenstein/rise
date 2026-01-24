@@ -853,7 +853,7 @@ impl AwsS3Provisioner {
                                     error!("Cannot delete bucket '{}' - not empty", bucket_name);
                                     status.state = S3State::Failed;
                                     status.error = Some(format!(
-                                        "Bucket '{}' is not empty. Change deletion_policy to 'force_empty' to allow automatic emptying.",
+                                        "Bucket '{}' is not empty. Change deletion_policy to 'ForceEmpty' to allow automatic emptying.",
                                         bucket_name
                                     ));
                                     return Ok(());
@@ -1610,19 +1610,105 @@ impl Extension for AwsS3Provisioner {
             &spec.bucket_strategy,
         );
 
-        // Ensure bucket exists in status
+        // Ensure bucket exists and is available. In isolated mode, buckets may need to be
+        // created on-demand the first time a deployment group is used.
+        let mut status = status; // Make mutable for potential updates
+        if let Some(bucket) = status.buckets.get(&bucket_name) {
+            if bucket.status != BucketState::Available {
+                anyhow::bail!(
+                    "Bucket '{}' is not available (current state: {:?})",
+                    bucket_name,
+                    bucket.status
+                );
+            }
+        } else {
+            // Bucket is missing from status; create it on-demand for isolated mode
+            if spec.bucket_strategy == BucketStrategy::Isolated {
+                info!(
+                    "Creating isolated S3 bucket '{}' on-demand for deployment group '{}'",
+                    bucket_name, deployment_group
+                );
+
+                // Create the bucket
+                self.create_bucket(&bucket_name, &self.default_region)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to create isolated S3 bucket '{}' in before_deployment",
+                            bucket_name
+                        )
+                    })?;
+
+                // Configure the bucket (encryption, versioning, etc.)
+                self.configure_bucket(&bucket_name, &spec)
+                    .await
+                    .context("Failed to configure bucket")?;
+
+                // Wait for the bucket to become available by polling HeadBucket with a timeout
+                let deadline = chrono::Utc::now() + chrono::Duration::minutes(5);
+                loop {
+                    if chrono::Utc::now() > deadline {
+                        anyhow::bail!(
+                            "Timed out waiting for isolated S3 bucket '{}' to become available",
+                            bucket_name
+                        );
+                    }
+
+                    match self
+                        .s3_client
+                        .head_bucket()
+                        .bucket(&bucket_name)
+                        .send()
+                        .await
+                    {
+                        Ok(_) => {
+                            info!("Isolated S3 bucket '{}' is now available", bucket_name);
+                            break;
+                        }
+                        Err(err) => {
+                            // If the bucket is not yet fully propagated, keep retrying; otherwise, fail.
+                            let msg = format!("{:?}", err);
+                            if msg.contains("NotFound") || msg.contains("NoSuchBucket") {
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                continue;
+                            }
+                            return Err(anyhow::anyhow!(err).context(format!(
+                                "Failed while waiting for isolated S3 bucket '{}' to become available",
+                                bucket_name
+                            )));
+                        }
+                    }
+                }
+
+                // Update status with the new bucket
+                status.buckets.insert(
+                    bucket_name.clone(),
+                    BucketStatus {
+                        status: BucketState::Available,
+                        region: self.default_region.clone(),
+                        cleanup_scheduled_at: None,
+                    },
+                );
+
+                // Persist updated status
+                db_extensions::update_status(
+                    &self.db_pool,
+                    project_id,
+                    &ext.extension,
+                    &serde_json::to_value(&status)?,
+                )
+                .await?;
+            } else {
+                // In shared mode, bucket should already exist from reconciliation
+                anyhow::bail!("Bucket '{}' not found in status", bucket_name);
+            }
+        }
+
+        // Get bucket reference from status (guaranteed to exist at this point)
         let bucket = status
             .buckets
             .get(&bucket_name)
-            .ok_or_else(|| anyhow::anyhow!("Bucket '{}' not found in status", bucket_name))?;
-
-        if bucket.status != BucketState::Available {
-            anyhow::bail!(
-                "Bucket '{}' is not available (current state: {:?})",
-                bucket_name,
-                bucket.status
-            );
-        }
+            .expect("Bucket should exist in status after creation check");
 
         // Inject environment variables
         let mut injected_vars = Vec::new();
@@ -1904,6 +1990,17 @@ Variable names are configurable via the `env_vars` field in the spec.
                     "default": false,
                     "description": "Enable S3 versioning for the bucket"
                 },
+                "env_vars": {
+                    "type": "object",
+                    "properties": {
+                        "bucket_name": { "type": "string", "default": "AWS_S3_BUCKET" },
+                        "region": { "type": "string", "default": "AWS_REGION" },
+                        "access_key_id": { "type": "string", "default": "AWS_ACCESS_KEY_ID" },
+                        "secret_access_key": { "type": "string", "default": "AWS_SECRET_ACCESS_KEY" },
+                        "role_arn": { "type": "string", "default": "AWS_ROLE_ARN" }
+                    },
+                    "description": "Environment variable names to inject for S3 access"
+                },
                 "lifecycle_rules": {
                     "type": "array",
                     "items": {
@@ -1918,6 +2015,46 @@ Variable names are configurable via the `env_vars` field in the spec.
                     },
                     "default": [],
                     "description": "Lifecycle rules for automatic object expiration"
+                },
+                "public_access_block": {
+                    "type": "object",
+                    "properties": {
+                        "block_public_acls": { "type": "boolean", "default": true },
+                        "ignore_public_acls": { "type": "boolean", "default": true },
+                        "block_public_policy": { "type": "boolean", "default": true },
+                        "restrict_public_buckets": { "type": "boolean", "default": true }
+                    },
+                    "default": {
+                        "block_public_acls": true,
+                        "ignore_public_acls": true,
+                        "block_public_policy": true,
+                        "restrict_public_buckets": true
+                    },
+                    "description": "Public access block configuration (default: all blocked)"
+                },
+                "cors": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "allowed_origins": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "allowed_methods": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "allowed_headers": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "default": []
+                            },
+                            "max_age_seconds": { "type": "integer" }
+                        },
+                        "required": ["allowed_origins", "allowed_methods"]
+                    },
+                    "description": "Optional CORS configuration for the bucket"
                 }
             }
         })
