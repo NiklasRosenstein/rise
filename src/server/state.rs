@@ -614,6 +614,73 @@ impl AppState {
 
                         tracing::info!("AWS RDS extension provider initialized and started");
                     }
+
+                    #[cfg(feature = "aws")]
+                    crate::server::settings::ExtensionProviderConfig::AwsS3Provisioner {
+                        region,
+                        bucket_prefix,
+                        encryption,
+                        access_mode,
+                        deletion_policy,
+                        access_key_id,
+                        secret_access_key,
+                    } => {
+                        tracing::info!("Initializing AWS S3 extension provider");
+
+                        // Create AWS config (reuse pattern from RDS)
+                        let mut aws_config_builder =
+                            aws_config::defaults(aws_config::BehaviorVersion::latest())
+                                .region(aws_config::Region::new(region.clone()));
+
+                        if let (Some(key_id), Some(secret_key)) = (access_key_id, secret_access_key)
+                        {
+                            aws_config_builder = aws_config_builder.credentials_provider(
+                                aws_sdk_sts::config::Credentials::new(
+                                    key_id,
+                                    secret_key,
+                                    None,
+                                    None,
+                                    "static-credentials",
+                                ),
+                            );
+                        }
+
+                        let aws_config = aws_config_builder.load().await;
+                        let s3_client = aws_sdk_s3::Client::new(&aws_config);
+                        let iam_client = aws_sdk_iam::Client::new(&aws_config);
+
+                        // Get encryption provider (required)
+                        let encryption_provider = encryption_provider.clone().ok_or_else(|| {
+                            anyhow::anyhow!("Encryption provider required for AWS S3 extension")
+                        })?;
+
+                        // Create and register extension
+                        let aws_s3_provisioner =
+                            crate::server::extensions::providers::aws_s3::AwsS3Provisioner::new(
+                                crate::server::extensions::providers::aws_s3::AwsS3ProvisionerConfig {
+                                    s3_client,
+                                    iam_client,
+                                    db_pool: db_pool.clone(),
+                                    encryption_provider,
+                                    default_region: region.clone(),
+                                    bucket_prefix: bucket_prefix.clone(),
+                                    encryption: encryption.clone(),
+                                    access_mode: access_mode.clone(),
+                                    deletion_policy: deletion_policy.clone(),
+                                }
+                            )
+                            .await?;
+
+                        let aws_s3_arc: Arc<dyn crate::server::extensions::Extension> =
+                            Arc::new(aws_s3_provisioner);
+                        extension_registry.register_type(aws_s3_arc.clone());
+
+                        // Start reconciliation loop
+                        aws_s3_arc.start();
+
+                        tracing::info!("AWS S3 extension provider initialized and started");
+                    }
+
                     // When no extension provider features are enabled, this ensures the match is exhaustive
                     #[allow(unreachable_patterns)]
                     _ => {
