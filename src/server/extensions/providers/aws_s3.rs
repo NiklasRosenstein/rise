@@ -853,7 +853,7 @@ impl AwsS3Provisioner {
                                     error!("Cannot delete bucket '{}' - not empty", bucket_name);
                                     status.state = S3State::Failed;
                                     status.error = Some(format!(
-                                        "Bucket '{}' is not empty. Change deletion_policy to 'force-empty' to allow automatic emptying.",
+                                        "Bucket '{}' is not empty. Change deletion_policy to 'ForceEmpty' to allow automatic emptying.",
                                         bucket_name
                                     ));
                                     return Ok(());
