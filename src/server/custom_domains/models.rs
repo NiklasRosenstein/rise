@@ -11,6 +11,7 @@ pub struct AddCustomDomainRequest {
 pub struct CustomDomainResponse {
     pub id: String,
     pub domain: String,
+    pub is_primary: bool,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -21,6 +22,7 @@ impl CustomDomainResponse {
         Self {
             id: domain.id.to_string(),
             domain: domain.domain.clone(),
+            is_primary: domain.is_primary,
             created_at: domain.created_at.to_rfc3339(),
             updated_at: domain.updated_at.to_rfc3339(),
         }

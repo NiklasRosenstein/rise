@@ -52,7 +52,7 @@ pub struct JwtSigner {
     rs256_key_id: String,
 
     issuer: String,
-    default_expiry_seconds: u64,
+    pub(crate) default_expiry_seconds: u64,
     claims_to_include: Vec<String>,
 }
 

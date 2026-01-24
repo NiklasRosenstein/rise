@@ -304,18 +304,21 @@ function DeploymentsList({ projectName }) {
         setRollbackDialogOpen(true);
     };
 
+    const [useSourceEnvVars, setUseSourceEnvVars] = useState(false);
+
     const handleRollbackConfirm = async () => {
         if (!deploymentToRollback) return;
 
         setRollingBack(true);
         try {
-            const response = await api.rollbackDeployment(projectName, deploymentToRollback.deployment_id);
-            showToast(`Rollback successful! New deployment: ${response.new_deployment_id}`, 'success');
+            const response = await api.createDeploymentFrom(projectName, deploymentToRollback.deployment_id, useSourceEnvVars);
+            showToast(`${deploymentToRollback.is_active ? 'Redeploy' : 'Rollback'} successful! New deployment: ${response.deployment_id}`, 'success');
             setRollbackDialogOpen(false);
             setDeploymentToRollback(null);
+            setUseSourceEnvVars(false); // Reset checkbox
             loadDeployments();
         } catch (err) {
-            showToast(`Failed to rollback deployment: ${err.message}`, 'error');
+            showToast(`Failed to ${deploymentToRollback.is_active ? 'redeploy' : 'rollback'} deployment: ${err.message}`, 'error');
         } finally {
             setRollingBack(false);
         }
@@ -475,21 +478,66 @@ function DeploymentsList({ projectName }) {
                 loading={stopping}
             />
 
-            <ConfirmDialog
+            <Modal
                 isOpen={rollbackDialogOpen}
                 onClose={() => {
                     setRollbackDialogOpen(false);
                     setDeploymentToRollback(null);
+                    setUseSourceEnvVars(false);
                 }}
-                onConfirm={handleRollbackConfirm}
                 title={deploymentToRollback?.is_active ? 'Redeploy' : 'Rollback to Deployment'}
-                message={deploymentToRollback?.is_active
-                    ? `Are you sure you want to redeploy ${deploymentToRollback?.deployment_id}? This will create a new deployment with the same image and configuration.`
-                    : `Are you sure you want to rollback to deployment ${deploymentToRollback?.deployment_id}? This will create a new deployment with the same image and configuration.`}
-                confirmText={deploymentToRollback?.is_active ? 'Redeploy' : 'Rollback'}
-                variant="primary"
-                loading={rollingBack}
-            />
+            >
+                <div className="space-y-4">
+                    <p className="text-gray-700 dark:text-gray-300">
+                        {deploymentToRollback?.is_active
+                            ? `Are you sure you want to redeploy ${deploymentToRollback?.deployment_id}? This will create a new deployment with the same image.`
+                            : `Are you sure you want to rollback to deployment ${deploymentToRollback?.deployment_id}? This will create a new deployment with the same image.`}
+                    </p>
+                    
+                    <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                        <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={useSourceEnvVars}
+                                onChange={(e) => setUseSourceEnvVars(e.target.checked)}
+                                className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                            />
+                            <div className="flex-1">
+                                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    Use source deployment's environment variables
+                                </div>
+                                <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                    {useSourceEnvVars 
+                                        ? "Will copy environment variables from the source deployment" 
+                                        : "Will use the current project's environment variables (default)"}
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div className="flex gap-3 justify-end pt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => {
+                                setRollbackDialogOpen(false);
+                                setDeploymentToRollback(null);
+                                setUseSourceEnvVars(false);
+                            }}
+                            disabled={rollingBack}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleRollbackConfirm}
+                            loading={rollingBack}
+                            disabled={rollingBack}
+                        >
+                            {deploymentToRollback?.is_active ? 'Redeploy' : 'Rollback'}
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </div>
     );
 }
@@ -804,6 +852,7 @@ function DeploymentDetail({ projectName, deploymentId }) {
     const [error, setError] = useState(null);
     const [rollbackDialogOpen, setRollbackDialogOpen] = useState(false);
     const [rolling, setRolling] = useState(false);
+    const [useSourceEnvVars, setUseSourceEnvVars] = useState(false);
     const { showToast } = useToast();
 
     const isTerminal = (status) => {
@@ -828,13 +877,14 @@ function DeploymentDetail({ projectName, deploymentId }) {
     const handleRollback = async () => {
         setRolling(true);
         try {
-            const response = await api.rollbackDeployment(projectName, deploymentId);
-            showToast(`Rollback successful! New deployment: ${response.new_deployment_id}`, 'success');
+            const response = await api.createDeploymentFrom(projectName, deploymentId, useSourceEnvVars);
+            showToast(`${deployment.is_active ? 'Redeploy' : 'Rollback'} successful! New deployment: ${response.deployment_id}`, 'success');
             setRollbackDialogOpen(false);
+            setUseSourceEnvVars(false); // Reset checkbox
             // Redirect to project page to see the new deployment
             window.location.hash = `project/${projectName}`;
         } catch (err) {
-            showToast(`Failed to rollback deployment: ${err.message}`, 'error');
+            showToast(`Failed to ${deployment.is_active ? 'redeploy' : 'rollback'} deployment: ${err.message}`, 'error');
         } finally {
             setRolling(false);
         }
@@ -959,18 +1009,64 @@ function DeploymentDetail({ projectName, deploymentId }) {
             <h3 className="text-xl font-bold mb-4">Environment Variables</h3>
             <EnvVarsList projectName={projectName} deploymentId={deploymentId} />
 
-            <ConfirmDialog
+            <Modal
                 isOpen={rollbackDialogOpen}
-                onClose={() => setRollbackDialogOpen(false)}
-                onConfirm={handleRollback}
+                onClose={() => {
+                    setRollbackDialogOpen(false);
+                    setUseSourceEnvVars(false);
+                }}
                 title={deployment?.is_active ? 'Redeploy' : 'Rollback to Deployment'}
-                message={deployment?.is_active
-                    ? `Are you sure you want to redeploy ${deploymentId}? This will create a new deployment with the same image and configuration.`
-                    : `Are you sure you want to rollback to deployment ${deploymentId}? This will create a new deployment with the same image and configuration.`}
-                confirmText={deployment?.is_active ? 'Redeploy' : 'Rollback'}
-                variant="primary"
-                loading={rolling}
-            />
+            >
+                <div className="space-y-4">
+                    <p className="text-gray-700 dark:text-gray-300">
+                        {deployment?.is_active
+                            ? `Are you sure you want to redeploy ${deploymentId}? This will create a new deployment with the same image.`
+                            : `Are you sure you want to rollback to deployment ${deploymentId}? This will create a new deployment with the same image.`}
+                    </p>
+                    
+                    <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+                        <label className="flex items-start gap-3 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={useSourceEnvVars}
+                                onChange={(e) => setUseSourceEnvVars(e.target.checked)}
+                                className="mt-1 w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                            />
+                            <div className="flex-1">
+                                <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    Use source deployment's environment variables
+                                </div>
+                                <div className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                                    {useSourceEnvVars 
+                                        ? "Will copy environment variables from the source deployment" 
+                                        : "Will use the current project's environment variables (default)"}
+                                </div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <div className="flex gap-3 justify-end pt-4">
+                        <Button
+                            variant="secondary"
+                            onClick={() => {
+                                setRollbackDialogOpen(false);
+                                setUseSourceEnvVars(false);
+                            }}
+                            disabled={rolling}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleRollback}
+                            loading={rolling}
+                            disabled={rolling}
+                        >
+                            {deployment?.is_active ? 'Redeploy' : 'Rollback'}
+                        </Button>
+                    </div>
+                </div>
+            </Modal>
         </section>
     );
 }

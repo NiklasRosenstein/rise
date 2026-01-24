@@ -237,6 +237,7 @@ pub struct CustomDomain {
     pub id: Uuid,
     pub project_id: Uuid,
     pub domain: String,
+    pub is_primary: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

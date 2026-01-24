@@ -80,6 +80,8 @@ pub struct Deployment {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image_digest: Option<String>,
     #[serde(default)]
+    pub http_port: u16,
+    #[serde(default)]
     pub is_active: bool,
     #[serde(default)]
     pub created: String,
@@ -105,7 +107,14 @@ pub struct CreateDeploymentRequest {
     pub group: String, // Deployment group (e.g., 'default', 'mr/27')
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>, // Expiration duration (e.g., '7d', '2h', '30m')
-    pub http_port: u16,  // HTTP port the application listens on
+    /// HTTP port the application listens on.
+    /// If not provided, uses the project's PORT env var or defaults to 8080.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub http_port: Option<u16>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub from_deployment: Option<String>, // Optional source deployment ID to create from
+    #[serde(default)]
+    pub use_source_env_vars: bool, // If true and from_deployment is set, copy env vars from source (default: false = use current project env vars)
 }
 
 // Response from creating a deployment
@@ -122,12 +131,4 @@ pub struct UpdateDeploymentStatusRequest {
     pub status: DeploymentStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
-}
-
-// Response from rolling back a deployment
-#[derive(Debug, Serialize)]
-pub struct RollbackDeploymentResponse {
-    pub new_deployment_id: String,
-    pub rolled_back_from: String,
-    pub image_tag: String,
 }

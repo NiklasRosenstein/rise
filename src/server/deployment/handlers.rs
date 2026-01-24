@@ -290,7 +290,7 @@ async fn insert_rise_env_vars(
         )
     })?;
 
-    // 3. Generate RISE_APP_URLS
+    // 3. Generate RISE_APP_URL and RISE_APP_URLS
     let deployment_urls = state
         .deployment_backend
         .get_deployment_urls(deployment, project)
@@ -303,6 +303,31 @@ async fn insert_rise_env_vars(
             )
         })?;
 
+    // First, determine RISE_APP_URL (canonical URL)
+    // Use primary custom domain if set, otherwise use default project URL
+    let canonical_url =
+        match crate::db::custom_domains::get_primary_domain(&state.db_pool, project.id)
+            .await
+            .map_err(|e| {
+                error!("Failed to get primary custom domain: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get primary custom domain: {}", e),
+                )
+            })? {
+            Some(primary_domain) => {
+                // Find the URL for this domain in custom_domain_urls
+                deployment_urls
+                    .custom_domain_urls
+                    .iter()
+                    .find(|url| url.contains(&primary_domain.domain))
+                    .cloned()
+                    .unwrap_or_else(|| deployment_urls.primary_url.clone())
+            }
+            None => deployment_urls.primary_url.clone(),
+        };
+
+    // Then build RISE_APP_URLS (all URLs)
     let mut app_urls = vec![deployment_urls.primary_url];
     app_urls.extend(deployment_urls.custom_domain_urls);
 
@@ -328,6 +353,23 @@ async fn insert_rise_env_vars(
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to insert RISE_APP_URLS: {}", e),
+        )
+    })?;
+
+    // Insert RISE_APP_URL
+    crate::db::env_vars::upsert_deployment_env_var(
+        &state.db_pool,
+        deployment.id,
+        "RISE_APP_URL",
+        &canonical_url,
+        false, // Not a secret
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to insert RISE_APP_URL env var: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to insert RISE_APP_URL: {}", e),
         )
     })?;
 
@@ -404,10 +446,57 @@ async fn convert_deployment(
         custom_domain_urls,
         image,
         image_digest: deployment.image_digest,
+        http_port: deployment.http_port as u16,
         is_active: deployment.is_active,
         created: deployment.created_at.to_rfc3339(),
         updated: deployment.updated_at.to_rfc3339(),
     }
+}
+
+/// Resolve the effective HTTP port for a deployment.
+///
+/// Priority:
+/// 1. Explicit http_port from request (if provided)
+/// 2. PORT env var from project (if set and valid)
+/// 3. Default: 8080
+async fn resolve_effective_http_port(
+    state: &AppState,
+    project_id: uuid::Uuid,
+    explicit_port: Option<u16>,
+) -> Result<u16, (StatusCode, String)> {
+    // 1. Explicit port takes precedence
+    if let Some(port) = explicit_port {
+        return Ok(port);
+    }
+
+    // 2. Check project's PORT env var
+    let project_env_vars = crate::db::env_vars::list_project_env_vars(&state.db_pool, project_id)
+        .await
+        .map_err(|e| {
+            error!("Failed to list project env vars: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to list project environment variables: {}", e),
+            )
+        })?;
+
+    if let Some(port_var) = project_env_vars.iter().find(|v| v.key == "PORT") {
+        if let Ok(port) = port_var.value.parse::<u16>() {
+            if port > 0 {
+                debug!("Using PORT {} from project environment variable", port);
+                return Ok(port);
+            }
+        }
+        // Invalid PORT value - warn but fall through to default
+        debug!(
+            "Project PORT env var '{}' is not a valid port number, using default",
+            port_var.value
+        );
+    }
+
+    // 3. Default to 8080
+    debug!("No explicit port or PORT env var, defaulting to 8080");
+    Ok(8080)
 }
 
 /// POST /deployments - Create a new deployment
@@ -429,12 +518,14 @@ pub async fn create_deployment(
         ));
     }
 
-    // Validate http_port (should be 1-65535)
-    if payload.http_port == 0 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "HTTP port must be between 1 and 65535".to_string(),
-        ));
+    // Validate http_port if provided (should be 1-65535)
+    if let Some(port) = payload.http_port {
+        if port == 0 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "HTTP port must be between 1 and 65535".to_string(),
+            ));
+        }
     }
 
     // Parse expiration duration if provided
@@ -495,6 +586,198 @@ pub async fn create_deployment(
     let deployment_id = generate_deployment_id();
     debug!("Generated deployment ID: {}", deployment_id);
 
+    // Resolve effective http_port:
+    // 1. Explicit http_port from request (if provided)
+    // 2. Source deployment's http_port (if --from is used, handled below)
+    // 3. PORT env var from project (if set and valid)
+    // 4. Default: 8080
+    let effective_http_port =
+        resolve_effective_http_port(&state, project.id, payload.http_port).await?;
+    info!(
+        "Using http_port {} for deployment {}",
+        effective_http_port, deployment_id
+    );
+
+    // Handle deployment creation from an existing deployment (redeploy/rollback)
+    if let Some(ref from_deployment_id) = payload.from_deployment {
+        info!(
+            "Creating deployment from existing deployment '{}'",
+            from_deployment_id
+        );
+
+        // Find the source deployment
+        let source_deployment = db_deployments::find_by_project_and_deployment_id(
+            &state.db_pool,
+            project.id,
+            from_deployment_id,
+        )
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find source deployment: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!(
+                    "Source deployment '{}' not found for project '{}'",
+                    from_deployment_id, payload.project
+                ),
+            )
+        })?;
+
+        // Verify source deployment is in a valid state for creating from
+        // Allow Healthy (currently active), Superseded (previously active), and Stopped
+        if !state_machine::is_rollbackable(&source_deployment.status) {
+            return Err((StatusCode::BAD_REQUEST, format!("Cannot create deployment from '{}' with status '{:?}'. Only Healthy, Superseded, or Stopped deployments can be used as source.", from_deployment_id, source_deployment.status)));
+        }
+
+        // For chained redeployments, follow the chain to find the original source
+        // This ensures we use the correct image tag from the original deployment that built the image
+        let original_source_id =
+            if let Some(chained_source) = source_deployment.rolled_back_from_deployment_id {
+                // Source is itself a redeploy - use its source instead
+                debug!(
+                    "Source deployment {} is a redeploy, following chain to original source {}",
+                    from_deployment_id, chained_source
+                );
+                chained_source
+            } else {
+                // Source is the original - use it directly
+                source_deployment.id
+            };
+
+        // Determine http_port for the new deployment:
+        // - If explicit http_port was provided in request, use it (already in effective_http_port)
+        // - If no explicit port, inherit from source deployment
+        let final_http_port = if payload.http_port.is_some() {
+            effective_http_port
+        } else {
+            source_deployment.http_port as u16
+        };
+
+        // Create new deployment with Pushed status and invoke extension hooks
+        // Copy image and image_digest from source - the helper function will determine the tag
+        // For pre-built images: image_digest is copied, helper returns it
+        // For build-from-source: rolled_back_from_deployment_id is used to find the original source deployment's image
+        let new_deployment = create_deployment_with_hooks(
+            &state,
+            db_deployments::CreateDeploymentParams {
+                deployment_id: &deployment_id,
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
+                image: source_deployment.image.as_deref(), // Copy image from source if present
+                image_digest: source_deployment.image_digest.as_deref(), // Copy digest from source if present
+                rolled_back_from_deployment_id: Some(original_source_id), // Track original source for image tag calculation
+                deployment_group: &payload.group, // Use requested group (may be different from source)
+                expires_at,                       // expires_at
+                http_port: final_http_port as i32, // Use determined http_port
+                is_active: false,                 // Deployments start as inactive
+            },
+            &project,
+        )
+        .await?;
+
+        // Handle environment variables based on use_source_env_vars flag
+        if payload.use_source_env_vars {
+            // Copy environment variables from source deployment
+            info!(
+                "Copying environment variables from source deployment '{}'",
+                from_deployment_id
+            );
+            crate::db::env_vars::copy_deployment_env_vars_to_deployment(
+                &state.db_pool,
+                source_deployment.id,
+                new_deployment.id,
+            )
+            .await
+            .map_err(|e| {
+                error!(
+                    "Failed to copy environment variables from deployment {}: {}",
+                    from_deployment_id, e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to copy environment variables: {}", e),
+                )
+            })?;
+        } else {
+            // Copy current project environment variables to deployment
+            info!("Using current project environment variables");
+            crate::db::env_vars::copy_project_env_vars_to_deployment(
+                &state.db_pool,
+                project.id,
+                new_deployment.id,
+            )
+            .await
+            .map_err(|e| {
+                error!(
+                    "Failed to copy environment variables for deployment {}: {}",
+                    deployment_id, e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to copy environment variables: {}", e),
+                )
+            })?;
+        }
+
+        // Upsert PORT env var with the final http_port value
+        crate::db::env_vars::upsert_deployment_env_var(
+            &state.db_pool,
+            new_deployment.id,
+            "PORT",
+            &final_http_port.to_string(),
+            false, // not a secret
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to insert PORT env var: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to insert PORT env var: {}", e),
+            )
+        })?;
+
+        // Insert Rise-provided environment variables
+        insert_rise_env_vars(&state, &new_deployment, &project).await?;
+
+        // Use helper to determine image tag (for logging/response only)
+        let image_tag = crate::server::deployment::utils::get_deployment_image_tag(
+            &state,
+            &new_deployment,
+            &project,
+        )
+        .await;
+
+        info!(
+            "Created deployment {} from {} (image: {}, env vars: {})",
+            deployment_id,
+            from_deployment_id,
+            image_tag,
+            if payload.use_source_env_vars {
+                "from source"
+            } else {
+                "from project"
+            }
+        );
+
+        // Return response with image tag and empty credentials (no push needed)
+        return Ok(Json(CreateDeploymentResponse {
+            deployment_id,
+            image_tag,
+            credentials: crate::server::registry::models::RegistryCredentials {
+                registry_url: String::new(),
+                username: String::new(),
+                password: String::new(),
+                expires_in: None,
+            },
+        }));
+    }
+
     // Branch based on whether user provided a pre-built image
     if let Some(ref user_image) = payload.image {
         // Path 1: Pre-built image deployment
@@ -541,7 +824,7 @@ pub async fn create_deployment(
                 rolled_back_from_deployment_id: None, // Not a rollback
                 deployment_group: &payload.group,   // deployment_group
                 expires_at,                         // expires_at
-                http_port: payload.http_port as i32, // http_port
+                http_port: effective_http_port as i32, // http_port
                 is_active: false,                   // Deployments start as inactive
             },
             &project,
@@ -568,6 +851,24 @@ pub async fn create_deployment(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to copy environment variables: {}", e),
+            )
+        })?;
+
+        // Upsert PORT env var with the resolved effective value
+        // This overwrites any user-set PORT with the resolved value (which may be the same)
+        crate::db::env_vars::upsert_deployment_env_var(
+            &state.db_pool,
+            deployment.id,
+            "PORT",
+            &effective_http_port.to_string(),
+            false, // not a secret
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to insert PORT env var: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to insert PORT env var: {}", e),
             )
         })?;
 
@@ -621,7 +922,7 @@ pub async fn create_deployment(
                 rolled_back_from_deployment_id: None, // Not a rollback
                 deployment_group: &payload.group, // deployment_group
                 expires_at,         // expires_at
-                http_port: payload.http_port as i32, // http_port
+                http_port: effective_http_port as i32, // http_port
                 is_active: false,   // Deployments start as inactive
             },
             &project,
@@ -648,6 +949,24 @@ pub async fn create_deployment(
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to copy environment variables: {}", e),
+            )
+        })?;
+
+        // Upsert PORT env var with the resolved effective value
+        // This overwrites any user-set PORT with the resolved value (which may be the same)
+        crate::db::env_vars::upsert_deployment_env_var(
+            &state.db_pool,
+            deployment.id,
+            "PORT",
+            &effective_http_port.to_string(),
+            false, // not a secret
+        )
+        .await
+        .map_err(|e| {
+            error!("Failed to insert PORT env var: {}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to insert PORT env var: {}", e),
             )
         })?;
 
@@ -1327,138 +1646,6 @@ pub async fn list_deployment_groups(
         })?;
 
     Ok(Json(groups))
-}
-
-/// POST /projects/{project_name}/deployments/{deployment_id}/rollback - Rollback to a previous deployment
-pub async fn rollback_deployment(
-    State(state): State<AppState>,
-    Extension(user): Extension<User>,
-    Path((project_name, source_deployment_id)): Path<(String, String)>,
-) -> Result<Json<RollbackDeploymentResponse>, (StatusCode, String)> {
-    info!(
-        "Rolling back project '{}' to deployment '{}'",
-        project_name, source_deployment_id
-    );
-
-    // Find project by name
-    let project = projects::find_by_name(&state.db_pool, &project_name)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to query project: {}", e),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
-
-    // Check deployment permissions
-    // Return 404 instead of 403 to avoid revealing project existence
-    check_deploy_permission(&state, &project, &user)
-        .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
-
-    // Find the source deployment (the one we're rolling back to)
-    let source_deployment = db_deployments::find_by_project_and_deployment_id(
-        &state.db_pool,
-        project.id,
-        &source_deployment_id,
-    )
-    .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to find source deployment: {}", e),
-        )
-    })?
-    .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            format!(
-                "Source deployment '{}' not found for project '{}'",
-                source_deployment_id, project_name
-            ),
-        )
-    })?;
-
-    // Verify source deployment is in a valid state for rollback
-    // Allow Healthy (currently active) and Superseded (previously active, replaced by newer deployment)
-    if !state_machine::is_rollbackable(&source_deployment.status) {
-        return Err((StatusCode::BAD_REQUEST, format!("Cannot rollback to deployment '{}' with status '{:?}'. Only Healthy or Superseded deployments can be used for rollback.", source_deployment_id, source_deployment.status)));
-    }
-
-    // Generate new deployment ID
-    let new_deployment_id = generate_deployment_id();
-    debug!(
-        "Generated new deployment ID for rollback: {}",
-        new_deployment_id
-    );
-
-    // For chained rollbacks (rollback of a rollback), follow the chain to find the original source
-    // This ensures we use the correct image tag from the original deployment that built the image
-    let original_source_id =
-        if let Some(chained_source) = source_deployment.rolled_back_from_deployment_id {
-            // Source is itself a rollback - use its source instead
-            debug!(
-                "Source deployment {} is a rollback, following chain to original source {}",
-                source_deployment_id, chained_source
-            );
-            chained_source
-        } else {
-            // Source is the original - use it directly
-            source_deployment.id
-        };
-
-    // Create new deployment with Pushed status and invoke extension hooks
-    // Copy image and image_digest from source - the helper function will determine the tag
-    // For pre-built images: image_digest is copied, helper returns it
-    // For build-from-source: rolled_back_from_deployment_id is used to find the original source deployment's image
-    let new_deployment = create_deployment_with_hooks(
-        &state,
-        db_deployments::CreateDeploymentParams {
-            deployment_id: &new_deployment_id,
-            project_id: project.id,
-            created_by_id: user.id,
-            status: DbDeploymentStatus::Pushed, // Start in Pushed state so controller picks it up
-            image: source_deployment.image.as_deref(), // Copy image from source if present
-            image_digest: source_deployment.image_digest.as_deref(), // Copy digest from source if present
-            rolled_back_from_deployment_id: Some(original_source_id), // Track original source for image tag calculation
-            deployment_group: &source_deployment.deployment_group,    // Copy group from source
-            expires_at: None, // expires_at - rollbacks don't inherit expiration
-            http_port: source_deployment.http_port, // Copy http_port from source
-            is_active: false, // Rollback deployments also start as inactive
-        },
-        &project,
-    )
-    .await?;
-
-    // Use helper to determine image tag (for logging/response only)
-    let image_tag = crate::server::deployment::utils::get_deployment_image_tag(
-        &state,
-        &new_deployment,
-        &project,
-    )
-    .await;
-
-    info!(
-        "Created rollback deployment {} from {} (image: {})",
-        new_deployment_id, source_deployment_id, image_tag
-    );
-
-    Ok(Json(RollbackDeploymentResponse {
-        new_deployment_id,
-        rolled_back_from: source_deployment_id,
-        image_tag,
-    }))
 }
 
 /// Query parameters for log streaming

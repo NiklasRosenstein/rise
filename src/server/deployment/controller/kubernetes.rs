@@ -156,8 +156,10 @@ pub struct KubernetesController {
     /// Lost on controller restart → causes one re-apply, then cached again
     resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
+    #[allow(dead_code)]
     rise_jwks_json: String,
     /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
+    #[allow(dead_code)]
     rise_issuer: String,
 }
 
@@ -218,16 +220,21 @@ impl KubernetesController {
     }
 
     /// Update cached resource version
+    ///
+    /// When `version` is `Some`, inserts/updates the cached version.
+    /// When `version` is `None`, removes the cache entry to force re-evaluation on next reconcile.
     fn update_version_cache(
         &self,
         deployment_id: uuid::Uuid,
         resource_type: &str,
         version: Option<String>,
     ) {
+        let key = Self::resource_cache_key(deployment_id, resource_type);
+        let mut cache = self.resource_versions.write().unwrap();
         if let Some(version) = version {
-            let key = Self::resource_cache_key(deployment_id, resource_type);
-            let mut cache = self.resource_versions.write().unwrap();
             cache.insert(key, version);
+        } else {
+            cache.remove(&key);
         }
     }
 
@@ -1403,7 +1410,26 @@ impl KubernetesController {
             Ok(existing_ingress) => {
                 let current_version = existing_ingress.metadata.resource_version.as_deref();
 
-                if self.needs_apply(deployment_id, "ingress", current_version) {
+                // When needs_reconcile is set (e.g., access_class changed), use replace
+                // to fully replace the resource including removing old annotations.
+                // SSA patch may not properly remove annotations when switching access classes.
+                if deployment.needs_reconcile {
+                    let mut ingress = self.create_primary_ingress(project, deployment, metadata);
+                    // Set resourceVersion for optimistic concurrency
+                    ingress.metadata.resource_version = current_version.map(String::from);
+                    let result = ingress_api
+                        .replace(&ingress_name, &PostParams::default(), &ingress)
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "ingress",
+                        result.metadata.resource_version,
+                    );
+                    info!(
+                        "Replaced primary Ingress '{}' with updated annotations (needs_reconcile)",
+                        ingress_name
+                    );
+                } else if self.needs_apply(deployment_id, "ingress", current_version) {
                     let ingress = self.create_primary_ingress(project, deployment, metadata);
                     let result = ingress_api
                         .patch(
@@ -1445,7 +1471,36 @@ impl KubernetesController {
                 Ok(existing_ingress) => {
                     let current_version = existing_ingress.metadata.resource_version.as_deref();
 
-                    if self.needs_apply(deployment_id, "ingress-custom-domains", current_version) {
+                    // When needs_reconcile is set, use replace to fully replace the resource
+                    if deployment.needs_reconcile {
+                        let mut ingress = self.create_custom_domain_ingress(
+                            project,
+                            deployment,
+                            metadata,
+                            &custom_domains,
+                        );
+                        ingress.metadata.resource_version = current_version.map(String::from);
+                        let result = ingress_api
+                            .replace(
+                                &custom_domain_ingress_name,
+                                &PostParams::default(),
+                                &ingress,
+                            )
+                            .await?;
+                        self.update_version_cache(
+                            deployment_id,
+                            "ingress-custom-domains",
+                            result.metadata.resource_version,
+                        );
+                        info!(
+                            "Replaced custom domain Ingress '{}' with updated annotations (needs_reconcile)",
+                            custom_domain_ingress_name
+                        );
+                    } else if self.needs_apply(
+                        deployment_id,
+                        "ingress-custom-domains",
+                        current_version,
+                    ) {
                         let ingress = self.create_custom_domain_ingress(
                             project,
                             deployment,
@@ -1705,9 +1760,8 @@ impl KubernetesController {
     /// Load and decrypt environment variables for a deployment
     async fn load_env_vars(
         &self,
-        project: &crate::db::Project,
+        _project: &crate::db::Project,
         deployment: &crate::db::Deployment,
-        http_port: u16,
     ) -> Result<Vec<k8s_openapi::api::core::v1::EnvVar>> {
         use k8s_openapi::api::core::v1::EnvVar;
 
@@ -1720,7 +1774,9 @@ impl KubernetesController {
         .await?;
 
         // Format as Kubernetes EnvVar objects
-        let mut k8s_env_vars: Vec<EnvVar> = env_vars
+        // Note: PORT, RISE_JWKS, RISE_ISSUER, RISE_APP_URL, and RISE_APP_URLS are now
+        // persisted in deployment_env_vars and loaded from the database
+        let k8s_env_vars: Vec<EnvVar> = env_vars
             .into_iter()
             .map(|(key, value)| EnvVar {
                 name: key,
@@ -1728,78 +1784,6 @@ impl KubernetesController {
                 ..Default::default()
             })
             .collect();
-
-        // Always inject PORT environment variable using http_port (with default 8080)
-        // Only add if not already set by user
-        if !k8s_env_vars.iter().any(|env| env.name == "PORT") {
-            k8s_env_vars.push(EnvVar {
-                name: "PORT".to_string(),
-                value: Some(http_port.to_string()),
-                ..Default::default()
-            });
-        }
-
-        // Inject RISE_JWKS environment variable with RS256 public keys for JWT verification
-        // Only add if not already set by user (allows override for testing)
-        if !k8s_env_vars.iter().any(|env| env.name == "RISE_JWKS") {
-            k8s_env_vars.push(EnvVar {
-                name: "RISE_JWKS".to_string(),
-                value: Some(self.rise_jwks_json.clone()),
-                ..Default::default()
-            });
-        }
-
-        // Inject RISE_ISSUER environment variable for JWT issuer validation
-        // Only add if not already set by user (allows override for testing)
-        if !k8s_env_vars.iter().any(|env| env.name == "RISE_ISSUER") {
-            k8s_env_vars.push(EnvVar {
-                name: "RISE_ISSUER".to_string(),
-                value: Some(self.rise_issuer.clone()),
-                ..Default::default()
-            });
-        }
-
-        // Inject RISE_APP_URLS environment variable with all app URLs (primary + custom domains)
-        // Only add if not already set by user (allows override for testing)
-        if !k8s_env_vars.iter().any(|env| env.name == "RISE_APP_URLS") {
-            // Build primary URL
-            let primary_url = self.full_ingress_url(project, deployment);
-
-            // Load custom domains for this project
-            let custom_domains = crate::db::custom_domains::list_project_custom_domains(
-                &self.state.db_pool,
-                project.id,
-            )
-            .await?;
-
-            // Build all URLs (primary + custom domains)
-            let mut app_urls = vec![primary_url];
-            for domain in custom_domains {
-                let schema = if self.ingress_tls_secret_name.is_some()
-                    || (self.custom_domain_tls_mode
-                        == crate::server::settings::CustomDomainTlsMode::PerDomain)
-                {
-                    "https"
-                } else {
-                    &self.ingress_schema
-                };
-                let url = if let Some(port) = self.ingress_port {
-                    format!("{}://{}:{}", schema, domain.domain, port)
-                } else {
-                    format!("{}://{}", schema, domain.domain)
-                };
-                app_urls.push(url);
-            }
-
-            // Serialize as JSON array
-            let app_urls_json = serde_json::to_string(&app_urls)?;
-
-            k8s_env_vars.push(EnvVar {
-                name: "RISE_APP_URLS".to_string(),
-                value: Some(app_urls_json),
-                ..Default::default()
-            });
-        }
 
         Ok(k8s_env_vars)
     }
@@ -2130,11 +2114,9 @@ impl KubernetesController {
                 name: Some(Self::ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
-                annotations: if !annotations.is_empty() {
-                    Some(annotations)
-                } else {
-                    None
-                },
+                // Always include annotations (even if empty) so SSA removes old keys
+                // when access_class changes from authenticated to public
+                annotations: Some(annotations),
                 ..Default::default()
             },
             spec: Some(IngressSpec {
@@ -2186,11 +2168,9 @@ impl KubernetesController {
                 name: Some(Self::custom_domain_ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
-                annotations: if !annotations.is_empty() {
-                    Some(annotations)
-                } else {
-                    None
-                },
+                // Always include annotations (even if empty) so SSA removes old keys
+                // when access_class changes from authenticated to public
+                annotations: Some(annotations),
                 ..Default::default()
             },
             spec: Some(IngressSpec {
@@ -2821,9 +2801,7 @@ impl DeploymentBackend for KubernetesController {
                     }
 
                     // Load and decrypt environment variables
-                    let env_vars = self
-                        .load_env_vars(project, deployment, metadata.http_port)
-                        .await?;
+                    let env_vars = self.load_env_vars(project, deployment).await?;
 
                     // deploy_name already calculated above for migration check
                     let deploy_api: Api<K8sDeployment> =
@@ -3228,9 +3206,7 @@ impl DeploymentBackend for KubernetesController {
 
                 ReconcilePhase::Completed => {
                     // Load and decrypt environment variables for drift detection
-                    let env_vars = self
-                        .load_env_vars(project, deployment, metadata.http_port)
-                        .await?;
+                    let env_vars = self.load_env_vars(project, deployment).await?;
 
                     // Apply all supporting resources with drift detection
                     // This reconciles: Namespace, ImagePullSecret, BackendService, Service, Ingress
@@ -4232,6 +4208,7 @@ mod tests {
             id: Uuid::new_v4(),
             domain: "compass-dev.example.com".to_string(),
             project_id: project.id,
+            is_primary: false,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }];

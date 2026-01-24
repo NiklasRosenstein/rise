@@ -13,13 +13,6 @@ use crate::config::Config;
 // Re-export models from API module (always available)
 pub use crate::api::models::{Deployment, DeploymentStatus};
 
-#[derive(Debug, Deserialize)]
-struct RollbackResponse {
-    new_deployment_id: String,
-    rolled_back_from: String,
-    image_tag: String,
-}
-
 /// Parse duration string (e.g., "5m", "30s", "1h")
 pub(super) fn parse_duration(s: &str) -> Result<Duration> {
     let s = s.trim();
@@ -49,7 +42,7 @@ pub(super) fn parse_duration(s: &str) -> Result<Duration> {
 }
 
 /// Fetch deployment by project name and deployment_id
-pub(super) async fn fetch_deployment(
+pub async fn fetch_deployment(
     http_client: &Client,
     backend_url: &str,
     token: &str,
@@ -331,104 +324,6 @@ pub async fn show_deployment(
 /// Rollback to a previous deployment
 ///
 /// Creates a new deployment with the same image as the reference deployment
-pub async fn rollback_deployment(
-    http_client: &Client,
-    backend_url: &str,
-    config: &Config,
-    project: &str,
-    deployment_id: &str,
-) -> Result<()> {
-    let token = config
-        .get_token()
-        .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
-
-    info!(
-        "Rolling back project '{}' to deployment '{}'",
-        project, deployment_id
-    );
-
-    println!(
-        "Initiating rollback for project '{}' to deployment '{}'...",
-        project, deployment_id
-    );
-
-    // Call the rollback endpoint
-    let url = format!(
-        "{}/api/v1/projects/{}/deployments/{}/rollback",
-        backend_url, project, deployment_id
-    );
-    let response = http_client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .send()
-        .await
-        .context("Failed to send rollback request")?;
-
-    let status = response.status();
-    if !status.is_success() {
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-
-        match status {
-            reqwest::StatusCode::NOT_FOUND => {
-                bail!(
-                    "Deployment '{}' not found for project '{}'",
-                    deployment_id,
-                    project
-                );
-            }
-            reqwest::StatusCode::UNAUTHORIZED => {
-                bail!("Authentication failed. Please run 'rise login' again.");
-            }
-            reqwest::StatusCode::FORBIDDEN => {
-                bail!(
-                    "You don't have permission to rollback project '{}'",
-                    project
-                );
-            }
-            reqwest::StatusCode::BAD_REQUEST => {
-                bail!("Cannot rollback: {}", error_text);
-            }
-            _ => {
-                bail!("Rollback failed ({}): {}", status, error_text);
-            }
-        }
-    }
-
-    let rollback_response: RollbackResponse = response
-        .json()
-        .await
-        .context("Failed to parse rollback response")?;
-
-    println!();
-    println!("✓ Rollback initiated successfully!");
-    println!(
-        "  New deployment ID: {}",
-        rollback_response.new_deployment_id
-    );
-    println!(
-        "  Rolled back from:  {}",
-        rollback_response.rolled_back_from
-    );
-    println!("  Using image:       {}", rollback_response.image_tag);
-    println!();
-
-    // Follow the new deployment to completion
-    show_deployment(
-        http_client,
-        backend_url,
-        config,
-        project,
-        &rollback_response.new_deployment_id,
-        true,  // follow
-        "10m", // timeout
-    )
-    .await?;
-
-    Ok(())
-}
 
 #[derive(Debug, Deserialize)]
 struct StopDeploymentsResponse {
@@ -523,8 +418,12 @@ pub struct DeploymentOptions<'a> {
     pub image: Option<&'a str>,
     pub group: Option<&'a str>,
     pub expires_in: Option<&'a str>,
-    pub http_port: u16,
+    /// HTTP port the application listens on.
+    /// If None, server will use project's PORT env var or default to 8080.
+    pub http_port: Option<u16>,
     pub build_args: &'a build::BuildArgs,
+    pub from_deployment: Option<&'a str>,
+    pub use_source_env_vars: bool,
 }
 
 pub async fn create_deployment(
@@ -533,7 +432,14 @@ pub async fn create_deployment(
     config: &Config,
     deploy_opts: DeploymentOptions<'_>,
 ) -> Result<()> {
-    if let Some(image_ref) = deploy_opts.image {
+    if let Some(from_deployment_id) = deploy_opts.from_deployment {
+        info!(
+            "Creating deployment for project '{}' from deployment '{}' with {} environment variables",
+            deploy_opts.project_name,
+            from_deployment_id,
+            if deploy_opts.use_source_env_vars { "source" } else { "current project" }
+        );
+    } else if let Some(image_ref) = deploy_opts.image {
         info!(
             "Deploying project '{}' with pre-built image '{}'",
             deploy_opts.project_name, image_ref
@@ -564,6 +470,8 @@ pub async fn create_deployment(
         deploy_opts.group,
         deploy_opts.expires_in,
         deploy_opts.http_port,
+        deploy_opts.from_deployment,
+        deploy_opts.use_source_env_vars,
     )
     .await?;
 
@@ -598,9 +506,21 @@ pub async fn create_deployment(
         }
     });
 
-    if deploy_opts.image.is_some() {
-        // Pre-built image path: Skip build/push, backend already marked as Pushed
-        info!("✓ Pre-built image deployment created");
+    if deploy_opts.image.is_some() || deploy_opts.from_deployment.is_some() {
+        // Pre-built image path or redeploy from existing deployment: Skip build/push, backend already marked as Pushed
+        if deploy_opts.from_deployment.is_some() {
+            info!(
+                "✓ Deployment created from existing deployment '{}' with {} environment variables",
+                deploy_opts.from_deployment.unwrap(),
+                if deploy_opts.use_source_env_vars {
+                    "source"
+                } else {
+                    "current project"
+                }
+            );
+        } else {
+            info!("✓ Pre-built image deployment created");
+        }
     } else {
         // Build from source path: Execute build and push
         // Step 2: Login to registry if credentials provided
@@ -704,13 +624,20 @@ async fn call_create_deployment_api(
     image: Option<&str>,
     group: Option<&str>,
     expires_in: Option<&str>,
-    http_port: u16,
+    http_port: Option<u16>,
+    from_deployment: Option<&str>,
+    use_source_env_vars: bool,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
         "project": project_name,
-        "http_port": http_port,
     });
+
+    // Add http_port field if explicitly provided
+    // If not provided, server will resolve from project's PORT env var or use default (8080)
+    if let Some(port) = http_port {
+        payload["http_port"] = serde_json::json!(port);
+    }
 
     // Add image field if provided
     if let Some(image_ref) = image {
@@ -725,6 +652,12 @@ async fn call_create_deployment_api(
     // Add expires_in field if provided
     if let Some(expiration) = expires_in {
         payload["expires_in"] = serde_json::json!(expiration);
+    }
+
+    // Add from_deployment field if provided
+    if let Some(source_deployment_id) = from_deployment {
+        payload["from_deployment"] = serde_json::json!(source_deployment_id);
+        payload["use_source_env_vars"] = serde_json::json!(use_source_env_vars);
     }
 
     let response = http_client
