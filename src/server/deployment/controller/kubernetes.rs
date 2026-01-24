@@ -3761,6 +3761,44 @@ mod tests {
     // Test database URL for mock controllers
     const TEST_DATABASE_URL: &str = "postgres://localhost/test";
 
+    /// Mock registry provider for unit tests
+    struct MockRegistryProvider;
+
+    #[async_trait::async_trait]
+    impl crate::server::registry::RegistryProvider for MockRegistryProvider {
+        async fn get_credentials(
+            &self,
+            _repository: &str,
+        ) -> anyhow::Result<crate::server::registry::models::RegistryCredentials> {
+            Ok(crate::server::registry::models::RegistryCredentials {
+                username: "test".to_string(),
+                password: "test".to_string(),
+                registry_url: "localhost:5000".to_string(),
+            })
+        }
+
+        async fn get_pull_credentials(&self) -> anyhow::Result<(String, String)> {
+            Ok(("test".to_string(), "test".to_string()))
+        }
+
+        fn registry_host(&self) -> &str {
+            "localhost:5000"
+        }
+
+        fn registry_url(&self) -> &str {
+            "localhost:5000"
+        }
+
+        fn get_image_tag(
+            &self,
+            repository: &str,
+            tag: &str,
+            _tag_type: crate::server::registry::ImageTagType,
+        ) -> String {
+            format!("localhost:5000/{repository}:{tag}")
+        }
+    }
+
     fn create_test_deployment(
         name: &str,
         replicas: i32,
@@ -3904,7 +3942,7 @@ mod tests {
             staging_ingress_url_template: None,
             ingress_port: None,
             ingress_schema: "https".to_string(),
-            registry_provider: None,
+            registry_provider: Arc::new(MockRegistryProvider),
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
             backend_address: None,
@@ -4374,7 +4412,7 @@ mod tests {
             staging_ingress_url_template: None,
             ingress_port: None,
             ingress_schema: "https".to_string(),
-            registry_provider: None,
+            registry_provider: Arc::new(MockRegistryProvider),
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
             backend_address: None,
