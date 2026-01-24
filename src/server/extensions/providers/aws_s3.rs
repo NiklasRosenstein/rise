@@ -853,7 +853,7 @@ impl AwsS3Provisioner {
                                     error!("Cannot delete bucket '{}' - not empty", bucket_name);
                                     status.state = S3State::Failed;
                                     status.error = Some(format!(
-                                        "Bucket '{}' is not empty. Change deletion_policy to 'force_empty' to allow automatic emptying.",
+                                        "Bucket '{}' is not empty. Change deletion_policy to 'force-empty' to allow automatic emptying.",
                                         bucket_name
                                     ));
                                     return Ok(());
@@ -1904,6 +1904,17 @@ Variable names are configurable via the `env_vars` field in the spec.
                     "default": false,
                     "description": "Enable S3 versioning for the bucket"
                 },
+                "env_vars": {
+                    "type": "object",
+                    "properties": {
+                        "bucket_name": { "type": "string", "default": "AWS_S3_BUCKET" },
+                        "region": { "type": "string", "default": "AWS_REGION" },
+                        "access_key_id": { "type": "string", "default": "AWS_ACCESS_KEY_ID" },
+                        "secret_access_key": { "type": "string", "default": "AWS_SECRET_ACCESS_KEY" },
+                        "role_arn": { "type": "string", "default": "AWS_ROLE_ARN" }
+                    },
+                    "description": "Environment variable names to inject for S3 access"
+                },
                 "lifecycle_rules": {
                     "type": "array",
                     "items": {
@@ -1918,6 +1929,46 @@ Variable names are configurable via the `env_vars` field in the spec.
                     },
                     "default": [],
                     "description": "Lifecycle rules for automatic object expiration"
+                },
+                "public_access_block": {
+                    "type": "object",
+                    "properties": {
+                        "block_public_acls": { "type": "boolean", "default": true },
+                        "ignore_public_acls": { "type": "boolean", "default": true },
+                        "block_public_policy": { "type": "boolean", "default": true },
+                        "restrict_public_buckets": { "type": "boolean", "default": true }
+                    },
+                    "default": {
+                        "block_public_acls": true,
+                        "ignore_public_acls": true,
+                        "block_public_policy": true,
+                        "restrict_public_buckets": true
+                    },
+                    "description": "Public access block configuration (default: all blocked)"
+                },
+                "cors": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "allowed_origins": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "allowed_methods": {
+                                "type": "array",
+                                "items": { "type": "string" }
+                            },
+                            "allowed_headers": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "default": []
+                            },
+                            "max_age_seconds": { "type": "integer" }
+                        },
+                        "required": ["allowed_origins", "allowed_methods"]
+                    },
+                    "description": "Optional CORS configuration for the bucket"
                 }
             }
         })
