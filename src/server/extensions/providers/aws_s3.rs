@@ -1610,19 +1610,99 @@ impl Extension for AwsS3Provisioner {
             &spec.bucket_strategy,
         );
 
-        // Ensure bucket exists in status
+        // Ensure bucket exists and is available. In isolated mode, buckets may need to be
+        // created on-demand the first time a deployment group is used.
+        let mut status = status; // Make mutable for potential updates
+        if let Some(bucket) = status.buckets.get(&bucket_name) {
+            if bucket.status != BucketState::Available {
+                anyhow::bail!(
+                    "Bucket '{}' is not available (current state: {:?})",
+                    bucket_name,
+                    bucket.status
+                );
+            }
+        } else {
+            // Bucket is missing from status; create it on-demand for isolated mode
+            if spec.bucket_strategy == BucketStrategy::Isolated {
+                info!(
+                    "Creating isolated S3 bucket '{}' on-demand for deployment group '{}'",
+                    bucket_name, deployment_group
+                );
+
+                // Create the bucket
+                self.create_bucket(&bucket_name, &self.default_region)
+                    .await
+                    .with_context(|| {
+                        format!(
+                            "Failed to create isolated S3 bucket '{}' in before_deployment",
+                            bucket_name
+                        )
+                    })?;
+
+                // Configure the bucket (encryption, versioning, etc.)
+                self.configure_bucket(&bucket_name, &spec)
+                    .await
+                    .context("Failed to configure bucket")?;
+
+                // Wait for the bucket to become available by polling HeadBucket with a timeout
+                let deadline = chrono::Utc::now() + chrono::Duration::minutes(5);
+                loop {
+                    if chrono::Utc::now() > deadline {
+                        anyhow::bail!(
+                            "Timed out waiting for isolated S3 bucket '{}' to become available",
+                            bucket_name
+                        );
+                    }
+
+                    match self.s3_client.head_bucket().bucket(&bucket_name).send().await {
+                        Ok(_) => {
+                            info!("Isolated S3 bucket '{}' is now available", bucket_name);
+                            break;
+                        }
+                        Err(err) => {
+                            // If the bucket is not yet fully propagated, keep retrying; otherwise, fail.
+                            let msg = format!("{:?}", err);
+                            if msg.contains("NotFound") || msg.contains("NoSuchBucket") {
+                                tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+                                continue;
+                            }
+                            return Err(anyhow::anyhow!(err).context(format!(
+                                "Failed while waiting for isolated S3 bucket '{}' to become available",
+                                bucket_name
+                            )));
+                        }
+                    }
+                }
+
+                // Update status with the new bucket
+                status.buckets.insert(
+                    bucket_name.clone(),
+                    BucketStatus {
+                        status: BucketState::Available,
+                        region: self.default_region.clone(),
+                        cleanup_scheduled_at: None,
+                    },
+                );
+
+                // Persist updated status
+                db_extensions::update_status(
+                    &self.db_pool,
+                    project_id,
+                    &ext.extension,
+                    &serde_json::to_value(&status)?,
+                )
+                .await?;
+            } else {
+                // In shared mode, bucket should already exist from reconciliation
+                anyhow::bail!("Bucket '{}' not found in status", bucket_name);
+            }
+        }
+
+        // Get bucket reference from status (guaranteed to exist at this point)
         let bucket = status
             .buckets
             .get(&bucket_name)
-            .ok_or_else(|| anyhow::anyhow!("Bucket '{}' not found in status", bucket_name))?;
-
-        if bucket.status != BucketState::Available {
-            anyhow::bail!(
-                "Bucket '{}' is not available (current state: {:?})",
-                bucket_name,
-                bucket.status
-            );
-        }
+            .expect("Bucket should exist in status after creation check");
 
         // Inject environment variables
         let mut injected_vars = Vec::new();
