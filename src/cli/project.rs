@@ -71,7 +71,7 @@ pub async fn create_project(
     access_class: &str,
     owner: Option<String>,
     path: &str,
-    mode: &Option<String>,
+    mode: &Option<crate::ProjectMode>,
 ) -> Result<()> {
     use crate::build::config::{
         load_full_project_config, write_project_config, ProjectBuildConfig, ProjectConfig,
@@ -85,27 +85,21 @@ pub async fn create_project(
 
     // Determine the mode
     let effective_mode = if let Some(m) = mode {
-        match m.as_str() {
-            "remote" | "local" | "remote+local" => m.clone(),
-            _ => anyhow::bail!(
-                "Invalid mode '{}'. Valid modes are: remote, local, remote+local",
-                m
-            ),
-        }
+        *m
     } else {
         // Auto-detect mode: remote if rise.toml exists, remote+local otherwise
         let rise_toml_path = Path::new(path).join("rise.toml");
         let dot_rise_toml_path = Path::new(path).join(".rise.toml");
         if rise_toml_path.exists() || dot_rise_toml_path.exists() {
-            "remote".to_string()
+            crate::ProjectMode::Remote
         } else {
-            "remote+local".to_string()
+            crate::ProjectMode::RemoteLocal
         }
     };
 
     // Determine project name and access_class based on mode and inputs
-    let (project_name, project_access_class) = match effective_mode.as_str() {
-        "remote" => {
+    let (project_name, project_access_class) = match effective_mode {
+        crate::ProjectMode::Remote => {
             // Remote mode: read from rise.toml if name not provided
             if let Some(name_str) = name {
                 (name_str.clone(), access_class.to_string())
@@ -128,7 +122,7 @@ pub async fn create_project(
                 )
             }
         }
-        "local" => {
+        crate::ProjectMode::Local => {
             // Local mode: name is optional, will read from rise.toml if exists, or use provided name
             if let Some(name_str) = name {
                 (name_str.clone(), access_class.to_string())
@@ -147,7 +141,7 @@ pub async fn create_project(
                 }
             }
         }
-        "remote+local" => {
+        crate::ProjectMode::RemoteLocal => {
             // Remote+local mode: name is required
             if let Some(name_str) = name {
                 (name_str.clone(), access_class.to_string())
@@ -155,12 +149,17 @@ pub async fn create_project(
                 anyhow::bail!("In remote+local mode, project name is required");
             }
         }
-        _ => unreachable!(),
     };
 
     // Process based on mode
-    let should_create_remote = effective_mode == "remote" || effective_mode == "remote+local";
-    let should_create_local = effective_mode == "local" || effective_mode == "remote+local";
+    let should_create_remote = matches!(
+        effective_mode,
+        crate::ProjectMode::Remote | crate::ProjectMode::RemoteLocal
+    );
+    let should_create_local = matches!(
+        effective_mode,
+        crate::ProjectMode::Local | crate::ProjectMode::RemoteLocal
+    );
 
     // Create project on backend if needed
     if should_create_remote {

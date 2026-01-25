@@ -160,6 +160,18 @@ enum Commands {
     Team(TeamCommands),
 }
 
+/// Project creation mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ProjectMode {
+    /// Create/update project on backend only
+    Remote,
+    /// Create/update rise.toml only (no backend interaction)
+    Local,
+    /// Create project on backend AND create rise.toml
+    #[value(name = "remote+local")]
+    RemoteLocal,
+}
+
 #[derive(Subcommand, Debug)]
 enum ProjectCommands {
     /// Create a new project
@@ -179,8 +191,8 @@ enum ProjectCommands {
         path: String,
         /// Mode: remote (backend only), local (rise.toml only), remote+local (both).
         /// If unset: remote if rise.toml exists, remote+local otherwise
-        #[arg(long)]
-        mode: Option<String>,
+        #[arg(long, value_enum)]
+        mode: Option<ProjectMode>,
     },
     /// List all projects
     #[command(visible_alias = "ls")]
