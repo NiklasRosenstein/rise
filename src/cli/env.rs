@@ -61,6 +61,7 @@ async fn fetch_env_vars_response(
 }
 
 /// Fetch non-secret environment variables from a project (for use by other modules)
+#[allow(dead_code)]
 pub async fn fetch_non_secret_env_vars(
     http_client: &Client,
     backend_url: &str,

@@ -74,7 +74,7 @@ pub async fn run_locally(
 
     // Determine if we should load project environment variables
     let should_load_project_env = options.use_project_env || options.project_name.is_some();
-    
+
     if should_load_project_env {
         // Resolve project name from explicit argument or rise.toml
         let project_name = if let Some(name) = options.project_name {
