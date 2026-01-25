@@ -72,48 +72,37 @@ pub async fn run_locally(
 
     cmd.arg("--add-host=host.docker.internal:host-gateway");
 
-    // Determine if we should load project environment variables
-    let should_load_project_env = options.use_project_env || options.project_name.is_some();
-
-    if should_load_project_env {
-        // Resolve project name from explicit argument or rise.toml
-        let project_name = if let Some(name) = options.project_name {
-            name.to_string()
-        } else if options.use_project_env {
-            // Load from rise.toml
-            match build::config::load_full_project_config(options.path) {
-                Ok(Some(config)) => {
-                    if let Some(project_config) = config.project {
-                        project_config.name
-                    } else {
-                        warn!("--use-project-env specified but rise.toml has no [project] section");
-                        warn!("Skipping project environment variables");
-                        String::new()
-                    }
-                }
-                Ok(None) => {
-                    warn!("--use-project-env specified but no rise.toml found");
-                    warn!("Skipping project environment variables");
-                    String::new()
-                }
-                Err(e) => {
-                    warn!("Failed to load rise.toml: {}", e);
-                    warn!("Skipping project environment variables");
-                    String::new()
+    // Always try to resolve project name from rise.toml or explicit argument
+    let project_name = if let Some(name) = options.project_name {
+        // Explicit project name takes precedence
+        Some(name.to_string())
+    } else {
+        // Try to load from rise.toml
+        match build::config::load_full_project_config(options.path) {
+            Ok(Some(config)) => {
+                if let Some(project_config) = config.project {
+                    Some(project_config.name)
+                } else {
+                    None
                 }
             }
-        } else {
-            String::new()
-        };
+            Ok(None) => None,
+            Err(e) => {
+                warn!("Failed to load rise.toml: {}", e);
+                None
+            }
+        }
+    };
 
-        // Fetch environment variables if we have a project name
-        if !project_name.is_empty() {
+    // Load project environment variables if enabled and we have a project name
+    if options.use_project_env {
+        if let Some(project_name) = &project_name {
             if let Some(token) = config.get_token() {
                 match env::fetch_env_vars_with_secret_list(
                     http_client,
                     &backend_url,
                     &token,
-                    &project_name,
+                    project_name,
                 )
                 .await
                 {
@@ -184,7 +173,7 @@ pub async fn run_locally(
         "Running container: {} (port {}:{}, PORT={})",
         image_tag, options.expose, options.http_port, options.http_port
     );
-    if should_load_project_env {
+    if options.use_project_env && project_name.is_some() {
         info!("Project environment variables loaded (non-secret only)");
     }
     info!(

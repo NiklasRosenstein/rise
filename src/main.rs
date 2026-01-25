@@ -135,8 +135,8 @@ enum Commands {
         /// Project name (optional, used to load environment variables)
         #[arg(long, short)]
         project: Option<String>,
-        /// Load environment variables from the associated Rise project (non-secret only)
-        #[arg(long)]
+        /// Load environment variables from the associated Rise project (non-secret only). Defaults to true.
+        #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
         use_project_env: bool,
         /// Path to the directory containing the application
         #[arg(default_value = ".")]
