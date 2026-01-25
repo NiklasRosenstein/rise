@@ -70,9 +70,12 @@ rise login --device
 ### Project Management
 
 ```bash
-# Create
-rise project create my-app --visibility public
-rise project create internal-api --visibility private --owner team:backend
+# Create with explicit name (does not create or modify rise.toml)
+rise project create my-app --access-class public
+rise project create internal-api --access-class private --owner team:backend
+
+# Create from existing rise.toml (reads name and access_class from rise.toml)
+rise project create
 
 # List
 rise p ls
@@ -80,6 +83,10 @@ rise p ls
 # Update
 rise p update my-app --owner team:devops
 ```
+
+**Project creation behavior:**
+- **With name argument**: Creates project on backend but does NOT create or modify `rise.toml`
+- **Without name argument**: Reads project name and access_class from existing `rise.toml` and creates project on backend
 
 ### Deployments
 
