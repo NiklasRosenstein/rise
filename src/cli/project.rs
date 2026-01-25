@@ -113,7 +113,7 @@ pub async fn create_project(
                 // Read from rise.toml
                 let full_config = load_full_project_config(path)?.ok_or_else(|| {
                     anyhow::anyhow!(
-                        "No rise.toml found at {}. In remote mode without a name, rise.toml is required.",
+                        "No rise.toml found at {}. In remote mode without a project name, rise.toml must exist to read the project configuration.",
                         path
                     )
                 })?;
@@ -143,7 +143,7 @@ pub async fn create_project(
                         project_config.access_class.clone(),
                     )
                 } else {
-                    anyhow::bail!("In local mode without a name, either specify a name or have an existing rise.toml");
+                    anyhow::bail!("In local mode, project name is required when no existing rise.toml is found. Either specify a name with the command or ensure rise.toml exists in the target directory.");
                 }
             }
         }
