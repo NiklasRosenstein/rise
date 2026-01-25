@@ -166,8 +166,8 @@ enum ProjectCommands {
     #[command(visible_alias = "c")]
     #[command(visible_alias = "new")]
     Create {
-        /// Project name
-        name: String,
+        /// Project name (if not specified, reads from rise.toml)
+        name: Option<String>,
         /// Access class (e.g., public, private)
         #[arg(long, default_value = "public")]
         access_class: String,

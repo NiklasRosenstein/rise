@@ -66,7 +66,7 @@ pub async fn create_project(
     http_client: &Client,
     backend_url: &str,
     config: &Config,
-    name: &str,
+    name: &Option<String>,
     access_class: &str,
     owner: Option<String>,
     path: &str,
@@ -74,6 +74,31 @@ pub async fn create_project(
     let token = config
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
+
+    // Determine the project name and access_class based on whether name is provided
+    let (project_name, project_access_class) = if let Some(name_str) = name {
+        // Name is specified: use provided values, don't touch rise.toml
+        (name_str.clone(), access_class.to_string())
+    } else {
+        // Name is NOT specified: read from rise.toml
+        use crate::build::config::load_full_project_config;
+
+        let full_config = load_full_project_config(path)?.ok_or_else(|| {
+            anyhow::anyhow!(
+                "No rise.toml found at {}. Either create one or specify a project name.",
+                path
+            )
+        })?;
+
+        let project_config = full_config
+            .project
+            .ok_or_else(|| anyhow::anyhow!("No [project] section found in rise.toml"))?;
+
+        (
+            project_config.name.clone(),
+            project_config.access_class.clone(),
+        )
+    };
 
     // Determine owner
     let (owner_type, owner_id) = if let Some(owner_str) = owner {
@@ -114,8 +139,8 @@ pub async fn create_project(
     }
 
     let request = CreateRequest {
-        name: name.to_string(),
-        access_class: access_class.to_string(),
+        name: project_name.clone(),
+        access_class: project_access_class.clone(),
         owner: owner_payload,
     };
 
@@ -141,25 +166,11 @@ pub async fn create_project(
         println!("  ID: {}", create_response.project.id);
         println!("  Status: {}", create_response.project.status);
 
-        // Generate rise.toml
-        use crate::build::config::{write_project_config, ProjectBuildConfig, ProjectConfig};
-        use std::collections::HashMap;
-
-        let project_config = ProjectConfig {
-            name: name.to_string(),
-            access_class: access_class.to_string(),
-            custom_domains: Vec::new(),
-            env: HashMap::new(),
-        };
-
-        let config_to_write = ProjectBuildConfig {
-            version: Some(1),
-            project: Some(project_config),
-            build: None,
-        };
-
-        write_project_config(path, &config_to_write)?;
-        println!("  Created rise.toml at {}/rise.toml", path);
+        // Only create rise.toml if name was NOT specified (i.e., reading from existing rise.toml)
+        // When name is specified, we don't touch rise.toml at all
+        if name.is_none() {
+            println!("  Project synced from rise.toml");
+        }
     } else {
         let status = response.status();
         let error_text = response
