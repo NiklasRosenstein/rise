@@ -135,6 +135,9 @@ enum Commands {
         /// Project name (optional, used to load environment variables)
         #[arg(long, short)]
         project: Option<String>,
+        /// Load environment variables from the associated Rise project (non-secret only)
+        #[arg(long)]
+        use_project_env: bool,
         /// Path to the directory containing the application
         #[arg(default_value = ".")]
         path: String,
@@ -1210,6 +1213,7 @@ async fn main() -> Result<()> {
         }
         Commands::Run {
             project,
+            use_project_env,
             path,
             http_port,
             expose,
@@ -1223,6 +1227,7 @@ async fn main() -> Result<()> {
                 &config,
                 cli::run::RunOptions {
                     project_name: project.as_deref(),
+                    use_project_env: *use_project_env,
                     path,
                     http_port: *http_port,
                     expose: expose_port,

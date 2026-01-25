@@ -86,6 +86,29 @@ pub async fn fetch_non_secret_env_vars(
     Ok(env_vars)
 }
 
+/// Fetch environment variables from a project, returning non-secret vars and the list of secret var keys
+pub async fn fetch_env_vars_with_secret_list(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+) -> Result<(Vec<(String, String)>, Vec<String>)> {
+    let env_response = fetch_env_vars_response(http_client, backend_url, token, project).await?;
+
+    let mut non_secret_vars = Vec::new();
+    let mut secret_keys = Vec::new();
+
+    for var in env_response.env_vars {
+        if var.is_secret {
+            secret_keys.push(var.key);
+        } else {
+            non_secret_vars.push((var.key, var.value));
+        }
+    }
+
+    Ok((non_secret_vars, secret_keys))
+}
+
 /// Set an environment variable for a project
 pub async fn set_env(
     http_client: &Client,
