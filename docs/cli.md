@@ -70,9 +70,23 @@ rise login --device
 ### Project Management
 
 ```bash
-# Create
-rise project create my-app --visibility public
-rise project create internal-api --visibility private --owner team:backend
+# Create project on backend only (remote mode - auto-selected if rise.toml exists)
+rise project create my-app --access-class public
+rise project create internal-api --access-class private --owner team:backend
+
+# Create project on backend and rise.toml (remote+local mode - auto-selected if no rise.toml)
+rise project create my-new-app
+
+# Explicit mode selection
+rise project create my-app --mode remote              # Backend only
+rise project create my-app --mode local               # rise.toml only  
+rise project create my-app --mode remote+local        # Both backend and rise.toml
+
+# Create from existing rise.toml (auto-detects remote mode, reads name from rise.toml)
+rise project create
+
+# Or explicitly with mode flag
+rise project create --mode remote
 
 # List
 rise p ls
@@ -80,6 +94,12 @@ rise p ls
 # Update
 rise p update my-app --owner team:devops
 ```
+
+**Project creation modes:**
+- **`--mode remote`** (default if rise.toml exists): Creates/updates project on backend only
+- **`--mode local`**: Creates/updates `rise.toml` only, does not touch backend
+- **`--mode remote+local`** (default if no rise.toml): Creates project on backend AND creates `rise.toml`
+- **Auto-detection**: If `--mode` is not specified, automatically uses `remote` if `rise.toml` exists, otherwise `remote+local`
 
 ### Deployments
 

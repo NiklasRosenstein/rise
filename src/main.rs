@@ -163,14 +163,26 @@ enum Commands {
     Team(TeamCommands),
 }
 
+/// Project creation mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ProjectMode {
+    /// Create/update project on backend only
+    Remote,
+    /// Create/update rise.toml only (no backend interaction)
+    Local,
+    /// Create project on backend AND create rise.toml
+    #[value(name = "remote+local")]
+    RemoteLocal,
+}
+
 #[derive(Subcommand, Debug)]
 enum ProjectCommands {
     /// Create a new project
     #[command(visible_alias = "c")]
     #[command(visible_alias = "new")]
     Create {
-        /// Project name
-        name: String,
+        /// Project name (required for remote and remote+local modes, optional for local mode)
+        name: Option<String>,
         /// Access class (e.g., public, private)
         #[arg(long, default_value = "public")]
         access_class: String,
@@ -180,6 +192,10 @@ enum ProjectCommands {
         /// Path where to create rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
+        /// Mode: remote (backend only), local (rise.toml only), remote+local (both).
+        /// If unset: remote if rise.toml exists, remote+local otherwise
+        #[arg(long, value_enum)]
+        mode: Option<ProjectMode>,
     },
     /// List all projects
     #[command(visible_alias = "ls")]
@@ -704,6 +720,7 @@ async fn main() -> Result<()> {
                 access_class,
                 owner,
                 path,
+                mode,
             } => {
                 project::create_project(
                     &http_client,
@@ -713,6 +730,7 @@ async fn main() -> Result<()> {
                     access_class,
                     owner.clone(),
                     path,
+                    mode,
                 )
                 .await?;
             }
