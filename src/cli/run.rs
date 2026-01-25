@@ -131,7 +131,7 @@ pub async fn run_locally(
                             for key in &secret_keys {
                                 warn!("  - {}", key);
                             }
-                            warn!("Provide secret values manually using -e/--run-env if needed");
+                            warn!("Provide secret values manually using -r/--run-env if needed");
                         }
                     }
                     Err(e) => {
