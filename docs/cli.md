@@ -82,7 +82,10 @@ rise project create my-app --mode remote              # Backend only
 rise project create my-app --mode local               # rise.toml only  
 rise project create my-app --mode remote+local        # Both backend and rise.toml
 
-# Create from existing rise.toml (remote mode, reads name from rise.toml)
+# Create from existing rise.toml (auto-detects remote mode, reads name from rise.toml)
+rise project create
+
+# Or explicitly with mode flag
 rise project create --mode remote
 
 # List
