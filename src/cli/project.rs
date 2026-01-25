@@ -62,6 +62,7 @@ fn parse_owner(owner: &str) -> Result<(String, String)> {
 }
 
 // Create a new project
+#[allow(clippy::too_many_arguments)]
 pub async fn create_project(
     http_client: &Client,
     backend_url: &str,
@@ -70,118 +71,195 @@ pub async fn create_project(
     access_class: &str,
     owner: Option<String>,
     path: &str,
+    mode: &Option<String>,
 ) -> Result<()> {
-    use crate::build::config::load_full_project_config;
+    use crate::build::config::{
+        load_full_project_config, write_project_config, ProjectBuildConfig, ProjectConfig,
+    };
+    use std::collections::HashMap;
+    use std::path::Path;
 
     let token = config
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    // Determine the project name and access_class based on whether name is provided
-    let (project_name, project_access_class) = if let Some(name_str) = name {
-        // Name is specified: use provided values, don't touch rise.toml
-        (name_str.clone(), access_class.to_string())
+    // Determine the mode
+    let effective_mode = if let Some(m) = mode {
+        match m.as_str() {
+            "remote" | "local" | "remote+local" => m.clone(),
+            _ => anyhow::bail!(
+                "Invalid mode '{}'. Valid modes are: remote, local, remote+local",
+                m
+            ),
+        }
     } else {
-        // Name is NOT specified: read from rise.toml
-        let full_config = load_full_project_config(path)?.ok_or_else(|| {
-            anyhow::anyhow!(
-                "No rise.toml found at {}. Either create one or specify a project name.",
-                path
-            )
-        })?;
-
-        let project_config = full_config
-            .project
-            .ok_or_else(|| anyhow::anyhow!("No [project] section found in rise.toml"))?;
-
-        (
-            project_config.name.clone(),
-            project_config.access_class.clone(),
-        )
-    };
-
-    // Determine owner
-    let (owner_type, owner_id) = if let Some(owner_str) = owner {
-        let (otype, ovalue) = parse_owner(&owner_str)?;
-
-        // For user owner, we need to look up the ID from email
-        // For team owner, we can use the team name directly (backend will resolve)
-        if otype == "user" {
-            // TODO: Add user lookup endpoint or use email directly
-            (otype, ovalue)
+        // Auto-detect mode: remote if rise.toml exists, remote+local otherwise
+        let rise_toml_path = Path::new(path).join("rise.toml");
+        let dot_rise_toml_path = Path::new(path).join(".rise.toml");
+        if rise_toml_path.exists() || dot_rise_toml_path.exists() {
+            "remote".to_string()
         } else {
-            (otype, ovalue)
+            "remote+local".to_string()
         }
-    } else {
-        // Default to current user
-        let current_user = get_current_user(http_client, backend_url, &token).await?;
-        ("user".to_string(), current_user.id)
     };
 
-    #[derive(Serialize)]
-    #[serde(rename_all = "snake_case")]
-    enum OwnerType {
-        User(String),
-        Team(String),
+    // Determine project name and access_class based on mode and inputs
+    let (project_name, project_access_class) = match effective_mode.as_str() {
+        "remote" => {
+            // Remote mode: read from rise.toml if name not provided
+            if let Some(name_str) = name {
+                (name_str.clone(), access_class.to_string())
+            } else {
+                // Read from rise.toml
+                let full_config = load_full_project_config(path)?.ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "No rise.toml found at {}. In remote mode without a name, rise.toml is required.",
+                        path
+                    )
+                })?;
+
+                let project_config = full_config
+                    .project
+                    .ok_or_else(|| anyhow::anyhow!("No [project] section found in rise.toml"))?;
+
+                (
+                    project_config.name.clone(),
+                    project_config.access_class.clone(),
+                )
+            }
+        }
+        "local" => {
+            // Local mode: name is optional, will read from rise.toml if exists, or use provided name
+            if let Some(name_str) = name {
+                (name_str.clone(), access_class.to_string())
+            } else {
+                // Try to read from existing rise.toml
+                if let Some(full_config) = load_full_project_config(path)? {
+                    let project_config = full_config.project.ok_or_else(|| {
+                        anyhow::anyhow!("No [project] section found in rise.toml")
+                    })?;
+                    (
+                        project_config.name.clone(),
+                        project_config.access_class.clone(),
+                    )
+                } else {
+                    anyhow::bail!("In local mode without a name, either specify a name or have an existing rise.toml");
+                }
+            }
+        }
+        "remote+local" => {
+            // Remote+local mode: name is required
+            if let Some(name_str) = name {
+                (name_str.clone(), access_class.to_string())
+            } else {
+                anyhow::bail!("In remote+local mode, project name is required");
+            }
+        }
+        _ => unreachable!(),
+    };
+
+    // Process based on mode
+    let should_create_remote = effective_mode == "remote" || effective_mode == "remote+local";
+    let should_create_local = effective_mode == "local" || effective_mode == "remote+local";
+
+    // Create project on backend if needed
+    if should_create_remote {
+        // Determine owner
+        let (owner_type, owner_id) = if let Some(owner_str) = owner {
+            let (otype, ovalue) = parse_owner(&owner_str)?;
+
+            // For user owner, we need to look up the ID from email
+            // For team owner, we can use the team name directly (backend will resolve)
+            if otype == "user" {
+                // TODO: Add user lookup endpoint or use email directly
+                (otype, ovalue)
+            } else {
+                (otype, ovalue)
+            }
+        } else {
+            // Default to current user
+            let current_user = get_current_user(http_client, backend_url, &token).await?;
+            ("user".to_string(), current_user.id)
+        };
+
+        #[derive(Serialize)]
+        #[serde(rename_all = "snake_case")]
+        enum OwnerType {
+            User(String),
+            Team(String),
+        }
+
+        let owner_payload = if owner_type == "user" {
+            OwnerType::User(owner_id)
+        } else {
+            OwnerType::Team(owner_id)
+        };
+
+        #[derive(Serialize)]
+        struct CreateRequest {
+            name: String,
+            access_class: String,
+            owner: OwnerType,
+        }
+
+        let request = CreateRequest {
+            name: project_name.clone(),
+            access_class: project_access_class.clone(),
+            owner: owner_payload,
+        };
+
+        let url = format!("{}/api/v1/projects", backend_url);
+        let response = http_client
+            .post(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .json(&request)
+            .send()
+            .await
+            .context("Failed to send create project request")?;
+
+        if response.status().is_success() {
+            let create_response: CreateProjectResponse = response
+                .json()
+                .await
+                .context("Failed to parse create project response")?;
+
+            println!(
+                "✓ Project '{}' created on backend successfully!",
+                create_response.project.name
+            );
+            println!("  ID: {}", create_response.project.id);
+            println!("  Status: {}", create_response.project.status);
+        } else {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!(
+                "Failed to create project (status {}): {}",
+                status,
+                error_text
+            );
+        }
     }
 
-    let owner_payload = if owner_type == "user" {
-        OwnerType::User(owner_id)
-    } else {
-        OwnerType::Team(owner_id)
-    };
+    // Create/update local rise.toml if needed
+    if should_create_local {
+        let project_config = ProjectConfig {
+            name: project_name.clone(),
+            access_class: project_access_class.clone(),
+            custom_domains: Vec::new(),
+            env: HashMap::new(),
+        };
 
-    #[derive(Serialize)]
-    struct CreateRequest {
-        name: String,
-        access_class: String,
-        owner: OwnerType,
-    }
+        let config_to_write = ProjectBuildConfig {
+            version: Some(1),
+            project: Some(project_config),
+            build: None,
+        };
 
-    let request = CreateRequest {
-        name: project_name.clone(),
-        access_class: project_access_class.clone(),
-        owner: owner_payload,
-    };
-
-    let url = format!("{}/api/v1/projects", backend_url);
-    let response = http_client
-        .post(&url)
-        .header("Authorization", format!("Bearer {}", token))
-        .json(&request)
-        .send()
-        .await
-        .context("Failed to send create project request")?;
-
-    if response.status().is_success() {
-        let create_response: CreateProjectResponse = response
-            .json()
-            .await
-            .context("Failed to parse create project response")?;
-
-        println!(
-            "✓ Project '{}' created successfully!",
-            create_response.project.name
-        );
-        println!("  ID: {}", create_response.project.id);
-        println!("  Status: {}", create_response.project.status);
-
-        // When name was NOT specified, we read from existing rise.toml (no file modification)
-        // When name IS specified, we don't touch rise.toml at all (no file modification)
-        if name.is_none() {
-            println!("  Project created from rise.toml");
-        }
-    } else {
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unknown error".to_string());
-        anyhow::bail!(
-            "Failed to create project (status {}): {}",
-            status,
-            error_text
-        );
+        write_project_config(path, &config_to_write)?;
+        println!("✓ Created rise.toml at {}/rise.toml", path);
     }
 
     Ok(())

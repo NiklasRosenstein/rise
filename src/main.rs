@@ -166,7 +166,7 @@ enum ProjectCommands {
     #[command(visible_alias = "c")]
     #[command(visible_alias = "new")]
     Create {
-        /// Project name (if not specified, reads from rise.toml)
+        /// Project name (required for remote and remote+local modes, optional for local mode)
         name: Option<String>,
         /// Access class (e.g., public, private)
         #[arg(long, default_value = "public")]
@@ -177,6 +177,10 @@ enum ProjectCommands {
         /// Path where to create rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
+        /// Mode: remote (backend only), local (rise.toml only), remote+local (both).
+        /// If unset: remote if rise.toml exists, remote+local otherwise
+        #[arg(long)]
+        mode: Option<String>,
     },
     /// List all projects
     #[command(visible_alias = "ls")]
@@ -701,6 +705,7 @@ async fn main() -> Result<()> {
                 access_class,
                 owner,
                 path,
+                mode,
             } => {
                 project::create_project(
                     &http_client,
@@ -710,6 +715,7 @@ async fn main() -> Result<()> {
                     access_class,
                     owner.clone(),
                     path,
+                    mode,
                 )
                 .await?;
             }
