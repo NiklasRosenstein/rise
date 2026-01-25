@@ -71,6 +71,8 @@ pub async fn create_project(
     owner: Option<String>,
     path: &str,
 ) -> Result<()> {
+    use crate::build::config::load_full_project_config;
+
     let token = config
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
@@ -81,8 +83,6 @@ pub async fn create_project(
         (name_str.clone(), access_class.to_string())
     } else {
         // Name is NOT specified: read from rise.toml
-        use crate::build::config::load_full_project_config;
-
         let full_config = load_full_project_config(path)?.ok_or_else(|| {
             anyhow::anyhow!(
                 "No rise.toml found at {}. Either create one or specify a project name.",
@@ -166,10 +166,10 @@ pub async fn create_project(
         println!("  ID: {}", create_response.project.id);
         println!("  Status: {}", create_response.project.status);
 
-        // Only create rise.toml if name was NOT specified (i.e., reading from existing rise.toml)
-        // When name is specified, we don't touch rise.toml at all
+        // When name was NOT specified, we read from existing rise.toml (no file modification)
+        // When name IS specified, we don't touch rise.toml at all (no file modification)
         if name.is_none() {
-            println!("  Project synced from rise.toml");
+            println!("  Project created from rise.toml");
         }
     } else {
         let status = response.status();
