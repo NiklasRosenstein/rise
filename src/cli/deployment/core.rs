@@ -418,7 +418,9 @@ pub struct DeploymentOptions<'a> {
     pub image: Option<&'a str>,
     pub group: Option<&'a str>,
     pub expires_in: Option<&'a str>,
-    pub http_port: u16,
+    /// HTTP port the application listens on.
+    /// If None, server will use project's PORT env var or default to 8080.
+    pub http_port: Option<u16>,
     pub build_args: &'a build::BuildArgs,
     pub from_deployment: Option<&'a str>,
     pub use_source_env_vars: bool,
@@ -622,15 +624,20 @@ async fn call_create_deployment_api(
     image: Option<&str>,
     group: Option<&str>,
     expires_in: Option<&str>,
-    http_port: u16,
+    http_port: Option<u16>,
     from_deployment: Option<&str>,
     use_source_env_vars: bool,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
         "project": project_name,
-        "http_port": http_port,
     });
+
+    // Add http_port field if explicitly provided
+    // If not provided, server will resolve from project's PORT env var or use default (8080)
+    if let Some(port) = http_port {
+        payload["http_port"] = serde_json::json!(port);
+    }
 
     // Add image field if provided
     if let Some(image_ref) = image {

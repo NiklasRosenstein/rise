@@ -32,7 +32,7 @@
             </div>
 
             <script>
-                const redirectUrl = "{{ redirect_url }}";
+                const redirectUrl = {{ redirect_url | json_encode() }};
                 const progressBar = document.getElementById('progress-bar');
 
                 // Start progress bar animation

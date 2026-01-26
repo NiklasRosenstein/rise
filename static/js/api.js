@@ -215,6 +215,18 @@ class RiseAPI {
         });
     }
 
+    async setCustomDomainPrimary(projectName, domain) {
+        return this.request(`/projects/${projectName}/domains/${encodeURIComponent(domain)}/primary`, {
+            method: 'PUT'
+        });
+    }
+
+    async unsetCustomDomainPrimary(projectName, domain) {
+        return this.request(`/projects/${projectName}/domains/${encodeURIComponent(domain)}/primary`, {
+            method: 'DELETE'
+        });
+    }
+
     // Extension endpoints
 
     /**

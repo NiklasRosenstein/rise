@@ -63,49 +63,265 @@ fn inject_mount_into_run(line: &str, mount_spec: &str) -> String {
             return line.to_string();
         }
 
+        // Separate existing RUN flags from the actual command
+        let (flags, actual_command) = extract_run_flags(command);
+
+        // Use the first SSL_CERT_PATH as the environment variable
+        let ssl_cert_path = SSL_CERT_PATHS[0];
+
+        // Build the new command with SSL_CERT_FILE env var
+        let wrapped_command = if actual_command.is_empty() {
+            // No command yet (continuation expected)
+            String::new()
+        } else {
+            format!(
+                "export SSL_CERT_FILE={} && {}",
+                ssl_cert_path, actual_command
+            )
+        };
+
         format!(
             "{}{}{}{} {}",
             leading_ws,
             &trimmed[..after_run],
             ws,
             mount_spec,
-            command
+            if flags.is_empty() {
+                wrapped_command
+            } else {
+                format!("{} {}", flags, wrapped_command)
+            }
         )
     } else {
         // No whitespace after RUN (unusual but handle it)
+        let (flags, actual_command) = extract_run_flags(rest);
+        let ssl_cert_path = SSL_CERT_PATHS[0];
+
+        let wrapped_command = if actual_command.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "export SSL_CERT_FILE={} && {}",
+                ssl_cert_path, actual_command
+            )
+        };
+
         format!(
             "{}{} {} {}",
             leading_ws,
             &trimmed[..after_run],
             mount_spec,
-            rest
+            if flags.is_empty() {
+                wrapped_command
+            } else {
+                format!("{} {}", flags, wrapped_command)
+            }
         )
     }
+}
+
+/// Extract RUN flags from a command string
+/// Returns (flags, command) where flags are the --mount and other RUN options
+fn extract_run_flags(command: &str) -> (String, String) {
+    let mut flags = Vec::new();
+    let mut parts = command.split_whitespace().peekable();
+    let mut actual_command_parts = Vec::new();
+
+    while let Some(part) = parts.peek() {
+        if part.starts_with("--") {
+            // This is a flag
+            let flag = parts.next().unwrap();
+            flags.push(flag.to_string());
+
+            // Check if this flag takes a value (e.g., --mount=... is one token, but --mount ... might be two)
+            if !flag.contains('=') && parts.peek().is_some() {
+                let next = parts.peek().unwrap();
+                if !next.starts_with("--") {
+                    // This is the flag's value
+                    flags.push(parts.next().unwrap().to_string());
+                }
+            }
+        } else {
+            // Rest is the actual command
+            break;
+        }
+    }
+
+    // Collect remaining parts as the actual command
+    actual_command_parts.extend(parts);
+
+    (flags.join(" "), actual_command_parts.join(" "))
 }
 
 /// Inject SSL certificate secret mounts into RUN commands in a Dockerfile
 fn inject_ssl_mounts(dockerfile_content: &str) -> String {
     let mount_spec = generate_ssl_mount_spec();
     let mut result = String::new();
-    let mut in_continuation = false;
+    let lines: Vec<&str> = dockerfile_content.lines().collect();
+    let mut i = 0;
 
-    for line in dockerfile_content.lines() {
-        if in_continuation {
-            // Inside a multi-line command, don't modify
-            result.push_str(line);
-            in_continuation = line.trim_end().ends_with('\\');
-        } else if is_run_instruction(line) {
-            // Inject mount spec into RUN command
-            let modified = inject_mount_into_run(line, &mount_spec);
+    while i < lines.len() {
+        let line = lines[i];
+
+        if is_run_instruction(line) {
+            // Collect all lines of this RUN instruction
+            let mut run_lines = vec![line];
+            let mut j = i;
+            while j < lines.len() && lines[j].trim_end().ends_with('\\') {
+                j += 1;
+                if j < lines.len() {
+                    run_lines.push(lines[j]);
+                }
+            }
+
+            // Process the complete RUN instruction
+            let modified = inject_mount_into_multiline_run(&run_lines, &mount_spec);
             result.push_str(&modified);
-            in_continuation = line.trim_end().ends_with('\\');
+
+            // Skip the lines we just processed
+            i = j + 1;
         } else {
             result.push_str(line);
+            result.push('\n');
+            i += 1;
         }
-        result.push('\n');
     }
 
     result
+}
+
+/// Inject SSL mounts into a potentially multiline RUN instruction
+fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> String {
+    if run_lines.is_empty() {
+        return String::new();
+    }
+
+    // If single line, use the existing function
+    if run_lines.len() == 1 {
+        return format!("{}\n", inject_mount_into_run(run_lines[0], mount_spec));
+    }
+
+    // Multiline RUN - need to extract ALL flags from ALL lines
+    let first_line = run_lines[0];
+
+    // Check if already has SSL mount
+    if run_lines
+        .iter()
+        .any(|line| line.contains("--mount=type=secret,id=SSL_CERT_FILE"))
+    {
+        // Already processed, return as-is
+        return run_lines.join("\n") + "\n";
+    }
+
+    // Extract RUN prefix and whitespace
+    let trimmed = first_line.trim_start();
+    let leading_ws_len = first_line.len() - trimmed.len();
+    let leading_ws = &first_line[..leading_ws_len];
+
+    let run_upper = trimmed.to_uppercase();
+    let run_pos = run_upper.find("RUN").unwrap();
+    let after_run = run_pos + 3;
+
+    // Collect all flags and the actual command from all lines
+    let mut all_flags = Vec::new();
+    let mut command_lines = Vec::new();
+    let mut found_command = false;
+
+    for (idx, &line) in run_lines.iter().enumerate() {
+        let content = if idx == 0 {
+            // First line: skip "RUN" and leading whitespace
+            let rest = &trimmed[after_run..];
+            rest.trim_start()
+        } else {
+            // Continuation line: just trim leading whitespace
+            line.trim_start()
+        };
+
+        // Check if this line ends with backslash
+        let has_continuation = content.trim_end().ends_with('\\');
+        let content_no_backslash = if has_continuation {
+            content.trim_end().strip_suffix('\\').unwrap().trim_end()
+        } else {
+            content
+        };
+
+        // Extract flags from this line
+        let (flags, command) = extract_run_flags(content_no_backslash);
+
+        if !flags.is_empty() {
+            all_flags.push(flags);
+        }
+
+        if !command.is_empty() {
+            found_command = true;
+            if has_continuation {
+                command_lines.push(format!("{} \\", command));
+            } else {
+                command_lines.push(command.to_string());
+            }
+        } else if found_command {
+            // Empty command part but we've already found the command
+            // This shouldn't happen in well-formed Dockerfiles
+            if has_continuation {
+                command_lines.push("\\".to_string());
+            }
+        }
+    }
+
+    let ssl_cert_path = SSL_CERT_PATHS[0];
+    let all_flags_str = all_flags.join(" ");
+
+    // Build the result
+    let mut result = Vec::new();
+
+    if command_lines.is_empty() {
+        // No command found (shouldn't happen)
+        result.push(format!("{}RUN {}", leading_ws, mount_spec));
+    } else if command_lines.len() == 1 {
+        // Single line command
+        if all_flags_str.is_empty() {
+            result.push(format!(
+                "{}RUN {} export SSL_CERT_FILE={} && {}",
+                leading_ws, mount_spec, ssl_cert_path, command_lines[0]
+            ));
+        } else {
+            result.push(format!(
+                "{}RUN {} {} export SSL_CERT_FILE={} && {}",
+                leading_ws, mount_spec, all_flags_str, ssl_cert_path, command_lines[0]
+            ));
+        }
+    } else {
+        // Multiline command - put export on first line with backslash, command on continuation
+        if all_flags_str.is_empty() {
+            result.push(format!(
+                "{}RUN {} export SSL_CERT_FILE={} && \\",
+                leading_ws, mount_spec, ssl_cert_path
+            ));
+        } else {
+            result.push(format!(
+                "{}RUN {} {} export SSL_CERT_FILE={} && \\",
+                leading_ws, mount_spec, all_flags_str, ssl_cert_path
+            ));
+        }
+
+        // Add all command lines with their original indentation
+        for cmd_line in &command_lines {
+            // Get the indentation from the original continuation line
+            let original_line_idx = result.len();
+            let original_indent = if original_line_idx < run_lines.len() {
+                run_lines[original_line_idx]
+                    .chars()
+                    .take_while(|c| c.is_whitespace())
+                    .collect::<String>()
+            } else {
+                // Default indentation if we don't have an original to reference
+                "    ".to_string()
+            };
+            result.push(format!("{}{}", original_indent, cmd_line));
+        }
+    }
+
+    result.join("\n") + "\n"
 }
 
 /// Preprocess a Dockerfile to inject SSL certificate mounts into RUN commands
@@ -114,8 +330,13 @@ fn inject_ssl_mounts(dockerfile_content: &str) -> String {
 /// 1. Reads the original Dockerfile
 /// 2. Injects `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` into each RUN command
 ///    for all common SSL certificate paths
-/// 3. Writes the processed Dockerfile to a temporary directory
-/// 4. Returns the temp directory (for lifetime) and the path to the processed file
+/// 3. Exports SSL_CERT_FILE environment variable before the command:
+///    `RUN --mount=... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && original_command`
+/// 4. Writes the processed Dockerfile to a temporary directory
+/// 5. Returns the temp directory (for lifetime) and the path to the processed file
+///
+/// Using `export` ensures the variable is available for all commands in the RUN instruction,
+/// including multiline commands with backslash continuations.
 ///
 /// The caller should pass `--secret id=SSL_CERT_FILE,src=<path>` to the build command.
 pub(crate) fn preprocess_dockerfile_for_ssl(
@@ -167,7 +388,9 @@ mod tests {
         // Simple RUN command
         let result = inject_mount_into_run("RUN apt-get update", mount_spec);
         assert!(result.contains(mount_spec));
-        assert!(result.contains("apt-get update"));
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("&& apt-get update"));
+        assert!(!result.contains("("));
 
         // RUN with existing mount (should not duplicate)
         let line_with_mount =
@@ -179,6 +402,40 @@ mod tests {
         let result = inject_mount_into_run("    RUN apt-get update", mount_spec);
         assert!(result.starts_with("    RUN"));
         assert!(result.contains(mount_spec));
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("&& apt-get update"));
+
+        // RUN with existing flags
+        let result = inject_mount_into_run("RUN --network=host apt-get update", mount_spec);
+        assert!(result.contains(mount_spec));
+        assert!(result.contains("--network=host"));
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("&& apt-get update"));
+    }
+
+    #[test]
+    fn test_extract_run_flags() {
+        // No flags
+        let (flags, command) = extract_run_flags("apt-get update");
+        assert_eq!(flags, "");
+        assert_eq!(command, "apt-get update");
+
+        // One flag with =
+        let (flags, command) = extract_run_flags("--network=host apt-get update");
+        assert_eq!(flags, "--network=host");
+        assert_eq!(command, "apt-get update");
+
+        // Multiple flags
+        let (flags, command) =
+            extract_run_flags("--network=host --mount=type=cache,target=/cache apt-get update");
+        assert_eq!(flags, "--network=host --mount=type=cache,target=/cache");
+        assert_eq!(command, "apt-get update");
+
+        // Command with multiple words
+        let (flags, command) =
+            extract_run_flags("--network=host apt-get update && apt-get install curl");
+        assert_eq!(flags, "--network=host");
+        assert_eq!(command, "apt-get update && apt-get install curl");
     }
 
     #[test]
@@ -194,6 +451,14 @@ CMD ["python", "app.py"]
 
         // Should contain mount spec in RUN lines
         assert!(result.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+
+        // Should contain export SSL_CERT_FILE env var
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+
+        // Should not wrap commands in parentheses
+        assert!(!result.contains("("));
+        assert!(result.contains("&& apt-get update && apt-get install -y curl"));
+        assert!(result.contains("&& pip install -r requirements.txt"));
 
         // Should preserve FROM and COPY
         assert!(result.contains("FROM ubuntu:22.04"));
@@ -211,18 +476,134 @@ CMD ["python", "app.py"]
 
     #[test]
     fn test_multiline_run() {
+        // Test the exact case from the error message
         let dockerfile = r#"FROM ubuntu:22.04
-RUN apt-get update && \
-    apt-get install -y curl && \
-    rm -rf /var/lib/apt/lists/*
+RUN apt-get update -y && \
+    apt-get install -y gzip zip jq git less && \
+    apt-get clean
+"#;
+
+        let result = inject_ssl_mounts(dockerfile);
+        println!("Result:\n{}", result);
+
+        let lines: Vec<&str> = result.lines().collect();
+
+        // First line should have mount, export, and the backslash at the end
+        assert!(lines[1].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(lines[1].contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(
+            lines[1].ends_with(" \\"),
+            "First line should end with backslash continuation"
+        );
+
+        // Continuation lines should contain the actual commands
+        assert!(lines[2].trim().starts_with("apt-get update"));
+        assert!(lines[3].trim().starts_with("apt-get install"));
+        assert!(lines[4].trim().starts_with("apt-get clean"));
+
+        // Verify no mount or export on continuation lines
+        assert!(!lines[2].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(!lines[2].contains("export"));
+
+        // Verify no parentheses anywhere
+        assert!(!result.contains("("));
+        assert!(!result.contains(")"));
+    }
+
+    #[test]
+    fn test_run_with_existing_mount_flag() {
+        // Test RUN command with existing --mount flag (like uv.lock binding)
+        let dockerfile = r#"FROM python:3.12
+RUN --mount=type=bind,source=uv.lock,target=uv.lock uv sync --locked
 "#;
 
         let result = inject_ssl_mounts(dockerfile);
 
-        // Mount should only be on the first line
+        // Should have both SSL mounts and the original bind mount
+        assert!(result.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(result.contains("--mount=type=bind,source=uv.lock,target=uv.lock"));
+
+        // export should come AFTER all mount flags
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+
+        // The shell command should be "uv sync --locked"
+        assert!(result.contains("&& uv sync --locked"));
+
+        // Verify order: RUN, then all --mount flags, then export, then actual command
+        let run_line = result.lines().nth(1).unwrap();
+
+        // All --mount flags should come before "export"
+        let export_pos = run_line.find("export").expect("Should contain export");
+        let bind_mount_pos = run_line
+            .find("--mount=type=bind")
+            .expect("Should contain bind mount");
+        assert!(
+            bind_mount_pos < export_pos,
+            "Bind mount should come before export. Line: {}",
+            run_line
+        );
+
+        // The actual command should come after export
+        let command_pos = run_line.find("uv sync").expect("Should contain uv sync");
+        assert!(
+            export_pos < command_pos,
+            "export should come before the command"
+        );
+
+        println!("Generated line: {}", run_line);
+    }
+
+    #[test]
+    fn test_run_with_multiple_mount_flags_across_lines() {
+        // Test the real-world case from the user's Containerfile
+        let dockerfile = r#"FROM python:3.12
+RUN --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
+    --mount=type=bind,source=uv.lock,target=uv.lock \
+    uv sync --locked
+"#;
+
+        let result = inject_ssl_mounts(dockerfile);
+        println!("Result:\n{}", result);
+
         let lines: Vec<&str> = result.lines().collect();
-        assert!(lines[1].contains("--mount=type=secret,id=SSL_CERT_FILE"));
-        assert!(!lines[2].contains("--mount=type=secret,id=SSL_CERT_FILE"));
-        assert!(!lines[3].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        let run_line = lines[1];
+
+        // Should have SSL mounts and both original bind mounts
+        assert!(run_line.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(run_line.contains("--mount=type=bind,source=pyproject.toml,target=pyproject.toml"));
+        assert!(run_line.contains("--mount=type=bind,source=uv.lock,target=uv.lock"));
+
+        // export should come AFTER all mount flags
+        assert!(run_line.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+
+        // The command should be present
+        assert!(run_line.contains("uv sync --locked"));
+
+        // Verify order: RUN, then all --mount flags, then export, then command
+        let export_pos = run_line.find("export").expect("Should contain export");
+        let pyproject_mount_pos = run_line
+            .find("--mount=type=bind,source=pyproject.toml")
+            .expect("Should contain pyproject mount");
+        let uvlock_mount_pos = run_line
+            .find("--mount=type=bind,source=uv.lock")
+            .expect("Should contain uv.lock mount");
+        let command_pos = run_line.find("uv sync").expect("Should contain uv sync");
+
+        // Both mounts should come before export
+        assert!(
+            pyproject_mount_pos < export_pos,
+            "pyproject mount should come before export"
+        );
+        assert!(
+            uvlock_mount_pos < export_pos,
+            "uv.lock mount should come before export"
+        );
+        // Export should come before command
+        assert!(
+            export_pos < command_pos,
+            "export should come before command"
+        );
+
+        println!("Generated line: {}", run_line);
     }
 }
