@@ -678,6 +678,7 @@ impl SnowflakeOAuthProvisioner {
   OAUTH_ISSUE_REFRESH_TOKENS = TRUE
   OAUTH_REFRESH_TOKEN_VALIDITY = {refresh_token_validity}
   OAUTH_ENFORCE_PKCE = TRUE
+  OAUTH_USE_SECONDARY_ROLES = IMPLICIT
   BLOCKED_ROLES_LIST = ({blocked_roles})"#,
             integration_name = integration_name_escaped,
             redirect_uri = redirect_uri_escaped,
@@ -1356,6 +1357,11 @@ client_secret_env_var: SNOWFLAKE_CLIENT_SECRET  # Default if not specified
 The provisioner tests the Snowflake connection before creating the integration to catch
 credential issues early. If the test fails, the extension will transition to Failed state
 with an error message.
+
+## Secondary Roles
+
+The integration is created with `OAUTH_USE_SECONDARY_ROLES = IMPLICIT`, which enables
+secondary roles for OAuth sessions. This allows users to use multiple roles in their session.
 
 Deletion removes all resources: Snowflake integration, OAuth extension, and environment variables.
 "#
