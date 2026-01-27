@@ -7,8 +7,9 @@ use std::path::PathBuf;
 #[derive(Debug, Deserialize)]
 struct EnvVarResponse {
     key: String,
-    value: String, // Will be masked ("••••••••") for secrets
+    value: String, // Will be masked ("••••••••") for non-retrievable secrets
     is_secret: bool,
+    is_retrievable: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -21,6 +22,8 @@ struct SetEnvVarRequest {
     value: String,
     #[serde(default)]
     is_secret: bool,
+    #[serde(default)]
+    is_retrievable: bool,
 }
 
 /// Fetch environment variables from a project (internal helper)
@@ -87,27 +90,67 @@ pub async fn fetch_non_secret_env_vars(
     Ok(env_vars)
 }
 
-/// Fetch environment variables from a project, returning non-secret vars and the list of secret var keys
+/// Fetch environment variables from a project, returning:
+/// - Non-secret vars (always available)
+/// - Retrievable secret vars (decrypted values)
+/// - Non-retrievable secret keys (cannot be loaded)
 pub async fn fetch_env_vars_with_secret_list(
     http_client: &Client,
     backend_url: &str,
     token: &str,
     project: &str,
-) -> Result<(Vec<(String, String)>, Vec<String>)> {
-    let env_response = fetch_env_vars_response(http_client, backend_url, token, project).await?;
+) -> Result<(Vec<(String, String)>, Vec<(String, String)>, Vec<String>)> {
+    // Fetch with retrievable values included
+    let url = format!(
+        "{}/api/v1/projects/{}/env?include_retrievable_values=true",
+        backend_url, project
+    );
+
+    let response = http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .context("Failed to fetch environment variables")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to fetch environment variables (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    let env_response: EnvVarsResponse = response
+        .json()
+        .await
+        .context("Failed to parse environment variables response")?;
 
     let mut non_secret_vars = Vec::new();
-    let mut secret_keys = Vec::new();
+    let mut retrievable_secrets = Vec::new();
+    let mut non_retrievable_keys = Vec::new();
 
     for var in env_response.env_vars {
         if var.is_secret {
-            secret_keys.push(var.key);
+            if var.is_retrievable {
+                // Retrievable secret with decrypted value
+                retrievable_secrets.push((var.key, var.value));
+            } else {
+                // Non-retrievable secret (value is masked)
+                non_retrievable_keys.push(var.key);
+            }
         } else {
+            // Non-secret variable
             non_secret_vars.push((var.key, var.value));
         }
     }
 
-    Ok((non_secret_vars, secret_keys))
+    Ok((non_secret_vars, retrievable_secrets, non_retrievable_keys))
 }
 
 /// Set an environment variable for a project
@@ -119,12 +162,14 @@ pub async fn set_env(
     key: &str,
     value: &str,
     is_secret: bool,
+    is_retrievable: bool,
 ) -> Result<()> {
     let url = format!("{}/api/v1/projects/{}/env/{}", backend_url, project, key);
 
     let payload = SetEnvVarRequest {
         value: value.to_string(),
         is_secret,
+        is_retrievable,
     };
 
     let response = http_client
@@ -148,7 +193,15 @@ pub async fn set_env(
         );
     }
 
-    let var_type = if is_secret { "secret" } else { "plain text" };
+    let var_type = if is_secret {
+        if is_retrievable {
+            "retrievable secret"
+        } else {
+            "secret"
+        }
+    } else {
+        "plain text"
+    };
     println!(
         "✓ Set {} variable '{}' for project '{}'",
         var_type, key, project
@@ -183,14 +236,25 @@ pub async fn list_env(
             Cell::new("KEY").add_attribute(Attribute::Bold),
             Cell::new("VALUE").add_attribute(Attribute::Bold),
             Cell::new("TYPE").add_attribute(Attribute::Bold),
+            Cell::new("RETRIEVABLE").add_attribute(Attribute::Bold),
         ]);
 
     for var in env_vars_response.env_vars {
         let var_type = if var.is_secret { "secret" } else { "plain" };
+        let retrievable = if var.is_secret {
+            if var.is_retrievable {
+                "yes"
+            } else {
+                "no"
+            }
+        } else {
+            "-"
+        };
         table.add_row(vec![
             Cell::new(&var.key),
             Cell::new(&var.value),
             Cell::new(var_type),
+            Cell::new(retrievable),
         ]);
     }
 
@@ -311,6 +375,7 @@ pub async fn import_env(
             key,
             value,
             is_secret,
+            false, // is_retrievable (not supported for bulk import)
         )
         .await
         {

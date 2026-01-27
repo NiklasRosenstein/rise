@@ -106,32 +106,49 @@ pub async fn run_locally(
                 )
                 .await
                 {
-                    Ok((env_vars, secret_keys)) => {
+                    Ok((non_secret_vars, retrievable_secrets, non_retrievable_keys)) => {
                         // Set non-secret environment variables
-                        if !env_vars.is_empty() {
+                        if !non_secret_vars.is_empty() {
                             info!(
                                 "Loading {} non-secret environment variable{} from project '{}'",
-                                env_vars.len(),
-                                if env_vars.len() == 1 { "" } else { "s" },
+                                non_secret_vars.len(),
+                                if non_secret_vars.len() == 1 { "" } else { "s" },
                                 project_name
                             );
-                            for (key, value) in env_vars {
+                            for (key, value) in non_secret_vars {
                                 cmd.arg("-e").arg(format!("{}={}", key, value));
                             }
                         }
 
-                        // Warn about secret variables that cannot be loaded
-                        if !secret_keys.is_empty() {
-                            warn!(
-                                "Project '{}' has {} secret environment variable{} that cannot be loaded automatically:",
-                                project_name,
-                                secret_keys.len(),
-                                if secret_keys.len() == 1 { "" } else { "s" }
+                        // Load retrievable secrets
+                        if !retrievable_secrets.is_empty() {
+                            info!(
+                                "Loading {} retrievable secret{} from project '{}'",
+                                retrievable_secrets.len(),
+                                if retrievable_secrets.len() == 1 {
+                                    ""
+                                } else {
+                                    "s"
+                                },
+                                project_name
                             );
-                            for key in &secret_keys {
+                            for (key, value) in retrievable_secrets {
+                                cmd.arg("-e").arg(format!("{}={}", key, value));
+                            }
+                        }
+
+                        // Warn about non-retrievable secret variables that cannot be loaded
+                        if !non_retrievable_keys.is_empty() {
+                            warn!(
+                                "Project '{}' has {} non-retrievable secret{} that cannot be loaded automatically:",
+                                project_name,
+                                non_retrievable_keys.len(),
+                                if non_retrievable_keys.len() == 1 { "" } else { "s" }
+                            );
+                            for key in &non_retrievable_keys {
                                 warn!("  - {}", key);
                             }
-                            warn!("Provide secret values manually using -r/--run-env if needed");
+                            warn!("Provide values manually using -r/--run-env if needed");
                         }
                     }
                     Err(e) => {

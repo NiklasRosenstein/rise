@@ -452,6 +452,9 @@ enum EnvCommands {
         /// Mark as secret (encrypted at rest)
         #[arg(long)]
         secret: bool,
+        /// Mark secret as retrievable (can be decrypted via API)
+        #[arg(long, short = 'R')]
+        retrievable: bool,
     },
     /// List environment variables for a project
     #[command(visible_alias = "ls")]
@@ -1067,6 +1070,7 @@ async fn main() -> Result<()> {
                     key,
                     value,
                     secret,
+                    retrievable,
                 } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
                     env::set_env(
@@ -1077,6 +1081,7 @@ async fn main() -> Result<()> {
                         key,
                         value,
                         *secret,
+                        *retrievable,
                     )
                     .await?;
                 }
