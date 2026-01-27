@@ -239,12 +239,9 @@ impl OAuthProvider {
 
         // Delete associated Rise client ID env var
         let rise_client_id_ref = format!("OAUTH_RISE_CLIENT_ID_{}", ext.extension.to_uppercase());
-        if let Err(e) = db_env_vars::delete_project_env_var(
-            &self.db_pool,
-            ext.project_id,
-            &rise_client_id_ref,
-        )
-        .await
+        if let Err(e) =
+            db_env_vars::delete_project_env_var(&self.db_pool, ext.project_id, &rise_client_id_ref)
+                .await
         {
             warn!(
                 "Failed to delete Rise client ID env var {} for OAuth extension: {:?}",
