@@ -1,6 +1,7 @@
 use super::models::{
-    AuthorizeFlowQuery, CallbackRequest, OAuthExchangeState, OAuthExtensionSpec,
-    OAuthExtensionStatus, OAuthFlowType, OAuthState, TokenResponse,
+    AuthorizeFlowQuery, CallbackRequest, OAuth2ErrorResponse, OAuth2TokenResponse,
+    OAuthExchangeState, OAuthExtensionSpec, OAuthExtensionStatus, OAuthFlowType, OAuthState,
+    TokenRequest, TokenResponse,
 };
 use crate::db::{extensions as db_extensions, projects as db_projects, user_oauth_tokens};
 use crate::server::state::AppState;
@@ -193,6 +194,20 @@ pub async fn authorize(
         )
     })?;
 
+    // Validate PKCE parameters if provided
+    if req.code_challenge.is_some() {
+        let method = req.code_challenge_method.as_deref().unwrap_or("S256");
+        if method != "S256" && method != "plain" {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Unsupported code_challenge_method '{}'. Only 'S256' and 'plain' are supported.",
+                    method
+                ),
+            ));
+        }
+    }
+
     // Extract session ID from cookie (if present)
     let cookie_header = headers.get(header::COOKIE).and_then(|h| h.to_str().ok());
     let existing_session_id = extract_session_id_from_cookie(cookie_header);
@@ -306,6 +321,9 @@ pub async fn authorize(
                                     extension_name: extension_name.clone(),
                                     session_id: session_id.clone(),
                                     created_at: Utc::now(),
+                                    // No PKCE for cached tokens - user already authenticated
+                                    code_challenge: None,
+                                    code_challenge_method: None,
                                 };
 
                                 // Store exchange token in cache (5-minute TTL)
@@ -425,6 +443,8 @@ pub async fn authorize(
         flow_type: req.flow,
         code_verifier,
         created_at: Utc::now(),
+        client_code_challenge: req.code_challenge,
+        client_code_challenge_method: req.code_challenge_method,
     };
 
     // Store state in cache (TTL configured on cache builder)
@@ -796,6 +816,8 @@ pub async fn callback(
                 extension_name: extension_name.clone(),
                 session_id: session_id.clone(),
                 created_at: Utc::now(),
+                code_challenge: oauth_state.client_code_challenge.clone(),
+                code_challenge_method: oauth_state.client_code_challenge_method.clone(),
             };
 
             // Store exchange token in cache (5-minute TTL, single-use)
@@ -956,5 +978,450 @@ pub async fn exchange_credentials(
         token_type: "Bearer".to_string(),
         expires_at: token.expires_at.unwrap_or_else(Utc::now),
         refresh_token, // Include refresh token for backend apps
+    }))
+}
+
+/// Validate PKCE code_verifier against code_challenge
+/// Returns true if valid, false otherwise
+fn validate_pkce(
+    code_verifier: &str,
+    code_challenge: &str,
+    code_challenge_method: &str,
+) -> bool {
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+
+    match code_challenge_method {
+        "S256" => {
+            // SHA256 hash the verifier
+            let mut hasher = Sha256::new();
+            hasher.update(code_verifier.as_bytes());
+            let hash = hasher.finalize();
+
+            // Base64url encode (no padding)
+            let computed_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash);
+
+            // Constant-time comparison
+            computed_challenge.as_bytes().ct_eq(code_challenge.as_bytes()).into()
+        }
+        "plain" => {
+            // Direct comparison
+            code_verifier.as_bytes().ct_eq(code_challenge.as_bytes()).into()
+        }
+        _ => false,
+    }
+}
+
+/// Create OAuth2 error response
+fn oauth2_error(error: &str, description: Option<String>) -> (StatusCode, Json<OAuth2ErrorResponse>) {
+    let status_code = match error {
+        "invalid_request" => StatusCode::BAD_REQUEST,
+        "invalid_client" => StatusCode::UNAUTHORIZED,
+        "invalid_grant" => StatusCode::BAD_REQUEST,
+        "unsupported_grant_type" => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+
+    (
+        status_code,
+        Json(OAuth2ErrorResponse {
+            error: error.to_string(),
+            error_description: description,
+        }),
+    )
+}
+
+/// RFC 6749-compliant token endpoint
+///
+/// POST /api/v1/projects/{project}/extensions/{extension}/oauth/token
+///
+/// Grant types:
+/// - authorization_code: Exchange authorization code for tokens
+/// - refresh_token: Refresh access token
+///
+/// Client authentication:
+/// - Confidential clients: Use client_id + client_secret
+/// - Public clients: Use client_id + code_verifier (PKCE)
+pub async fn token_endpoint(
+    State(state): State<AppState>,
+    Path((project_name, extension_name)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+    body: String,
+) -> Result<Json<OAuth2TokenResponse>, (StatusCode, Json<OAuth2ErrorResponse>)> {
+    debug!(
+        "Token endpoint request for project={}, extension={}",
+        project_name, extension_name
+    );
+
+    // Parse request body (support both form-urlencoded and JSON)
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("application/x-www-form-urlencoded");
+
+    let req: TokenRequest = if content_type.contains("application/json") {
+        serde_json::from_str(&body).map_err(|e| {
+            oauth2_error(
+                "invalid_request",
+                Some(format!("Invalid JSON request body: {}", e)),
+            )
+        })?
+    } else {
+        // Parse as form-urlencoded
+        serde_urlencoded::from_str(&body).map_err(|e| {
+            oauth2_error(
+                "invalid_request",
+                Some(format!("Invalid form-urlencoded request body: {}", e)),
+            )
+        })?
+    };
+
+    // Get project
+    let project = db_projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| {
+            error!("Database error: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?
+        .ok_or_else(|| oauth2_error("invalid_request", Some("Project not found".to_string())))?;
+
+    // Get OAuth extension
+    let extension =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| {
+                error!("Database error: {:?}", e);
+                oauth2_error("server_error", Some("Internal server error".to_string()))
+            })?
+            .ok_or_else(|| {
+                oauth2_error(
+                    "invalid_request",
+                    Some("OAuth extension not configured".to_string()),
+                )
+            })?;
+
+    // Verify extension type
+    if extension.extension_type != "oauth" {
+        return Err(oauth2_error(
+            "invalid_request",
+            Some(format!(
+                "Extension '{}' is not an OAuth extension",
+                extension_name
+            )),
+        ));
+    }
+
+    // Parse spec
+    let spec: OAuthExtensionSpec =
+        serde_json::from_value(extension.spec.clone()).map_err(|e| {
+            error!("Invalid extension spec: {:?}", e);
+            oauth2_error("server_error", Some("Invalid extension configuration".to_string()))
+        })?;
+
+    // Validate client_id
+    let rise_client_id = spec.rise_client_id.as_ref().ok_or_else(|| {
+        error!("Rise client ID not configured for extension");
+        oauth2_error(
+            "server_error",
+            Some("OAuth extension not fully configured".to_string()),
+        )
+    })?;
+
+    if &req.client_id != rise_client_id {
+        return Err(oauth2_error("invalid_client", Some("Invalid client_id".to_string())));
+    }
+
+    // Validate client authentication (either client_secret or code_verifier)
+    let has_client_secret = req.client_secret.is_some();
+    let has_code_verifier = req.code_verifier.is_some();
+
+    if !has_client_secret && !has_code_verifier {
+        return Err(oauth2_error(
+            "invalid_request",
+            Some("Missing client authentication: provide either client_secret (confidential clients) or code_verifier (public clients with PKCE)".to_string()),
+        ));
+    }
+
+    // If client_secret provided, validate it
+    if let Some(ref client_secret) = req.client_secret {
+        let rise_client_secret_ref = spec.rise_client_secret_ref.as_ref().ok_or_else(|| {
+            error!("Rise client secret ref not configured");
+            oauth2_error(
+                "server_error",
+                Some("OAuth extension not fully configured".to_string()),
+            )
+        })?;
+
+        // Get stored secret from env vars
+        use crate::db::env_vars as db_env_vars;
+        let env_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id)
+            .await
+            .map_err(|e| {
+                error!("Failed to list env vars: {:?}", e);
+                oauth2_error("server_error", Some("Internal server error".to_string()))
+            })?;
+
+        let env_var = env_vars
+            .iter()
+            .find(|v| v.key == *rise_client_secret_ref)
+            .ok_or_else(|| {
+                error!("Rise client secret env var not found: {}", rise_client_secret_ref);
+                oauth2_error("invalid_client", Some("Client credentials not configured".to_string()))
+            })?;
+
+        // Decrypt stored secret
+        let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
+            error!("Encryption provider not configured");
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?;
+
+        let stored_secret = encryption_provider
+            .decrypt(&env_var.value)
+            .await
+            .map_err(|e| {
+                error!("Failed to decrypt Rise client secret: {:?}", e);
+                oauth2_error("server_error", Some("Internal server error".to_string()))
+            })?;
+
+        // Constant-time comparison
+        use subtle::ConstantTimeEq;
+        let is_valid: bool = client_secret.as_bytes().ct_eq(stored_secret.as_bytes()).into();
+        if !is_valid {
+            return Err(oauth2_error("invalid_client", Some("Invalid client_secret".to_string())));
+        }
+    }
+
+    // Route to grant-specific handlers
+    match req.grant_type.as_str() {
+        "authorization_code" => {
+            handle_authorization_code_grant(state, project, extension_name, spec, req).await
+        }
+        "refresh_token" => {
+            handle_refresh_token_grant(state, project, extension_name, spec, req).await
+        }
+        _ => Err(oauth2_error(
+            "unsupported_grant_type",
+            Some(format!("Unsupported grant_type: {}", req.grant_type)),
+        )),
+    }
+}
+
+/// Handle authorization_code grant type
+async fn handle_authorization_code_grant(
+    state: AppState,
+    project: crate::db::models::Project,
+    extension_name: String,
+    spec: OAuthExtensionSpec,
+    req: TokenRequest,
+) -> Result<Json<OAuth2TokenResponse>, (StatusCode, Json<OAuth2ErrorResponse>)> {
+    // Validate required parameters
+    let code = req.code.ok_or_else(|| {
+        oauth2_error(
+            "invalid_request",
+            Some("Missing required parameter: code".to_string()),
+        )
+    })?;
+
+    // Retrieve and invalidate exchange token (single-use)
+    let exchange_state = state
+        .oauth_exchange_store
+        .remove(&code)
+        .await
+        .ok_or_else(|| {
+            oauth2_error(
+                "invalid_grant",
+                Some("Invalid or expired authorization code".to_string()),
+            )
+        })?;
+
+    // Verify project and extension match
+    if exchange_state.project_id != project.id || exchange_state.extension_name != extension_name {
+        return Err(oauth2_error(
+            "invalid_grant",
+            Some("Authorization code mismatch".to_string()),
+        ));
+    }
+
+    // PKCE validation if code_challenge was provided during authorization
+    if let Some(ref code_challenge) = exchange_state.code_challenge {
+        // PKCE flow - require code_verifier
+        let code_verifier = req.code_verifier.ok_or_else(|| {
+            oauth2_error(
+                "invalid_request",
+                Some("Missing code_verifier for PKCE flow".to_string()),
+            )
+        })?;
+
+        let code_challenge_method = exchange_state
+            .code_challenge_method
+            .as_deref()
+            .unwrap_or("S256");
+
+        if !validate_pkce(&code_verifier, code_challenge, code_challenge_method) {
+            return Err(oauth2_error(
+                "invalid_grant",
+                Some("PKCE validation failed".to_string()),
+            ));
+        }
+
+        debug!("PKCE validation successful");
+    } else {
+        // Non-PKCE flow - client_secret must have been validated already
+        if req.client_secret.is_none() {
+            return Err(oauth2_error(
+                "invalid_client",
+                Some("Client authentication required".to_string()),
+            ));
+        }
+    }
+
+    // Get tokens from database
+    let token =
+        user_oauth_tokens::get_by_session(&state.db_pool, project.id, &extension_name, &exchange_state.session_id)
+            .await
+            .map_err(|e| {
+                error!("Failed to get OAuth token from database: {:?}", e);
+                oauth2_error("server_error", Some("Internal server error".to_string()))
+            })?
+            .ok_or_else(|| {
+                oauth2_error(
+                    "invalid_grant",
+                    Some("OAuth session not found or expired".to_string()),
+                )
+            })?;
+
+    // Decrypt tokens
+    let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
+        error!("Encryption provider not configured");
+        oauth2_error("server_error", Some("Internal server error".to_string()))
+    })?;
+
+    let access_token = encryption_provider
+        .decrypt(&token.access_token_encrypted)
+        .await
+        .map_err(|e| {
+            error!("Failed to decrypt access token: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?;
+
+    let refresh_token = if let Some(ref encrypted) = token.refresh_token_encrypted {
+        Some(encryption_provider.decrypt(encrypted).await.map_err(|e| {
+            error!("Failed to decrypt refresh token: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?)
+    } else {
+        None
+    };
+
+    let id_token = if let Some(ref encrypted) = token.id_token_encrypted {
+        Some(encryption_provider.decrypt(encrypted).await.map_err(|e| {
+            error!("Failed to decrypt ID token: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?)
+    } else {
+        None
+    };
+
+    // Calculate expires_in (seconds from now)
+    let expires_in = token.expires_at.map(|expires_at| {
+        let now = Utc::now();
+        let duration = expires_at.signed_duration_since(now);
+        duration.num_seconds().max(0) // Don't return negative values
+    });
+
+    // Build scope from extension spec
+    let scope = if spec.scopes.is_empty() {
+        None
+    } else {
+        Some(spec.scopes.join(" "))
+    };
+
+    info!(
+        "Authorization code grant successful for project {} extension {}",
+        project.name, extension_name
+    );
+
+    Ok(Json(OAuth2TokenResponse {
+        access_token,
+        token_type: "Bearer".to_string(),
+        expires_in,
+        refresh_token,
+        scope,
+        id_token,
+    }))
+}
+
+/// Handle refresh_token grant type
+async fn handle_refresh_token_grant(
+    state: AppState,
+    project: crate::db::models::Project,
+    extension_name: String,
+    spec: OAuthExtensionSpec,
+    req: TokenRequest,
+) -> Result<Json<OAuth2TokenResponse>, (StatusCode, Json<OAuth2ErrorResponse>)> {
+    // Validate required parameters
+    let refresh_token = req.refresh_token.ok_or_else(|| {
+        oauth2_error(
+            "invalid_request",
+            Some("Missing required parameter: refresh_token".to_string()),
+        )
+    })?;
+
+    // Call OAuth provider's refresh_token method
+    use super::provider::{OAuthProvider, OAuthProviderConfig};
+
+    let oauth_provider = OAuthProvider::new(OAuthProviderConfig {
+        db_pool: state.db_pool.clone(),
+        encryption_provider: state.encryption_provider.clone().ok_or_else(|| {
+            error!("Encryption provider not configured");
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?,
+        http_client: reqwest::Client::new(),
+        api_domain: state.public_url.clone(),
+    });
+
+    // Get upstream OAuth client secret
+    let client_secret = oauth_provider
+        .resolve_client_secret(project.id, &spec.client_secret_ref)
+        .await
+        .map_err(|e| {
+            error!("Failed to resolve OAuth client secret: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?;
+
+    // Refresh tokens with upstream provider
+    let token_response = oauth_provider
+        .refresh_token(&spec, &client_secret, &refresh_token)
+        .await
+        .map_err(|e| {
+            error!("Failed to refresh token with upstream provider: {:?}", e);
+            oauth2_error(
+                "invalid_grant",
+                Some("Failed to refresh token".to_string()),
+            )
+        })?;
+
+    // Calculate expires_in
+    let expires_in = Some(token_response.expires_in);
+
+    // Build scope
+    let scope = if spec.scopes.is_empty() {
+        None
+    } else {
+        Some(spec.scopes.join(" "))
+    };
+
+    info!(
+        "Refresh token grant successful for project {} extension {}",
+        project.name, extension_name
+    );
+
+    Ok(Json(OAuth2TokenResponse {
+        access_token: token_response.access_token,
+        token_type: token_response.token_type,
+        expires_in,
+        refresh_token: token_response.refresh_token,
+        scope,
+        id_token: token_response.id_token,
     }))
 }

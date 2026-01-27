@@ -142,6 +142,8 @@ rustls = { version = "0.23", features = ["ring"], optional = true }
 
 # Snowflake feature dependencies
 snowflake-connector-rs = { version = "0.4", optional = true }
+subtle = "2.6.1"
+serde_urlencoded = "0.7.1"
 
 [dev-dependencies]
 tempfile = "3.0"

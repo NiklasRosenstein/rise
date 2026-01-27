@@ -7,28 +7,36 @@ Rise's Generic OAuth 2.0 extension enables end-user authentication with any OAut
 **Key Features:**
 
 - **Generic Provider Support**: Works with any OAuth 2.0 compliant provider
-- **Dual Flow Support**: Fragment-based (SPAs) and exchange token (backend apps)
+- **Multiple Flow Support**:
+  - Fragment-based (SPAs, deprecated)
+  - PKCE (SPAs, recommended)
+  - Token endpoint with client credentials (backend apps, RFC 6749-compliant)
 - **Secure Token Storage**: Encrypted user tokens with automatic refresh
 - **Session Management**: Browser cookie-based session tracking
 - **No Client Secret Exposure**: Secrets stored as encrypted environment variables on Rise
+- **Standards Compliant**: RFC 6749 (OAuth 2.0) and RFC 7636 (PKCE) support
 
 **Security Model:**
 
-- Client secrets never leave Rise backend
+- Client secrets never leave Rise backend (both upstream OAuth and Rise client credentials)
 - User tokens encrypted at rest in database
 - OAuth state tokens prevent CSRF attacks
-- Exchange tokens single-use with 5-minute TTL
+- Authorization codes single-use with 5-minute TTL
 - Session-based token caching per user
+- PKCE support for public clients (SPAs) prevents code interception attacks
+- Constant-time comparison for all secret validation
 
 ## OAuth Flows
 
-Rise supports two OAuth flows to accommodate different application architectures:
+Rise supports multiple OAuth flows to accommodate different application architectures:
 
-### Fragment Flow (Default - For SPAs)
+### Fragment Flow (DEPRECATED - For SPAs)
+
+**⚠️ DEPRECATED:** This flow is deprecated in favor of the PKCE flow (see below). It will be removed in a future major version. Please migrate to PKCE for better security and standards compliance.
 
 Best for single-page applications (React, Vue, Angular) where tokens are handled in JavaScript.
 
-**Security:** Tokens delivered in URL fragment (`#`) which is never sent to server - no server logs, no Referer leakage.
+**Security:** Tokens delivered in URL fragment (`#`) which is never sent to server - no server logs, no Referer leakage. However, this is a non-standard approach and has known security concerns.
 
 ```
 ┌──────────────┐                                           ┌──────────────┐
@@ -115,7 +123,116 @@ function extractTokens() {
 }
 ```
 
-### Exchange Flow (For Backend Apps)
+### PKCE Flow (RECOMMENDED - For SPAs)
+
+Best for single-page applications (React, Vue, Angular) using RFC 7636 Proof Key for Code Exchange (PKCE). This is the **recommended approach** for SPAs, providing better security than the deprecated fragment flow.
+
+**Security:** PKCE prevents authorization code interception attacks by requiring the client to prove it initiated the OAuth flow. No client secret needed (SPAs can't securely store secrets).
+
+**Usage Example:**
+
+```javascript
+// 1. Generate PKCE verifier and challenge
+function generateRandomString(length) {
+  const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+  const randomValues = new Uint8Array(length);
+  crypto.getRandomValues(randomValues);
+  return Array.from(randomValues)
+    .map(v => charset[v % charset.length])
+    .join('');
+}
+
+async function sha256(plain) {
+  const encoder = new TextEncoder();
+  const data = encoder.encode(plain);
+  return await crypto.subtle.digest('SHA-256', data);
+}
+
+function base64urlEncode(arrayBuffer) {
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = '';
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i]);
+  }
+  return btoa(binary)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=/g, '');
+}
+
+async function generatePKCE() {
+  const codeVerifier = generateRandomString(128);
+  const hashed = await sha256(codeVerifier);
+  const codeChallenge = base64urlEncode(hashed);
+  return { codeVerifier, codeChallenge };
+}
+
+// 2. Initiate OAuth login with PKCE
+async function login() {
+  const { codeVerifier, codeChallenge } = await generatePKCE();
+
+  // Store verifier for later use
+  sessionStorage.setItem('pkce_verifier', codeVerifier);
+
+  // Start OAuth flow with code_challenge
+  const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize' +
+    `?code_challenge=${codeChallenge}&code_challenge_method=S256`;
+
+  window.location.href = authUrl;
+}
+
+// 3. After callback, exchange code for tokens
+async function handleCallback() {
+  const urlParams = new URLSearchParams(window.location.search);
+  const code = urlParams.get('code');  // Authorization code from callback
+  const verifier = sessionStorage.getItem('pkce_verifier');
+
+  if (!code || !verifier) {
+    throw new Error('Missing code or verifier');
+  }
+
+  // Exchange code for tokens using PKCE
+  const response = await fetch(
+    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: 'OAUTH_RISE_CLIENT_ID_oauth-google',  // Can be public
+        code_verifier: verifier
+      })
+    }
+  );
+
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(`OAuth error: ${error.error} - ${error.error_description}`);
+  }
+
+  const tokens = await response.json();
+  // tokens = {
+  //   access_token: "...",
+  //   token_type: "Bearer",
+  //   expires_in: 3600,  // seconds
+  //   refresh_token: "...",
+  //   scope: "email profile",
+  //   id_token: "..."
+  // }
+
+  // Store tokens
+  localStorage.setItem('oauth_tokens', JSON.stringify(tokens));
+
+  // Clean up
+  sessionStorage.removeItem('pkce_verifier');
+  window.history.replaceState(null, '', window.location.pathname);
+
+  return tokens;
+}
+```
+
+### Token Endpoint Flow (For Backend Apps)
 
 Best for server-rendered applications (Ruby on Rails, Django, Express) where tokens should be handled server-side.
 
@@ -185,26 +302,51 @@ Best for server-rendered applications (Ruby on Rails, Django, Express) where tok
        v
 ```
 
-**Usage Example:**
+**Usage Example (RFC 6749-compliant with client credentials):**
 
 ```ruby
 # Rails controller
 class OAuthController < ApplicationController
   def callback
-    # Extract exchange token from query params
-    exchange_token = params[:exchange_token]
+    # Extract authorization code from query params
+    code = params[:code]  # This is the authorization code, not an exchange token
 
-    # Exchange for real tokens
-    response = HTTParty.get(
-      "https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/exchange",
-      query: { exchange_token: exchange_token }
+    # Get Rise client credentials from environment
+    client_id = ENV['OAUTH_RISE_CLIENT_ID_oauth-google']
+    client_secret = ENV['OAUTH_RISE_CLIENT_SECRET_oauth-google']
+
+    # Exchange authorization code for tokens using RFC 6749-compliant endpoint
+    response = HTTParty.post(
+      "https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token",
+      body: {
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: client_id,
+        client_secret: client_secret
+      }
     )
 
-    credentials = JSON.parse(response.body)
+    if response.code != 200
+      error = JSON.parse(response.body)
+      Rails.logger.error("OAuth token exchange failed: #{error['error']} - #{error['error_description']}")
+      redirect_to root_path, alert: 'Authentication failed'
+      return
+    end
+
+    tokens = JSON.parse(response.body)
+    # tokens = {
+    #   "access_token" => "...",
+    #   "token_type" => "Bearer",
+    #   "expires_in" => 3600,  # seconds from now
+    #   "refresh_token" => "...",
+    #   "scope" => "email profile",
+    #   "id_token" => "..."
+    # }
 
     # Store in session (HttpOnly cookie)
-    session[:oauth_access_token] = credentials['access_token']
-    session[:oauth_expires_at] = credentials['expires_at']
+    session[:oauth_access_token] = tokens['access_token']
+    session[:oauth_expires_at] = Time.now + tokens['expires_in'].seconds
+    session[:oauth_refresh_token] = tokens['refresh_token']
 
     # Redirect to app
     redirect_to root_path
@@ -215,18 +357,47 @@ end
 ```javascript
 // Express/Node.js
 app.get('/oauth/callback', async (req, res) => {
-  const { exchange_token } = req.query;
+  const { code } = req.query;  // Authorization code from callback
 
-  // Exchange for real tokens
+  // Get Rise client credentials from environment
+  const clientId = process.env.OAUTH_RISE_CLIENT_ID_oauth_google;
+  const clientSecret = process.env.OAUTH_RISE_CLIENT_SECRET_oauth_google;
+
+  // Exchange authorization code for tokens
   const response = await fetch(
-    `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/exchange?exchange_token=${exchange_token}`
+    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: clientId,
+        client_secret: clientSecret
+      })
+    }
   );
 
-  const credentials = await response.json();
+  if (!response.ok) {
+    const error = await response.json();
+    console.error(`OAuth token exchange failed: ${error.error} - ${error.error_description}`);
+    return res.redirect('/?error=auth_failed');
+  }
+
+  const tokens = await response.json();
+  // tokens = {
+  //   access_token: "...",
+  //   token_type: "Bearer",
+  //   expires_in: 3600,  // seconds from now
+  //   refresh_token: "...",
+  //   scope: "email profile",
+  //   id_token: "..."
+  // }
 
   // Store in session
-  req.session.oauthAccessToken = credentials.access_token;
-  req.session.oauthExpiresAt = credentials.expires_at;
+  req.session.oauthAccessToken = tokens.access_token;
+  req.session.oauthExpiresAt = new Date(Date.now() + tokens.expires_in * 1000);
+  req.session.oauthRefreshToken = tokens.refresh_token;
 
   res.redirect('/');
 });
@@ -516,7 +687,76 @@ HTTP/1.1 302 Found
 Location: https://my-app.rise.dev/callback?exchange_token=abc123...
 ```
 
-### Exchange Credentials Endpoint
+### Token Endpoint (RFC 6749-compliant)
+
+**Recommended:** This is the standards-compliant OAuth 2.0 token endpoint.
+
+```
+POST /api/v1/projects/{project}/extensions/{extension}/oauth/token
+Content-Type: application/x-www-form-urlencoded
+```
+
+**Request Parameters (form-urlencoded or JSON):**
+
+**For authorization_code grant (exchange code for tokens):**
+- `grant_type` (required): Must be `"authorization_code"`
+- `code` (required): Authorization code from callback
+- `client_id` (required): Rise client ID from environment variable `OAUTH_RISE_CLIENT_ID_{extension}`
+- **Confidential clients (backend apps):**
+  - `client_secret` (required): Rise client secret from environment variable `OAUTH_RISE_CLIENT_SECRET_{extension}`
+- **Public clients (SPAs with PKCE):**
+  - `code_verifier` (required): PKCE code verifier (proves client initiated the flow)
+
+**For refresh_token grant (refresh access token):**
+- `grant_type` (required): Must be `"refresh_token"`
+- `refresh_token` (required): Refresh token from previous token response
+- `client_id` (required): Rise client ID
+- `client_secret` (required): Rise client secret (confidential clients)
+
+**Response (RFC 6749 format):**
+```json
+{
+  "access_token": "eyJhbGc...",
+  "token_type": "Bearer",
+  "expires_in": 3600,  // Seconds from now (not timestamp)
+  "refresh_token": "eyJhbGc...",  // Optional
+  "scope": "email profile",  // Optional, space-delimited
+  "id_token": "eyJhbGc..."  // Optional, OIDC
+}
+```
+
+**Error Response (RFC 6749 format):**
+```json
+{
+  "error": "invalid_grant",
+  "error_description": "Invalid or expired authorization code"
+}
+```
+
+**Error Codes:**
+- `invalid_request` (400): Missing or invalid parameters
+- `invalid_client` (401): Invalid client_id or client_secret
+- `invalid_grant` (400): Invalid/expired code, or PKCE validation failed
+- `unsupported_grant_type` (400): Unknown grant_type
+- `server_error` (500): Internal server error
+
+**Client Credentials:**
+
+Rise automatically generates client credentials when you create an OAuth extension:
+- `OAUTH_RISE_CLIENT_ID_{extension}` - Client ID (plaintext, can be public for PKCE flows)
+- `OAUTH_RISE_CLIENT_SECRET_{extension}` - Client secret (encrypted, for confidential clients)
+
+These are available as environment variables in your deployed applications.
+
+**Security:**
+- Client secret validated with constant-time comparison
+- PKCE code_verifier validated against code_challenge (SHA-256 hash)
+- Authorization codes are single-use with 5-minute TTL
+- All tokens encrypted at rest
+
+### Exchange Credentials Endpoint (DEPRECATED)
+
+**⚠️ DEPRECATED:** This endpoint is deprecated in favor of the standards-compliant `/token` endpoint above. It is kept for backwards compatibility but may be removed in a future major version.
 
 ```
 GET /api/v1/projects/{project}/extensions/{extension}/oauth/exchange?exchange_token=...
@@ -530,7 +770,7 @@ GET /api/v1/projects/{project}/extensions/{extension}/oauth/exchange?exchange_to
 {
   "access_token": "eyJhbGc...",
   "token_type": "Bearer",
-  "expires_at": "2025-12-19T12:00:00Z",
+  "expires_at": "2025-12-19T12:00:00Z",  // Note: timestamp, not expires_in
   "refresh_token": "eyJhbGc..." // optional
 }
 ```
@@ -538,3 +778,5 @@ GET /api/v1/projects/{project}/extensions/{extension}/oauth/exchange?exchange_to
 **Error Responses:**
 - `400 Bad Request`: Missing or invalid exchange token
 - `404 Not Found`: Token expired, already used, or never existed
+
+**Migration Guide:** Replace GET `/oauth/exchange` with POST `/oauth/token` using `grant_type=authorization_code` and client credentials.

@@ -39,6 +39,16 @@ impl Clone for OAuthProvider {
     }
 }
 
+/// Generate a secure random token for Rise client secret (32 bytes, base64url encoded)
+fn generate_rise_client_secret() -> String {
+    use base64::Engine;
+    use rand::Rng;
+
+    let mut rng = rand::thread_rng();
+    let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
 impl OAuthProvider {
     pub fn new(config: OAuthProviderConfig) -> Self {
         Self {
@@ -206,7 +216,7 @@ impl OAuthProvider {
         let spec: OAuthExtensionSpec =
             serde_json::from_value(ext.spec).context("Failed to parse OAuth extension spec")?;
 
-        // Delete associated environment variable (client secret)
+        // Delete associated environment variable (upstream OAuth client secret)
         if !spec.client_secret_ref.is_empty() {
             if let Err(e) = db_env_vars::delete_project_env_var(
                 &self.db_pool,
@@ -223,6 +233,27 @@ impl OAuthProvider {
                 info!(
                     "Deleted environment variable {} for OAuth extension",
                     spec.client_secret_ref
+                );
+            }
+        }
+
+        // Delete associated Rise client secret env var
+        if let Some(ref rise_client_secret_ref) = spec.rise_client_secret_ref {
+            if let Err(e) = db_env_vars::delete_project_env_var(
+                &self.db_pool,
+                ext.project_id,
+                rise_client_secret_ref,
+            )
+            .await
+            {
+                warn!(
+                    "Failed to delete Rise client secret env var {} for OAuth extension: {:?}",
+                    rise_client_secret_ref, e
+                );
+            } else {
+                info!(
+                    "Deleted Rise client secret env var {} for OAuth extension",
+                    rise_client_secret_ref
                 );
             }
         }
@@ -300,6 +331,123 @@ impl Extension for OAuthProvider {
         let ext = db_extensions::find_by_project_and_name(db_pool, project_id, extension_name)
             .await?
             .ok_or_else(|| anyhow!("Extension not found"))?;
+
+        // Parse the new spec to check/generate Rise client credentials
+        let mut spec: OAuthExtensionSpec = serde_json::from_value(new_spec.clone())
+            .context("Invalid OAuth extension spec format")?;
+
+        // Generate Rise client credentials if they don't exist
+        let mut spec_updated = false;
+        if spec.rise_client_id.is_none() || spec.rise_client_secret_ref.is_none() {
+            info!(
+                "Generating Rise client credentials for OAuth extension {}/{}",
+                project_id, extension_name
+            );
+
+            // Generate credentials
+            let rise_client_id = Uuid::new_v4().to_string();
+            let rise_client_secret = generate_rise_client_secret();
+            let rise_client_secret_ref =
+                format!("OAUTH_RISE_CLIENT_SECRET_{}", extension_name.to_uppercase());
+
+            // Encrypt the client secret
+            let rise_client_secret_encrypted = self
+                .encryption_provider
+                .encrypt(&rise_client_secret)
+                .await
+                .context("Failed to encrypt Rise client secret")?;
+
+            // Store as environment variable
+            db_env_vars::upsert_project_env_var(
+                db_pool,
+                project_id,
+                &rise_client_secret_ref,
+                &rise_client_secret_encrypted,
+                true, // is_secret
+            )
+            .await
+            .context("Failed to store Rise client secret as environment variable")?;
+
+            info!(
+                "Stored Rise client secret as environment variable: {}",
+                rise_client_secret_ref
+            );
+
+            // Update spec with Rise credentials
+            spec.rise_client_id = Some(rise_client_id);
+            spec.rise_client_secret_ref = Some(rise_client_secret_ref);
+            spec.rise_client_secret_encrypted = Some(rise_client_secret_encrypted.clone());
+
+            spec_updated = true;
+        } else {
+            // Restore Rise client secret env var if missing
+            if let Some(ref rise_client_secret_ref) = spec.rise_client_secret_ref {
+                // Check if env var exists
+                let env_vars = db_env_vars::list_project_env_vars(db_pool, project_id)
+                    .await
+                    .unwrap_or_default();
+                let env_var_exists = env_vars.iter().any(|v| v.key == *rise_client_secret_ref);
+
+                if !env_var_exists {
+                        // Env var is missing, restore from encrypted backup
+                        if let Some(ref encrypted) = spec.rise_client_secret_encrypted {
+                            warn!(
+                                "Rise client secret env var {} missing, restoring from backup",
+                                rise_client_secret_ref
+                            );
+
+                            db_env_vars::upsert_project_env_var(
+                                db_pool,
+                                project_id,
+                                rise_client_secret_ref,
+                                encrypted,
+                                true, // is_secret
+                            )
+                            .await
+                            .context("Failed to restore Rise client secret")?;
+
+                            info!("Restored Rise client secret: {}", rise_client_secret_ref);
+                        } else {
+                            // Both env var and backup missing - regenerate
+                            warn!("Rise client secret and backup both missing, regenerating");
+                            let rise_client_secret = generate_rise_client_secret();
+                            let rise_client_secret_encrypted = self
+                                .encryption_provider
+                                .encrypt(&rise_client_secret)
+                                .await
+                                .context("Failed to encrypt Rise client secret")?;
+
+                            db_env_vars::upsert_project_env_var(
+                                db_pool,
+                                project_id,
+                                rise_client_secret_ref,
+                                &rise_client_secret_encrypted,
+                                true,
+                            )
+                            .await
+                            .context("Failed to store Rise client secret")?;
+
+                            spec.rise_client_secret_encrypted = Some(rise_client_secret_encrypted);
+                            spec_updated = true;
+                        }
+                }
+            }
+        }
+
+        // If spec was updated with Rise credentials, persist it
+        if spec_updated {
+            let updated_spec_value = serde_json::to_value(&spec)
+                .context("Failed to serialize updated OAuth spec")?;
+
+            db_extensions::upsert(db_pool, project_id, extension_name, "oauth", &updated_spec_value)
+                .await
+                .context("Failed to update extension spec with Rise credentials")?;
+
+            info!(
+                "Updated extension spec with Rise client credentials for {}/{}",
+                project_id, extension_name
+            );
+        }
 
         // Parse current status
         let mut status: OAuthExtensionStatus =
