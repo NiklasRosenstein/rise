@@ -512,7 +512,7 @@ function EnvVarsList({ projectName, deploymentId }) {
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingEnvVar, setEditingEnvVar] = useState(null);
-    const [formData, setFormData] = useState({ key: '', value: '', is_secret: false });
+    const [formData, setFormData] = useState({ key: '', value: '', is_secret: false, is_retrievable: false });
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [envVarToDelete, setEnvVarToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
@@ -538,13 +538,13 @@ function EnvVarsList({ projectName, deploymentId }) {
 
     const handleAddClick = () => {
         setEditingEnvVar(null);
-        setFormData({ key: '', value: '', is_secret: false });
+        setFormData({ key: '', value: '', is_secret: false, is_retrievable: false });
         setIsModalOpen(true);
     };
 
     const handleEditClick = (envVar) => {
         setEditingEnvVar(envVar);
-        setFormData({ key: envVar.key, value: envVar.value, is_secret: envVar.is_secret });
+        setFormData({ key: envVar.key, value: envVar.is_secret && !envVar.is_retrievable ? '' : envVar.value, is_secret: envVar.is_secret, is_retrievable: envVar.is_retrievable });
         setIsModalOpen(true);
     };
 
@@ -561,7 +561,7 @@ function EnvVarsList({ projectName, deploymentId }) {
 
         setSaving(true);
         try {
-            await api.setEnvVar(projectName, formData.key, formData.value, formData.is_secret);
+            await api.setEnvVar(projectName, formData.key, formData.value, formData.is_secret, formData.is_retrievable);
             showToast(`Environment variable ${formData.key} ${editingEnvVar ? 'updated' : 'created'} successfully`, 'success');
             setIsModalOpen(false);
             loadEnvVars();
@@ -624,10 +624,37 @@ function EnvVarsList({ projectName, deploymentId }) {
                             envVars.map(env => (
                             <tr key={env.key} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
                                 <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{env.key}</td>
-                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{env.value}</td>
+                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
+                                    <div className="flex items-center gap-2">
+                                        <span>{env.value}</span>
+                                        {env.is_secret && env.is_retrievable && (
+                                            <button
+                                                onClick={async () => {
+                                                    try {
+                                                        const response = await api.getEnvVarValue(projectName, env.key);
+                                                        await navigator.clipboard.writeText(response.value);
+                                                        showToast('Secret copied to clipboard!', 'success');
+                                                    } catch (err) {
+                                                        showToast(`Failed to copy secret: ${err.message}`, 'error');
+                                                        console.error('Failed to fetch secret:', err);
+                                                    }
+                                                }}
+                                                className="text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300 text-base"
+                                                title="Copy secret value to clipboard"
+                                            >
+                                                📋
+                                            </button>
+                                        )}
+                                    </div>
+                                </td>
                                 <td className="px-6 py-4 text-sm">
                                     {env.is_secret ? (
-                                        <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
+                                        <div className="flex gap-1">
+                                            <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
+                                            {env.is_retrievable && (
+                                                <span className="bg-green-600 text-white text-xs font-semibold px-2 py-1 rounded-full uppercase">retrievable</span>
+                                            )}
+                                        </div>
                                     ) : (
                                         <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">plain</span>
                                     )}
@@ -701,9 +728,24 @@ function EnvVarsList({ projectName, deploymentId }) {
                         id="env-is-secret"
                         type="checkbox"
                         value={formData.is_secret}
-                        onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked })}
+                        onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked, is_retrievable: e.target.checked ? formData.is_retrievable : false })}
                         placeholder="Mark as secret (value will be encrypted)"
                     />
+                    {formData.is_secret && (
+                        <>
+                            <FormField
+                                label=""
+                                id="env-is-retrievable"
+                                type="checkbox"
+                                value={formData.is_retrievable}
+                                onChange={(e) => setFormData({ ...formData, is_retrievable: e.target.checked })}
+                                placeholder="Allow retrieval (can be decrypted and copied via API)"
+                            />
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
+                                Warning: Retrievable secrets can be accessed via API. Only enable for development/CI credentials.
+                            </p>
+                        </>
+                    )}
 
                     <div className="flex justify-end gap-3 pt-4">
                         <Button

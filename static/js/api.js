@@ -184,11 +184,15 @@ class RiseAPI {
         return this.request(`/projects/${projectName}/deployments/${deploymentId}/env`);
     }
 
-    async setEnvVar(projectName, key, value, isSecret) {
+    async setEnvVar(projectName, key, value, isSecret, isRetrievable = false) {
         return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}`, {
             method: 'PUT',
-            body: JSON.stringify({ value, is_secret: isSecret })
+            body: JSON.stringify({ value, is_secret: isSecret, is_retrievable: isRetrievable })
         });
+    }
+
+    async getEnvVarValue(projectName, key) {
+        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}/value`);
     }
 
     async deleteEnvVar(projectName, key) {
