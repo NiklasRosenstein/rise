@@ -1,12 +1,13 @@
-use super::models::{EnvVarResponse, EnvVarsResponse, SetEnvVarRequest};
+use super::models::{EnvVarResponse, EnvVarValueResponse, EnvVarsResponse, SetEnvVarRequest};
 use crate::db::models::User;
 use crate::db::{env_vars as db_env_vars, projects};
 use crate::server::state::AppState;
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     Json,
 };
+use std::collections::HashMap;
 
 /// Format an error and its full chain of causes for logging/display
 fn format_error_chain(error: &anyhow::Error) -> String {
@@ -69,6 +70,14 @@ pub async fn set_project_env_var(
         ));
     }
 
+    // Validate: is_retrievable requires is_secret
+    if payload.is_retrievable && !payload.is_secret {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "Cannot mark non-secret variable as retrievable. Set is_secret=true to enable retrieval.".to_string(),
+        ));
+    }
+
     // IMPORTANT: If this is a secret, we must have an encryption provider
     if payload.is_secret && state.encryption_provider.is_none() {
         return Err((
@@ -106,6 +115,7 @@ pub async fn set_project_env_var(
         &key,
         &value_to_store,
         payload.is_secret,
+        payload.is_retrievable,
     )
     .await
     .map_err(|e| {
@@ -116,10 +126,11 @@ pub async fn set_project_env_var(
     })?;
 
     tracing::info!(
-        "Set environment variable '{}' for project '{}' (secret: {}). This will apply to new deployments only.",
+        "Set environment variable '{}' for project '{}' (secret: {}, retrievable: {}). This will apply to new deployments only.",
         key,
         project.name,
-        payload.is_secret
+        payload.is_secret,
+        payload.is_retrievable
     );
 
     // Note: Environment variables are snapshots at deployment time.
@@ -131,6 +142,7 @@ pub async fn set_project_env_var(
         env_var.key,
         env_var.value,
         env_var.is_secret,
+        env_var.is_retrievable,
     )))
 }
 
@@ -139,6 +151,7 @@ pub async fn list_project_env_vars(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(project_id_or_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<EnvVarsResponse>, (StatusCode, String)> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
@@ -179,6 +192,12 @@ pub async fn list_project_env_vars(
         ));
     }
 
+    // Check if we should include retrievable values
+    let include_retrievable = params
+        .get("include_retrievable_values")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
     // Get all environment variables
     let db_env_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id)
         .await
@@ -189,11 +208,49 @@ pub async fn list_project_env_vars(
             )
         })?;
 
-    // Convert to API response, masking secrets
-    let env_vars = db_env_vars
-        .into_iter()
-        .map(|var| EnvVarResponse::from_db_model(var.key, var.value, var.is_secret))
-        .collect();
+    // Convert to API response
+    let mut env_vars = Vec::new();
+    for var in db_env_vars {
+        let value = if include_retrievable && var.is_secret && var.is_retrievable {
+            // Decrypt retrievable secret
+            match &state.encryption_provider {
+                Some(provider) => provider.decrypt(&var.value).await.map_err(|e| {
+                    tracing::error!(
+                        "Failed to decrypt retrievable secret '{}': {:?}",
+                        var.key,
+                        e
+                    );
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to decrypt secret '{}': {}", var.key, e),
+                    )
+                })?,
+                None => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Cannot decrypt secrets: no encryption provider configured".to_string(),
+                    ))
+                }
+            }
+        } else {
+            var.value.clone()
+        };
+
+        env_vars.push(
+            if var.is_secret && !(include_retrievable && var.is_retrievable) {
+                // Mask non-retrievable secrets
+                EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_retrievable)
+            } else {
+                // Return plaintext or decrypted value
+                EnvVarResponse {
+                    key: var.key,
+                    value,
+                    is_secret: var.is_secret,
+                    is_retrievable: var.is_retrievable,
+                }
+            },
+        );
+    }
 
     Ok(Json(EnvVarsResponse { env_vars }))
 }
@@ -278,6 +335,7 @@ pub async fn list_deployment_env_vars(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_id_or_name, deployment_id)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<EnvVarsResponse>, (StatusCode, String)> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
@@ -330,6 +388,12 @@ pub async fn list_deployment_env_vars(
             })?
             .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
 
+    // Check if we should include retrievable values
+    let include_retrievable = params
+        .get("include_retrievable_values")
+        .map(|v| v == "true")
+        .unwrap_or(false);
+
     // Get all deployment environment variables
     let db_env_vars = db_env_vars::list_deployment_env_vars(&state.db_pool, deployment.id)
         .await
@@ -340,11 +404,150 @@ pub async fn list_deployment_env_vars(
             )
         })?;
 
-    // Convert to API response, masking secrets
-    let env_vars = db_env_vars
-        .into_iter()
-        .map(|var| EnvVarResponse::from_db_model(var.key, var.value, var.is_secret))
-        .collect();
+    // Convert to API response
+    let mut env_vars = Vec::new();
+    for var in db_env_vars {
+        let value = if include_retrievable && var.is_secret && var.is_retrievable {
+            // Decrypt retrievable secret
+            match &state.encryption_provider {
+                Some(provider) => provider.decrypt(&var.value).await.map_err(|e| {
+                    tracing::error!(
+                        "Failed to decrypt retrievable secret '{}': {:?}",
+                        var.key,
+                        e
+                    );
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to decrypt secret '{}': {}", var.key, e),
+                    )
+                })?,
+                None => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Cannot decrypt secrets: no encryption provider configured".to_string(),
+                    ))
+                }
+            }
+        } else {
+            var.value.clone()
+        };
+
+        env_vars.push(
+            if var.is_secret && !(include_retrievable && var.is_retrievable) {
+                // Mask non-retrievable secrets
+                EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_retrievable)
+            } else {
+                // Return plaintext or decrypted value
+                EnvVarResponse {
+                    key: var.key,
+                    value,
+                    is_secret: var.is_secret,
+                    is_retrievable: var.is_retrievable,
+                }
+            },
+        );
+    }
 
     Ok(Json(EnvVarsResponse { env_vars }))
+}
+
+/// Get the decrypted value of a specific retrievable secret
+pub async fn get_project_env_var_value(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((project_id_or_name, key)): Path<(String, String)>,
+) -> Result<Json<EnvVarValueResponse>, (StatusCode, String)> {
+    // Find project by ID or name
+    let project = if let Ok(uuid) = project_id_or_name.parse() {
+        projects::find_by_id(&state.db_pool, uuid)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get project: {}", e),
+                )
+            })?
+    } else {
+        projects::find_by_name(&state.db_pool, &project_id_or_name)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get project: {}", e),
+                )
+            })?
+    }
+    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    // Check if user has access to the project
+    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to check project access: {}", e),
+            )
+        })?;
+
+    if !has_access {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "You do not have access to this project".to_string(),
+        ));
+    }
+
+    // Get the specific environment variable
+    let env_var = db_env_vars::get_project_env_var(&state.db_pool, project.id, &key)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get environment variable: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Environment variable '{}' not found", key),
+            )
+        })?;
+
+    // Validate: must be a retrievable secret
+    if !env_var.is_secret || !env_var.is_retrievable {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Environment variable '{}' is not a retrievable secret. Only secrets marked as retrievable can be decrypted.",
+                key
+            ),
+        ));
+    }
+
+    // Decrypt the value
+    let decrypted_value = match &state.encryption_provider {
+        Some(provider) => provider.decrypt(&env_var.value).await.map_err(|e| {
+            tracing::error!("Failed to decrypt retrievable secret '{}': {:?}", key, e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to decrypt secret '{}': {}", key, e),
+            )
+        })?,
+        None => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Cannot decrypt secrets: no encryption provider configured".to_string(),
+            ))
+        }
+    };
+
+    tracing::info!(
+        "Retrieved decrypted value for secret '{}' in project '{}' by user '{}'",
+        key,
+        project.name,
+        user.email
+    );
+
+    Ok(Json(EnvVarValueResponse {
+        value: decrypted_value,
+    }))
 }

@@ -263,6 +263,7 @@ async fn insert_rise_env_vars(
         "RISE_JWKS",
         &jwks_json,
         false, // Not a secret - public keys
+        false, // is_retrievable
     )
     .await
     .map_err(|e| {
@@ -280,6 +281,7 @@ async fn insert_rise_env_vars(
         "RISE_ISSUER",
         &state.public_url,
         false, // Not a secret
+        false, // is_retrievable
     )
     .await
     .map_err(|e| {
@@ -346,6 +348,7 @@ async fn insert_rise_env_vars(
         "RISE_APP_URLS",
         &app_urls_json,
         false, // Not a secret
+        false, // is_retrievable
     )
     .await
     .map_err(|e| {
@@ -363,6 +366,7 @@ async fn insert_rise_env_vars(
         "RISE_APP_URL",
         &canonical_url,
         false, // Not a secret
+        false, // is_retrievable
     )
     .await
     .map_err(|e| {
@@ -732,6 +736,7 @@ pub async fn create_deployment(
             "PORT",
             &final_http_port.to_string(),
             false, // not a secret
+            false, // is_retrievable
         )
         .await
         .map_err(|e| {
@@ -862,6 +867,7 @@ pub async fn create_deployment(
             "PORT",
             &effective_http_port.to_string(),
             false, // not a secret
+            false, // is_retrievable
         )
         .await
         .map_err(|e| {
@@ -960,6 +966,7 @@ pub async fn create_deployment(
             "PORT",
             &effective_http_port.to_string(),
             false, // not a secret
+            false, // is_retrievable
         )
         .await
         .map_err(|e| {

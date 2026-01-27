@@ -867,7 +867,8 @@ impl SnowflakeOAuthProvisioner {
             project_id,
             &env_var_name,
             &client_secret_encrypted,
-            true, // is_secret
+            true,  // is_secret
+            false, // is_retrievable (not needed for OAuth secrets)
         )
         .await
         .context("Failed to create environment variable")?;
