@@ -22,9 +22,4 @@ pub fn oauth_routes() -> Router<AppState> {
             "/projects/{project}/extensions/{extension}/oauth/token",
             post(handlers::token_endpoint),
         )
-        // Legacy exchange endpoint (deprecated, kept for backwards compatibility)
-        .route(
-            "/projects/{project}/extensions/{extension}/oauth/exchange",
-            get(handlers::exchange_credentials),
-        )
 }

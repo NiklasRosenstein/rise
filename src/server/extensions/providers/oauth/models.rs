@@ -96,16 +96,6 @@ pub struct CallbackRequest {
     pub state: String,
 }
 
-/// Response containing OAuth credentials
-#[derive(Debug, Serialize)]
-pub struct CredentialsResponse {
-    pub access_token: String,
-    pub token_type: String,
-    pub expires_at: DateTime<Utc>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub refresh_token: Option<String>,
-}
-
 /// User OAuth token record from database
 #[derive(Debug, Clone, sqlx::FromRow)]
 #[allow(dead_code)]
@@ -142,13 +132,6 @@ pub struct OAuthCodeState {
     /// PKCE code challenge method ("S256" or "plain")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_challenge_method: Option<String>,
-}
-
-/// Request to exchange an authorization code for OAuth credentials (legacy endpoint)
-#[derive(Debug, Deserialize)]
-pub struct ExchangeCodeRequest {
-    /// Authorization code (single-use, short TTL)
-    pub code: String,
 }
 
 /// Query parameter to enable exchange flow
