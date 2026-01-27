@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, project_id, key, value, is_secret, is_retrievable, created_at, updated_at\n        FROM project_env_vars\n        WHERE project_id = $1 AND key = $2\n        ",
+  "query": "\n        SELECT id, project_id, key, value, is_secret, is_protected, created_at, updated_at\n        FROM project_env_vars\n        WHERE project_id = $1\n        ORDER BY key ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -30,7 +30,7 @@
       },
       {
         "ordinal": 5,
-        "name": "is_retrievable",
+        "name": "is_protected",
         "type_info": "Bool"
       },
       {
@@ -46,8 +46,7 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -61,5 +60,5 @@
       false
     ]
   },
-  "hash": "67c9dfa8c03cd25ad048bf9cd62362fabba6e9a2ef3663de7459f04ae5c09d2c"
+  "hash": "893ef7260975ed71f761759369c09ffac7deff431854bc62f826c103f8d73290"
 }

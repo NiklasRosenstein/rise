@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, project_id, key, value, is_secret, is_retrievable, created_at, updated_at\n        FROM project_env_vars\n        WHERE project_id = $1\n        ORDER BY key ASC\n        ",
+  "query": "\n        INSERT INTO project_env_vars (project_id, key, value, is_secret, is_protected)\n        VALUES ($1, $2, $3, $4, $5)\n        ON CONFLICT (project_id, key)\n        DO UPDATE SET\n            value = EXCLUDED.value,\n            is_secret = EXCLUDED.is_secret,\n            is_protected = EXCLUDED.is_protected,\n            updated_at = NOW()\n        RETURNING id, project_id, key, value, is_secret, is_protected, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -30,7 +30,7 @@
       },
       {
         "ordinal": 5,
-        "name": "is_retrievable",
+        "name": "is_protected",
         "type_info": "Bool"
       },
       {
@@ -46,7 +46,11 @@
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool"
       ]
     },
     "nullable": [
@@ -60,5 +64,5 @@
       false
     ]
   },
-  "hash": "6eb4babe2fa7526e2387e27bad586558bfc7ddeed21f3f6df30ddd2bde67f7a9"
+  "hash": "3080a90466ac988ec28ed8dfa7ef6a75a0e418adc54bc4f8a27bf54e20602481"
 }
