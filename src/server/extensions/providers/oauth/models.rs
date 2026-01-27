@@ -124,17 +124,17 @@ pub struct UserOAuthToken {
     pub updated_at: DateTime<Utc>,
 }
 
-/// Exchange token state for secure backend flow
-/// Temporary state linking an exchange token to a user's OAuth session
+/// Authorization code state for OAuth 2.0 flow
+/// Temporary state linking an authorization code to a user's OAuth session
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OAuthExchangeState {
+pub struct OAuthCodeState {
     /// Project ID
     pub project_id: Uuid,
     /// Extension name
     pub extension_name: String,
     /// Session ID from OAuth flow
     pub session_id: String,
-    /// When this exchange token was created
+    /// When this authorization code was created
     pub created_at: DateTime<Utc>,
     /// PKCE code challenge from client (if PKCE flow)
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -144,10 +144,10 @@ pub struct OAuthExchangeState {
     pub code_challenge_method: Option<String>,
 }
 
-/// Request to exchange a temporary token for OAuth credentials
+/// Request to exchange an authorization code for OAuth credentials (legacy endpoint)
 #[derive(Debug, Deserialize)]
-pub struct ExchangeTokenRequest {
-    /// Temporary exchange token (single-use, short TTL)
+pub struct ExchangeCodeRequest {
+    /// Authorization code (single-use, short TTL)
     pub exchange_token: String,
 }
 
