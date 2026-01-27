@@ -544,7 +544,7 @@ function EnvVarsList({ projectName, deploymentId }) {
 
     const handleEditClick = (envVar) => {
         setEditingEnvVar(envVar);
-        setFormData({ key: envVar.key, value: envVar.is_secret && envVar.is_protected ? '' : envVar.value, is_secret: envVar.is_secret, is_protected: envVar.is_protected });
+        setFormData({ key: envVar.key, value: envVar.is_secret ? '' : envVar.value, is_secret: envVar.is_secret, is_protected: envVar.is_protected });
         setIsModalOpen(true);
     };
 
