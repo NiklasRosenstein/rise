@@ -298,8 +298,18 @@
                 }
                 sessionStorage.removeItem('pkce_code_verifier');
 
-                // Get Rise client ID from environment (public, no secret needed for PKCE)
-                const riseClientId = `OAUTH_RISE_CLIENT_ID_${CONFIG.extensionName}`;
+                // Fetch Rise client ID from extension spec (public, no authentication needed)
+                // For production apps, you could hardcode this value in your config
+                const extUrl = new URL(
+                    `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}`,
+                    CONFIG.riseApiUrl
+                );
+                const extResponse = await fetch(extUrl);
+                if (!extResponse.ok) {
+                    throw new Error('Failed to fetch extension details');
+                }
+                const extension = await extResponse.json();
+                const riseClientId = extension.spec.rise_client_id;
 
                 // Exchange authorization code for tokens using PKCE
                 const tokenUrl = new URL(

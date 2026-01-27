@@ -237,6 +237,26 @@ impl OAuthProvider {
             }
         }
 
+        // Delete associated Rise client ID env var
+        let rise_client_id_ref = format!("OAUTH_RISE_CLIENT_ID_{}", ext.extension.to_uppercase());
+        if let Err(e) = db_env_vars::delete_project_env_var(
+            &self.db_pool,
+            ext.project_id,
+            &rise_client_id_ref,
+        )
+        .await
+        {
+            warn!(
+                "Failed to delete Rise client ID env var {} for OAuth extension: {:?}",
+                rise_client_id_ref, e
+            );
+        } else {
+            info!(
+                "Deleted Rise client ID env var {} for OAuth extension",
+                rise_client_id_ref
+            );
+        }
+
         // Delete associated Rise client secret env var
         if let Some(ref rise_client_secret_ref) = spec.rise_client_secret_ref {
             if let Err(e) = db_env_vars::delete_project_env_var(
@@ -347,6 +367,8 @@ impl Extension for OAuthProvider {
             // Generate credentials
             let rise_client_id = Uuid::new_v4().to_string();
             let rise_client_secret = generate_rise_client_secret();
+            let rise_client_id_ref =
+                format!("OAUTH_RISE_CLIENT_ID_{}", extension_name.to_uppercase());
             let rise_client_secret_ref =
                 format!("OAUTH_RISE_CLIENT_SECRET_{}", extension_name.to_uppercase());
 
@@ -357,7 +379,18 @@ impl Extension for OAuthProvider {
                 .await
                 .context("Failed to encrypt Rise client secret")?;
 
-            // Store as environment variable
+            // Store client ID as environment variable (plaintext, not secret)
+            db_env_vars::upsert_project_env_var(
+                db_pool,
+                project_id,
+                &rise_client_id_ref,
+                &rise_client_id,
+                false, // not secret - client ID is public
+            )
+            .await
+            .context("Failed to store Rise client ID as environment variable")?;
+
+            // Store client secret as environment variable (encrypted, secret)
             db_env_vars::upsert_project_env_var(
                 db_pool,
                 project_id,
@@ -369,8 +402,8 @@ impl Extension for OAuthProvider {
             .context("Failed to store Rise client secret as environment variable")?;
 
             info!(
-                "Stored Rise client secret as environment variable: {}",
-                rise_client_secret_ref
+                "Stored Rise client credentials as environment variables: {}, {}",
+                rise_client_id_ref, rise_client_secret_ref
             );
 
             // Update spec with Rise credentials
@@ -380,6 +413,37 @@ impl Extension for OAuthProvider {
 
             spec_updated = true;
         } else {
+            // Restore Rise client ID env var if missing
+            if let Some(ref rise_client_id) = spec.rise_client_id {
+                let rise_client_id_ref =
+                    format!("OAUTH_RISE_CLIENT_ID_{}", extension_name.to_uppercase());
+
+                // Check if env var exists
+                let env_vars = db_env_vars::list_project_env_vars(db_pool, project_id)
+                    .await
+                    .unwrap_or_default();
+                let env_var_exists = env_vars.iter().any(|v| v.key == rise_client_id_ref);
+
+                if !env_var_exists {
+                    warn!(
+                        "Rise client ID env var {} missing, restoring from spec",
+                        rise_client_id_ref
+                    );
+
+                    db_env_vars::upsert_project_env_var(
+                        db_pool,
+                        project_id,
+                        &rise_client_id_ref,
+                        rise_client_id,
+                        false, // not secret
+                    )
+                    .await
+                    .context("Failed to restore Rise client ID")?;
+
+                    info!("Restored Rise client ID: {}", rise_client_id_ref);
+                }
+            }
+
             // Restore Rise client secret env var if missing
             if let Some(ref rise_client_secret_ref) = spec.rise_client_secret_ref {
                 // Check if env var exists
