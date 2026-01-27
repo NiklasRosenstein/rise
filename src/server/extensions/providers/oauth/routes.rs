@@ -1,6 +1,9 @@
 use super::handlers;
 use crate::server::state::AppState;
-use axum::{routing::{get, post}, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 
 /// Create OAuth routes
 pub fn oauth_routes() -> Router<AppState> {

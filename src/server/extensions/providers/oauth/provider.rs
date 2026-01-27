@@ -389,59 +389,65 @@ impl Extension for OAuthProvider {
                 let env_var_exists = env_vars.iter().any(|v| v.key == *rise_client_secret_ref);
 
                 if !env_var_exists {
-                        // Env var is missing, restore from encrypted backup
-                        if let Some(ref encrypted) = spec.rise_client_secret_encrypted {
-                            warn!(
-                                "Rise client secret env var {} missing, restoring from backup",
-                                rise_client_secret_ref
-                            );
+                    // Env var is missing, restore from encrypted backup
+                    if let Some(ref encrypted) = spec.rise_client_secret_encrypted {
+                        warn!(
+                            "Rise client secret env var {} missing, restoring from backup",
+                            rise_client_secret_ref
+                        );
 
-                            db_env_vars::upsert_project_env_var(
-                                db_pool,
-                                project_id,
-                                rise_client_secret_ref,
-                                encrypted,
-                                true, // is_secret
-                            )
+                        db_env_vars::upsert_project_env_var(
+                            db_pool,
+                            project_id,
+                            rise_client_secret_ref,
+                            encrypted,
+                            true, // is_secret
+                        )
+                        .await
+                        .context("Failed to restore Rise client secret")?;
+
+                        info!("Restored Rise client secret: {}", rise_client_secret_ref);
+                    } else {
+                        // Both env var and backup missing - regenerate
+                        warn!("Rise client secret and backup both missing, regenerating");
+                        let rise_client_secret = generate_rise_client_secret();
+                        let rise_client_secret_encrypted = self
+                            .encryption_provider
+                            .encrypt(&rise_client_secret)
                             .await
-                            .context("Failed to restore Rise client secret")?;
+                            .context("Failed to encrypt Rise client secret")?;
 
-                            info!("Restored Rise client secret: {}", rise_client_secret_ref);
-                        } else {
-                            // Both env var and backup missing - regenerate
-                            warn!("Rise client secret and backup both missing, regenerating");
-                            let rise_client_secret = generate_rise_client_secret();
-                            let rise_client_secret_encrypted = self
-                                .encryption_provider
-                                .encrypt(&rise_client_secret)
-                                .await
-                                .context("Failed to encrypt Rise client secret")?;
+                        db_env_vars::upsert_project_env_var(
+                            db_pool,
+                            project_id,
+                            rise_client_secret_ref,
+                            &rise_client_secret_encrypted,
+                            true,
+                        )
+                        .await
+                        .context("Failed to store Rise client secret")?;
 
-                            db_env_vars::upsert_project_env_var(
-                                db_pool,
-                                project_id,
-                                rise_client_secret_ref,
-                                &rise_client_secret_encrypted,
-                                true,
-                            )
-                            .await
-                            .context("Failed to store Rise client secret")?;
-
-                            spec.rise_client_secret_encrypted = Some(rise_client_secret_encrypted);
-                            spec_updated = true;
-                        }
+                        spec.rise_client_secret_encrypted = Some(rise_client_secret_encrypted);
+                        spec_updated = true;
+                    }
                 }
             }
         }
 
         // If spec was updated with Rise credentials, persist it
         if spec_updated {
-            let updated_spec_value = serde_json::to_value(&spec)
-                .context("Failed to serialize updated OAuth spec")?;
+            let updated_spec_value =
+                serde_json::to_value(&spec).context("Failed to serialize updated OAuth spec")?;
 
-            db_extensions::upsert(db_pool, project_id, extension_name, "oauth", &updated_spec_value)
-                .await
-                .context("Failed to update extension spec with Rise credentials")?;
+            db_extensions::upsert(
+                db_pool,
+                project_id,
+                extension_name,
+                "oauth",
+                &updated_spec_value,
+            )
+            .await
+            .context("Failed to update extension spec with Rise credentials")?;
 
             info!(
                 "Updated extension spec with Rise client credentials for {}/{}",
@@ -675,40 +681,64 @@ rise extension create my-app oauth-github \
 
 ## OAuth Flows
 
-The extension supports two OAuth flows:
+The extension supports RFC 6749-compliant OAuth flows with PKCE support:
 
-### Fragment Flow (Default - Recommended for SPAs)
+### PKCE Flow (Recommended for SPAs)
 
-Tokens are returned in the URL fragment (`#access_token=...`), which never reaches the server.
-This is the most secure option for single-page applications.
+For single-page applications, use PKCE (RFC 7636) to securely exchange authorization codes
+for tokens. This prevents authorization code interception attacks.
 
 **Frontend Integration:**
 
 ```javascript
-// Initiate OAuth login (fragment flow is default)
-function login() {
-  window.location.href = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize';
+// Generate PKCE verifier and challenge
+async function generatePKCE() {
+  const verifier = generateRandomString(128);
+  const hashed = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
+  const challenge = base64urlEncode(hashed);
+  return { verifier, challenge };
 }
 
-// Extract tokens from URL fragment after redirect
-function extractTokens() {
-  const fragment = window.location.hash.substring(1);
-  const params = new URLSearchParams(fragment);
-  const accessToken = params.get('access_token');
-  const idToken = params.get('id_token');
-  const expiresAt = params.get('expires_at');
+// Initiate OAuth login with PKCE
+async function login() {
+  const { verifier, challenge } = await generatePKCE();
+  sessionStorage.setItem('pkce_verifier', verifier);
 
-  // Store in sessionStorage or localStorage
-  sessionStorage.setItem('access_token', accessToken);
+  const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize' +
+    `?code_challenge=${challenge}&code_challenge_method=S256`;
+  window.location.href = authUrl;
+}
 
-  return { accessToken, idToken, expiresAt };
+// Handle callback and exchange code for tokens
+async function handleCallback() {
+  const code = new URLSearchParams(window.location.search).get('code');
+  const verifier = sessionStorage.getItem('pkce_verifier');
+  const clientId = 'OAUTH_RISE_CLIENT_ID_oauth-provider'; // From env vars
+
+  const response = await fetch(
+    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/token',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: clientId,
+        code_verifier: verifier
+      })
+    }
+  );
+
+  const tokens = await response.json();
+  sessionStorage.setItem('access_token', tokens.access_token);
+  return tokens;
 }
 ```
 
-### Exchange Token Flow (For Backend Apps)
+### Token Endpoint Flow (For Backend Apps)
 
-For server-rendered applications, use the exchange flow. The callback receives a temporary
-exchange token as a query parameter, which your backend exchanges for the actual OAuth tokens.
+For server-rendered applications, use the RFC 6749-compliant token endpoint with client credentials.
+Rise auto-generates client credentials for each OAuth extension.
 
 **Backend Integration (Node.js/Express example):**
 
@@ -721,11 +751,25 @@ app.get('/login', (req, res) => {
 
 // Handle OAuth callback
 app.get('/oauth/callback', async (req, res) => {
-  const exchangeToken = req.query.exchange_token;
+  const code = req.query.code; // Authorization code from callback
 
-  // Exchange the temporary token for actual OAuth tokens
+  // Get Rise client credentials from environment
+  const clientId = process.env.OAUTH_RISE_CLIENT_ID_oauth_provider;
+  const clientSecret = process.env.OAUTH_RISE_CLIENT_SECRET_oauth_provider;
+
+  // Exchange authorization code for tokens
   const response = await fetch(
-    `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/exchange?exchange_token=${exchangeToken}`
+    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/token',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: clientId,
+        client_secret: clientSecret
+      })
+    }
   );
 
   const tokens = await response.json();
@@ -743,22 +787,24 @@ app.get('/oauth/callback', async (req, res) => {
 For local development, override the redirect URI:
 
 ```javascript
-// Fragment flow
-const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?redirect_uri=http://localhost:3000/callback';
+// PKCE flow (for SPAs)
+const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?code_challenge=' + codeChallenge + '&code_challenge_method=S256&redirect_uri=http://localhost:3000/callback';
 
-// Exchange flow
-const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?flow=exchange&redirect_uri=http://localhost:3000/oauth/callback';
+// Token endpoint flow (for backend apps)
+const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?redirect_uri=http://localhost:3000/oauth/callback';
 ```
 
 ## Security Features
 
 - Client secrets stored encrypted in database
-- Fragment flow: Tokens in URL fragments (never sent to server)
-- Exchange flow: Temporary single-use tokens with 5-minute TTL
+- PKCE (RFC 7636): Prevents authorization code interception for public clients
+- Rise client credentials: Auto-generated per extension for token endpoint authentication
+- Temporary single-use authorization codes with 5-minute TTL
 - Redirect URI validation (localhost or project domains only)
 - CSRF protection via state tokens
 - User token caching with automatic refresh
 - Session-based token storage with encrypted credentials
+- Constant-time comparison for client secret and PKCE validation
 - Configurable token retention policies
 "#
     }

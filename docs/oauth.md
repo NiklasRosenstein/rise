@@ -8,8 +8,7 @@ Rise's Generic OAuth 2.0 extension enables end-user authentication with any OAut
 
 - **Generic Provider Support**: Works with any OAuth 2.0 compliant provider
 - **Multiple Flow Support**:
-  - Fragment-based (SPAs, deprecated)
-  - PKCE (SPAs, recommended)
+  - PKCE (SPAs, RFC 7636-compliant)
   - Token endpoint with client credentials (backend apps, RFC 6749-compliant)
 - **Secure Token Storage**: Encrypted user tokens with automatic refresh
 - **Session Management**: Browser cookie-based session tracking
@@ -30,102 +29,9 @@ Rise's Generic OAuth 2.0 extension enables end-user authentication with any OAut
 
 Rise supports multiple OAuth flows to accommodate different application architectures:
 
-### Fragment Flow (DEPRECATED - For SPAs)
+### PKCE Flow (For SPAs)
 
-**⚠️ DEPRECATED:** This flow is deprecated in favor of the PKCE flow (see below). It will be removed in a future major version. Please migrate to PKCE for better security and standards compliance.
-
-Best for single-page applications (React, Vue, Angular) where tokens are handled in JavaScript.
-
-**Security:** Tokens delivered in URL fragment (`#`) which is never sent to server - no server logs, no Referer leakage. However, this is a non-standard approach and has known security concerns.
-
-```
-┌──────────────┐                                           ┌──────────────┐
-│              │  1. GET /oauth/authorize?flow=fragment    │              │
-│   Browser    │──────────────────────────────────────────>│     Rise     │
-│              │                                           │   Backend    │
-└──────────────┘                                           └──────────────┘
-                                                                   │
-                  2. Compute redirect_uri:                        │
-                     https://api.{domain}/oauth/callback/         │
-                       {project}/{extension}                      │
-                                                                   │
-                  3. Generate state token (CSRF)                  │
-                     Store in cache (10-min TTL):                 │
-                     { redirect_uri, session_id, flow: Fragment } │
-                                                                   │
-┌──────────────┐                                           ┌──────────────┐
-│              │  4. Redirect to OAuth Provider            │              │
-│   Browser    │<──────────────────────────────────────────│     Rise     │
-│              │     with state token                      │   Backend    │
-└──────────────┘                                           └──────────────┘
-       │
-       │  5. User authenticates
-       │
-       v
-┌──────────────┐
-│    OAuth     │
-│   Provider   │
-└──────────────┘
-       │
-       │  6. Redirect to callback URL
-       │     with code + state
-       v
-┌──────────────┐                                           ┌──────────────┐
-│              │  7. GET /oauth/callback?code=...&state=...│              │
-│   Browser    │──────────────────────────────────────────>│     Rise     │
-│              │                                           │   Backend    │
-└──────────────┘                                           └──────────────┘
-                                                                   │
-                  8. Validate state (CSRF check)                  │
-                     Exchange code for tokens                     │
-                     Encrypt + store in database                  │
-                                                                   │
-┌──────────────┐                                           ┌──────────────┐
-│              │  9. Redirect to app with tokens in        │              │
-│   Browser    │<─────fragment (#access_token=...)─────────│     Rise     │
-│              │                                           │   Backend    │
-└──────────────┘                                           └──────────────┘
-       │
-       │  10. JavaScript extracts tokens from URL fragment
-       │      Store in memory/localStorage
-       v
-```
-
-**Usage Example:**
-
-```javascript
-// Initiate OAuth login
-function login() {
-  const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize';
-  window.location.href = authUrl;  // flow=fragment is default
-}
-
-// Extract tokens after redirect
-function extractTokens() {
-  const fragment = window.location.hash.substring(1);
-  const params = new URLSearchParams(fragment);
-
-  const tokens = {
-    accessToken: params.get('access_token'),
-    tokenType: params.get('token_type'),
-    expiresAt: params.get('expires_at'),
-    idToken: params.get('id_token'),
-    refreshToken: params.get('refresh_token')
-  };
-
-  // Store and use tokens
-  localStorage.setItem('oauth_tokens', JSON.stringify(tokens));
-
-  // Clear fragment from URL
-  window.history.replaceState(null, '', window.location.pathname);
-
-  return tokens;
-}
-```
-
-### PKCE Flow (RECOMMENDED - For SPAs)
-
-Best for single-page applications (React, Vue, Angular) using RFC 7636 Proof Key for Code Exchange (PKCE). This is the **recommended approach** for SPAs, providing better security than the deprecated fragment flow.
+Best for single-page applications (React, Vue, Angular) using RFC 7636 Proof Key for Code Exchange (PKCE).
 
 **Security:** PKCE prevents authorization code interception attacks by requiring the client to prove it initiated the OAuth flow. No client secret needed (SPAs can't securely store secrets).
 
@@ -492,21 +398,27 @@ rise extension create my-app oauth-github \
 
 For local development, pass a `redirect_uri` parameter to redirect back to localhost:
 
-**Fragment Flow:**
+**PKCE Flow (SPA):**
 
 ```javascript
+// Generate PKCE verifier and challenge
+const codeVerifier = generateRandomString(128);
+const codeChallenge = await sha256Base64Url(codeVerifier);
+sessionStorage.setItem('pkce_verifier', codeVerifier);
+
+// Initiate OAuth with PKCE
 const localCallbackUrl = 'http://localhost:3000/oauth/callback';
-const authUrl = `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize?redirect_uri=${encodeURIComponent(localCallbackUrl)}`;
+const authUrl = `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize?code_challenge=${codeChallenge}&code_challenge_method=S256&redirect_uri=${encodeURIComponent(localCallbackUrl)}`;
 window.location.href = authUrl;
 ```
 
-**Exchange Flow:**
+**Token Endpoint Flow (Backend):**
 
 ```ruby
 # Initiate OAuth
 def login
   redirect_uri = "http://localhost:3000/oauth/callback"
-  auth_url = "https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize?flow=exchange&redirect_uri=#{CGI.escape(redirect_uri)}"
+  auth_url = "https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize?redirect_uri=#{CGI.escape(redirect_uri)}"
   redirect_to auth_url
 end
 ```
@@ -519,52 +431,28 @@ Rise only allows redirects to:
 
 ## Security Considerations
 
-### Fragment vs Query Parameters
+### PKCE Flow Security
 
-**Why fragments for default flow?**
+**Why PKCE for SPAs?**
 
-URL fragments (`#token=...`) offer superior security over query parameters (`?token=...`):
+PKCE (Proof Key for Code Exchange, RFC 7636) provides additional security for public clients:
 
-| Security Aspect | Fragment (`#`) | Query Parameter (`?`) |
-|----------------|----------------|----------------------|
-| Server logs | ✅ Never logged | ❌ Appears in logs |
-| Referer header | ✅ Not sent | ❌ Leaked to third parties |
-| Browser history | ✅ Not saved | ❌ Saved in history |
-| Server access | ✅ JavaScript-only | ❌ Backend can read |
+1. **Code Interception Protection**: Prevents attackers from stealing authorization codes
+2. **No Client Secret Needed**: SPAs can't securely store secrets - PKCE solves this
+3. **Standards-Based**: Works with any RFC 7636-compliant OAuth provider
+4. **Code Verifier Challenge**: Client proves it initiated the flow by providing the verifier
 
-**Example vulnerability with query params:**
+### Token Endpoint Flow Security
 
-```
-User clicks external link from app at:
-https://my-app.rise.dev/dashboard?access_token=secret123
+**Why authorization codes for backend apps?**
 
-Browser sends Referer header to external site:
-Referer: https://my-app.rise.dev/dashboard?access_token=secret123
-                                           ^^^^^^^^^^^^^^^^^^^^^^^^^
-                                           Token leaked!
-```
+Authorization code flow with client credentials provides security for confidential clients:
 
-With fragments, only the path is leaked:
-```
-https://my-app.rise.dev/dashboard#access_token=secret123
-
-Browser sends:
-Referer: https://my-app.rise.dev/dashboard
-         (fragment never included)
-```
-
-### Exchange Token Flow Security
-
-**Why exchange tokens for backend apps?**
-
-Exchange tokens provide additional security for server-rendered applications:
-
-1. **Short-lived**: 5-minute TTL reduces exposure window
-2. **Single-use**: Invalidated immediately after exchange
-3. **Backend-only**: Real tokens never touch browser
-4. **HttpOnly cookies**: Can store tokens in cookies inaccessible to JavaScript (XSS protection)
-
-**Best Practice:** Use exchange flow for server-rendered apps, fragment flow for SPAs.
+1. **Short-lived codes**: 5-minute TTL reduces exposure window
+2. **Single-use**: Codes invalidated immediately after exchange
+3. **Client authentication**: Backend proves identity with client_secret
+4. **Backend-only**: Real tokens never touch browser
+5. **HttpOnly cookies**: Can store tokens in cookies inaccessible to JavaScript (XSS protection)
 
 ### Token Storage
 
@@ -575,12 +463,12 @@ Exchange tokens provide additional security for server-rendered applications:
 - Exchange tokens: In-memory cache (5-minute TTL)
 
 **Application:**
-- **SPAs (Fragment Flow)**:
+- **SPAs (PKCE Flow)**:
   - Memory (best security, lost on refresh)
   - localStorage (persistent, vulnerable to XSS)
   - Never use cookies (sent with all requests, CSRF risk)
 
-- **Backend Apps (Exchange Flow)**:
+- **Backend Apps (Token Endpoint Flow)**:
   - HttpOnly cookies (best security, XSS-safe)
   - Backend session store (Redis, database)
   - Never expose to frontend
@@ -635,11 +523,6 @@ Tokens unused for 30+ days automatically deleted to reduce attack surface.
 - Exchange token expired (5-minute TTL)
 - Request new authorization
 
-**Tokens not appearing in URL fragment:**
-- Check browser console for JavaScript errors
-- Verify redirect URI is correct
-- Ensure OAuth provider redirecting to Rise callback URL
-
 **"Could not find user OAuth token"**
 - Session cookie missing or expired
 - User has not completed OAuth flow
@@ -649,23 +532,23 @@ Tokens unused for 30+ days automatically deleted to reduce attack surface.
 
 ### Authorization Endpoint
 
-**Fragment Flow (SPA):**
+**PKCE Flow (SPA):**
+
+```
+GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?code_challenge=...&code_challenge_method=S256
+GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?code_challenge=...&code_challenge_method=S256&redirect_uri=http://localhost:3000/callback
+```
+
+**Token Endpoint Flow (Backend):**
 
 ```
 GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize
-GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?flow=fragment
 GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?redirect_uri=http://localhost:3000/callback
 ```
 
-**Exchange Flow (Backend):**
-
-```
-GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?flow=exchange
-GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?flow=exchange&redirect_uri=http://localhost:3000/callback
-```
-
 **Query Parameters:**
-- `flow` (optional): `fragment` (default) or `exchange`
+- `code_challenge` (optional): PKCE code challenge (base64url-encoded SHA-256 hash of code_verifier)
+- `code_challenge_method` (optional): `S256` (default) or `plain`
 - `redirect_uri` (optional): Where to redirect after OAuth (localhost or project domain)
 - `state` (optional): Application state passed through OAuth flow
 
@@ -675,17 +558,13 @@ GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?flow=excha
 GET /api/v1/oauth/callback/{project}/{extension}?code=...&state=...
 ```
 
-**Fragment Flow Response:**
+**Response:**
 ```
 HTTP/1.1 302 Found
-Location: https://my-app.rise.dev/callback#access_token=...&token_type=Bearer&expires_at=...&id_token=...
+Location: https://my-app.rise.dev/callback?code=abc123...
 ```
 
-**Exchange Flow Response:**
-```
-HTTP/1.1 302 Found
-Location: https://my-app.rise.dev/callback?exchange_token=abc123...
-```
+The `code` parameter is an authorization code that can be exchanged for tokens at the token endpoint.
 
 ### Token Endpoint (RFC 6749-compliant)
 

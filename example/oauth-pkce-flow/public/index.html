@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OAuth Fragment Flow - Rise</title>
+    <title>OAuth PKCE Flow - Rise</title>
     <style>
         * {
             margin: 0;
@@ -81,6 +81,11 @@
             transform: translateY(0);
         }
 
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
         .token-display {
             background: #f8f9fa;
             border: 1px solid #e9ecef;
@@ -121,6 +126,12 @@
             border: 1px solid #f5c6cb;
         }
 
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
         .footer {
             margin-top: 2rem;
             font-size: 0.85rem;
@@ -139,22 +150,28 @@
 </head>
 <body>
     <div class="container">
-        <h1>OAuth Fragment Flow Example</h1>
-        <div class="badge">Fragment Flow (SPA)</div>
+        <h1>OAuth PKCE Flow Example</h1>
+        <div class="badge">PKCE Flow (RFC 7636)</div>
 
         <p>
-            This example demonstrates the <strong>fragment-based OAuth flow</strong> for single-page applications.
-            Tokens are delivered in the URL fragment (<code>#access_token=...</code>) which never reaches the server.
+            This example demonstrates the <strong>PKCE (Proof Key for Code Exchange) OAuth flow</strong> for SPAs.
+            PKCE prevents authorization code interception attacks without requiring client secrets.
         </p>
 
         <div id="logged-out" class="hidden">
-            <p>Click below to initiate the OAuth flow. You'll be redirected to Dex (local dev) for authentication.</p>
-            <button onclick="login()">Login with OAuth</button>
+            <p>Click below to initiate the PKCE flow. You'll be redirected to Dex (local dev) for authentication.</p>
+            <button onclick="login()">Login with OAuth (PKCE)</button>
+        </div>
+
+        <div id="exchanging" class="hidden">
+            <div class="status info">
+                ⏳ Exchanging authorization code for tokens...
+            </div>
         </div>
 
         <div id="logged-in" class="hidden">
             <div class="status success">
-                ✓ Successfully authenticated! Access token retrieved.
+                ✓ Successfully authenticated! Access token retrieved via PKCE flow.
             </div>
 
             <div class="token-display">
@@ -168,13 +185,18 @@
             </div>
 
             <div class="token-display">
-                <strong>Expires At:</strong>
-                <pre id="expires-at"></pre>
+                <strong>Expires In:</strong>
+                <pre id="expires-in"></pre>
             </div>
 
             <div class="token-display" id="id-token-display" class="hidden">
                 <strong>ID Token:</strong>
                 <pre id="id-token"></pre>
+            </div>
+
+            <div class="token-display" id="refresh-token-display" class="hidden">
+                <strong>Refresh Token:</strong>
+                <pre id="refresh-token"></pre>
             </div>
 
             <div style="margin-top: 1.5rem;">
@@ -183,11 +205,12 @@
         </div>
 
         <div class="footer">
-            <strong>How it works:</strong><br>
-            1. Click login → redirect to Rise OAuth endpoint<br>
-            2. Rise redirects to Dex for authentication<br>
-            3. After auth, redirect back with tokens in URL fragment<br>
-            4. JavaScript extracts tokens (server never sees them)
+            <strong>How PKCE works:</strong><br>
+            1. Generate code_verifier (random 128 chars)<br>
+            2. Hash it with SHA-256 → code_challenge<br>
+            3. Send code_challenge to authorization endpoint<br>
+            4. After auth, exchange code + code_verifier for tokens<br>
+            5. Rise validates verifier matches challenge
         </div>
     </div>
 
@@ -205,10 +228,13 @@
         };
 
         // Initialize on page load
-        window.addEventListener('DOMContentLoaded', () => {
-            // Check if we have tokens in the URL fragment
-            if (window.location.hash) {
-                extractTokensFromFragment();
+        window.addEventListener('DOMContentLoaded', async () => {
+            // Check if we have an authorization code in the URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                await exchangeCodeForTokens(code);
             } else {
                 // Check if we have tokens in localStorage
                 const tokens = getStoredTokens();
@@ -220,12 +246,25 @@
             }
         });
 
-        function login() {
+        async function login() {
+            // Generate PKCE code verifier (random 128-character string)
+            const codeVerifier = generateRandomString(128);
+
+            // Generate code challenge (SHA-256 hash of verifier, base64url-encoded)
+            const codeChallenge = await sha256Base64Url(codeVerifier);
+
+            // Store code verifier for later use (when exchanging code for tokens)
+            sessionStorage.setItem('pkce_code_verifier', codeVerifier);
+
             // Build the OAuth authorization URL
             const authUrl = new URL(
                 `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/authorize`,
                 CONFIG.riseApiUrl
             );
+
+            // Add PKCE parameters
+            authUrl.searchParams.set('code_challenge', codeChallenge);
+            authUrl.searchParams.set('code_challenge_method', 'S256');
 
             // Add redirect_uri for local development
             authUrl.searchParams.set('redirect_uri', CONFIG.redirectUri);
@@ -233,69 +272,113 @@
             // Optional: Add application state for CSRF protection
             const state = generateState();
             authUrl.searchParams.set('state', state);
-            localStorage.setItem('oauth_state', state);
+            sessionStorage.setItem('oauth_state', state);
 
             // Redirect to OAuth flow
             window.location.href = authUrl.toString();
         }
 
-        function extractTokensFromFragment() {
-            const fragment = window.location.hash.substring(1);
-            const params = new URLSearchParams(fragment);
+        async function exchangeCodeForTokens(code) {
+            showExchanging();
 
-            // Verify state if we set one
-            const storedState = localStorage.getItem('oauth_state');
-            const returnedState = params.get('state');
-            if (storedState && storedState !== returnedState) {
-                showError('State mismatch - possible CSRF attack');
-                return;
+            try {
+                // Verify state if we set one
+                const urlParams = new URLSearchParams(window.location.search);
+                const storedState = sessionStorage.getItem('oauth_state');
+                const returnedState = urlParams.get('state');
+                if (storedState && storedState !== returnedState) {
+                    throw new Error('State mismatch - possible CSRF attack');
+                }
+                sessionStorage.removeItem('oauth_state');
+
+                // Get the code verifier we stored earlier
+                const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
+                if (!codeVerifier) {
+                    throw new Error('No code verifier found - please restart the flow');
+                }
+                sessionStorage.removeItem('pkce_code_verifier');
+
+                // Get Rise client ID from environment (public, no secret needed for PKCE)
+                const riseClientId = `OAUTH_RISE_CLIENT_ID_${CONFIG.extensionName}`;
+
+                // Exchange authorization code for tokens using PKCE
+                const tokenUrl = new URL(
+                    `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/token`,
+                    CONFIG.riseApiUrl
+                );
+
+                const response = await fetch(tokenUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        code: code,
+                        client_id: riseClientId,
+                        code_verifier: codeVerifier
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error_description || error.error || 'Token exchange failed');
+                }
+
+                const tokens = await response.json();
+
+                // Store tokens in localStorage (or sessionStorage for better security)
+                storeTokens(tokens);
+
+                // Clean URL by removing query parameters
+                window.history.replaceState(null, '', window.location.pathname);
+
+                // Display tokens
+                displayTokens(tokens);
+            } catch (error) {
+                showError(error.message);
+                showLoggedOut();
             }
-            localStorage.removeItem('oauth_state');
-
-            const tokens = {
-                accessToken: params.get('access_token'),
-                tokenType: params.get('token_type'),
-                expiresAt: params.get('expires_at'),
-                idToken: params.get('id_token'),
-                refreshToken: params.get('refresh_token')
-            };
-
-            if (!tokens.accessToken) {
-                showError('No access token in URL fragment');
-                return;
-            }
-
-            // Store tokens in localStorage (or sessionStorage for better security)
-            storeTokens(tokens);
-
-            // Clean URL by removing fragment
-            window.history.replaceState(null, '', window.location.pathname);
-
-            // Display tokens
-            displayTokens(tokens);
         }
 
         function displayTokens(tokens) {
             document.getElementById('logged-out').classList.add('hidden');
+            document.getElementById('exchanging').classList.add('hidden');
             document.getElementById('logged-in').classList.remove('hidden');
 
-            document.getElementById('access-token').textContent = tokens.accessToken;
-            document.getElementById('token-type').textContent = tokens.tokenType || 'Bearer';
-            document.getElementById('expires-at').textContent = tokens.expiresAt || 'Not provided';
+            document.getElementById('access-token').textContent = tokens.access_token;
+            document.getElementById('token-type').textContent = tokens.token_type || 'Bearer';
+            document.getElementById('expires-in').textContent = tokens.expires_in
+                ? `${tokens.expires_in} seconds`
+                : 'Not provided';
 
-            if (tokens.idToken) {
+            if (tokens.id_token) {
                 document.getElementById('id-token-display').classList.remove('hidden');
-                document.getElementById('id-token').textContent = tokens.idToken;
+                document.getElementById('id-token').textContent = tokens.id_token;
+            }
+
+            if (tokens.refresh_token) {
+                document.getElementById('refresh-token-display').classList.remove('hidden');
+                document.getElementById('refresh-token').textContent = tokens.refresh_token;
             }
         }
 
         function showLoggedOut() {
             document.getElementById('logged-out').classList.remove('hidden');
+            document.getElementById('exchanging').classList.add('hidden');
+            document.getElementById('logged-in').classList.add('hidden');
+        }
+
+        function showExchanging() {
+            document.getElementById('logged-out').classList.add('hidden');
+            document.getElementById('exchanging').classList.remove('hidden');
             document.getElementById('logged-in').classList.add('hidden');
         }
 
         function logout() {
             localStorage.removeItem('oauth_tokens');
+            sessionStorage.removeItem('pkce_code_verifier');
+            sessionStorage.removeItem('oauth_state');
             showLoggedOut();
         }
 
@@ -314,12 +397,35 @@
             return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
         }
 
+        function generateRandomString(length) {
+            const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+            const array = new Uint8Array(length);
+            crypto.getRandomValues(array);
+            return Array.from(array, byte => charset[byte % charset.length]).join('');
+        }
+
+        async function sha256Base64Url(str) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(str);
+            const hash = await crypto.subtle.digest('SHA-256', data);
+
+            // Convert to base64url
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(hash)));
+            return base64
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=/g, '');
+        }
+
         function showError(message) {
             const container = document.querySelector('.container');
             const errorDiv = document.createElement('div');
             errorDiv.className = 'status error';
             errorDiv.textContent = '✗ Error: ' + message;
             container.insertBefore(errorDiv, container.firstChild);
+
+            // Remove error after 10 seconds
+            setTimeout(() => errorDiv.remove(), 10000);
         }
     </script>
 </body>

@@ -1,7 +1,7 @@
 use super::models::{
     AuthorizeFlowQuery, CallbackRequest, OAuth2ErrorResponse, OAuth2TokenResponse,
-    OAuthExchangeState, OAuthExtensionSpec, OAuthExtensionStatus, OAuthFlowType, OAuthState,
-    TokenRequest, TokenResponse,
+    OAuthExchangeState, OAuthExtensionSpec, OAuthExtensionStatus, OAuthState, TokenRequest,
+    TokenResponse,
 };
 use crate::db::{extensions as db_extensions, projects as db_projects, user_oauth_tokens};
 use crate::server::state::AppState;
@@ -241,39 +241,6 @@ pub async fn authorize(
                             warn!("Failed to update last_accessed_at: {:?}", e);
                         }
 
-                        // Decrypt tokens
-                        let encryption_provider = state.encryption_provider.as_ref().ok_or((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Encryption provider not configured".to_string(),
-                        ))?;
-
-                        let access_token = encryption_provider
-                            .decrypt(&cached_token.access_token_encrypted)
-                            .await
-                            .map_err(|e| {
-                                (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    format!("Failed to decrypt access token: {}", e),
-                                )
-                            })?;
-
-                        let id_token =
-                            if let Some(ref id_token_encrypted) = cached_token.id_token_encrypted {
-                                Some(
-                                    encryption_provider
-                                        .decrypt(id_token_encrypted)
-                                        .await
-                                        .map_err(|e| {
-                                            (
-                                                StatusCode::INTERNAL_SERVER_ERROR,
-                                                format!("Failed to decrypt ID token: {}", e),
-                                            )
-                                        })?,
-                                )
-                            } else {
-                                None
-                            };
-
                         // Determine final redirect URI
                         let final_redirect_uri = req.redirect_uri.unwrap_or_else(|| {
                             // Default to project's primary URL
@@ -292,58 +259,35 @@ pub async fn authorize(
                             )
                         })?;
 
-                        match req.flow {
-                            OAuthFlowType::Fragment => {
-                                // Fragment flow: Return tokens in URL fragment
-                                let expires_in = (expires_at - Utc::now()).num_seconds();
-                                let mut fragment_parts = vec![
-                                    format!("access_token={}", access_token),
-                                    format!("token_type=Bearer"),
-                                    format!("expires_in={}", expires_in),
-                                ];
+                        // Exchange flow: Generate exchange token for backend to retrieve
+                        let exchange_token = generate_state_token();
 
-                                if let Some(id_token) = id_token {
-                                    fragment_parts.push(format!("id_token={}", id_token));
-                                }
+                        let exchange_state = OAuthExchangeState {
+                            project_id: project.id,
+                            extension_name: extension_name.clone(),
+                            session_id: session_id.clone(),
+                            created_at: Utc::now(),
+                            // No PKCE for cached tokens - user already authenticated
+                            code_challenge: None,
+                            code_challenge_method: None,
+                        };
 
-                                if let Some(app_state) = req.state {
-                                    fragment_parts.push(format!("state={}", app_state));
-                                }
+                        // Store exchange token in cache (5-minute TTL)
+                        state
+                            .oauth_exchange_store
+                            .insert(exchange_token.clone(), exchange_state)
+                            .await;
 
-                                redirect_url.set_fragment(Some(&fragment_parts.join("&")));
-                            }
-                            OAuthFlowType::Exchange => {
-                                // Exchange flow: Generate exchange token for backend to retrieve
-                                let exchange_token = generate_state_token();
+                        // Return exchange token in query parameter
+                        redirect_url
+                            .query_pairs_mut()
+                            .append_pair("exchange_token", &exchange_token);
 
-                                let exchange_state = OAuthExchangeState {
-                                    project_id: project.id,
-                                    extension_name: extension_name.clone(),
-                                    session_id: session_id.clone(),
-                                    created_at: Utc::now(),
-                                    // No PKCE for cached tokens - user already authenticated
-                                    code_challenge: None,
-                                    code_challenge_method: None,
-                                };
-
-                                // Store exchange token in cache (5-minute TTL)
-                                state
-                                    .oauth_exchange_store
-                                    .insert(exchange_token.clone(), exchange_state)
-                                    .await;
-
-                                // Return exchange token in query parameter
-                                redirect_url
-                                    .query_pairs_mut()
-                                    .append_pair("exchange_token", &exchange_token);
-
-                                // Pass through application's CSRF state if provided
-                                if let Some(app_state) = req.state {
-                                    redirect_url
-                                        .query_pairs_mut()
-                                        .append_pair("state", &app_state);
-                                }
-                            }
+                        // Pass through application's CSRF state if provided
+                        if let Some(app_state) = req.state {
+                            redirect_url
+                                .query_pairs_mut()
+                                .append_pair("state", &app_state);
                         }
 
                         return Ok(Redirect::to(redirect_url.as_str()).into_response());
@@ -785,65 +729,40 @@ pub async fn callback(
         )
     })?;
 
-    match oauth_state.flow_type {
-        OAuthFlowType::Fragment => {
-            // Fragment flow: Return tokens directly in URL fragment (for SPAs)
-            let mut fragment_parts = vec![
-                format!("access_token={}", token_response.access_token),
-                format!("token_type={}", token_response.token_type),
-                format!("expires_in={}", token_response.expires_in),
-            ];
+    // Exchange flow: Generate exchange token for backend to retrieve (for server-rendered apps)
+    let exchange_token = generate_state_token(); // Reuse same random token generator
 
-            if let Some(id_token) = token_response.id_token {
-                fragment_parts.push(format!("id_token={}", id_token));
-            }
+    let exchange_state = OAuthExchangeState {
+        project_id: project.id,
+        extension_name: extension_name.clone(),
+        session_id: session_id.clone(),
+        created_at: Utc::now(),
+        code_challenge: oauth_state.client_code_challenge.clone(),
+        code_challenge_method: oauth_state.client_code_challenge_method.clone(),
+    };
 
-            // Pass through application's CSRF state
-            if let Some(app_state) = oauth_state.application_state {
-                fragment_parts.push(format!("state={}", app_state));
-            }
+    // Store exchange token in cache (5-minute TTL, single-use)
+    state
+        .oauth_exchange_store
+        .insert(exchange_token.clone(), exchange_state)
+        .await;
 
-            redirect_url.set_fragment(Some(&fragment_parts.join("&")));
+    // Add exchange token as query parameter
+    redirect_url
+        .query_pairs_mut()
+        .append_pair("exchange_token", &exchange_token);
 
-            debug!("Fragment flow: Returning tokens in URL fragment");
-        }
-        OAuthFlowType::Exchange => {
-            // Exchange flow: Generate exchange token for backend to retrieve (for server-rendered apps)
-            let exchange_token = generate_state_token(); // Reuse same random token generator
-
-            let exchange_state = OAuthExchangeState {
-                project_id: project.id,
-                extension_name: extension_name.clone(),
-                session_id: session_id.clone(),
-                created_at: Utc::now(),
-                code_challenge: oauth_state.client_code_challenge.clone(),
-                code_challenge_method: oauth_state.client_code_challenge_method.clone(),
-            };
-
-            // Store exchange token in cache (5-minute TTL, single-use)
-            state
-                .oauth_exchange_store
-                .insert(exchange_token.clone(), exchange_state)
-                .await;
-
-            // Add exchange token as query parameter
-            redirect_url
-                .query_pairs_mut()
-                .append_pair("exchange_token", &exchange_token);
-
-            // Pass through application's CSRF state
-            if let Some(app_state) = oauth_state.application_state {
-                redirect_url
-                    .query_pairs_mut()
-                    .append_pair("state", &app_state);
-            }
-
-            info!(
-                "Exchange flow: Generated exchange token for session {}",
-                session_id
-            );
-        }
+    // Pass through application's CSRF state
+    if let Some(app_state) = oauth_state.application_state {
+        redirect_url
+            .query_pairs_mut()
+            .append_pair("state", &app_state);
     }
+
+    info!(
+        "Exchange flow: Generated exchange token for session {}",
+        session_id
+    );
 
     // Set session cookie
     let cookie_value = format!(
@@ -983,11 +902,7 @@ pub async fn exchange_credentials(
 
 /// Validate PKCE code_verifier against code_challenge
 /// Returns true if valid, false otherwise
-fn validate_pkce(
-    code_verifier: &str,
-    code_challenge: &str,
-    code_challenge_method: &str,
-) -> bool {
+fn validate_pkce(code_verifier: &str, code_challenge: &str, code_challenge_method: &str) -> bool {
     use sha2::{Digest, Sha256};
     use subtle::ConstantTimeEq;
 
@@ -1002,18 +917,27 @@ fn validate_pkce(
             let computed_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash);
 
             // Constant-time comparison
-            computed_challenge.as_bytes().ct_eq(code_challenge.as_bytes()).into()
+            computed_challenge
+                .as_bytes()
+                .ct_eq(code_challenge.as_bytes())
+                .into()
         }
         "plain" => {
             // Direct comparison
-            code_verifier.as_bytes().ct_eq(code_challenge.as_bytes()).into()
+            code_verifier
+                .as_bytes()
+                .ct_eq(code_challenge.as_bytes())
+                .into()
         }
         _ => false,
     }
 }
 
 /// Create OAuth2 error response
-fn oauth2_error(error: &str, description: Option<String>) -> (StatusCode, Json<OAuth2ErrorResponse>) {
+fn oauth2_error(
+    error: &str,
+    description: Option<String>,
+) -> (StatusCode, Json<OAuth2ErrorResponse>) {
     let status_code = match error {
         "invalid_request" => StatusCode::BAD_REQUEST,
         "invalid_client" => StatusCode::UNAUTHORIZED,
@@ -1112,11 +1036,13 @@ pub async fn token_endpoint(
     }
 
     // Parse spec
-    let spec: OAuthExtensionSpec =
-        serde_json::from_value(extension.spec.clone()).map_err(|e| {
-            error!("Invalid extension spec: {:?}", e);
-            oauth2_error("server_error", Some("Invalid extension configuration".to_string()))
-        })?;
+    let spec: OAuthExtensionSpec = serde_json::from_value(extension.spec.clone()).map_err(|e| {
+        error!("Invalid extension spec: {:?}", e);
+        oauth2_error(
+            "server_error",
+            Some("Invalid extension configuration".to_string()),
+        )
+    })?;
 
     // Validate client_id
     let rise_client_id = spec.rise_client_id.as_ref().ok_or_else(|| {
@@ -1128,7 +1054,10 @@ pub async fn token_endpoint(
     })?;
 
     if &req.client_id != rise_client_id {
-        return Err(oauth2_error("invalid_client", Some("Invalid client_id".to_string())));
+        return Err(oauth2_error(
+            "invalid_client",
+            Some("Invalid client_id".to_string()),
+        ));
     }
 
     // Validate client authentication (either client_secret or code_verifier)
@@ -1165,8 +1094,14 @@ pub async fn token_endpoint(
             .iter()
             .find(|v| v.key == *rise_client_secret_ref)
             .ok_or_else(|| {
-                error!("Rise client secret env var not found: {}", rise_client_secret_ref);
-                oauth2_error("invalid_client", Some("Client credentials not configured".to_string()))
+                error!(
+                    "Rise client secret env var not found: {}",
+                    rise_client_secret_ref
+                );
+                oauth2_error(
+                    "invalid_client",
+                    Some("Client credentials not configured".to_string()),
+                )
             })?;
 
         // Decrypt stored secret
@@ -1185,9 +1120,15 @@ pub async fn token_endpoint(
 
         // Constant-time comparison
         use subtle::ConstantTimeEq;
-        let is_valid: bool = client_secret.as_bytes().ct_eq(stored_secret.as_bytes()).into();
+        let is_valid: bool = client_secret
+            .as_bytes()
+            .ct_eq(stored_secret.as_bytes())
+            .into();
         if !is_valid {
-            return Err(oauth2_error("invalid_client", Some("Invalid client_secret".to_string())));
+            return Err(oauth2_error(
+                "invalid_client",
+                Some("Invalid client_secret".to_string()),
+            ));
         }
     }
 
@@ -1276,19 +1217,23 @@ async fn handle_authorization_code_grant(
     }
 
     // Get tokens from database
-    let token =
-        user_oauth_tokens::get_by_session(&state.db_pool, project.id, &extension_name, &exchange_state.session_id)
-            .await
-            .map_err(|e| {
-                error!("Failed to get OAuth token from database: {:?}", e);
-                oauth2_error("server_error", Some("Internal server error".to_string()))
-            })?
-            .ok_or_else(|| {
-                oauth2_error(
-                    "invalid_grant",
-                    Some("OAuth session not found or expired".to_string()),
-                )
-            })?;
+    let token = user_oauth_tokens::get_by_session(
+        &state.db_pool,
+        project.id,
+        &extension_name,
+        &exchange_state.session_id,
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to get OAuth token from database: {:?}", e);
+        oauth2_error("server_error", Some("Internal server error".to_string()))
+    })?
+    .ok_or_else(|| {
+        oauth2_error(
+            "invalid_grant",
+            Some("OAuth session not found or expired".to_string()),
+        )
+    })?;
 
     // Decrypt tokens
     let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
@@ -1395,10 +1340,7 @@ async fn handle_refresh_token_grant(
         .await
         .map_err(|e| {
             error!("Failed to refresh token with upstream provider: {:?}", e);
-            oauth2_error(
-                "invalid_grant",
-                Some("Failed to refresh token".to_string()),
-            )
+            oauth2_error("invalid_grant", Some("Failed to refresh token".to_string()))
         })?;
 
     // Calculate expires_in

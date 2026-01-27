@@ -171,10 +171,9 @@ pub struct AuthorizeFlowQuery {
 #[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum OAuthFlowType {
-    /// Fragment-based flow (tokens in URL fragment) - best for SPAs
+    /// Exchange token flow (backend exchanges token) - for server-rendered apps
+    /// SPAs should use PKCE flow instead (code_challenge parameter)
     #[default]
-    Fragment,
-    /// Exchange token flow (backend exchanges token) - best for server-rendered apps
     Exchange,
 }
 
