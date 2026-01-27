@@ -779,8 +779,6 @@ pub async fn callback(
     Ok(response)
 }
 
-/// Exchange a temporary token for OAuth credentials (Exchange Flow)
-///
 /// Exchange authorization code for OAuth credentials (DEPRECATED)
 ///
 /// POST /api/v1/projects/{project}/extensions/{extension}/oauth/exchange
