@@ -214,6 +214,7 @@ pub struct ProjectEnvVar {
     /// Encrypted value if is_secret = true
     pub value: String,
     pub is_secret: bool,
+    pub is_retrievable: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -227,6 +228,7 @@ pub struct DeploymentEnvVar {
     /// Encrypted value if is_secret = true
     pub value: String,
     pub is_secret: bool,
+    pub is_retrievable: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
