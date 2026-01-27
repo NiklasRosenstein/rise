@@ -70,11 +70,12 @@ pub async fn set_project_env_var(
         ));
     }
 
-    // Validate: is_retrievable requires is_secret
-    if payload.is_retrievable && !payload.is_secret {
+    // Validate: is_protected requires is_secret (non-secrets cannot be "protected")
+    if !payload.is_protected && !payload.is_secret {
         return Err((
             StatusCode::BAD_REQUEST,
-            "Cannot mark non-secret variable as retrievable. Set is_secret=true to enable retrieval.".to_string(),
+            "Cannot disable protection for non-secret variables. Only secrets can be unprotected."
+                .to_string(),
         ));
     }
 
@@ -115,7 +116,7 @@ pub async fn set_project_env_var(
         &key,
         &value_to_store,
         payload.is_secret,
-        payload.is_retrievable,
+        payload.is_protected,
     )
     .await
     .map_err(|e| {
@@ -126,11 +127,11 @@ pub async fn set_project_env_var(
     })?;
 
     tracing::info!(
-        "Set environment variable '{}' for project '{}' (secret: {}, retrievable: {}). This will apply to new deployments only.",
+        "Set environment variable '{}' for project '{}' (secret: {}, protected: {}). This will apply to new deployments only.",
         key,
         project.name,
         payload.is_secret,
-        payload.is_retrievable
+        payload.is_protected
     );
 
     // Note: Environment variables are snapshots at deployment time.
@@ -142,7 +143,7 @@ pub async fn set_project_env_var(
         env_var.key,
         env_var.value,
         env_var.is_secret,
-        env_var.is_retrievable,
+        env_var.is_protected,
     )))
 }
 
@@ -192,9 +193,9 @@ pub async fn list_project_env_vars(
         ));
     }
 
-    // Check if we should include retrievable values
-    let include_retrievable = params
-        .get("include_retrievable_values")
+    // Check if we should include unprotected values
+    let include_unprotected = params
+        .get("include_unprotected_values")
         .map(|v| v == "true")
         .unwrap_or(false);
 
@@ -211,12 +212,12 @@ pub async fn list_project_env_vars(
     // Convert to API response
     let mut env_vars = Vec::new();
     for var in db_env_vars {
-        let value = if include_retrievable && var.is_secret && var.is_retrievable {
-            // Decrypt retrievable secret
+        let value = if include_unprotected && var.is_secret && !var.is_protected {
+            // Decrypt unprotected secret
             match &state.encryption_provider {
                 Some(provider) => provider.decrypt(&var.value).await.map_err(|e| {
                     tracing::error!(
-                        "Failed to decrypt retrievable secret '{}': {:?}",
+                        "Failed to decrypt unprotected secret '{}': {:?}",
                         var.key,
                         e
                     );
@@ -237,16 +238,16 @@ pub async fn list_project_env_vars(
         };
 
         env_vars.push(
-            if var.is_secret && !(include_retrievable && var.is_retrievable) {
-                // Mask non-retrievable secrets
-                EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_retrievable)
+            if var.is_secret && (!include_unprotected || var.is_protected) {
+                // Mask protected secrets
+                EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_protected)
             } else {
                 // Return plaintext or decrypted value
                 EnvVarResponse {
                     key: var.key,
                     value,
                     is_secret: var.is_secret,
-                    is_retrievable: var.is_retrievable,
+                    is_protected: var.is_protected,
                 }
             },
         );
@@ -388,9 +389,9 @@ pub async fn list_deployment_env_vars(
             })?
             .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
 
-    // Check if we should include retrievable values
-    let include_retrievable = params
-        .get("include_retrievable_values")
+    // Check if we should include unprotected values
+    let include_unprotected = params
+        .get("include_unprotected_values")
         .map(|v| v == "true")
         .unwrap_or(false);
 
@@ -407,12 +408,12 @@ pub async fn list_deployment_env_vars(
     // Convert to API response
     let mut env_vars = Vec::new();
     for var in db_env_vars {
-        let value = if include_retrievable && var.is_secret && var.is_retrievable {
-            // Decrypt retrievable secret
+        let value = if include_unprotected && var.is_secret && !var.is_protected {
+            // Decrypt unprotected secret
             match &state.encryption_provider {
                 Some(provider) => provider.decrypt(&var.value).await.map_err(|e| {
                     tracing::error!(
-                        "Failed to decrypt retrievable secret '{}': {:?}",
+                        "Failed to decrypt unprotected secret '{}': {:?}",
                         var.key,
                         e
                     );
@@ -433,16 +434,16 @@ pub async fn list_deployment_env_vars(
         };
 
         env_vars.push(
-            if var.is_secret && !(include_retrievable && var.is_retrievable) {
-                // Mask non-retrievable secrets
-                EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_retrievable)
+            if var.is_secret && (!include_unprotected || var.is_protected) {
+                // Mask protected secrets
+                EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_protected)
             } else {
                 // Return plaintext or decrypted value
                 EnvVarResponse {
                     key: var.key,
                     value,
                     is_secret: var.is_secret,
-                    is_retrievable: var.is_retrievable,
+                    is_protected: var.is_protected,
                 }
             },
         );
@@ -512,12 +513,13 @@ pub async fn get_project_env_var_value(
             )
         })?;
 
-    // Validate: must be a retrievable secret
-    if !env_var.is_secret || !env_var.is_retrievable {
+    // Validate: must be an unprotected secret
+    if !env_var.is_secret || env_var.is_protected {
         return Err((
             StatusCode::BAD_REQUEST,
             format!(
-                "Environment variable '{}' is not a retrievable secret. Only secrets marked as retrievable can be decrypted.",
+                "Environment variable '{}' is a protected secret and cannot be retrieved. \
+                 Update it with --protected=false to allow retrieval.",
                 key
             ),
         ));
@@ -526,7 +528,7 @@ pub async fn get_project_env_var_value(
     // Decrypt the value
     let decrypted_value = match &state.encryption_provider {
         Some(provider) => provider.decrypt(&env_var.value).await.map_err(|e| {
-            tracing::error!("Failed to decrypt retrievable secret '{}': {:?}", key, e);
+            tracing::error!("Failed to decrypt unprotected secret '{}': {:?}", key, e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 format!("Failed to decrypt secret '{}': {}", key, e),
