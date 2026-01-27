@@ -1,7 +1,6 @@
 use super::models::{
-    AuthorizeFlowQuery, CallbackRequest, OAuth2ErrorResponse, OAuth2TokenResponse,
-    OAuthExchangeState, OAuthExtensionSpec, OAuthExtensionStatus, OAuthState, TokenRequest,
-    TokenResponse,
+    AuthorizeFlowQuery, CallbackRequest, OAuth2ErrorResponse, OAuth2TokenResponse, OAuthCodeState,
+    OAuthExtensionSpec, OAuthExtensionStatus, OAuthState, TokenRequest, TokenResponse,
 };
 use crate::db::{extensions as db_extensions, projects as db_projects, user_oauth_tokens};
 use crate::server::state::AppState;
@@ -259,10 +258,10 @@ pub async fn authorize(
                             )
                         })?;
 
-                        // Exchange flow: Generate exchange token for backend to retrieve
-                        let exchange_token = generate_state_token();
+                        // Exchange flow: Generate authorization code for backend to retrieve
+                        let authorization_code = generate_state_token();
 
-                        let exchange_state = OAuthExchangeState {
+                        let code_state = OAuthCodeState {
                             project_id: project.id,
                             extension_name: extension_name.clone(),
                             session_id: session_id.clone(),
@@ -272,16 +271,16 @@ pub async fn authorize(
                             code_challenge_method: None,
                         };
 
-                        // Store exchange token in cache (5-minute TTL)
+                        // Store authorization code in cache (5-minute TTL)
                         state
-                            .oauth_exchange_store
-                            .insert(exchange_token.clone(), exchange_state)
+                            .oauth_code_store
+                            .insert(authorization_code.clone(), code_state)
                             .await;
 
-                        // Return exchange token in query parameter
+                        // Return authorization code as query parameter (RFC 6749)
                         redirect_url
                             .query_pairs_mut()
-                            .append_pair("exchange_token", &exchange_token);
+                            .append_pair("code", &authorization_code);
 
                         // Pass through application's CSRF state if provided
                         if let Some(app_state) = req.state {
@@ -729,10 +728,10 @@ pub async fn callback(
         )
     })?;
 
-    // Exchange flow: Generate exchange token for backend to retrieve (for server-rendered apps)
-    let exchange_token = generate_state_token(); // Reuse same random token generator
+    // Exchange flow: Generate authorization code for backend to retrieve (for server-rendered apps)
+    let authorization_code = generate_state_token(); // Reuse same random token generator
 
-    let exchange_state = OAuthExchangeState {
+    let code_state = OAuthCodeState {
         project_id: project.id,
         extension_name: extension_name.clone(),
         session_id: session_id.clone(),
@@ -741,16 +740,16 @@ pub async fn callback(
         code_challenge_method: oauth_state.client_code_challenge_method.clone(),
     };
 
-    // Store exchange token in cache (5-minute TTL, single-use)
+    // Store authorization code in cache (5-minute TTL, single-use)
     state
-        .oauth_exchange_store
-        .insert(exchange_token.clone(), exchange_state)
+        .oauth_code_store
+        .insert(authorization_code.clone(), code_state)
         .await;
 
-    // Add exchange token as query parameter
+    // Add authorization code as query parameter (RFC 6749)
     redirect_url
         .query_pairs_mut()
-        .append_pair("exchange_token", &exchange_token);
+        .append_pair("code", &authorization_code);
 
     // Pass through application's CSRF state
     if let Some(app_state) = oauth_state.application_state {
@@ -760,7 +759,7 @@ pub async fn callback(
     }
 
     info!(
-        "Exchange flow: Generated exchange token for session {}",
+        "Exchange flow: Generated authorization code for session {}",
         session_id
     );
 
@@ -778,126 +777,6 @@ pub async fn callback(
         .insert(header::SET_COOKIE, cookie_value.parse().unwrap());
 
     Ok(response)
-}
-
-/// Exchange a temporary token for OAuth credentials (Exchange Flow)
-///
-/// POST /api/v1/projects/{project}/extensions/{extension}/oauth/exchange
-///
-/// Query params:
-/// - exchange_token: Temporary exchange token from callback
-///
-/// This endpoint is called by backend applications that received an exchange_token
-/// from the OAuth callback. They exchange it for the actual OAuth credentials.
-/// Requires service account authentication (RISE_SERVICE_ACCOUNT_TOKEN).
-pub async fn exchange_credentials(
-    State(state): State<AppState>,
-    Path((project_name, extension_name)): Path<(String, String)>,
-    Query(params): Query<super::models::ExchangeTokenRequest>,
-) -> Result<Json<super::models::CredentialsResponse>, (StatusCode, String)> {
-    debug!(
-        "Exchange credentials request for project={}, extension={}",
-        project_name, extension_name
-    );
-
-    // Get project
-    let project = db_projects::find_by_name(&state.db_pool, &project_name)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
-
-    // Retrieve and validate exchange token (single-use, 5-minute TTL)
-    let exchange_state = state
-        .oauth_exchange_store
-        .get(&params.exchange_token)
-        .await
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            "Invalid or expired exchange token".to_string(),
-        ))?;
-
-    // Invalidate exchange token immediately (single-use)
-    state
-        .oauth_exchange_store
-        .invalidate(&params.exchange_token)
-        .await;
-
-    debug!(
-        "Exchange token validated and invalidated for session {}",
-        exchange_state.session_id
-    );
-
-    // Verify project and extension match
-    if exchange_state.project_id != project.id || exchange_state.extension_name != extension_name {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Exchange token does not match project/extension".to_string(),
-        ));
-    }
-
-    // Get tokens from database
-    let token = user_oauth_tokens::get_by_session(
-        &state.db_pool,
-        project.id,
-        &extension_name,
-        &exchange_state.session_id,
-    )
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .ok_or((
-        StatusCode::NOT_FOUND,
-        "OAuth token not found for this session".to_string(),
-    ))?;
-
-    // Update last_accessed_at
-    if let Err(e) = user_oauth_tokens::update_last_accessed(&state.db_pool, token.id).await {
-        warn!("Failed to update last_accessed_at: {:?}", e);
-    }
-
-    // Decrypt tokens
-    let encryption_provider = state.encryption_provider.as_ref().ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Encryption provider not configured".to_string(),
-    ))?;
-
-    let access_token = encryption_provider
-        .decrypt(&token.access_token_encrypted)
-        .await
-        .map_err(|e| {
-            error!("Failed to decrypt access token: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to decrypt access token: {}", e),
-            )
-        })?;
-
-    let refresh_token = match &token.refresh_token_encrypted {
-        Some(refresh_token_encrypted) => Some(
-            encryption_provider
-                .decrypt(refresh_token_encrypted)
-                .await
-                .map_err(|e| {
-                    error!("Failed to decrypt refresh token: {:?}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to decrypt refresh token: {}", e),
-                    )
-                })?,
-        ),
-        None => None,
-    };
-
-    info!(
-        "Exchange successful for session {} on project {} extension {}",
-        exchange_state.session_id, project_name, extension_name
-    );
-
-    Ok(Json(super::models::CredentialsResponse {
-        access_token,
-        token_type: "Bearer".to_string(),
-        expires_at: token.expires_at.unwrap_or_else(Utc::now),
-        refresh_token, // Include refresh token for backend apps
-    }))
 }
 
 /// Validate PKCE code_verifier against code_challenge
@@ -1174,20 +1053,16 @@ async fn handle_authorization_code_grant(
         )
     })?;
 
-    // Retrieve and invalidate exchange token (single-use)
-    let exchange_state = state
-        .oauth_exchange_store
-        .remove(&code)
-        .await
-        .ok_or_else(|| {
-            oauth2_error(
-                "invalid_grant",
-                Some("Invalid or expired authorization code".to_string()),
-            )
-        })?;
+    // Retrieve and invalidate authorization code (single-use)
+    let code_state = state.oauth_code_store.remove(&code).await.ok_or_else(|| {
+        oauth2_error(
+            "invalid_grant",
+            Some("Invalid or expired authorization code".to_string()),
+        )
+    })?;
 
     // Verify project and extension match
-    if exchange_state.project_id != project.id || exchange_state.extension_name != extension_name {
+    if code_state.project_id != project.id || code_state.extension_name != extension_name {
         return Err(oauth2_error(
             "invalid_grant",
             Some("Authorization code mismatch".to_string()),
@@ -1195,7 +1070,7 @@ async fn handle_authorization_code_grant(
     }
 
     // PKCE validation if code_challenge was provided during authorization
-    if let Some(ref code_challenge) = exchange_state.code_challenge {
+    if let Some(ref code_challenge) = code_state.code_challenge {
         // PKCE flow - require code_verifier
         let code_verifier = req.code_verifier.ok_or_else(|| {
             oauth2_error(
@@ -1204,7 +1079,7 @@ async fn handle_authorization_code_grant(
             )
         })?;
 
-        let code_challenge_method = exchange_state
+        let code_challenge_method = code_state
             .code_challenge_method
             .as_deref()
             .unwrap_or("S256");
@@ -1217,22 +1092,15 @@ async fn handle_authorization_code_grant(
         }
 
         debug!("PKCE validation successful");
-    } else {
-        // Non-PKCE flow - client_secret must have been validated already
-        if req.client_secret.is_none() {
-            return Err(oauth2_error(
-                "invalid_client",
-                Some("Client authentication required".to_string()),
-            ));
-        }
     }
+    // Note: For non-PKCE flows, client_secret was already validated in token_endpoint()
 
     // Get tokens from database
     let token = user_oauth_tokens::get_by_session(
         &state.db_pool,
         project.id,
         &extension_name,
-        &exchange_state.session_id,
+        &code_state.session_id,
     )
     .await
     .map_err(|e| {
