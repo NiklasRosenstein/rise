@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, deployment_id, key, value, is_secret, created_at, updated_at\n        FROM deployment_env_vars\n        WHERE deployment_id = $1\n        ORDER BY key ASC\n        ",
+  "query": "\n        SELECT id, deployment_id, key, value, is_secret, is_retrievable, created_at, updated_at\n        FROM deployment_env_vars\n        WHERE deployment_id = $1\n        ORDER BY key ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -30,11 +30,16 @@
       },
       {
         "ordinal": 5,
+        "name": "is_retrievable",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -51,8 +56,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "188cfa4f7720e92a55f73ded06583a96f7377b939dc329cfbdea725b1e1a13f0"
+  "hash": "993c74eb9b95fc1c8ddc5166d970b92a5b9d6801b3507c8e67187b5de8090898"
 }
