@@ -1060,7 +1060,7 @@ pub async fn token_endpoint(
         ));
     }
 
-    // Validate client authentication (either client_secret or code_verifier)
+    // Validate client authentication (either client_secret or code_verifier, but not both)
     let has_client_secret = req.client_secret.is_some();
     let has_code_verifier = req.code_verifier.is_some();
 
@@ -1068,6 +1068,17 @@ pub async fn token_endpoint(
         return Err(oauth2_error(
             "invalid_request",
             Some("Missing client authentication: provide either client_secret (confidential clients) or code_verifier (public clients with PKCE)".to_string()),
+        ));
+    }
+
+    // RFC 6749 & RFC 7636: client_secret and code_verifier are mutually exclusive
+    // - Confidential clients (backend apps) use client_secret
+    // - Public clients (SPAs) use PKCE (code_verifier)
+    // Providing both is ambiguous and indicates a misconfigured client
+    if has_client_secret && has_code_verifier {
+        return Err(oauth2_error(
+            "invalid_request",
+            Some("Client authentication methods are mutually exclusive: provide either client_secret (confidential clients) or code_verifier (public clients), not both".to_string()),
         ));
     }
 

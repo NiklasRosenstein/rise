@@ -581,10 +581,12 @@ Content-Type: application/x-www-form-urlencoded
 - `grant_type` (required): Must be `"authorization_code"`
 - `code` (required): Authorization code from callback
 - `client_id` (required): Rise client ID from environment variable `OAUTH_RISE_CLIENT_ID_{extension}`
-- **Confidential clients (backend apps):**
-  - `client_secret` (required): Rise client secret from environment variable `OAUTH_RISE_CLIENT_SECRET_{extension}`
-- **Public clients (SPAs with PKCE):**
-  - `code_verifier` (required): PKCE code verifier (proves client initiated the flow)
+- **Client authentication (choose ONE method - mutually exclusive):**
+  - **Confidential clients (backend apps):**
+    - `client_secret` (required): Rise client secret from environment variable `OAUTH_RISE_CLIENT_SECRET_{extension}`
+  - **Public clients (SPAs with PKCE):**
+    - `code_verifier` (required): PKCE code verifier (proves client initiated the flow)
+  - **Note:** Providing both `client_secret` and `code_verifier` will result in an `invalid_request` error
 
 **For refresh_token grant (refresh access token):**
 - `grant_type` (required): Must be `"refresh_token"`
@@ -613,7 +615,7 @@ Content-Type: application/x-www-form-urlencoded
 ```
 
 **Error Codes:**
-- `invalid_request` (400): Missing or invalid parameters
+- `invalid_request` (400): Missing or invalid parameters, or both `client_secret` and `code_verifier` provided
 - `invalid_client` (401): Invalid client_id or client_secret
 - `invalid_grant` (400): Invalid/expired code, or PKCE validation failed
 - `unsupported_grant_type` (400): Unknown grant_type
