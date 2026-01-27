@@ -512,7 +512,7 @@ function EnvVarsList({ projectName, deploymentId }) {
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingEnvVar, setEditingEnvVar] = useState(null);
-    const [formData, setFormData] = useState({ key: '', value: '', is_secret: false, is_retrievable: false });
+    const [formData, setFormData] = useState({ key: '', value: '', is_secret: false, is_protected: true });
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [envVarToDelete, setEnvVarToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
@@ -538,13 +538,13 @@ function EnvVarsList({ projectName, deploymentId }) {
 
     const handleAddClick = () => {
         setEditingEnvVar(null);
-        setFormData({ key: '', value: '', is_secret: false, is_retrievable: false });
+        setFormData({ key: '', value: '', is_secret: false, is_protected: true });
         setIsModalOpen(true);
     };
 
     const handleEditClick = (envVar) => {
         setEditingEnvVar(envVar);
-        setFormData({ key: envVar.key, value: envVar.is_secret && !envVar.is_retrievable ? '' : envVar.value, is_secret: envVar.is_secret, is_retrievable: envVar.is_retrievable });
+        setFormData({ key: envVar.key, value: envVar.is_secret && envVar.is_protected ? '' : envVar.value, is_secret: envVar.is_secret, is_protected: envVar.is_protected });
         setIsModalOpen(true);
     };
 
@@ -561,7 +561,7 @@ function EnvVarsList({ projectName, deploymentId }) {
 
         setSaving(true);
         try {
-            await api.setEnvVar(projectName, formData.key, formData.value, formData.is_secret, formData.is_retrievable);
+            await api.setEnvVar(projectName, formData.key, formData.value, formData.is_secret, formData.is_protected);
             showToast(`Environment variable ${formData.key} ${editingEnvVar ? 'updated' : 'created'} successfully`, 'success');
             setIsModalOpen(false);
             loadEnvVars();
@@ -627,7 +627,7 @@ function EnvVarsList({ projectName, deploymentId }) {
                                 <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
                                     <div className="flex items-center gap-2">
                                         <span>{env.value}</span>
-                                        {env.is_secret && env.is_retrievable && (
+                                        {env.is_secret && !env.is_protected && (
                                             <button
                                                 onClick={async () => {
                                                     try {
@@ -664,8 +664,8 @@ function EnvVarsList({ projectName, deploymentId }) {
                                     {env.is_secret ? (
                                         <div className="flex gap-1">
                                             <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
-                                            {env.is_retrievable && (
-                                                <span className="bg-green-600 text-white text-xs font-semibold px-2 py-1 rounded-full uppercase">retrievable</span>
+                                            {!env.is_protected && (
+                                                <span className="bg-orange-600 text-white text-xs font-semibold px-2 py-1 rounded-full uppercase">unprotected</span>
                                             )}
                                         </div>
                                     ) : (
@@ -741,21 +741,21 @@ function EnvVarsList({ projectName, deploymentId }) {
                         id="env-is-secret"
                         type="checkbox"
                         value={formData.is_secret}
-                        onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked, is_retrievable: e.target.checked ? formData.is_retrievable : false })}
+                        onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked, is_protected: e.target.checked ? formData.is_protected : true })}
                         placeholder="Mark as secret (value will be encrypted)"
                     />
                     {formData.is_secret && (
                         <>
                             <FormField
                                 label=""
-                                id="env-is-retrievable"
+                                id="env-is-unprotected"
                                 type="checkbox"
-                                value={formData.is_retrievable}
-                                onChange={(e) => setFormData({ ...formData, is_retrievable: e.target.checked })}
-                                placeholder="Allow retrieval (can be decrypted and copied via API)"
+                                value={!formData.is_protected}
+                                onChange={(e) => setFormData({ ...formData, is_protected: !e.target.checked })}
+                                placeholder="Allow unprotected access (can be decrypted and copied via API)"
                             />
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-                                Warning: Retrievable secrets can be accessed via API. Only enable for development/CI credentials.
+                                Warning: Unprotected secrets can be accessed via API. Only disable protection for development/CI credentials.
                             </p>
                         </>
                     )}
