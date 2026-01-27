@@ -781,10 +781,12 @@ pub async fn callback(
 
 /// Exchange a temporary token for OAuth credentials (Exchange Flow)
 ///
+/// Exchange authorization code for OAuth credentials (DEPRECATED)
+///
 /// POST /api/v1/projects/{project}/extensions/{extension}/oauth/exchange
 ///
 /// Query params:
-/// - exchange_token: Authorization code from OAuth callback
+/// - code: Authorization code from OAuth callback
 ///
 /// DEPRECATED: Use POST /oauth/token with RFC 6749-compliant token endpoint instead.
 /// This endpoint is called by backend applications that received an authorization code
@@ -807,20 +809,13 @@ pub async fn exchange_credentials(
         .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
     // Retrieve and validate authorization code (single-use, 5-minute TTL)
-    let code_state = state
-        .oauth_code_store
-        .get(&params.exchange_token)
-        .await
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            "Invalid or expired authorization code".to_string(),
-        ))?;
+    let code_state = state.oauth_code_store.get(&params.code).await.ok_or((
+        StatusCode::BAD_REQUEST,
+        "Invalid or expired authorization code".to_string(),
+    ))?;
 
     // Invalidate authorization code immediately (single-use)
-    state
-        .oauth_code_store
-        .invalidate(&params.exchange_token)
-        .await;
+    state.oauth_code_store.invalidate(&params.code).await;
 
     debug!(
         "Authorization code validated and invalidated for session {}",

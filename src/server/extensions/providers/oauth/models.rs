@@ -148,7 +148,7 @@ pub struct OAuthCodeState {
 #[derive(Debug, Deserialize)]
 pub struct ExchangeCodeRequest {
     /// Authorization code (single-use, short TTL)
-    pub exchange_token: String,
+    pub code: String,
 }
 
 /// Query parameter to enable exchange flow
