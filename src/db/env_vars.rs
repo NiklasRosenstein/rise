@@ -9,7 +9,7 @@ pub async fn list_project_env_vars(pool: &PgPool, project_id: Uuid) -> Result<Ve
     let env_vars = sqlx::query_as!(
         ProjectEnvVar,
         r#"
-        SELECT id, project_id, key, value, is_secret, is_retrievable, created_at, updated_at
+        SELECT id, project_id, key, value, is_secret, is_protected, created_at, updated_at
         FROM project_env_vars
         WHERE project_id = $1
         ORDER BY key ASC
@@ -32,7 +32,7 @@ pub async fn get_project_env_var(
     let env_var = sqlx::query_as!(
         ProjectEnvVar,
         r#"
-        SELECT id, project_id, key, value, is_secret, is_retrievable, created_at, updated_at
+        SELECT id, project_id, key, value, is_secret, is_protected, created_at, updated_at
         FROM project_env_vars
         WHERE project_id = $1 AND key = $2
         "#,
@@ -53,26 +53,26 @@ pub async fn upsert_project_env_var(
     key: &str,
     value: &str,
     is_secret: bool,
-    is_retrievable: bool,
+    is_protected: bool,
 ) -> Result<ProjectEnvVar> {
     let env_var = sqlx::query_as!(
         ProjectEnvVar,
         r#"
-        INSERT INTO project_env_vars (project_id, key, value, is_secret, is_retrievable)
+        INSERT INTO project_env_vars (project_id, key, value, is_secret, is_protected)
         VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (project_id, key)
         DO UPDATE SET
             value = EXCLUDED.value,
             is_secret = EXCLUDED.is_secret,
-            is_retrievable = EXCLUDED.is_retrievable,
+            is_protected = EXCLUDED.is_protected,
             updated_at = NOW()
-        RETURNING id, project_id, key, value, is_secret, is_retrievable, created_at, updated_at
+        RETURNING id, project_id, key, value, is_secret, is_protected, created_at, updated_at
         "#,
         project_id,
         key,
         value,
         is_secret,
-        is_retrievable
+        is_protected
     )
     .fetch_one(pool)
     .await
@@ -107,8 +107,8 @@ pub async fn copy_project_env_vars_to_deployment(
 ) -> Result<u64> {
     let result = sqlx::query!(
         r#"
-        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_retrievable)
-        SELECT $1, key, value, is_secret, is_retrievable
+        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
+        SELECT $1, key, value, is_secret, is_protected
         FROM project_env_vars
         WHERE project_id = $2
         "#,
@@ -131,8 +131,8 @@ pub async fn copy_deployment_env_vars_to_deployment(
 ) -> Result<u64> {
     let result = sqlx::query!(
         r#"
-        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_retrievable)
-        SELECT $1, key, value, is_secret, is_retrievable
+        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
+        SELECT $1, key, value, is_secret, is_protected
         FROM deployment_env_vars
         WHERE deployment_id = $2
         "#,
@@ -155,7 +155,7 @@ pub async fn list_deployment_env_vars(
     let env_vars = sqlx::query_as!(
         DeploymentEnvVar,
         r#"
-        SELECT id, deployment_id, key, value, is_secret, is_retrievable, created_at, updated_at
+        SELECT id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at
         FROM deployment_env_vars
         WHERE deployment_id = $1
         ORDER BY key ASC
@@ -176,26 +176,26 @@ pub async fn upsert_deployment_env_var(
     key: &str,
     value: &str,
     is_secret: bool,
-    is_retrievable: bool,
+    is_protected: bool,
 ) -> Result<DeploymentEnvVar> {
     let env_var = sqlx::query_as!(
         DeploymentEnvVar,
         r#"
-        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_retrievable)
+        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
         VALUES ($1, $2, $3, $4, $5)
         ON CONFLICT (deployment_id, key)
         DO UPDATE SET
             value = EXCLUDED.value,
             is_secret = EXCLUDED.is_secret,
-            is_retrievable = EXCLUDED.is_retrievable,
+            is_protected = EXCLUDED.is_protected,
             updated_at = NOW()
-        RETURNING id, deployment_id, key, value, is_secret, is_retrievable, created_at, updated_at
+        RETURNING id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at
         "#,
         deployment_id,
         key,
         value,
         is_secret,
-        is_retrievable
+        is_protected
     )
     .fetch_one(pool)
     .await
