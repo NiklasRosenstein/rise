@@ -278,10 +278,10 @@ pub async fn authorize(
                             .insert(exchange_token.clone(), exchange_state)
                             .await;
 
-                        // Return exchange token in query parameter
+                        // Return authorization code as query parameter (RFC 6749)
                         redirect_url
                             .query_pairs_mut()
-                            .append_pair("exchange_token", &exchange_token);
+                            .append_pair("code", &exchange_token);
 
                         // Pass through application's CSRF state if provided
                         if let Some(app_state) = req.state {
@@ -747,10 +747,10 @@ pub async fn callback(
         .insert(exchange_token.clone(), exchange_state)
         .await;
 
-    // Add exchange token as query parameter
+    // Add authorization code as query parameter (RFC 6749)
     redirect_url
         .query_pairs_mut()
-        .append_pair("exchange_token", &exchange_token);
+        .append_pair("code", &exchange_token);
 
     // Pass through application's CSRF state
     if let Some(app_state) = oauth_state.application_state {
@@ -1217,15 +1217,8 @@ async fn handle_authorization_code_grant(
         }
 
         debug!("PKCE validation successful");
-    } else {
-        // Non-PKCE flow - client_secret must have been validated already
-        if req.client_secret.is_none() {
-            return Err(oauth2_error(
-                "invalid_client",
-                Some("Client authentication required".to_string()),
-            ));
-        }
     }
+    // Note: For non-PKCE flows, client_secret was already validated in token_endpoint()
 
     // Get tokens from database
     let token = user_oauth_tokens::get_by_session(
