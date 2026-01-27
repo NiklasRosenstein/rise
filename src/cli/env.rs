@@ -154,6 +154,7 @@ pub async fn fetch_env_vars_with_secret_list(
 }
 
 /// Set an environment variable for a project
+#[allow(clippy::too_many_arguments)]
 pub async fn set_env(
     http_client: &Client,
     backend_url: &str,
