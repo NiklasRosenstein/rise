@@ -467,6 +467,18 @@ enum EnvCommands {
         #[arg(long, default_value = ".")]
         path: String,
     },
+    /// Get the value of a specific environment variable
+    #[command(visible_alias = "g")]
+    Get {
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// Variable name
+        key: String,
+    },
     /// Delete an environment variable from a project
     #[command(visible_alias = "unset")]
     #[command(visible_alias = "rm")]
@@ -1088,6 +1100,10 @@ async fn main() -> Result<()> {
                 EnvCommands::List { project, path } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
                     env::list_env(&http_client, &backend_url, &token, &project_name).await?;
+                }
+                EnvCommands::Get { project, path, key } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
+                    env::get_env(&http_client, &backend_url, &token, &project_name, key).await?;
                 }
                 EnvCommands::Delete { project, path, key } => {
                     let project_name = resolve_project_name(project.clone(), path)?;

@@ -266,6 +266,80 @@ pub async fn list_env(
     Ok(())
 }
 
+/// Get the value of a specific environment variable
+pub async fn get_env(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    key: &str,
+) -> Result<()> {
+    // First, fetch the variable to check if it exists and get its metadata
+    let env_vars_response =
+        fetch_env_vars_response(http_client, backend_url, token, project).await?;
+
+    let env_var = env_vars_response
+        .env_vars
+        .into_iter()
+        .find(|v| v.key == key)
+        .ok_or_else(|| anyhow::anyhow!("Environment variable '{}' not found", key))?;
+
+    // If it's a secret and not retrievable, we can't get the value
+    if env_var.is_secret && !env_var.is_retrievable {
+        anyhow::bail!(
+            "Cannot retrieve value: '{}' is a non-retrievable secret.\n\
+             To make it retrievable, update it with: rise env set {} <value> --secret --retrievable",
+            key, key
+        );
+    }
+
+    // If it's a retrievable secret, fetch the decrypted value
+    if env_var.is_secret && env_var.is_retrievable {
+        let url = format!(
+            "{}/api/v1/projects/{}/env/{}/value",
+            backend_url, project, key
+        );
+
+        let response = http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await
+            .context("Failed to get environment variable value")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!(
+                "Failed to get environment variable value (status {}): {}",
+                status,
+                error_text
+            );
+        }
+
+        #[derive(Debug, serde::Deserialize)]
+        struct EnvVarValueResponse {
+            value: String,
+        }
+
+        let value_response: EnvVarValueResponse = response
+            .json()
+            .await
+            .context("Failed to parse environment variable value response")?;
+
+        // Print just the value (useful for scripting)
+        println!("{}", value_response.value);
+    } else {
+        // For non-secret variables, the value is already in the response
+        println!("{}", env_var.value);
+    }
+
+    Ok(())
+}
+
 /// Delete an environment variable from a project
 pub async fn unset_env(
     http_client: &Client,
