@@ -757,10 +757,10 @@ function EnvVarsList({ projectName, deploymentId }) {
                                 type="checkbox"
                                 value={formData.is_protected}
                                 onChange={(e) => setFormData({ ...formData, is_protected: e.target.checked })}
-                                placeholder="Protected (prevents decryption via API)"
+                                placeholder="Protected (value cannot be retrieved again)"
                             />
                             <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-                                Protected secrets cannot be retrieved via API. Uncheck to allow decryption for development/CI credentials.
+                                Protected secrets are write-only and cannot be read back. Uncheck to allow retrieval for development/CI use.
                             </p>
                         </>
                     )}
