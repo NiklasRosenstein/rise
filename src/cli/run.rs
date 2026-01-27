@@ -106,7 +106,7 @@ pub async fn run_locally(
                 )
                 .await
                 {
-                    Ok((non_secret_vars, retrievable_secrets, non_retrievable_keys)) => {
+                    Ok((non_secret_vars, unprotected_secrets, protected_keys)) => {
                         // Set non-secret environment variables
                         if !non_secret_vars.is_empty() {
                             info!(
@@ -120,35 +120,35 @@ pub async fn run_locally(
                             }
                         }
 
-                        // Load retrievable secrets
-                        if !retrievable_secrets.is_empty() {
+                        // Load unprotected secrets
+                        if !unprotected_secrets.is_empty() {
                             info!(
-                                "Loading {} retrievable secret{} from project '{}'",
-                                retrievable_secrets.len(),
-                                if retrievable_secrets.len() == 1 {
+                                "Loading {} unprotected secret{} from project '{}'",
+                                unprotected_secrets.len(),
+                                if unprotected_secrets.len() == 1 {
                                     ""
                                 } else {
                                     "s"
                                 },
                                 project_name
                             );
-                            for (key, value) in retrievable_secrets {
+                            for (key, value) in unprotected_secrets {
                                 cmd.arg("-e").arg(format!("{}={}", key, value));
                             }
                         }
 
-                        // Warn about non-retrievable secret variables that cannot be loaded
-                        if !non_retrievable_keys.is_empty() {
+                        // Warn about protected secret variables that cannot be loaded
+                        if !protected_keys.is_empty() {
                             warn!(
-                                "Project '{}' has {} non-retrievable secret{} that cannot be loaded automatically:",
+                                "Project '{}' has {} protected secret{} that cannot be loaded automatically:",
                                 project_name,
-                                non_retrievable_keys.len(),
-                                if non_retrievable_keys.len() == 1 { "" } else { "s" }
+                                protected_keys.len(),
+                                if protected_keys.len() == 1 { "" } else { "s" }
                             );
-                            for key in &non_retrievable_keys {
+                            for key in &protected_keys {
                                 warn!("  - {}", key);
                             }
-                            warn!("Provide values manually using -r/--run-env if needed");
+                            warn!("Mark secrets as unprotected with --protected=false if needed for local development");
                         }
                     }
                     Err(e) => {

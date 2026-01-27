@@ -7,9 +7,9 @@ use std::path::PathBuf;
 #[derive(Debug, Deserialize)]
 struct EnvVarResponse {
     key: String,
-    value: String, // Will be masked ("••••••••") for non-retrievable secrets
+    value: String, // Will be masked ("••••••••") for protected secrets
     is_secret: bool,
-    is_retrievable: bool,
+    is_protected: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -17,13 +17,18 @@ struct EnvVarsResponse {
     env_vars: Vec<EnvVarResponse>,
 }
 
+#[allow(dead_code)]
+fn default_protected() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize)]
 struct SetEnvVarRequest {
     value: String,
     #[serde(default)]
     is_secret: bool,
-    #[serde(default)]
-    is_retrievable: bool,
+    #[serde(default = "default_protected")]
+    is_protected: bool,
 }
 
 /// Fetch environment variables from a project (internal helper)
@@ -92,17 +97,17 @@ pub async fn fetch_non_secret_env_vars(
 
 /// Fetch environment variables from a project, returning:
 /// - Non-secret vars (always available)
-/// - Retrievable secret vars (decrypted values)
-/// - Non-retrievable secret keys (cannot be loaded)
+/// - Unprotected secret vars (decrypted values)
+/// - Protected secret keys (cannot be loaded)
 pub async fn fetch_env_vars_with_secret_list(
     http_client: &Client,
     backend_url: &str,
     token: &str,
     project: &str,
 ) -> Result<(Vec<(String, String)>, Vec<(String, String)>, Vec<String>)> {
-    // Fetch with retrievable values included
+    // Fetch with unprotected values included
     let url = format!(
-        "{}/api/v1/projects/{}/env?include_retrievable_values=true",
+        "{}/api/v1/projects/{}/env?include_unprotected_values=true",
         backend_url, project
     );
 
@@ -132,17 +137,17 @@ pub async fn fetch_env_vars_with_secret_list(
         .context("Failed to parse environment variables response")?;
 
     let mut non_secret_vars = Vec::new();
-    let mut retrievable_secrets = Vec::new();
-    let mut non_retrievable_keys = Vec::new();
+    let mut unprotected_secrets = Vec::new();
+    let mut protected_keys = Vec::new();
 
     for var in env_response.env_vars {
         if var.is_secret {
-            if var.is_retrievable {
-                // Retrievable secret with decrypted value
-                retrievable_secrets.push((var.key, var.value));
+            if !var.is_protected {
+                // Unprotected secret with decrypted value
+                unprotected_secrets.push((var.key, var.value));
             } else {
-                // Non-retrievable secret (value is masked)
-                non_retrievable_keys.push(var.key);
+                // Protected secret (value is masked)
+                protected_keys.push(var.key);
             }
         } else {
             // Non-secret variable
@@ -150,7 +155,7 @@ pub async fn fetch_env_vars_with_secret_list(
         }
     }
 
-    Ok((non_secret_vars, retrievable_secrets, non_retrievable_keys))
+    Ok((non_secret_vars, unprotected_secrets, protected_keys))
 }
 
 /// Set an environment variable for a project
@@ -163,14 +168,14 @@ pub async fn set_env(
     key: &str,
     value: &str,
     is_secret: bool,
-    is_retrievable: bool,
+    is_protected: bool,
 ) -> Result<()> {
     let url = format!("{}/api/v1/projects/{}/env/{}", backend_url, project, key);
 
     let payload = SetEnvVarRequest {
         value: value.to_string(),
         is_secret,
-        is_retrievable,
+        is_protected,
     };
 
     let response = http_client
@@ -195,10 +200,10 @@ pub async fn set_env(
     }
 
     let var_type = if is_secret {
-        if is_retrievable {
-            "retrievable secret"
+        if is_protected {
+            "protected secret"
         } else {
-            "secret"
+            "unprotected secret"
         }
     } else {
         "plain text"
@@ -237,13 +242,13 @@ pub async fn list_env(
             Cell::new("KEY").add_attribute(Attribute::Bold),
             Cell::new("VALUE").add_attribute(Attribute::Bold),
             Cell::new("TYPE").add_attribute(Attribute::Bold),
-            Cell::new("RETRIEVABLE").add_attribute(Attribute::Bold),
+            Cell::new("PROTECTED").add_attribute(Attribute::Bold),
         ]);
 
     for var in env_vars_response.env_vars {
         let var_type = if var.is_secret { "secret" } else { "plain" };
-        let retrievable = if var.is_secret {
-            if var.is_retrievable {
+        let protected = if var.is_secret {
+            if var.is_protected {
                 "yes"
             } else {
                 "no"
@@ -255,7 +260,7 @@ pub async fn list_env(
             Cell::new(&var.key),
             Cell::new(&var.value),
             Cell::new(var_type),
-            Cell::new(retrievable),
+            Cell::new(protected),
         ]);
     }
 
@@ -284,17 +289,17 @@ pub async fn get_env(
         .find(|v| v.key == key)
         .ok_or_else(|| anyhow::anyhow!("Environment variable '{}' not found", key))?;
 
-    // If it's a secret and not retrievable, we can't get the value
-    if env_var.is_secret && !env_var.is_retrievable {
+    // If it's a secret and protected, we can't get the value
+    if env_var.is_secret && env_var.is_protected {
         anyhow::bail!(
-            "Cannot retrieve value: '{}' is a non-retrievable secret.\n\
-             To make it retrievable, update it with: rise env set {} <value> --secret --retrievable",
+            "Cannot retrieve value: '{}' is a protected secret.\n\
+             To make it unprotected, update it with: rise env set {} <value> --secret --protected=false",
             key, key
         );
     }
 
-    // If it's a retrievable secret, fetch the decrypted value
-    if env_var.is_secret && env_var.is_retrievable {
+    // If it's an unprotected secret, fetch the decrypted value
+    if env_var.is_secret && !env_var.is_protected {
         let url = format!(
             "{}/api/v1/projects/{}/env/{}/value",
             backend_url, project, key
@@ -450,7 +455,7 @@ pub async fn import_env(
             key,
             value,
             is_secret,
-            false, // is_retrievable (not supported for bulk import)
+            true, // is_protected (protected by default, bulk import doesn't support customization)
         )
         .await
         {
