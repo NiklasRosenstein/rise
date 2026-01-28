@@ -59,8 +59,6 @@ pub struct OAuthState {
     pub project_name: String,
     /// Extension name (e.g., "oauth-snowflake")
     pub extension_name: String,
-    /// OAuth flow type (fragment or exchange)
-    pub flow_type: OAuthFlowType,
     /// PKCE code verifier (for upstream OAuth provider)
     pub code_verifier: String,
     /// When this state was created
@@ -123,30 +121,17 @@ pub struct OAuthCodeState {
     pub expires_at: Option<DateTime<Utc>>,
 }
 
-/// Query parameter to enable exchange flow
+/// OAuth authorization request parameters
 #[derive(Debug, Deserialize)]
 pub struct AuthorizeFlowQuery {
     /// Where to redirect after OAuth completes (optional, for local dev)
     pub redirect_uri: Option<String>,
     /// Application's CSRF state parameter (passed through)
     pub state: Option<String>,
-    /// OAuth flow type: "fragment" (default) or "exchange" (for backend apps)
-    #[serde(default)]
-    pub flow: OAuthFlowType,
     /// PKCE code challenge (for public clients/SPAs)
     pub code_challenge: Option<String>,
     /// PKCE code challenge method ("S256" or "plain", defaults to "S256")
     pub code_challenge_method: Option<String>,
-}
-
-/// OAuth flow type
-#[derive(Debug, Clone, Deserialize, Serialize, Default, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum OAuthFlowType {
-    /// Exchange token flow (backend exchanges token) - for server-rendered apps
-    /// SPAs should use PKCE flow instead (code_challenge parameter)
-    #[default]
-    Exchange,
 }
 
 /// Token request (RFC 6749-compliant)

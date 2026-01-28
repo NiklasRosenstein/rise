@@ -127,7 +127,8 @@ async fn validate_redirect_uri(
 /// Query params:
 /// - redirect_uri (optional): Where to redirect after auth (for local dev/custom domains)
 /// - state (optional): Application's CSRF state parameter (passed through to final redirect)
-/// - flow (optional): "fragment" (default, for SPAs) or "exchange" (for backend apps)
+/// - code_challenge (optional): PKCE code challenge for public clients (SPAs)
+/// - code_challenge_method (optional): PKCE method ("S256" or "plain", defaults to "S256")
 pub async fn authorize(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
@@ -269,7 +270,6 @@ pub async fn authorize(
         application_state: req.state,
         project_name: project_name.clone(),
         extension_name: extension_name.clone(),
-        flow_type: req.flow,
         code_verifier,
         created_at: Utc::now(),
         client_code_challenge: req.code_challenge,
@@ -583,7 +583,7 @@ pub async fn callback(
         "Missing redirect URI in state".to_string(),
     ))?;
 
-    // Build redirect URL - different flow based on oauth_state.flow_type
+    // Build redirect URL with authorization code (RFC 6749)
     let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
