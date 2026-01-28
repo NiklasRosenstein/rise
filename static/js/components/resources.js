@@ -512,7 +512,7 @@ function EnvVarsList({ projectName, deploymentId }) {
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingEnvVar, setEditingEnvVar] = useState(null);
-    const [formData, setFormData] = useState({ key: '', value: '', is_secret: false });
+    const [formData, setFormData] = useState({ key: '', value: '', is_secret: false, is_protected: true });
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [envVarToDelete, setEnvVarToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
@@ -538,13 +538,13 @@ function EnvVarsList({ projectName, deploymentId }) {
 
     const handleAddClick = () => {
         setEditingEnvVar(null);
-        setFormData({ key: '', value: '', is_secret: false });
+        setFormData({ key: '', value: '', is_secret: false, is_protected: true });
         setIsModalOpen(true);
     };
 
     const handleEditClick = (envVar) => {
         setEditingEnvVar(envVar);
-        setFormData({ key: envVar.key, value: envVar.value, is_secret: envVar.is_secret });
+        setFormData({ key: envVar.key, value: envVar.is_secret ? '' : envVar.value, is_secret: envVar.is_secret, is_protected: envVar.is_protected });
         setIsModalOpen(true);
     };
 
@@ -561,7 +561,7 @@ function EnvVarsList({ projectName, deploymentId }) {
 
         setSaving(true);
         try {
-            await api.setEnvVar(projectName, formData.key, formData.value, formData.is_secret);
+            await api.setEnvVar(projectName, formData.key, formData.value, formData.is_secret, formData.is_protected);
             showToast(`Environment variable ${formData.key} ${editingEnvVar ? 'updated' : 'created'} successfully`, 'success');
             setIsModalOpen(false);
             loadEnvVars();
@@ -624,10 +624,55 @@ function EnvVarsList({ projectName, deploymentId }) {
                             envVars.map(env => (
                             <tr key={env.key} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
                                 <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{env.key}</td>
-                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{env.value}</td>
+                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
+                                    <div className="flex items-center gap-2">
+                                        <span>{env.value}</span>
+                                        {env.is_secret && !env.is_protected && (
+                                            <button
+                                                onClick={async () => {
+                                                    try {
+                                                        const response = await api.getEnvVarValue(projectName, env.key);
+                                                        await navigator.clipboard.writeText(response.value);
+                                                        showToast('Secret copied to clipboard!', 'success');
+                                                    } catch (err) {
+                                                        showToast(`Failed to copy secret: ${err.message}`, 'error');
+                                                        console.error('Failed to fetch secret:', err);
+                                                    }
+                                                }}
+                                                className="p-1 text-gray-500 hover:text-blue-600 dark:text-gray-400 dark:hover:text-blue-400 transition-colors rounded hover:bg-gray-100 dark:hover:bg-gray-700"
+                                                title="Copy secret value to clipboard"
+                                            >
+                                                <svg
+                                                    xmlns="http://www.w3.org/2000/svg"
+                                                    className="h-4 w-4"
+                                                    fill="none"
+                                                    viewBox="0 0 24 24"
+                                                    stroke="currentColor"
+                                                    strokeWidth={2}
+                                                >
+                                                    <path
+                                                        strokeLinecap="round"
+                                                        strokeLinejoin="round"
+                                                        d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
+                                                    />
+                                                </svg>
+                                            </button>
+                                        )}
+                                    </div>
+                                </td>
                                 <td className="px-6 py-4 text-sm">
                                     {env.is_secret ? (
-                                        <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
+                                        <div className="flex gap-1">
+                                            <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
+                                            {env.is_protected && (
+                                                <span className="bg-purple-600 text-white text-xs font-semibold px-2 py-1 rounded-full uppercase flex items-center gap-1">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                                                    </svg>
+                                                    protected
+                                                </span>
+                                            )}
+                                        </div>
                                     ) : (
                                         <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">plain</span>
                                     )}
@@ -701,9 +746,24 @@ function EnvVarsList({ projectName, deploymentId }) {
                         id="env-is-secret"
                         type="checkbox"
                         value={formData.is_secret}
-                        onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked })}
+                        onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked, is_protected: e.target.checked ? formData.is_protected : true })}
                         placeholder="Mark as secret (value will be encrypted)"
                     />
+                    {formData.is_secret && (
+                        <>
+                            <FormField
+                                label=""
+                                id="env-is-protected"
+                                type="checkbox"
+                                value={formData.is_protected}
+                                onChange={(e) => setFormData({ ...formData, is_protected: e.target.checked })}
+                                placeholder="Protected (value cannot be retrieved again)"
+                            />
+                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
+                                Protected secrets are write-only and cannot be read back. Uncheck to allow retrieval for development/CI use.
+                            </p>
+                        </>
+                    )}
 
                     <div className="flex justify-end gap-3 pt-4">
                         <Button

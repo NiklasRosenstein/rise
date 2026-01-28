@@ -1669,6 +1669,7 @@ impl Extension for AwsRdsProvisioner {
                     env_var_name,
                     &encrypted_database_url,
                     true, // is_secret
+                    true, // is_protected (system-generated secrets are protected by default)
                 )
                 .await
                 .context(format!(
@@ -1698,6 +1699,7 @@ impl Extension for AwsRdsProvisioner {
                     key,
                     value,
                     is_secret,
+                    true, // is_protected (system-generated secrets are protected by default)
                 )
                 .await
                 .with_context(|| format!("Failed to write {} to deployment_env_vars", key))?;

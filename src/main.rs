@@ -452,6 +452,9 @@ enum EnvCommands {
         /// Mark as secret (encrypted at rest)
         #[arg(long)]
         secret: bool,
+        /// Mark secret as protected (cannot be decrypted via API). Default is true (protected). Use --protected=false to allow decryption.
+        #[arg(long, short = 'p', default_value = "true")]
+        protected: bool,
     },
     /// List environment variables for a project
     #[command(visible_alias = "ls")]
@@ -463,6 +466,18 @@ enum EnvCommands {
         /// Path to rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
+    },
+    /// Get the value of a specific environment variable
+    #[command(visible_alias = "g")]
+    Get {
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// Variable name
+        key: String,
     },
     /// Delete an environment variable from a project
     #[command(visible_alias = "unset")]
@@ -1067,6 +1082,7 @@ async fn main() -> Result<()> {
                     key,
                     value,
                     secret,
+                    protected,
                 } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
                     env::set_env(
@@ -1077,12 +1093,17 @@ async fn main() -> Result<()> {
                         key,
                         value,
                         *secret,
+                        *protected,
                     )
                     .await?;
                 }
                 EnvCommands::List { project, path } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
                     env::list_env(&http_client, &backend_url, &token, &project_name).await?;
+                }
+                EnvCommands::Get { project, path, key } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
+                    env::get_env(&http_client, &backend_url, &token, &project_name, key).await?;
                 }
                 EnvCommands::Delete { project, path, key } => {
                     let project_name = resolve_project_name(project.clone(), path)?;

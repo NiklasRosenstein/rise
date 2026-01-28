@@ -7,8 +7,9 @@ use std::path::PathBuf;
 #[derive(Debug, Deserialize)]
 struct EnvVarResponse {
     key: String,
-    value: String, // Will be masked ("••••••••") for secrets
+    value: String, // Will be masked ("••••••••") for protected secrets
     is_secret: bool,
+    is_protected: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -16,11 +17,18 @@ struct EnvVarsResponse {
     env_vars: Vec<EnvVarResponse>,
 }
 
+#[allow(dead_code)]
+fn default_protected() -> bool {
+    true
+}
+
 #[derive(Debug, Serialize)]
 struct SetEnvVarRequest {
     value: String,
     #[serde(default)]
     is_secret: bool,
+    #[serde(default = "default_protected")]
+    is_protected: bool,
 }
 
 /// Fetch environment variables from a project (internal helper)
@@ -87,30 +95,71 @@ pub async fn fetch_non_secret_env_vars(
     Ok(env_vars)
 }
 
-/// Fetch environment variables from a project, returning non-secret vars and the list of secret var keys
+/// Fetch environment variables from a project, returning:
+/// - Non-secret vars (always available)
+/// - Unprotected secret vars (decrypted values)
+/// - Protected secret keys (cannot be loaded)
 pub async fn fetch_env_vars_with_secret_list(
     http_client: &Client,
     backend_url: &str,
     token: &str,
     project: &str,
-) -> Result<(Vec<(String, String)>, Vec<String>)> {
-    let env_response = fetch_env_vars_response(http_client, backend_url, token, project).await?;
+) -> Result<(Vec<(String, String)>, Vec<(String, String)>, Vec<String>)> {
+    // Fetch with unprotected values included
+    let url = format!(
+        "{}/api/v1/projects/{}/env?include_unprotected_values=true",
+        backend_url, project
+    );
+
+    let response = http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .context("Failed to fetch environment variables")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to fetch environment variables (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    let env_response: EnvVarsResponse = response
+        .json()
+        .await
+        .context("Failed to parse environment variables response")?;
 
     let mut non_secret_vars = Vec::new();
-    let mut secret_keys = Vec::new();
+    let mut unprotected_secrets = Vec::new();
+    let mut protected_keys = Vec::new();
 
     for var in env_response.env_vars {
         if var.is_secret {
-            secret_keys.push(var.key);
+            if !var.is_protected {
+                // Unprotected secret with decrypted value
+                unprotected_secrets.push((var.key, var.value));
+            } else {
+                // Protected secret (value is masked)
+                protected_keys.push(var.key);
+            }
         } else {
+            // Non-secret variable
             non_secret_vars.push((var.key, var.value));
         }
     }
 
-    Ok((non_secret_vars, secret_keys))
+    Ok((non_secret_vars, unprotected_secrets, protected_keys))
 }
 
 /// Set an environment variable for a project
+#[allow(clippy::too_many_arguments)]
 pub async fn set_env(
     http_client: &Client,
     backend_url: &str,
@@ -119,12 +168,14 @@ pub async fn set_env(
     key: &str,
     value: &str,
     is_secret: bool,
+    is_protected: bool,
 ) -> Result<()> {
     let url = format!("{}/api/v1/projects/{}/env/{}", backend_url, project, key);
 
     let payload = SetEnvVarRequest {
         value: value.to_string(),
         is_secret,
+        is_protected,
     };
 
     let response = http_client
@@ -148,7 +199,15 @@ pub async fn set_env(
         );
     }
 
-    let var_type = if is_secret { "secret" } else { "plain text" };
+    let var_type = if is_secret {
+        if is_protected {
+            "protected secret"
+        } else {
+            "unprotected secret"
+        }
+    } else {
+        "plain text"
+    };
     println!(
         "✓ Set {} variable '{}' for project '{}'",
         var_type, key, project
@@ -183,20 +242,105 @@ pub async fn list_env(
             Cell::new("KEY").add_attribute(Attribute::Bold),
             Cell::new("VALUE").add_attribute(Attribute::Bold),
             Cell::new("TYPE").add_attribute(Attribute::Bold),
+            Cell::new("PROTECTED").add_attribute(Attribute::Bold),
         ]);
 
     for var in env_vars_response.env_vars {
         let var_type = if var.is_secret { "secret" } else { "plain" };
+        let protected = if var.is_secret {
+            if var.is_protected {
+                "yes"
+            } else {
+                "no"
+            }
+        } else {
+            "-"
+        };
         table.add_row(vec![
             Cell::new(&var.key),
             Cell::new(&var.value),
             Cell::new(var_type),
+            Cell::new(protected),
         ]);
     }
 
     println!("{}", table);
     println!("\nProject: {}", project);
     println!("Note: Secret values are always masked for security");
+
+    Ok(())
+}
+
+/// Get the value of a specific environment variable
+pub async fn get_env(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    key: &str,
+) -> Result<()> {
+    // First, fetch the variable to check if it exists and get its metadata
+    let env_vars_response =
+        fetch_env_vars_response(http_client, backend_url, token, project).await?;
+
+    let env_var = env_vars_response
+        .env_vars
+        .into_iter()
+        .find(|v| v.key == key)
+        .ok_or_else(|| anyhow::anyhow!("Environment variable '{}' not found", key))?;
+
+    // If it's a secret and protected, we can't get the value
+    if env_var.is_secret && env_var.is_protected {
+        anyhow::bail!(
+            "Cannot retrieve value: '{}' is a protected secret.\n\
+             To make it unprotected, update it with: rise env set {} <value> --secret --protected=false",
+            key, key
+        );
+    }
+
+    // If it's an unprotected secret, fetch the decrypted value
+    if env_var.is_secret && !env_var.is_protected {
+        let url = format!(
+            "{}/api/v1/projects/{}/env/{}/value",
+            backend_url, project, key
+        );
+
+        let response = http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", token))
+            .send()
+            .await
+            .context("Failed to get environment variable value")?;
+
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unknown error".to_string());
+            anyhow::bail!(
+                "Failed to get environment variable value (status {}): {}",
+                status,
+                error_text
+            );
+        }
+
+        #[derive(Debug, serde::Deserialize)]
+        struct EnvVarValueResponse {
+            value: String,
+        }
+
+        let value_response: EnvVarValueResponse = response
+            .json()
+            .await
+            .context("Failed to parse environment variable value response")?;
+
+        // Print just the value (useful for scripting)
+        println!("{}", value_response.value);
+    } else {
+        // For non-secret variables, the value is already in the response
+        println!("{}", env_var.value);
+    }
 
     Ok(())
 }
@@ -311,6 +455,7 @@ pub async fn import_env(
             key,
             value,
             is_secret,
+            true, // is_protected (protected by default, bulk import doesn't support customization)
         )
         .await
         {

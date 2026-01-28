@@ -14,6 +14,10 @@ pub fn routes() -> Router<AppState> {
             put(handlers::set_project_env_var).delete(handlers::delete_project_env_var),
         )
         .route(
+            "/projects/{project_id_or_name}/env/{key}/value",
+            get(handlers::get_project_env_var_value),
+        )
+        .route(
             "/projects/{project_id_or_name}/env",
             get(handlers::list_project_env_vars),
         )
