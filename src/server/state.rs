@@ -54,11 +54,8 @@ pub struct AppState {
     pub extension_registry: Arc<crate::server::extensions::registry::ExtensionRegistry>,
     pub oauth_state_store:
         Arc<moka::future::Cache<String, crate::server::extensions::providers::oauth::OAuthState>>,
-    pub oauth_exchange_store: Arc<
-        moka::future::Cache<
-            String,
-            crate::server::extensions::providers::oauth::OAuthExchangeState,
-        >,
+    pub oauth_code_store: Arc<
+        moka::future::Cache<String, crate::server::extensions::providers::oauth::OAuthCodeState>,
     >,
     pub access_classes:
         Arc<std::collections::HashMap<String, crate::server::settings::AccessClass>>,
@@ -666,14 +663,14 @@ impl AppState {
         );
         tracing::info!("Initialized OAuth state store for OAuth extensions");
 
-        // Initialize OAuth exchange token store (5 minute TTL, single-use)
-        let oauth_exchange_store = Arc::new(
+        // Initialize OAuth authorization code store (5 minute TTL, single-use)
+        let oauth_code_store = Arc::new(
             moka::future::Cache::builder()
                 .time_to_live(Duration::from_secs(300))
                 .max_capacity(10_000) // Prevent memory exhaustion
                 .build(),
         );
-        tracing::info!("Initialized OAuth exchange token store for secure backend flow");
+        tracing::info!("Initialized OAuth authorization code store for secure backend flow");
 
         // Extract access_classes from deployment controller settings
         // Filter out null values (used to remove inherited access classes)
@@ -716,7 +713,7 @@ impl AppState {
             deployment_backend,
             extension_registry,
             oauth_state_store,
-            oauth_exchange_store,
+            oauth_code_store,
             access_classes,
             production_ingress_url_template,
             staging_ingress_url_template,
