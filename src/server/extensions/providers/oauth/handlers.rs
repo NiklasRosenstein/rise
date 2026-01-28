@@ -921,8 +921,11 @@ async fn handle_authorization_code_grant(
         )
     })?;
 
-    // Retrieve authorization code (validate before consuming)
-    let code_state = state.oauth_code_store.get(&code).await.ok_or_else(|| {
+    // SECURITY: Consume authorization code immediately (atomic get-and-remove)
+    // This prevents race conditions where the same code could be used twice.
+    // Validations happen after removal - if they fail, code is already consumed.
+    // This is acceptable per RFC 6749: codes MUST be single-use.
+    let code_state = state.oauth_code_store.remove(&code).await.ok_or_else(|| {
         oauth2_error(
             "invalid_grant",
             Some("Invalid or expired authorization code".to_string()),
@@ -1040,9 +1043,6 @@ async fn handle_authorization_code_grant(
         "Authorization code grant successful for project {} extension {}",
         project.name, extension_name
     );
-
-    // Consume authorization code (single-use, only after all validations passed)
-    state.oauth_code_store.remove(&code).await;
 
     Ok(Json(OAuth2TokenResponse {
         access_token,
