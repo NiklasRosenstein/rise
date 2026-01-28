@@ -808,10 +808,20 @@ pub async fn sync_env_vars(
         .map(|v| v.key)
         .collect();
 
-    // Set/update vars from rise.toml (always non-secret)
+    // Set/update vars from rise.toml (always non-secret, non-retrievable)
     for (key, value) in desired_env {
         println!("Setting env var '{}' from rise.toml", key);
-        env::set_env(http_client, backend_url, token, project, key, value, false).await?;
+        env::set_env(
+            http_client,
+            backend_url,
+            token,
+            project,
+            key,
+            value,
+            false,
+            false,
+        )
+        .await?;
     }
 
     // Warn about unmanaged non-secret vars

@@ -106,32 +106,49 @@ pub async fn run_locally(
                 )
                 .await
                 {
-                    Ok((env_vars, secret_keys)) => {
+                    Ok((non_secret_vars, unprotected_secrets, protected_keys)) => {
                         // Set non-secret environment variables
-                        if !env_vars.is_empty() {
+                        if !non_secret_vars.is_empty() {
                             info!(
                                 "Loading {} non-secret environment variable{} from project '{}'",
-                                env_vars.len(),
-                                if env_vars.len() == 1 { "" } else { "s" },
+                                non_secret_vars.len(),
+                                if non_secret_vars.len() == 1 { "" } else { "s" },
                                 project_name
                             );
-                            for (key, value) in env_vars {
+                            for (key, value) in non_secret_vars {
                                 cmd.arg("-e").arg(format!("{}={}", key, value));
                             }
                         }
 
-                        // Warn about secret variables that cannot be loaded
-                        if !secret_keys.is_empty() {
-                            warn!(
-                                "Project '{}' has {} secret environment variable{} that cannot be loaded automatically:",
-                                project_name,
-                                secret_keys.len(),
-                                if secret_keys.len() == 1 { "" } else { "s" }
+                        // Load unprotected secrets
+                        if !unprotected_secrets.is_empty() {
+                            info!(
+                                "Loading {} unprotected secret{} from project '{}'",
+                                unprotected_secrets.len(),
+                                if unprotected_secrets.len() == 1 {
+                                    ""
+                                } else {
+                                    "s"
+                                },
+                                project_name
                             );
-                            for key in &secret_keys {
+                            for (key, value) in unprotected_secrets {
+                                cmd.arg("-e").arg(format!("{}={}", key, value));
+                            }
+                        }
+
+                        // Warn about protected secret variables that cannot be loaded
+                        if !protected_keys.is_empty() {
+                            warn!(
+                                "Project '{}' has {} protected secret{} that cannot be loaded automatically:",
+                                project_name,
+                                protected_keys.len(),
+                                if protected_keys.len() == 1 { "" } else { "s" }
+                            );
+                            for key in &protected_keys {
                                 warn!("  - {}", key);
                             }
-                            warn!("Provide secret values manually using -r/--run-env if needed");
+                            warn!("Mark secrets as unprotected with --protected=false if needed for local development");
                         }
                     }
                     Err(e) => {

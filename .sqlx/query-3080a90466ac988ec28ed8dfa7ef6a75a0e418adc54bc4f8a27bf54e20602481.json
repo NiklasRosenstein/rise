@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO project_env_vars (project_id, key, value, is_secret)\n        VALUES ($1, $2, $3, $4)\n        ON CONFLICT (project_id, key)\n        DO UPDATE SET\n            value = EXCLUDED.value,\n            is_secret = EXCLUDED.is_secret,\n            updated_at = NOW()\n        RETURNING id, project_id, key, value, is_secret, created_at, updated_at\n        ",
+  "query": "\n        INSERT INTO project_env_vars (project_id, key, value, is_secret, is_protected)\n        VALUES ($1, $2, $3, $4, $5)\n        ON CONFLICT (project_id, key)\n        DO UPDATE SET\n            value = EXCLUDED.value,\n            is_secret = EXCLUDED.is_secret,\n            is_protected = EXCLUDED.is_protected,\n            updated_at = NOW()\n        RETURNING id, project_id, key, value, is_secret, is_protected, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -30,11 +30,16 @@
       },
       {
         "ordinal": 5,
+        "name": "is_protected",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 6,
+        "ordinal": 7,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -44,6 +49,7 @@
         "Uuid",
         "Text",
         "Text",
+        "Bool",
         "Bool"
       ]
     },
@@ -54,8 +60,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "65af97f04cbc221aec482ede2c5a5ec0a9d83e5c70a5083e531622cc6a2e5848"
+  "hash": "3080a90466ac988ec28ed8dfa7ef6a75a0e418adc54bc4f8a27bf54e20602481"
 }
