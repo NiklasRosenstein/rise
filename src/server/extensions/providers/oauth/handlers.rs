@@ -792,26 +792,41 @@ pub async fn token_endpoint(
         ));
     }
 
-    // Validate client authentication (either client_secret or code_verifier, but not both)
+    // Grant-specific authentication validation
     let has_client_secret = req.client_secret.is_some();
     let has_code_verifier = req.code_verifier.is_some();
 
-    if !has_client_secret && !has_code_verifier {
-        return Err(oauth2_error(
-            "invalid_request",
-            Some("Missing client authentication: provide either client_secret (confidential clients) or code_verifier (public clients with PKCE)".to_string()),
-        ));
-    }
-
-    // RFC 6749 & RFC 7636: client_secret and code_verifier are mutually exclusive
-    // - Confidential clients (backend apps) use client_secret
-    // - Public clients (SPAs) use PKCE (code_verifier)
-    // Providing both is ambiguous and indicates a misconfigured client
-    if has_client_secret && has_code_verifier {
-        return Err(oauth2_error(
-            "invalid_request",
-            Some("Client authentication methods are mutually exclusive: provide either client_secret (confidential clients) or code_verifier (public clients), not both".to_string()),
-        ));
+    match req.grant_type.as_str() {
+        "authorization_code" => {
+            // authorization_code grant: REQUIRE client_secret OR code_verifier (PKCE)
+            if !has_client_secret && !has_code_verifier {
+                return Err(oauth2_error(
+                    "invalid_request",
+                    Some("Missing client authentication: provide either client_secret (confidential clients) or code_verifier (public clients with PKCE)".to_string()),
+                ));
+            }
+            // For authorization_code grant, client_secret and code_verifier are mutually exclusive
+            if has_client_secret && has_code_verifier {
+                return Err(oauth2_error(
+                    "invalid_request",
+                    Some("Client authentication methods are mutually exclusive: provide either client_secret (confidential clients) or code_verifier (public clients), not both".to_string()),
+                ));
+            }
+        }
+        "refresh_token" => {
+            // refresh_token grant: ALLOW client_secret (confidential) or no auth (public)
+            // REJECT code_verifier (PKCE is only for authorization_code grant)
+            if has_code_verifier {
+                return Err(oauth2_error(
+                    "invalid_request",
+                    Some("code_verifier not supported for refresh_token grant (PKCE is only for authorization_code)".to_string()),
+                ));
+            }
+            // Note: client_secret is optional for refresh_token grant (public clients)
+        }
+        _ => {
+            // Unknown grant type will be rejected later
+        }
     }
 
     // If client_secret provided, validate it
@@ -906,8 +921,8 @@ async fn handle_authorization_code_grant(
         )
     })?;
 
-    // Retrieve and invalidate authorization code (single-use)
-    let code_state = state.oauth_code_store.remove(&code).await.ok_or_else(|| {
+    // Retrieve authorization code (validate before consuming)
+    let code_state = state.oauth_code_store.get(&code).await.ok_or_else(|| {
         oauth2_error(
             "invalid_grant",
             Some("Invalid or expired authorization code".to_string()),
@@ -919,6 +934,15 @@ async fn handle_authorization_code_grant(
         return Err(oauth2_error(
             "invalid_grant",
             Some("Authorization code mismatch".to_string()),
+        ));
+    }
+
+    // CRITICAL: If code_verifier provided, challenge must have been provided during authz
+    // This prevents bypassing authentication by providing code_verifier without prior code_challenge
+    if req.code_verifier.is_some() && code_state.code_challenge.is_none() {
+        return Err(oauth2_error(
+            "invalid_request",
+            Some("code_verifier requires prior code_challenge during authorization".to_string()),
         ));
     }
 
@@ -963,6 +987,7 @@ async fn handle_authorization_code_grant(
 
         debug!("PKCE validation successful");
     }
+
     // Note: For non-PKCE flows, client_secret was already validated in token_endpoint()
 
     // Decrypt tokens from code_state (tokens stored directly in authorization code cache)
@@ -1015,6 +1040,9 @@ async fn handle_authorization_code_grant(
         "Authorization code grant successful for project {} extension {}",
         project.name, extension_name
     );
+
+    // Consume authorization code (single-use, only after all validations passed)
+    state.oauth_code_store.remove(&code).await;
 
     Ok(Json(OAuth2TokenResponse {
         access_token,
