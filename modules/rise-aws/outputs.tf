@@ -66,6 +66,11 @@ output "push_policy_arn" {
   value       = var.enable_ecr ? aws_iam_policy.push_role[0].arn : null
 }
 
+output "s3_user_boundary_policy_arn" {
+  description = "ARN of the permission boundary policy for S3 IAM users (null if S3 not enabled)"
+  value       = var.enable_s3 ? aws_iam_policy.s3_user_boundary[0].arn : null
+}
+
 output "policy_document" {
   description = "The IAM policy document JSON for the Rise backend"
   value       = data.aws_iam_policy_document.backend.json

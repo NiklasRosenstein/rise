@@ -865,6 +865,7 @@ pub enum PrivateKeySource {
 /// Extension provider configuration
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
+#[allow(clippy::enum_variant_names)]
 pub enum ExtensionProviderConfig {
     #[cfg(feature = "aws")]
     AwsRdsProvisioner {
@@ -906,6 +907,32 @@ pub enum ExtensionProviderConfig {
         secret_access_key: Option<String>,
     },
 
+    #[cfg(feature = "aws")]
+    #[serde(rename = "aws-s3-provisioner")]
+    AwsS3Provisioner {
+        region: String,
+        /// Prefix for S3 bucket names (default: "rise")
+        #[serde(default = "default_bucket_prefix")]
+        bucket_prefix: String,
+        /// Encryption configuration for all buckets (server-controlled)
+        #[serde(default = "default_s3_encryption")]
+        encryption: S3EncryptionConfig,
+        /// Access mode for all S3 extensions (server-controlled)
+        #[serde(default = "default_s3_access_mode")]
+        access_mode: S3AccessMode,
+        /// Deletion policy for all buckets (server-controlled)
+        #[serde(default = "default_s3_deletion_policy")]
+        deletion_policy: S3DeletionPolicy,
+        /// IAM permission boundary policy ARN for created IAM users (prevents privilege escalation)
+        /// This should match the boundary policy created by Terraform (e.g., "arn:aws:iam::123456789012:policy/rise-backend-s3-user-boundary")
+        #[serde(default)]
+        iam_user_boundary_policy_arn: Option<String>,
+        #[serde(default)]
+        access_key_id: Option<String>,
+        #[serde(default)]
+        secret_access_key: Option<String>,
+    },
+
     #[cfg(feature = "snowflake")]
     #[serde(rename = "snowflake-oauth-provisioner")]
     SnowflakeOAuthProvisioner {
@@ -937,6 +964,60 @@ pub enum ExtensionProviderConfig {
         #[serde(default = "default_refresh_token_validity_seconds")]
         refresh_token_validity_seconds: i64,
     },
+}
+
+/// S3 bucket encryption configuration (server-level setting)
+#[cfg(feature = "aws")]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub enum S3EncryptionConfig {
+    Aes256,
+    AwsKms,
+    AwsKmsCustomKey { key_id: String },
+}
+
+/// S3 access mode configuration (server-level setting)
+#[cfg(feature = "aws")]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub enum S3AccessMode {
+    IamUser,
+    IamRole { role_arn: String },
+    Both { role_arn: String },
+}
+
+/// S3 bucket deletion policy (server-level setting)
+#[cfg(feature = "aws")]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq)]
+#[serde(rename_all = "PascalCase")]
+pub enum S3DeletionPolicy {
+    Retain,
+    ForceEmpty,
+    Delete,
+}
+
+#[cfg(feature = "aws")]
+#[allow(dead_code)]
+fn default_bucket_prefix() -> String {
+    "rise".to_string()
+}
+
+#[cfg(feature = "aws")]
+#[allow(dead_code)]
+fn default_s3_encryption() -> S3EncryptionConfig {
+    S3EncryptionConfig::Aes256
+}
+
+#[cfg(feature = "aws")]
+#[allow(dead_code)]
+fn default_s3_access_mode() -> S3AccessMode {
+    S3AccessMode::IamUser
+}
+
+#[cfg(feature = "aws")]
+#[allow(dead_code)]
+fn default_s3_deletion_policy() -> S3DeletionPolicy {
+    S3DeletionPolicy::Retain
 }
 
 #[allow(dead_code)]

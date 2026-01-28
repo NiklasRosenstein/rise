@@ -50,6 +50,12 @@ variable "enable_rds" {
   default     = false
 }
 
+variable "enable_s3" {
+  description = "Enable S3 and IAM permissions for the Rise backend. Set to true if using the AWS S3 provisioner extension."
+  type        = bool
+  default     = false
+}
+
 variable "create_rds_service_linked_role" {
   description = "Create the RDS service-linked role. Only needed once per AWS account. Set to false if the role already exists."
   type        = bool
