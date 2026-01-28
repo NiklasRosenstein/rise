@@ -189,105 +189,81 @@ Best for server-rendered applications (Ruby on Rails, Django, Express) where tok
        v
 ```
 
-**Usage Example (RFC 6749-compliant with client credentials):**
+**Usage Examples:**
 
-```ruby
-# Rails controller
-class OAuthController < ApplicationController
-  def callback
-    # Extract authorization code from query params
-    code = params[:code]  # This is the authorization code, not an exchange token
-
-    # Get Rise client credentials from environment
-    client_id = ENV['OAUTH_RISE_CLIENT_ID_oauth-google']
-    client_secret = ENV['OAUTH_RISE_CLIENT_SECRET_oauth-google']
-
-    # Exchange authorization code for tokens using RFC 6749-compliant endpoint
-    response = HTTParty.post(
-      "https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token",
-      body: {
-        grant_type: 'authorization_code',
-        code: code,
-        client_id: client_id,
-        client_secret: client_secret
-      }
-    )
-
-    if response.code != 200
-      error = JSON.parse(response.body)
-      Rails.logger.error("OAuth token exchange failed: #{error['error']} - #{error['error_description']}")
-      redirect_to root_path, alert: 'Authentication failed'
-      return
-    end
-
-    tokens = JSON.parse(response.body)
-    # tokens = {
-    #   "access_token" => "...",
-    #   "token_type" => "Bearer",
-    #   "expires_in" => 3600,  # seconds from now
-    #   "refresh_token" => "...",
-    #   "scope" => "email profile",
-    #   "id_token" => "..."
-    # }
-
-    # Store in session (HttpOnly cookie)
-    session[:oauth_access_token] = tokens['access_token']
-    session[:oauth_expires_at] = Time.now + tokens['expires_in'].seconds
-    session[:oauth_refresh_token] = tokens['refresh_token']
-
-    # Redirect to app
-    redirect_to root_path
-  end
-end
-```
-
-```javascript
-// Express/Node.js
+```typescript
+// TypeScript (Express)
 app.get('/oauth/callback', async (req, res) => {
-  const { code } = req.query;  // Authorization code from callback
+  const { code } = req.query;
 
-  // Get Rise client credentials from environment
-  const clientId = process.env.OAUTH_RISE_CLIENT_ID_oauth_google;
-  const clientSecret = process.env.OAUTH_RISE_CLIENT_SECRET_oauth_google;
-
-  // Exchange authorization code for tokens
-  const response = await fetch(
-    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token',
+  const tokens = await fetch(
+    `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        code: code,
-        client_id: clientId,
-        client_secret: clientSecret
+        code: code as string,
+        client_id: process.env.OAUTH_RISE_CLIENT_ID_OAUTH_GOOGLE!,
+        client_secret: process.env.OAUTH_RISE_CLIENT_SECRET_OAUTH_GOOGLE!
       })
     }
-  );
+  ).then(r => r.json());
 
-  if (!response.ok) {
-    const error = await response.json();
-    console.error(`OAuth token exchange failed: ${error.error} - ${error.error_description}`);
-    return res.redirect('/?error=auth_failed');
-  }
-
-  const tokens = await response.json();
-  // tokens = {
-  //   access_token: "...",
-  //   token_type: "Bearer",
-  //   expires_in: 3600,  // seconds from now
-  //   refresh_token: "...",
-  //   scope: "email profile",
-  //   id_token: "..."
-  // }
-
-  // Store in session
-  req.session.oauthAccessToken = tokens.access_token;
-  req.session.oauthExpiresAt = new Date(Date.now() + tokens.expires_in * 1000);
-  req.session.oauthRefreshToken = tokens.refresh_token;
-
+  req.session.tokens = tokens;  // Store in HttpOnly session
   res.redirect('/');
 });
+```
+
+```python
+# Python (FastAPI)
+import httpx
+from fastapi import FastAPI, Request
+
+@app.get("/oauth/callback")
+async def callback(code: str, request: Request):
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            "https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token",
+            data={
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": os.getenv("OAUTH_RISE_CLIENT_ID_OAUTH_GOOGLE"),
+                "client_secret": os.getenv("OAUTH_RISE_CLIENT_SECRET_OAUTH_GOOGLE"),
+            }
+        )
+        tokens = response.json()
+
+    request.session["tokens"] = tokens  # Store in session
+    return RedirectResponse("/")
+```
+
+```rust
+// Rust (Axum)
+use axum::{extract::Query, response::Redirect};
+use serde::Deserialize;
+
+#[derive(Deserialize)]
+struct Callback { code: String }
+
+async fn oauth_callback(Query(params): Query<Callback>) -> Redirect {
+    let client = reqwest::Client::new();
+    let tokens: serde_json::Value = client
+        .post("https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token")
+        .form(&[
+            ("grant_type", "authorization_code"),
+            ("code", &params.code),
+            ("client_id", &std::env::var("OAUTH_RISE_CLIENT_ID_OAUTH_GOOGLE").unwrap()),
+            ("client_secret", &std::env::var("OAUTH_RISE_CLIENT_SECRET_OAUTH_GOOGLE").unwrap()),
+        ])
+        .send()
+        .await.unwrap()
+        .json()
+        .await.unwrap();
+
+    // Store tokens in session (implementation depends on session middleware)
+    Redirect::to("/")
+}
 ```
 
 ## Configuration
