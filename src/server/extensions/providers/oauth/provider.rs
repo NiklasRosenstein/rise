@@ -238,7 +238,10 @@ impl OAuthProvider {
         }
 
         // Delete associated Rise client ID env var
-        let rise_client_id_ref = format!("OAUTH_RISE_CLIENT_ID_{}", ext.extension.to_uppercase());
+        let rise_client_id_ref = format!(
+            "OAUTH_RISE_CLIENT_ID_{}",
+            ext.extension.to_uppercase().replace('-', "_")
+        );
         if let Err(e) =
             db_env_vars::delete_project_env_var(&self.db_pool, ext.project_id, &rise_client_id_ref)
                 .await
@@ -364,10 +367,11 @@ impl Extension for OAuthProvider {
             // Generate credentials
             let rise_client_id = Uuid::new_v4().to_string();
             let rise_client_secret = generate_rise_client_secret();
-            let rise_client_id_ref =
-                format!("OAUTH_RISE_CLIENT_ID_{}", extension_name.to_uppercase());
-            let rise_client_secret_ref =
-                format!("OAUTH_RISE_CLIENT_SECRET_{}", extension_name.to_uppercase());
+
+            // Normalize extension name for env var (uppercase, replace hyphens with underscores)
+            let normalized_name = extension_name.to_uppercase().replace('-', "_");
+            let rise_client_id_ref = format!("OAUTH_RISE_CLIENT_ID_{}", normalized_name);
+            let rise_client_secret_ref = format!("OAUTH_RISE_CLIENT_SECRET_{}", normalized_name);
 
             // Encrypt the client secret
             let rise_client_secret_encrypted = self
@@ -414,8 +418,10 @@ impl Extension for OAuthProvider {
         } else {
             // Restore Rise client ID env var if missing
             if let Some(ref rise_client_id) = spec.rise_client_id {
-                let rise_client_id_ref =
-                    format!("OAUTH_RISE_CLIENT_ID_{}", extension_name.to_uppercase());
+                let rise_client_id_ref = format!(
+                    "OAUTH_RISE_CLIENT_ID_{}",
+                    extension_name.to_uppercase().replace('-', "_")
+                );
 
                 // Check if env var exists
                 let env_vars = db_env_vars::list_project_env_vars(db_pool, project_id)
