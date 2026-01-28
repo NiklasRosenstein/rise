@@ -57,102 +57,65 @@ const CONFIG = {
 
 **Usage Example:**
 
+```bash
+# Install OAuth library for PKCE helpers
+npm install oauth4webapi
+```
+
 ```javascript
-// 1. Generate PKCE verifier and challenge
-function generateRandomString(length) {
-  const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
-  const randomValues = new Uint8Array(length);
-  crypto.getRandomValues(randomValues);
-  return Array.from(randomValues)
-    .map(v => charset[v % charset.length])
-    .join('');
-}
+import * as oauth from 'oauth4webapi';
 
-async function sha256(plain) {
-  const encoder = new TextEncoder();
-  const data = encoder.encode(plain);
-  return await crypto.subtle.digest('SHA-256', data);
-}
-
-function base64urlEncode(arrayBuffer) {
-  const bytes = new Uint8Array(arrayBuffer);
-  let binary = '';
-  for (let i = 0; i < bytes.length; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-  return btoa(binary)
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=/g, '');
-}
-
-async function generatePKCE() {
-  const codeVerifier = generateRandomString(128);
-  const hashed = await sha256(codeVerifier);
-  const codeChallenge = base64urlEncode(hashed);
-  return { codeVerifier, codeChallenge };
-}
-
-// 2. Initiate OAuth login with PKCE
+// 1. Initiate OAuth login with PKCE
 async function login() {
-  const { codeVerifier, codeChallenge } = await generatePKCE();
-
-  // Store verifier for later use
+  // Generate PKCE code verifier and challenge
+  const codeVerifier = oauth.generateRandomCodeVerifier();
+  const codeChallenge = await oauth.calculatePKCECodeChallenge(codeVerifier);
   sessionStorage.setItem('pkce_verifier', codeVerifier);
 
-  // Start OAuth flow with code_challenge
-  const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize' +
-    `?code_challenge=${codeChallenge}&code_challenge_method=S256`;
+  // Build authorization URL
+  const authUrl = new URL(
+    `https://api.rise.dev/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/authorize`
+  );
+  authUrl.searchParams.set('code_challenge', codeChallenge);
+  authUrl.searchParams.set('code_challenge_method', 'S256');
 
   window.location.href = authUrl;
 }
 
-// 3. After callback, exchange code for tokens
+// 2. After callback, exchange code for tokens
 async function handleCallback() {
   const urlParams = new URLSearchParams(window.location.search);
-  const code = urlParams.get('code');  // Authorization code from callback
-  const verifier = sessionStorage.getItem('pkce_verifier');
+  const code = urlParams.get('code');
+  const codeVerifier = sessionStorage.getItem('pkce_verifier');
 
-  if (!code || !verifier) {
+  if (!code || !codeVerifier) {
     throw new Error('Missing code or verifier');
   }
 
-  // Exchange code for tokens using PKCE
-  const response = await fetch(
-    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token',
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        grant_type: 'authorization_code',
-        code: code,
-        client_id: CONFIG.riseClientId,  // From build-time configuration
-        code_verifier: verifier
-      })
-    }
-  );
+  // Exchange code for tokens
+  const tokenUrl = `https://api.rise.dev/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/token`;
+  const response = await fetch(tokenUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'authorization_code',
+      code: code,
+      client_id: CONFIG.riseClientId,
+      code_verifier: codeVerifier
+    })
+  });
 
   if (!response.ok) {
     const error = await response.json();
-    throw new Error(`OAuth error: ${error.error} - ${error.error_description}`);
+    throw new Error(`OAuth error: ${error.error}`);
   }
 
   const tokens = await response.json();
-  // tokens = {
-  //   access_token: "...",
-  //   token_type: "Bearer",
-  //   expires_in: 3600,  // seconds
-  //   refresh_token: "...",
-  //   scope: "email profile",
-  //   id_token: "..."
-  // }
+  // { access_token, token_type, expires_in, refresh_token, scope, id_token }
 
-  // Store tokens
+  // Store tokens securely
   localStorage.setItem('oauth_tokens', JSON.stringify(tokens));
-
-  // Clean up
   sessionStorage.removeItem('pkce_verifier');
-  window.history.replaceState(null, '', window.location.pathname);
 
   return tokens;
 }
