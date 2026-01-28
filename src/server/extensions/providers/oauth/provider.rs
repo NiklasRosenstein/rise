@@ -747,34 +747,36 @@ The extension supports RFC 6749-compliant OAuth flows with PKCE support:
 For single-page applications, use PKCE (RFC 7636) to securely exchange authorization codes
 for tokens. This prevents authorization code interception attacks.
 
-**Frontend Integration:**
+**Frontend Integration (using oauth4webapi):**
+
+```bash
+npm install oauth4webapi
+```
 
 ```javascript
-// Generate PKCE verifier and challenge
-async function generatePKCE() {
-  const verifier = generateRandomString(128);
-  const hashed = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier));
-  const challenge = base64urlEncode(hashed);
-  return { verifier, challenge };
-}
+import * as oauth from 'oauth4webapi';
 
-// Initiate OAuth login with PKCE
+// 1. Initiate OAuth login with PKCE
 async function login() {
-  const { verifier, challenge } = await generatePKCE();
-  sessionStorage.setItem('pkce_verifier', verifier);
+  const codeVerifier = oauth.generateRandomCodeVerifier();
+  const codeChallenge = await oauth.calculatePKCECodeChallenge(codeVerifier);
+  sessionStorage.setItem('pkce_verifier', codeVerifier);
 
-  const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize' +
-    `?code_challenge=${challenge}&code_challenge_method=S256`;
+  const authUrl = new URL(
+    `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize`
+  );
+  authUrl.searchParams.set('code_challenge', codeChallenge);
+  authUrl.searchParams.set('code_challenge_method', 'S256');
+
   window.location.href = authUrl;
 }
 
-// Handle callback and exchange code for tokens
+// 2. Handle callback and exchange code for tokens
 async function handleCallback() {
   const code = new URLSearchParams(window.location.search).get('code');
-  const verifier = sessionStorage.getItem('pkce_verifier');
-  const clientId = 'OAUTH_RISE_CLIENT_ID_oauth-provider'; // From env vars
+  const codeVerifier = sessionStorage.getItem('pkce_verifier');
 
-  const response = await fetch(
+  const tokens = await fetch(
     'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/token',
     {
       method: 'POST',
@@ -782,14 +784,13 @@ async function handleCallback() {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        client_id: clientId,
-        code_verifier: verifier
+        client_id: CONFIG.riseClientId,  // From build-time config
+        code_verifier: codeVerifier
       })
     }
-  );
+  ).then(r => r.json());
 
-  const tokens = await response.json();
-  sessionStorage.setItem('access_token', tokens.access_token);
+  sessionStorage.setItem('tokens', JSON.stringify(tokens));
   return tokens;
 }
 ```
@@ -799,57 +800,40 @@ async function handleCallback() {
 For server-rendered applications, use the RFC 6749-compliant token endpoint with client credentials.
 Rise auto-generates client credentials for each OAuth extension.
 
-**Backend Integration (Node.js/Express example):**
+**Backend Integration (TypeScript/Express):**
 
-```javascript
-// Initiate OAuth login with exchange flow
-app.get('/login', (req, res) => {
-  const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?flow=exchange';
-  res.redirect(authUrl);
-});
-
-// Handle OAuth callback
+```typescript
 app.get('/oauth/callback', async (req, res) => {
-  const code = req.query.code; // Authorization code from callback
+  const { code } = req.query;
 
-  // Get Rise client credentials from environment
-  const clientId = process.env.OAUTH_RISE_CLIENT_ID_oauth_provider;
-  const clientSecret = process.env.OAUTH_RISE_CLIENT_SECRET_oauth_provider;
-
-  // Exchange authorization code for tokens
-  const response = await fetch(
+  const tokens = await fetch(
     'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/token',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
         grant_type: 'authorization_code',
-        code: code,
-        client_id: clientId,
-        client_secret: clientSecret
+        code: code as string,
+        client_id: process.env.OAUTH_RISE_CLIENT_ID_OAUTH_PROVIDER!,
+        client_secret: process.env.OAUTH_RISE_CLIENT_SECRET_OAUTH_PROVIDER!
       })
     }
-  );
+  ).then(r => r.json());
 
-  const tokens = await response.json();
-
-  // Store tokens in session (HttpOnly cookie recommended)
-  req.session.accessToken = tokens.access_token;
-  req.session.idToken = tokens.id_token;
-
-  res.redirect('/dashboard');
+  req.session.tokens = tokens;
+  res.redirect('/');
 });
 ```
 
-### Local Development
+## Local Development
 
-For local development, override the redirect URI:
+For local development, add `redirect_uri` parameter:
 
 ```javascript
-// PKCE flow (for SPAs)
-const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?code_challenge=' + codeChallenge + '&code_challenge_method=S256&redirect_uri=http://localhost:3000/callback';
+// PKCE flow
+authUrl.searchParams.set('redirect_uri', 'http://localhost:3000/callback');
 
-// Token endpoint flow (for backend apps)
+// Backend flow
 const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?redirect_uri=http://localhost:3000/oauth/callback';
 ```
 
