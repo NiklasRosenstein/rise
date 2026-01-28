@@ -346,7 +346,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                         <strong>Security:</strong> Client secrets are stored encrypted and never exposed to your application.
-                        Tokens are delivered in URL fragments for frontend apps or via secure exchange for backend apps.
+                        Supports PKCE flow for SPAs and RFC 6749-compliant token endpoint for backend apps.
                     </p>
                 </div>
             </div>
@@ -498,7 +498,7 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
     const backendUrl = CONFIG.backendUrl.replace(/\/$/, '');
     const authorizeUrl = `${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`;
     const callbackUrl = `${backendUrl}/api/v1/oauth/callback/${projectName}/${extensionName}`;
-    const exchangeUrl = `${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/exchange`;
+    const tokenUrl = `${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/token`;
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={onClose}>
@@ -528,17 +528,17 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
                                 : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
                         }`}
                     >
-                        Fragment Flow (SPAs)
+                        PKCE Flow (SPAs)
                     </button>
                     <button
-                        onClick={() => setActiveTab('exchange')}
+                        onClick={() => setActiveTab('backend')}
                         className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                            activeTab === 'exchange'
+                            activeTab === 'backend'
                                 ? 'border-indigo-500 text-indigo-400'
                                 : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
                         }`}
                     >
-                        Exchange Flow (Backend)
+                        Token Endpoint (Backend)
                     </button>
                     <button
                         onClick={() => setActiveTab('local')}
@@ -609,66 +609,72 @@ handleCallback();`}
                         </div>
                     )}
 
-                    {activeTab === 'exchange' && (
+                    {activeTab === 'backend' && (
                         <div className="space-y-4">
                             <p className="text-sm text-gray-700 dark:text-gray-300">
-                                <strong>Exchange Flow</strong> is designed for server-rendered applications. Your backend receives a
-                                temporary exchange token as a query parameter, which it exchanges for the actual OAuth tokens via a server-side API call.
+                                <strong>Token Endpoint Flow</strong> is designed for server-rendered applications (confidential clients). Your backend receives an
+                                authorization code as a query parameter, which it exchanges for OAuth tokens via the RFC 6749-compliant token endpoint using client credentials.
                             </p>
 
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Authorization URL:</p>
                                 <code className="block bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all">
-                                    {authorizeUrl}?flow=exchange
+                                    {authorizeUrl}
                                 </code>
                             </div>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Exchange Endpoint:</p>
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Token Endpoint:</p>
                                 <code className="block bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all">
-                                    {exchangeUrl}?exchange_token=...
+                                    POST {tokenUrl}
                                 </code>
                             </div>
 
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Example Code (Node.js/Express):</p>
                                 <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
-{`// Initiate OAuth login with exchange flow
+{`// Initiate OAuth login
 app.get('/login', (req, res) => {
-  const authUrl = '${authorizeUrl}?flow=exchange';
+  const authUrl = '${authorizeUrl}';
   res.redirect(authUrl);
 });
 
 // Handle OAuth callback
 app.get('/oauth/callback', async (req, res) => {
-  const exchangeToken = req.query.exchange_token;
+  const code = req.query.code;
 
-  if (!exchangeToken) {
-    return res.status(400).send('Missing exchange token');
+  if (!code) {
+    return res.status(400).send('Missing authorization code');
   }
 
   try {
-    // Exchange the temporary token for actual OAuth tokens
-    const response = await fetch(
-      \`${exchangeUrl}?exchange_token=\${exchangeToken}\`
-    );
+    // Exchange authorization code for tokens
+    const response = await fetch('${tokenUrl}', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: process.env.OAUTH_RISE_CLIENT_ID_${extensionName.toUpperCase().replace(/-/g, '_')},
+        client_secret: process.env.OAUTH_RISE_CLIENT_SECRET_${extensionName.toUpperCase().replace(/-/g, '_')}
+      })
+    });
 
     if (!response.ok) {
-      throw new Error('Token exchange failed');
+      const error = await response.json();
+      throw new Error(\`Token exchange failed: \${error.error}\`);
     }
 
     const tokens = await response.json();
-    // { access_token, id_token, expires_at, ... }
+    // { access_token, token_type, expires_in, refresh_token, ... }
 
     // Store in HttpOnly session cookie (recommended)
-    req.session.accessToken = tokens.access_token;
-    req.session.idToken = tokens.id_token;
-    req.session.expiresAt = tokens.expires_at;
+    req.session.tokens = tokens;
 
     // Redirect to app
     res.redirect('/dashboard');
   } catch (error) {
-    console.error('OAuth exchange error:', error);
+    console.error('OAuth error:', error);
     res.status(500).send('Authentication failed');
   }
 });`}
@@ -685,7 +691,7 @@ app.get('/oauth/callback', async (req, res) => {
                             </p>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Fragment Flow (localhost):</p>
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">PKCE Flow (localhost):</p>
                                 <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
 {`// Override redirect URI for local development
 const authUrl = '${authorizeUrl}?redirect_uri=' +
@@ -704,19 +710,19 @@ function handleCallback() {
                             </div>
 
                             <div>
-                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Exchange Flow (localhost):</p>
+                                <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Token Endpoint Flow (localhost):</p>
                                 <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
 {`// Override redirect URI for local development
 app.get('/login', (req, res) => {
-  const authUrl = '${authorizeUrl}?flow=exchange&redirect_uri=' +
+  const authUrl = '${authorizeUrl}?redirect_uri=' +
     encodeURIComponent('http://localhost:3000/oauth/callback');
   res.redirect(authUrl);
 });
 
 // Your local callback handler
 app.get('/oauth/callback', async (req, res) => {
-  const exchangeToken = req.query.exchange_token;
-  // ... same exchange logic as production
+  const code = req.query.code;
+  // ... same token exchange logic as production
 });`}
                                 </pre>
                             </div>
@@ -725,7 +731,7 @@ app.get('/oauth/callback', async (req, res) => {
                                 <p className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-2">ℹ️ How it Works</p>
                                 <p className="text-xs text-blue-800 dark:text-blue-200">
                                     The OAuth provider only redirects to <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{callbackUrl}</code> (Rise's callback URL).
-                                    Rise then redirects to your app's redirect_uri with the tokens. You don't need to configure localhost URLs in your OAuth provider.
+                                    Rise then redirects to your app's redirect_uri with the authorization code. You don't need to configure localhost URLs in your OAuth provider.
                                 </p>
                             </div>
                         </div>
@@ -903,7 +909,7 @@ function OAuthDetailView({ extension, projectName }) {
                             📚 Integration Guide
                         </button>
                         <p className="text-xs text-gray-600 dark:text-gray-500 mt-2">
-                            View code examples for Fragment Flow, Exchange Flow, and local development.
+                            View code examples for PKCE Flow, Token Endpoint Flow, and local development.
                         </p>
                     </section>
                 </div>

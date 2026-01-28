@@ -41,14 +41,11 @@ app.get('/', (req, res) => {
 
 // Initiate OAuth flow
 app.get('/login', (req, res) => {
-  // Build the OAuth authorization URL with exchange flow
+  // Build the OAuth authorization URL
   const authUrl = new URL(
     `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/authorize`,
     CONFIG.riseApiUrl
   );
-
-  // Specify exchange flow (not fragment)
-  authUrl.searchParams.set('flow', 'exchange');
 
   // Set redirect URI to our callback
   const redirectUri = `${req.protocol}://${req.get('host')}/oauth/callback`;
@@ -66,7 +63,7 @@ app.get('/login', (req, res) => {
 // OAuth callback handler
 app.get('/oauth/callback', async (req, res) => {
   try {
-    const { exchange_token, state } = req.query;
+    const { code, state } = req.query;
 
     // Verify state (CSRF protection)
     if (req.session.oauthState && req.session.oauthState !== state) {
@@ -74,34 +71,45 @@ app.get('/oauth/callback', async (req, res) => {
     }
     delete req.session.oauthState;
 
-    if (!exchange_token) {
-      return res.status(400).send(renderErrorPage('No exchange token received'));
+    if (!code) {
+      return res.status(400).send(renderErrorPage('No authorization code received'));
     }
 
-    // Exchange the temporary token for real OAuth credentials
-    const exchangeUrl = new URL(
-      `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/exchange`,
+    // Exchange the authorization code for OAuth tokens
+    const tokenUrl = new URL(
+      `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/token`,
       CONFIG.riseApiUrl
     );
-    exchangeUrl.searchParams.set('exchange_token', exchange_token);
 
-    const response = await fetch(exchangeUrl.toString());
+    const response = await fetch(tokenUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: process.env[`OAUTH_RISE_CLIENT_ID_${CONFIG.extensionName.toUpperCase().replace(/-/g, '_')}`],
+        client_secret: process.env[`OAUTH_RISE_CLIENT_SECRET_${CONFIG.extensionName.toUpperCase().replace(/-/g, '_')}`],
+      }),
+    });
 
     if (!response.ok) {
-      const errorText = await response.text();
+      const error = await response.json();
       return res.status(response.status).send(
-        renderErrorPage(`Token exchange failed: ${errorText}`)
+        renderErrorPage(`Token exchange failed: ${error.error} - ${error.error_description || ''}`)
       );
     }
 
-    const credentials = await response.json();
+    const tokens = await response.json();
 
     // Store credentials in session (HttpOnly cookie)
     req.session.oauth = {
-      accessToken: credentials.access_token,
-      tokenType: credentials.token_type,
-      expiresAt: credentials.expires_at,
-      refreshToken: credentials.refresh_token,
+      accessToken: tokens.access_token,
+      tokenType: tokens.token_type,
+      expiresIn: tokens.expires_in,
+      refreshToken: tokens.refresh_token,
+      scope: tokens.scope,
       retrievedAt: new Date().toISOString()
     };
 
@@ -145,17 +153,17 @@ function renderLoginPage() {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>OAuth Exchange Flow - Login</title>
+        <title>OAuth Token Endpoint Flow - Login</title>
         <style>${getStyles()}</style>
     </head>
     <body>
         <div class="container">
-            <h1>OAuth Exchange Flow Example</h1>
-            <div class="badge">Exchange Flow (Backend Apps)</div>
+            <h1>OAuth Token Endpoint Flow Example</h1>
+            <div class="badge">Token Endpoint Flow (Backend Apps)</div>
 
             <p>
-                This example demonstrates the <strong>exchange token flow</strong> for server-rendered applications.
-                The backend securely exchanges a temporary token for real OAuth credentials.
+                This example demonstrates the <strong>RFC 6749-compliant token endpoint flow</strong> for server-rendered applications.
+                The backend securely exchanges an authorization code for OAuth credentials using client credentials.
             </p>
 
             <button onclick="window.location.href='/login'">Login with OAuth</button>
@@ -164,8 +172,8 @@ function renderLoginPage() {
                 <strong>How it works:</strong><br>
                 1. Click login → redirect to Rise OAuth endpoint<br>
                 2. Rise redirects to Dex for authentication<br>
-                3. After auth, redirect with exchange token (5-min TTL)<br>
-                4. Backend exchanges token for real credentials<br>
+                3. After auth, redirect with authorization code (5-min TTL)<br>
+                4. Backend exchanges code for tokens via /oauth/token<br>
                 5. Store in session (HttpOnly cookie, XSS-safe)
             </div>
         </div>
@@ -181,32 +189,34 @@ function renderProfilePage(oauth) {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>OAuth Exchange Flow - Profile</title>
+        <title>OAuth Token Endpoint Flow - Profile</title>
         <style>${getStyles()}</style>
     </head>
     <body>
         <div class="container">
-            <h1>OAuth Exchange Flow Example</h1>
-            <div class="badge">Exchange Flow (Backend Apps)</div>
+            <h1>OAuth Token Endpoint Flow Example</h1>
+            <div class="badge">Token Endpoint Flow (Backend Apps)</div>
 
             <div class="status success">
-                ✓ Successfully authenticated! Credentials stored in session.
+                ✓ Successfully authenticated! OAuth tokens stored in session.
             </div>
 
             <div class="info">
                 <h2>Session Information</h2>
                 <p><strong>Token Type:</strong> ${oauth.tokenType}</p>
-                <p><strong>Expires At:</strong> ${oauth.expiresAt}</p>
+                <p><strong>Expires In:</strong> ${oauth.expiresIn} seconds</p>
                 <p><strong>Retrieved At:</strong> ${oauth.retrievedAt}</p>
                 <p><strong>Has Refresh Token:</strong> ${oauth.refreshToken ? 'Yes' : 'No'}</p>
+                <p><strong>Scopes:</strong> ${oauth.scope || 'N/A'}</p>
             </div>
 
             <div class="info">
                 <h2>Security Benefits</h2>
                 <ul>
                     <li>✓ Tokens stored in HttpOnly cookie (XSS-safe)</li>
-                    <li>✓ Exchange token was single-use (5-min TTL)</li>
-                    <li>✓ Real credentials never exposed to browser</li>
+                    <li>✓ Authorization code was single-use (5-min TTL)</li>
+                    <li>✓ Client authenticated with client_secret</li>
+                    <li>✓ OAuth tokens never exposed to browser</li>
                     <li>✓ CSRF protection via state parameter</li>
                 </ul>
             </div>
@@ -254,12 +264,12 @@ function renderErrorPage(message) {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>OAuth Exchange Flow - Error</title>
+        <title>OAuth Token Endpoint Flow - Error</title>
         <style>${getStyles()}</style>
     </head>
     <body>
         <div class="container">
-            <h1>OAuth Exchange Flow Example</h1>
+            <h1>OAuth Token Endpoint Flow Example</h1>
             <div class="status error">
                 ✗ Error: ${escapeHtml(message)}
             </div>
@@ -445,10 +455,13 @@ function escapeHtml(text) {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`OAuth Exchange Flow Example running on http://localhost:${PORT}`);
+  console.log(`OAuth Token Endpoint Flow Example running on http://localhost:${PORT}`);
   console.log('Configuration:', {
     riseApiUrl: CONFIG.riseApiUrl,
     projectName: CONFIG.projectName,
     extensionName: CONFIG.extensionName
   });
+  console.log('\nRequired environment variables:');
+  console.log(`  OAUTH_RISE_CLIENT_ID_${CONFIG.extensionName.toUpperCase().replace(/-/g, '_')}`);
+  console.log(`  OAUTH_RISE_CLIENT_SECRET_${CONFIG.extensionName.toUpperCase().replace(/-/g, '_')}`);
 });
