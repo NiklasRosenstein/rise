@@ -95,6 +95,13 @@ async function handleCallback() {
     throw new Error('Missing code or verifier');
   }
 
+  // Fetch extension details to get Rise client ID
+  const extResponse = await fetch(
+    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google'
+  );
+  const extension = await extResponse.json();
+  const riseClientId = extension.spec.rise_client_id;
+
   // Exchange code for tokens using PKCE
   const response = await fetch(
     'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token',
@@ -104,7 +111,7 @@ async function handleCallback() {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        client_id: window.RISE_CLIENT_ID,  // Injected by app or fetched from config
+        client_id: riseClientId,  // Fetched from extension spec
         code_verifier: verifier
       })
     }
