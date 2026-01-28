@@ -59,8 +59,6 @@ pub struct OAuthState {
     pub project_name: String,
     /// Extension name (e.g., "oauth-snowflake")
     pub extension_name: String,
-    /// Session ID from cookie (if present)
-    pub session_id: Option<String>,
     /// OAuth flow type (fragment or exchange)
     pub flow_type: OAuthFlowType,
     /// PKCE code verifier (for upstream OAuth provider)
@@ -96,34 +94,14 @@ pub struct CallbackRequest {
     pub state: String,
 }
 
-/// User OAuth token record from database
-#[derive(Debug, Clone, sqlx::FromRow)]
-#[allow(dead_code)]
-pub struct UserOAuthToken {
-    pub id: Uuid,
-    pub project_id: Uuid,
-    pub extension: String,
-    pub session_id: String,
-    pub access_token_encrypted: String,
-    pub refresh_token_encrypted: Option<String>,
-    pub id_token_encrypted: Option<String>,
-    pub expires_at: Option<DateTime<Utc>>,
-    pub last_refreshed_at: Option<DateTime<Utc>>,
-    pub last_accessed_at: DateTime<Utc>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
-}
-
 /// Authorization code state for OAuth 2.0 flow
-/// Temporary state linking an authorization code to a user's OAuth session
+/// Stores encrypted tokens from upstream provider for single-use exchange
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthCodeState {
     /// Project ID
     pub project_id: Uuid,
     /// Extension name
     pub extension_name: String,
-    /// Session ID from OAuth flow
-    pub session_id: String,
     /// When this authorization code was created
     pub created_at: DateTime<Utc>,
     /// PKCE code challenge from client (if PKCE flow)
@@ -132,6 +110,17 @@ pub struct OAuthCodeState {
     /// PKCE code challenge method ("S256" or "plain")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_challenge_method: Option<String>,
+    /// Encrypted access token from upstream OAuth provider
+    pub access_token_encrypted: String,
+    /// Encrypted refresh token (optional)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub refresh_token_encrypted: Option<String>,
+    /// Encrypted ID token (optional, OIDC)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub id_token_encrypted: Option<String>,
+    /// Token expiration time
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 /// Query parameter to enable exchange flow

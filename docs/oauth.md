@@ -10,20 +10,18 @@ Rise's Generic OAuth 2.0 extension enables end-user authentication with any OAut
 - **Multiple Flow Support**:
   - PKCE (SPAs, RFC 7636-compliant)
   - Token endpoint with client credentials (backend apps, RFC 6749-compliant)
-- **Secure Token Storage**: Encrypted user tokens with automatic refresh
-- **Session Management**: Browser cookie-based session tracking
+- **Stateless OAuth Proxy**: Rise proxies OAuth flows, clients own their tokens after exchange
 - **No Client Secret Exposure**: Secrets stored as encrypted environment variables on Rise
 - **Standards Compliant**: RFC 6749 (OAuth 2.0) and RFC 7636 (PKCE) support
 
 **Security Model:**
 
 - Client secrets never leave Rise backend (both upstream OAuth and Rise client credentials)
-- User tokens encrypted at rest in database
 - OAuth state tokens prevent CSRF attacks
 - Authorization codes single-use with 5-minute TTL
-- Session-based token caching per user
 - PKCE support for public clients (SPAs) prevents code interception attacks
 - Constant-time comparison for all secret validation
+- Clients manage token refresh via `/oauth/token` with `grant_type=refresh_token`
 
 ## OAuth Flows
 
@@ -106,7 +104,7 @@ async function handleCallback() {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        client_id: 'OAUTH_RISE_CLIENT_ID_oauth-google',  // Can be public
+        client_id: window.RISE_CLIENT_ID,  // Injected by app or fetched from config
         code_verifier: verifier
       })
     }
@@ -142,18 +140,17 @@ async function handleCallback() {
 
 Best for server-rendered applications (Ruby on Rails, Django, Express) where tokens should be handled server-side.
 
-**Security:** Temporary exchange token (5-min TTL, single-use) passed in query param, backend exchanges for real tokens securely.
+**Security:** Authorization code (5-min TTL, single-use) passed in query param, backend exchanges for tokens via Rise's token endpoint.
 
 ```
 ┌──────────────┐                                           ┌──────────────┐
-│              │  1. GET /oauth/authorize?flow=exchange    │              │
+│              │  1. GET /oauth/authorize                  │              │
 │   Browser    │──────────────────────────────────────────>│     Rise     │
 │              │                                           │   Backend    │
 └──────────────┘                                           └──────────────┘
                                                                    │
                   2. Generate state token                         │
-                     Store in cache:                              │
-                     { redirect_uri, session_id, flow: Exchange } │
+                     Store in cache: { redirect_uri, PKCE }       │
                                                                    │
 ┌──────────────┐                                           ┌──────────────┐
 │              │  3. Redirect to OAuth Provider            │              │
@@ -176,35 +173,34 @@ Best for server-rendered applications (Ruby on Rails, Django, Express) where tok
 │              │                                           │   Backend    │
 └──────────────┘                                           └──────────────┘
                                                                    │
-                  7. Exchange code for tokens                     │
-                     Encrypt + store in database                  │
-                     Generate exchange token                      │
+                  7. Exchange upstream code for tokens            │
+                     Encrypt tokens                               │
+                     Generate authorization code                  │
                      Store in cache (5-min TTL, single-use)       │
                                                                    │
 ┌──────────────┐                                           ┌──────────────┐
-│              │  8. Redirect with exchange token          │              │
-│   Browser    │<──────?exchange_token=abc123──────────────│     Rise     │
+│              │  8. Redirect with authorization code      │              │
+│   Browser    │<──────?code=abc123────────────────────────│     Rise     │
 │              │                                           │   Backend    │
 └──────────────┘                                           └──────────────┘
        │
-       │  9. Pass exchange token to backend
+       │  9. Pass code to backend
        v
 ┌──────────────┐
-│     App      │  10. POST to Rise with exchange token
+│     App      │  10. POST /oauth/token (grant_type=authorization_code)
 │   Backend    │──────────────────────────────────────────>┌──────────────┐
 └──────────────┘                                           │     Rise     │
                                                            │   Backend    │
-                  11. Validate exchange token (single-use) └──────────────┘
-                      Invalidate immediately                      │
-                      Retrieve + decrypt tokens                   │
+                  11. Validate code (single-use)           └──────────────┘
+                      Decrypt and return tokens                   │
                                                                    │
 ┌──────────────┐                                           ┌──────────────┐
-│     App      │  12. Return OAuth credentials             │              │
+│     App      │  12. Return OAuth tokens                  │              │
 │   Backend    │<──────────────────────────────────────────│     Rise     │
 └──────────────┘                                           │   Backend    │
        │                                                   └──────────────┘
-       │  13. Store in session (HttpOnly cookie)
-       │      or backend database
+       │  13. Store tokens in session (HttpOnly cookie)
+       │      Client owns and manages refresh
        v
 ```
 
@@ -458,11 +454,10 @@ Authorization code flow with client credentials provides security for confidenti
 
 **Rise Platform:**
 - Client secrets: Encrypted environment variables (AES-GCM or AWS KMS)
-- User tokens: Encrypted at rest in PostgreSQL
 - OAuth state: In-memory cache (10-minute TTL)
-- Exchange tokens: In-memory cache (5-minute TTL)
+- Authorization codes: In-memory cache with encrypted tokens (5-minute TTL, single-use)
 
-**Application:**
+**Application (after token exchange, clients own their tokens):**
 - **SPAs (PKCE Flow)**:
   - Memory (best security, lost on refresh)
   - localStorage (persistent, vulnerable to XSS)
@@ -478,27 +473,33 @@ Authorization code flow with client credentials provides security for confidenti
 All OAuth flows include CSRF protection via state tokens:
 
 1. Rise generates random state token
-2. Stores in cache with session context
+2. Stores in cache with flow context
 3. Passes to OAuth provider
 4. Validates on callback
 5. Rejects mismatched/expired states
 
 ### Token Refresh
 
-Rise automatically refreshes expired tokens when `refresh_token` is available:
+Clients manage their own token refresh by calling the `/oauth/token` endpoint:
 
-1. Check `expires_at` before using token
-2. If expired, use `refresh_token` to get new `access_token`
-3. Update database with new tokens
-4. Return fresh credentials
+```javascript
+const response = await fetch(
+  'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token',
+  {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      grant_type: 'refresh_token',
+      refresh_token: storedRefreshToken,
+      client_id: clientId,
+      client_secret: clientSecret  // or omit for PKCE flows
+    })
+  }
+);
+const newTokens = await response.json();
+```
 
-**Background job** (future enhancement): Proactively refresh tokens before expiration.
-
-### Token Cleanup
-
-**Inactive token cleanup** (future enhancement):
-
-Tokens unused for 30+ days automatically deleted to reduce attack surface.
+Rise proxies the refresh request to the upstream OAuth provider and returns fresh tokens.
 
 ## Troubleshooting
 
@@ -518,15 +519,10 @@ Tokens unused for 30+ days automatically deleted to reduce attack surface.
 - State token expired (10-minute TTL)
 - Restart OAuth flow from beginning
 
-**"Invalid exchange token"**
-- Exchange token already used (single-use)
-- Exchange token expired (5-minute TTL)
+**"Invalid or expired authorization code"**
+- Authorization code already used (single-use)
+- Authorization code expired (5-minute TTL)
 - Request new authorization
-
-**"Could not find user OAuth token"**
-- Session cookie missing or expired
-- User has not completed OAuth flow
-- Token may have been cleaned up due to inactivity
 
 ## API Reference
 

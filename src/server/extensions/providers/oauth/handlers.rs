@@ -2,7 +2,7 @@ use super::models::{
     AuthorizeFlowQuery, CallbackRequest, OAuth2ErrorResponse, OAuth2TokenResponse, OAuthCodeState,
     OAuthExtensionSpec, OAuthExtensionStatus, OAuthState, TokenRequest, TokenResponse,
 };
-use crate::db::{extensions as db_extensions, projects as db_projects, user_oauth_tokens};
+use crate::db::{extensions as db_extensions, projects as db_projects};
 use crate::server::state::AppState;
 use axum::{
     extract::{Path, Query, State},
@@ -15,7 +15,6 @@ use chrono::{Duration, Utc};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use url::Url;
-use uuid::Uuid;
 
 /// Generate a random state token for CSRF protection
 fn generate_state_token() -> String {
@@ -24,11 +23,6 @@ fn generate_state_token() -> String {
     (0..32)
         .map(|_| format!("{:02x}", rng.gen::<u8>()))
         .collect()
-}
-
-/// Generate a random session ID
-fn generate_session_id() -> String {
-    Uuid::new_v4().to_string()
 }
 
 /// Generate a PKCE code verifier (random string)
@@ -53,19 +47,6 @@ fn generate_code_challenge(verifier: &str) -> String {
 
     // Base64url encode (no padding)
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash)
-}
-
-/// Extract session ID from cookie header
-fn extract_session_id_from_cookie(cookie_header: Option<&str>) -> Option<String> {
-    // TODO: Use proper cookie parsing library
-    cookie_header?.split(';').find_map(|cookie| {
-        let cookie = cookie.trim();
-        if cookie.starts_with("rise_oauth_session=") {
-            Some(cookie.trim_start_matches("rise_oauth_session=").to_string())
-        } else {
-            None
-        }
-    })
 }
 
 /// Validate redirect URI against allowed origins
@@ -151,7 +132,6 @@ pub async fn authorize(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
     Query(req): Query<AuthorizeFlowQuery>,
-    headers: axum::http::HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
     debug!(
         "OAuth authorize request for project={}, extension={}",
@@ -194,7 +174,24 @@ pub async fn authorize(
     })?;
 
     // Validate PKCE parameters if provided
-    if req.code_challenge.is_some() {
+    if let Some(ref code_challenge) = req.code_challenge {
+        // RFC 7636: code_challenge must be 43-128 characters, base64url charset
+        if code_challenge.len() < 43 || code_challenge.len() > 128 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "code_challenge must be 43-128 characters".to_string(),
+            ));
+        }
+        if !code_challenge
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "code_challenge contains invalid characters (must be base64url)".to_string(),
+            ));
+        }
+
         let method = req.code_challenge_method.as_deref().unwrap_or("S256");
         if method != "S256" && method != "plain" {
             return Err((
@@ -206,116 +203,6 @@ pub async fn authorize(
             ));
         }
     }
-
-    // Extract session ID from cookie (if present)
-    let cookie_header = headers.get(header::COOKIE).and_then(|h| h.to_str().ok());
-    let existing_session_id = extract_session_id_from_cookie(cookie_header);
-
-    debug!("Existing session ID from cookie: {:?}", existing_session_id);
-
-    // Check for cached token if we have a session ID
-    if let Some(ref session_id) = existing_session_id {
-        match user_oauth_tokens::get_by_session(
-            &state.db_pool,
-            project.id,
-            &extension_name,
-            session_id,
-        )
-        .await
-        {
-            Ok(Some(cached_token)) => {
-                debug!("Found cached OAuth token for session {}", session_id);
-
-                // Check if token is still valid or can be refreshed
-                if let Some(expires_at) = cached_token.expires_at {
-                    if expires_at > Utc::now() {
-                        // Token is still valid, use it immediately
-                        info!("Cached token still valid, redirecting with cached token");
-
-                        // Update last_accessed_at
-                        if let Err(e) =
-                            user_oauth_tokens::update_last_accessed(&state.db_pool, cached_token.id)
-                                .await
-                        {
-                            warn!("Failed to update last_accessed_at: {:?}", e);
-                        }
-
-                        // Determine final redirect URI
-                        let final_redirect_uri = req.redirect_uri.unwrap_or_else(|| {
-                            // Default to project's primary URL
-                            format!(
-                                "https://{}.{}",
-                                project_name,
-                                state.public_url.trim_start_matches("https://api.")
-                            )
-                        });
-
-                        // Build redirect URL based on requested flow type
-                        let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("Invalid redirect URI: {}", e),
-                            )
-                        })?;
-
-                        // Exchange flow: Generate authorization code for backend to retrieve
-                        let authorization_code = generate_state_token();
-
-                        let code_state = OAuthCodeState {
-                            project_id: project.id,
-                            extension_name: extension_name.clone(),
-                            session_id: session_id.clone(),
-                            created_at: Utc::now(),
-                            // No PKCE for cached tokens - user already authenticated
-                            code_challenge: None,
-                            code_challenge_method: None,
-                        };
-
-                        // Store authorization code in cache (5-minute TTL)
-                        state
-                            .oauth_code_store
-                            .insert(authorization_code.clone(), code_state)
-                            .await;
-
-                        // Return authorization code as query parameter (RFC 6749)
-                        redirect_url
-                            .query_pairs_mut()
-                            .append_pair("code", &authorization_code);
-
-                        // Pass through application's CSRF state if provided
-                        if let Some(app_state) = req.state {
-                            redirect_url
-                                .query_pairs_mut()
-                                .append_pair("state", &app_state);
-                        }
-
-                        return Ok(Redirect::to(redirect_url.as_str()).into_response());
-                    } else if cached_token.refresh_token_encrypted.is_some() {
-                        // Token expired but we have a refresh token - refresh it
-                        debug!("Cached token expired, attempting refresh");
-                        // TODO: Implement inline token refresh
-                        // For now, fall through to full OAuth flow
-                    } else {
-                        // Token expired and no refresh token - delete it
-                        debug!("Cached token expired without refresh token, deleting");
-                        if let Err(e) =
-                            user_oauth_tokens::delete(&state.db_pool, cached_token.id).await
-                        {
-                            warn!("Failed to delete expired token: {:?}", e);
-                        }
-                    }
-                }
-            }
-            Ok(None) => {
-                debug!("No cached token found for session {}", session_id);
-            }
-            Err(e) => {
-                warn!("Error checking for cached token: {:?}", e);
-            }
-        }
-    }
-
-    // No valid cached token - proceed with full OAuth flow
 
     // Determine final redirect URI
     let final_redirect_uri = if let Some(ref uri) = req.redirect_uri {
@@ -382,7 +269,6 @@ pub async fn authorize(
         application_state: req.state,
         project_name: project_name.clone(),
         extension_name: extension_name.clone(),
-        session_id: existing_session_id,
         flow_type: req.flow,
         code_verifier,
         created_at: Utc::now(),
@@ -662,31 +548,8 @@ pub async fn callback(
         None => None,
     };
 
-    // Determine session ID (use existing or generate new)
-    let session_id = oauth_state.session_id.unwrap_or_else(generate_session_id);
-
-    // Store user OAuth token in database
+    // Calculate token expiration
     let expires_at = Some(Utc::now() + Duration::seconds(token_response.expires_in));
-    user_oauth_tokens::upsert(
-        &state.db_pool,
-        project.id,
-        &extension_name,
-        &session_id,
-        &access_token_encrypted,
-        refresh_token_encrypted.as_deref(),
-        id_token_encrypted.as_deref(),
-        expires_at,
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to store user OAuth token: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to store token: {}", e),
-        )
-    })?;
-
-    info!("Successfully stored OAuth token for session {}", session_id);
 
     // Update extension status
     let status = OAuthExtensionStatus {
@@ -728,19 +591,22 @@ pub async fn callback(
         )
     })?;
 
-    // Exchange flow: Generate authorization code for backend to retrieve (for server-rendered apps)
-    let authorization_code = generate_state_token(); // Reuse same random token generator
+    // Generate authorization code for client to exchange for tokens
+    let authorization_code = generate_state_token();
 
+    // Store encrypted tokens in authorization code state (5-minute TTL, single-use)
     let code_state = OAuthCodeState {
         project_id: project.id,
         extension_name: extension_name.clone(),
-        session_id: session_id.clone(),
         created_at: Utc::now(),
         code_challenge: oauth_state.client_code_challenge.clone(),
         code_challenge_method: oauth_state.client_code_challenge_method.clone(),
+        access_token_encrypted,
+        refresh_token_encrypted,
+        id_token_encrypted,
+        expires_at,
     };
 
-    // Store authorization code in cache (5-minute TTL, single-use)
     state
         .oauth_code_store
         .insert(authorization_code.clone(), code_state)
@@ -759,24 +625,11 @@ pub async fn callback(
     }
 
     info!(
-        "Exchange flow: Generated authorization code for session {}",
-        session_id
+        "Generated authorization code for project {} extension {}",
+        project_name, extension_name
     );
 
-    // Set session cookie
-    let cookie_value = format!(
-        "rise_oauth_session={}; HttpOnly; Secure; SameSite=Lax; Max-Age={}; Path=/",
-        session_id,
-        90 * 24 * 60 * 60 // 90 days
-    );
-
-    // Build response with cookie
-    let mut response = Redirect::to(redirect_url.as_str()).into_response();
-    response
-        .headers_mut()
-        .insert(header::SET_COOKIE, cookie_value.parse().unwrap());
-
-    Ok(response)
+    Ok(Redirect::to(redirect_url.as_str()).into_response())
 }
 
 /// Validate PKCE code_verifier against code_challenge
@@ -1079,6 +932,23 @@ async fn handle_authorization_code_grant(
             )
         })?;
 
+        // RFC 7636: code_verifier must be 43-128 characters, unreserved charset [A-Za-z0-9-._~]
+        if code_verifier.len() < 43 || code_verifier.len() > 128 {
+            return Err(oauth2_error(
+                "invalid_request",
+                Some("code_verifier must be 43-128 characters".to_string()),
+            ));
+        }
+        if !code_verifier
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-._~".contains(c))
+        {
+            return Err(oauth2_error(
+                "invalid_request",
+                Some("code_verifier contains invalid characters".to_string()),
+            ));
+        }
+
         let code_challenge_method = code_state
             .code_challenge_method
             .as_deref()
@@ -1095,40 +965,21 @@ async fn handle_authorization_code_grant(
     }
     // Note: For non-PKCE flows, client_secret was already validated in token_endpoint()
 
-    // Get tokens from database
-    let token = user_oauth_tokens::get_by_session(
-        &state.db_pool,
-        project.id,
-        &extension_name,
-        &code_state.session_id,
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to get OAuth token from database: {:?}", e);
-        oauth2_error("server_error", Some("Internal server error".to_string()))
-    })?
-    .ok_or_else(|| {
-        oauth2_error(
-            "invalid_grant",
-            Some("OAuth session not found or expired".to_string()),
-        )
-    })?;
-
-    // Decrypt tokens
+    // Decrypt tokens from code_state (tokens stored directly in authorization code cache)
     let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
         error!("Encryption provider not configured");
         oauth2_error("server_error", Some("Internal server error".to_string()))
     })?;
 
     let access_token = encryption_provider
-        .decrypt(&token.access_token_encrypted)
+        .decrypt(&code_state.access_token_encrypted)
         .await
         .map_err(|e| {
             error!("Failed to decrypt access token: {:?}", e);
             oauth2_error("server_error", Some("Internal server error".to_string()))
         })?;
 
-    let refresh_token = if let Some(ref encrypted) = token.refresh_token_encrypted {
+    let refresh_token = if let Some(ref encrypted) = code_state.refresh_token_encrypted {
         Some(encryption_provider.decrypt(encrypted).await.map_err(|e| {
             error!("Failed to decrypt refresh token: {:?}", e);
             oauth2_error("server_error", Some("Internal server error".to_string()))
@@ -1137,7 +988,7 @@ async fn handle_authorization_code_grant(
         None
     };
 
-    let id_token = if let Some(ref encrypted) = token.id_token_encrypted {
+    let id_token = if let Some(ref encrypted) = code_state.id_token_encrypted {
         Some(encryption_provider.decrypt(encrypted).await.map_err(|e| {
             error!("Failed to decrypt ID token: {:?}", e);
             oauth2_error("server_error", Some("Internal server error".to_string()))
@@ -1147,7 +998,7 @@ async fn handle_authorization_code_grant(
     };
 
     // Calculate expires_in (seconds from now)
-    let expires_in = token.expires_at.map(|expires_at| {
+    let expires_in = code_state.expires_at.map(|expires_at| {
         let now = Utc::now();
         let duration = expires_at.signed_duration_since(now);
         duration.num_seconds().max(0) // Don't return negative values

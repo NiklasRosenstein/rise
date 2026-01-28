@@ -383,6 +383,7 @@ impl Extension for OAuthProvider {
                 &rise_client_id_ref,
                 &rise_client_id,
                 false, // not secret - client ID is public
+                false, // not protected - managed by Rise
             )
             .await
             .context("Failed to store Rise client ID as environment variable")?;
@@ -393,7 +394,8 @@ impl Extension for OAuthProvider {
                 project_id,
                 &rise_client_secret_ref,
                 &rise_client_secret_encrypted,
-                true, // is_secret
+                true,  // is_secret
+                false, // not protected - managed by Rise
             )
             .await
             .context("Failed to store Rise client secret as environment variable")?;
@@ -433,6 +435,7 @@ impl Extension for OAuthProvider {
                         &rise_client_id_ref,
                         rise_client_id,
                         false, // not secret
+                        false, // not protected
                     )
                     .await
                     .context("Failed to restore Rise client ID")?;
@@ -462,7 +465,8 @@ impl Extension for OAuthProvider {
                             project_id,
                             rise_client_secret_ref,
                             encrypted,
-                            true, // is_secret
+                            true,  // is_secret
+                            false, // not protected
                         )
                         .await
                         .context("Failed to restore Rise client secret")?;
@@ -483,7 +487,8 @@ impl Extension for OAuthProvider {
                             project_id,
                             rise_client_secret_ref,
                             &rise_client_secret_encrypted,
-                            true,
+                            true,  // is_secret
+                            false, // not protected
                         )
                         .await
                         .context("Failed to store Rise client secret")?;
@@ -546,26 +551,13 @@ impl Extension for OAuthProvider {
             }
         }
 
-        // Reset auth_verified and invalidate cached tokens when critical fields change
+        // Reset auth_verified when critical fields change
         if auth_changed {
             debug!(
-                "OAuth spec changed for {}/{}, resetting auth_verified and invalidating cached tokens",
+                "OAuth spec changed for {}/{}, resetting auth_verified",
                 project_id, extension_name
             );
             status.auth_verified = false;
-
-            // Delete all cached user OAuth tokens for this extension
-            // Tokens were obtained with old credentials and are no longer valid
-            use crate::db::user_oauth_tokens;
-            let deleted_count =
-                user_oauth_tokens::delete_by_extension(db_pool, project_id, extension_name).await?;
-
-            if deleted_count > 0 {
-                info!(
-                    "Invalidated {} cached OAuth token(s) for {}/{}",
-                    deleted_count, project_id, extension_name
-                );
-            }
         }
 
         // Save updated status
@@ -863,10 +855,8 @@ const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-pr
 - Temporary single-use authorization codes with 5-minute TTL
 - Redirect URI validation (localhost or project domains only)
 - CSRF protection via state tokens
-- User token caching with automatic refresh
-- Session-based token storage with encrypted credentials
 - Constant-time comparison for client secret and PKCE validation
-- Configurable token retention policies
+- Stateless OAuth proxy: clients own their tokens after exchange
 "#
     }
 
