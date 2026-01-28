@@ -33,6 +33,28 @@ Best for single-page applications (React, Vue, Angular) using RFC 7636 Proof Key
 
 **Security:** PKCE prevents authorization code interception attacks by requiring the client to prove it initiated the OAuth flow. No client secret needed (SPAs can't securely store secrets).
 
+**Configuration:**
+
+Before implementing OAuth, fetch your Rise client ID from the extension (requires authentication):
+
+```bash
+# Fetch extension details (requires Rise auth token)
+rise extension show my-app oauth-google --output json | jq -r '.spec.rise_client_id'
+# Output: "abc-123-def-456-..."
+```
+
+Add to your build-time configuration:
+
+```javascript
+// config.js (or environment variables)
+const CONFIG = {
+  apiUrl: 'https://api.rise.dev',
+  projectName: 'my-app',
+  extensionName: 'oauth-google',
+  riseClientId: 'abc-123-def-456-...'  // From extension spec (public, safe to embed)
+};
+```
+
 **Usage Example:**
 
 ```javascript
@@ -95,13 +117,6 @@ async function handleCallback() {
     throw new Error('Missing code or verifier');
   }
 
-  // Fetch extension details to get Rise client ID
-  const extResponse = await fetch(
-    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google'
-  );
-  const extension = await extResponse.json();
-  const riseClientId = extension.spec.rise_client_id;
-
   // Exchange code for tokens using PKCE
   const response = await fetch(
     'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token',
@@ -111,7 +126,7 @@ async function handleCallback() {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        client_id: riseClientId,  // Fetched from extension spec
+        client_id: CONFIG.riseClientId,  // From build-time configuration
         code_verifier: verifier
       })
     }
