@@ -133,6 +133,8 @@ fn create_buildkit_daemon(
         daemon_name,
         "--rm",
         "-d",
+        "--add-host",
+        "host.docker.internal:host-gateway",
     ]);
 
     // Add labels and volume mount based on SSL cert presence

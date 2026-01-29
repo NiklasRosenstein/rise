@@ -35,12 +35,15 @@ Best for single-page applications (React, Vue, Angular) using RFC 7636 Proof Key
 
 **Configuration:**
 
-Before implementing OAuth, fetch your Rise client ID from the extension (requires authentication):
+Rise client IDs are deterministic and follow the pattern `{project-name}-{extension-name}`. You can construct the client ID directly or fetch it from the extension:
 
 ```bash
-# Fetch extension details (requires Rise auth token)
+# Option 1: Construct directly (deterministic format)
+# For project "my-app" and extension "oauth-google": my-app-oauth-google
+
+# Option 2: Fetch from extension spec (requires Rise auth token)
 rise extension show my-app oauth-google --output json | jq -r '.spec.rise_client_id'
-# Output: "abc-123-def-456-..."
+# Output: "my-app-oauth-google"
 ```
 
 Add to your build-time configuration:
@@ -51,7 +54,10 @@ const CONFIG = {
   apiUrl: 'https://api.rise.dev',
   projectName: 'my-app',
   extensionName: 'oauth-google',
-  riseClientId: 'abc-123-def-456-...'  // From extension spec (public, safe to embed)
+  // Client ID is deterministic: {projectName}-{extensionName}
+  get riseClientId() {
+    return `${this.projectName}-${this.extensionName}`;
+  }
 };
 ```
 
@@ -582,7 +588,9 @@ Content-Type: application/x-www-form-urlencoded
 
 Rise automatically generates client credentials when you create an OAuth extension:
 - `OAUTH_RISE_CLIENT_ID_{extension}` - Client ID (plaintext, can be public for PKCE flows)
-- `OAUTH_RISE_CLIENT_SECRET_{extension}` - Client secret (encrypted, for confidential clients)
+  - Format: `{project-name}-{extension-name}` (deterministic and predictable)
+  - Example: For project `my-app` and extension `oauth-google` → `my-app-oauth-google`
+- `OAUTH_RISE_CLIENT_SECRET_{extension}` - Client secret (encrypted, random, for confidential clients)
 
 These are available as environment variables in your deployed applications.
 

@@ -364,8 +364,8 @@ impl Extension for OAuthProvider {
                 project_id, extension_name
             );
 
-            // Generate credentials
-            let rise_client_id = Uuid::new_v4().to_string();
+            // Generate credentials with deterministic client ID: {project_name}-{extension_name}
+            let rise_client_id = format!("{}-{}", project.name, extension_name);
             let rise_client_secret = generate_rise_client_secret();
 
             // Normalize extension name for env var (uppercase, replace hyphens with underscores)
