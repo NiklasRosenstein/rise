@@ -20,10 +20,10 @@ rise project create oauth-demo --visibility public
 
 # The OAuth extension needs a client secret stored as an environment variable
 # For local Dex, the secret is "rise-backend-secret"
-rise env set oauth-demo DEX_CLIENT_SECRET "rise-backend-secret" --secret
+rise env set DEX_CLIENT_SECRET "rise-backend-secret" --secret
 
 # Create the OAuth extension
-rise extension create oauth-demo oauth-dex \
+rise extension create oauth-dex \
   --type oauth \
   --spec '{
     "provider_name": "Dex (Local Dev)",
