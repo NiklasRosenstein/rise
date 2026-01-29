@@ -49,6 +49,8 @@ pub struct AppState {
     pub token_store: Arc<dyn TokenStore>,
     pub cookie_settings: CookieSettings,
     pub public_url: String,
+    /// Internal URL for cluster-internal access (defaults to public_url if not configured)
+    pub internal_url: String,
     pub encryption_provider: Option<Arc<dyn EncryptionProvider>>,
     pub deployment_backend: Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
     pub extension_registry: Arc<crate::server::extensions::registry::ExtensionRegistry>,
@@ -455,7 +457,13 @@ impl AppState {
         }
 
         let public_url = settings.server.public_url.clone();
+        let internal_url = settings
+            .server
+            .internal_url
+            .clone()
+            .unwrap_or_else(|| public_url.clone());
         tracing::info!("Public URL: {}", public_url);
+        tracing::info!("Internal URL: {}", internal_url);
 
         // Initialize encryption provider
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
@@ -709,6 +717,7 @@ impl AppState {
             token_store,
             cookie_settings,
             public_url,
+            internal_url,
             encryption_provider,
             deployment_backend,
             extension_registry,

@@ -229,18 +229,38 @@ fn convert_status_to_db(status: DeploymentStatus) -> DbDeploymentStatus {
 /// Insert Rise-provided environment variables into a deployment
 ///
 /// This function adds the following environment variables:
+/// - RISE_API_URL: Internal URL for calling Rise API (e.g., OAuth token endpoint)
 /// - RISE_JWKS: JSON Web Key Set for JWT validation
 /// - RISE_ISSUER: The Rise backend URL (issuer of JWTs)
-/// - RISE_APP_URLS: JSON array of URLs where the app can be accessed
+/// - RISE_APP_URL: Canonical URL where the app is accessible
+/// - RISE_APP_URLS: JSON array of all URLs where the app can be accessed
 ///
 /// These environment variables are visible in the Rise UI and allow deployed applications
-/// to validate Rise-issued JWTs and know their own URLs.
+/// to validate Rise-issued JWTs, call Rise APIs, and know their own URLs.
 async fn insert_rise_env_vars(
     state: &AppState,
     deployment: &crate::db::models::Deployment,
     project: &crate::db::models::Project,
 ) -> Result<(), (StatusCode, String)> {
-    // 1. Generate RISE_JWKS
+    // 1. Insert RISE_API_URL (internal URL for API calls)
+    crate::db::env_vars::upsert_deployment_env_var(
+        &state.db_pool,
+        deployment.id,
+        "RISE_API_URL",
+        &state.internal_url,
+        false, // Not a secret
+        false, // is_retrievable
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to insert RISE_API_URL env var: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to insert RISE_API_URL: {}", e),
+        )
+    })?;
+
+    // 2. Generate RISE_JWKS
     let jwks = state.jwt_signer.generate_jwks().map_err(|e| {
         error!("Failed to generate JWKS: {}", e);
         (
@@ -274,7 +294,7 @@ async fn insert_rise_env_vars(
         )
     })?;
 
-    // 2. Insert RISE_ISSUER
+    // 3. Insert RISE_ISSUER
     crate::db::env_vars::upsert_deployment_env_var(
         &state.db_pool,
         deployment.id,
@@ -292,7 +312,7 @@ async fn insert_rise_env_vars(
         )
     })?;
 
-    // 3. Generate RISE_APP_URL and RISE_APP_URLS
+    // 4. Generate RISE_APP_URL and RISE_APP_URLS
     let deployment_urls = state
         .deployment_backend
         .get_deployment_urls(deployment, project)
