@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec, ReplicaSet};
 use k8s_openapi::api::core::v1::{
-    Container, ContainerPort, LocalObjectReference, Namespace, PodSpec, PodTemplateSpec, Secret,
-    Service, ServicePort, ServiceSpec,
+    Container, ContainerPort, HostAlias, LocalObjectReference, Namespace, PodSpec, PodTemplateSpec,
+    Secret, Service, ServicePort, ServiceSpec,
 };
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, Ingress, IngressBackend, IngressRule,
@@ -126,6 +126,8 @@ pub struct KubernetesControllerConfig {
     pub rise_jwks_json: String,
     /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
     pub rise_issuer: String,
+    /// Host aliases to inject into pod specs (hostname -> IP address)
+    pub host_aliases: std::collections::HashMap<String, String>,
 }
 
 /// Kubernetes controller implementation
@@ -161,6 +163,8 @@ pub struct KubernetesController {
     /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
     #[allow(dead_code)]
     rise_issuer: String,
+    /// Host aliases to inject into pod specs (hostname -> IP address)
+    host_aliases: std::collections::HashMap<String, String>,
 }
 
 impl KubernetesController {
@@ -193,6 +197,7 @@ impl KubernetesController {
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             rise_jwks_json: config.rise_jwks_json,
             rise_issuer: config.rise_issuer,
+            host_aliases: config.host_aliases,
         })
     }
 
@@ -1898,6 +1903,19 @@ impl KubernetesController {
                             None
                         } else {
                             Some(self.node_selector.clone().into_iter().collect())
+                        },
+                        host_aliases: if self.host_aliases.is_empty() {
+                            None
+                        } else {
+                            Some(
+                                self.host_aliases
+                                    .iter()
+                                    .map(|(hostname, ip)| HostAlias {
+                                        hostnames: Some(vec![hostname.clone()]),
+                                        ip: ip.clone(),
+                                    })
+                                    .collect(),
+                            )
                         },
                         ..Default::default()
                     }),
@@ -3959,6 +3977,7 @@ mod tests {
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             rise_jwks_json: r#"{"keys":[]}"#.to_string(),
             rise_issuer: "http://localhost:3000".to_string(),
+            host_aliases: std::collections::HashMap::new(),
         }
     }
 
@@ -4429,6 +4448,7 @@ mod tests {
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             rise_jwks_json: r#"{"keys":[]}"#.to_string(),
             rise_issuer: "http://localhost:3000".to_string(),
+            host_aliases: std::collections::HashMap::new(),
         }
     }
 }

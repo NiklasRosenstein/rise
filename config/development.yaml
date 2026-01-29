@@ -34,3 +34,7 @@ deployment_controller:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
   ingress_port: 8080 # `mise minikube:launch` port-forwards the ingress controller to this port
   ingress_schema: "http" # Use http for local development (defaults to https in production)
+  # Host aliases for pods to resolve custom hostnames (useful for OIDC issuer URLs)
+  # Get minikube host IP with: minikube ssh -- ip route | awk '/default/ { print $3 }'
+  host_aliases:
+    rise.local: "192.168.49.1"  # Minikube host IP

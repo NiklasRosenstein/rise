@@ -243,6 +243,7 @@ async fn run_kubernetes_controller_loop(
         node_selector,
         image_pull_secret_name,
         access_classes,
+        host_aliases,
     ) = match settings.deployment_controller.clone() {
         Some(settings::DeploymentControllerSettings::Kubernetes {
             kubeconfig,
@@ -262,6 +263,7 @@ async fn run_kubernetes_controller_loop(
             node_selector,
             image_pull_secret_name,
             access_classes,
+            host_aliases,
         }) => (
             kubeconfig,
             production_ingress_url_template,
@@ -280,6 +282,7 @@ async fn run_kubernetes_controller_loop(
             node_selector,
             image_pull_secret_name,
             access_classes,
+            host_aliases,
         ),
         None => {
             anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
@@ -336,6 +339,7 @@ async fn run_kubernetes_controller_loop(
             rise_jwks_json: jwks_json,
             // Use public_url as issuer
             rise_issuer: settings.server.public_url.clone(),
+            host_aliases,
         },
     )?);
 

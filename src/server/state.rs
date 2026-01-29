@@ -181,6 +181,7 @@ async fn init_kubernetes_backend(
         node_selector,
         image_pull_secret_name,
         access_classes,
+        host_aliases,
         ..
     }) = &settings.deployment_controller
     {
@@ -236,6 +237,7 @@ async fn init_kubernetes_backend(
                 access_classes: filtered_access_classes,
                 rise_jwks_json: jwks_json,
                 rise_issuer: settings.server.public_url.clone(),
+                host_aliases: host_aliases.clone(),
             },
         )?;
 

@@ -412,6 +412,13 @@ pub enum DeploymentControllerSettings {
         /// Value: access class configuration (display info, ingress settings)
         /// Use `null` in YAML to remove an inherited access class from parent configs
         access_classes: std::collections::HashMap<String, Option<AccessClass>>,
+
+        /// Host aliases to inject into pod specs (hostname -> IP address)
+        /// Maps hostnames to IP addresses, injected as Kubernetes hostAliases.
+        /// Useful for local development where pods need to resolve custom hostnames.
+        /// Example: {"rise.local": "192.168.49.1"}
+        #[serde(default)]
+        host_aliases: std::collections::HashMap<String, String>,
     },
 }
 
