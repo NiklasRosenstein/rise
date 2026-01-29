@@ -453,7 +453,7 @@ enum EnvCommands {
         #[arg(long)]
         secret: bool,
         /// Mark secret as protected (cannot be decrypted via API). Default is true (protected). Use --protected=false to allow decryption.
-        #[arg(long, short = 'p', default_value = "true")]
+        #[arg(long, default_value = "true")]
         protected: bool,
     },
     /// List environment variables for a project
