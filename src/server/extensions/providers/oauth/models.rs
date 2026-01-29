@@ -20,10 +20,14 @@ pub struct OAuthExtensionSpec {
     pub token_endpoint: String,
     /// OAuth scopes to request
     pub scopes: Vec<String>,
+    /// OIDC issuer URL (optional, for id_token validation via JWKS discovery)
+    /// If not provided, will be derived from token_endpoint base URL
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub issuer: Option<String>,
     /// Rise client ID (for apps to authenticate to Rise's /token endpoint)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rise_client_id: Option<String>,
-    /// Environment variable name containing Rise client secret (e.g., "OAUTH_RISE_CLIENT_SECRET_{extension}")
+    /// Environment variable name containing Rise client secret (e.g., "{EXT}_CLIENT_SECRET")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rise_client_secret_ref: Option<String>,
     /// Encrypted backup of Rise client secret in spec (for restoration)

@@ -210,8 +210,8 @@ app.get('/oauth/callback', async (req, res) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code as string,
-        client_id: process.env.OAUTH_RISE_CLIENT_ID_OAUTH_GOOGLE!,
-        client_secret: process.env.OAUTH_RISE_CLIENT_SECRET_OAUTH_GOOGLE!
+        client_id: process.env.OAUTH_GOOGLE_CLIENT_ID!,
+        client_secret: process.env.OAUTH_GOOGLE_CLIENT_SECRET!
       })
     }
   ).then(r => r.json());
@@ -234,8 +234,8 @@ async def callback(code: str, request: Request):
             data={
                 "grant_type": "authorization_code",
                 "code": code,
-                "client_id": os.getenv("OAUTH_RISE_CLIENT_ID_OAUTH_GOOGLE"),
-                "client_secret": os.getenv("OAUTH_RISE_CLIENT_SECRET_OAUTH_GOOGLE"),
+                "client_id": os.getenv("OAUTH_GOOGLE_CLIENT_ID"),
+                "client_secret": os.getenv("OAUTH_GOOGLE_CLIENT_SECRET"),
             }
         )
         tokens = response.json()
@@ -259,8 +259,8 @@ async fn oauth_callback(Query(params): Query<Callback>) -> Redirect {
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", &params.code),
-            ("client_id", &std::env::var("OAUTH_RISE_CLIENT_ID_OAUTH_GOOGLE").unwrap()),
-            ("client_secret", &std::env::var("OAUTH_RISE_CLIENT_SECRET_OAUTH_GOOGLE").unwrap()),
+            ("client_id", &std::env::var("OAUTH_GOOGLE_CLIENT_ID").unwrap()),
+            ("client_secret", &std::env::var("OAUTH_GOOGLE_CLIENT_SECRET").unwrap()),
         ])
         .send()
         .await.unwrap()
@@ -543,10 +543,10 @@ Content-Type: application/x-www-form-urlencoded
 **For authorization_code grant (exchange code for tokens):**
 - `grant_type` (required): Must be `"authorization_code"`
 - `code` (required): Authorization code from callback
-- `client_id` (required): Rise client ID from environment variable `OAUTH_RISE_CLIENT_ID_{extension}`
+- `client_id` (required): Rise client ID from environment variable `{EXTENSION}_CLIENT_ID`
 - **Client authentication (choose ONE method - mutually exclusive):**
   - **Confidential clients (backend apps):**
-    - `client_secret` (required): Rise client secret from environment variable `OAUTH_RISE_CLIENT_SECRET_{extension}`
+    - `client_secret` (required): Rise client secret from environment variable `{EXTENSION}_CLIENT_SECRET`
   - **Public clients (SPAs with PKCE):**
     - `code_verifier` (required): PKCE code verifier (proves client initiated the flow)
   - **Note:** Providing both `client_secret` and `code_verifier` will result in an `invalid_request` error
@@ -587,12 +587,17 @@ Content-Type: application/x-www-form-urlencoded
 **Client Credentials:**
 
 Rise automatically generates client credentials when you create an OAuth extension:
-- `OAUTH_RISE_CLIENT_ID_{extension}` - Client ID (plaintext, can be public for PKCE flows)
+- `{EXTENSION}_CLIENT_ID` - Client ID (plaintext, can be public for PKCE flows)
   - Format: `{project-name}-{extension-name}` (deterministic and predictable)
   - Example: For project `my-app` and extension `oauth-google` → `my-app-oauth-google`
-- `OAUTH_RISE_CLIENT_SECRET_{extension}` - Client secret (encrypted, random, for confidential clients)
+  - Env var: `OAUTH_GOOGLE_CLIENT_ID` (for extension named `oauth-google`)
+- `{EXTENSION}_CLIENT_SECRET` - Client secret (encrypted, random, for confidential clients)
+  - Env var: `OAUTH_GOOGLE_CLIENT_SECRET` (for extension named `oauth-google`)
+- `{EXTENSION}_ISSUER` - OIDC issuer URL for id_token validation via JWKS discovery
+  - Env var: `OAUTH_GOOGLE_ISSUER` (for extension named `oauth-google`)
+  - Used to fetch `/.well-known/openid-configuration` for JWKS
 
-These are available as environment variables in your deployed applications.
+These are available as environment variables in your deployed applications. The extension name is normalized to uppercase with hyphens replaced by underscores.
 
 **Rise URL Environment Variables:**
 

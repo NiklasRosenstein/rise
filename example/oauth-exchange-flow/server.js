@@ -1,9 +1,24 @@
 const express = require('express');
 const session = require('express-session');
 const fetch = require('node-fetch');
+const jose = require('jose');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
+
+// Helper to get required env var (fails fast if missing)
+function requireEnv(name, description) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}${description ? ` (${description})` : ''}`);
+  }
+  return value;
+}
+
+// Derive env var prefix from extension name
+// e.g., "oauth-dex" -> "OAUTH_DEX"
+const EXTENSION_NAME = process.env.EXTENSION_NAME || 'oauth-dex';
+const EXT_PREFIX = EXTENSION_NAME.toUpperCase().replace(/-/g, '_');
 
 // Configuration - adjust for your setup
 const CONFIG = {
@@ -12,8 +27,14 @@ const CONFIG = {
   // RISE_API_URL: Internal URL for backend-to-backend API calls (token exchange)
   riseApiUrl: process.env.RISE_API_URL || 'http://localhost:3000',
   projectName: process.env.PROJECT_NAME || 'oauth-demo',
-  extensionName: process.env.EXTENSION_NAME || 'oauth-dex',
+  extensionName: EXTENSION_NAME,
   sessionSecret: process.env.SESSION_SECRET || 'change-this-in-production',
+  // OAuth credentials injected by Rise as {EXT}_CLIENT_ID, {EXT}_CLIENT_SECRET, {EXT}_ISSUER
+  // These are REQUIRED - fail fast if not set
+  clientId: requireEnv(`${EXT_PREFIX}_CLIENT_ID`, 'Rise OAuth client ID'),
+  clientSecret: requireEnv(`${EXT_PREFIX}_CLIENT_SECRET`, 'Rise OAuth client secret'),
+  // OIDC issuer for id_token validation via JWKS discovery
+  oidcIssuer: requireEnv(`${EXT_PREFIX}_ISSUER`, 'OIDC issuer URL'),
 };
 
 // Session middleware for storing OAuth tokens
@@ -30,6 +51,44 @@ app.use(session({
 
 // Serve static files
 app.use(express.static('public'));
+
+// JWKS cache for id_token validation
+let cachedJwks = null;
+let jwksExpiry = 0;
+
+async function getJwks() {
+  if (cachedJwks && Date.now() < jwksExpiry) {
+    return cachedJwks;
+  }
+
+  // Fetch OIDC discovery document (standard: {issuer}/.well-known/openid-configuration)
+  const discoveryUrl = `${CONFIG.oidcIssuer}/.well-known/openid-configuration`;
+  const discoveryRes = await fetch(discoveryUrl);
+  if (!discoveryRes.ok) {
+    throw new Error(`Failed to fetch OIDC discovery from ${discoveryUrl}: ${discoveryRes.status}`);
+  }
+  const discovery = await discoveryRes.json();
+
+  // Fetch JWKS from jwks_uri
+  const jwksRes = await fetch(discovery.jwks_uri);
+  if (!jwksRes.ok) {
+    throw new Error(`Failed to fetch JWKS: ${jwksRes.status}`);
+  }
+  cachedJwks = await jwksRes.json();
+  jwksExpiry = Date.now() + 3600000; // Cache for 1 hour
+
+  return cachedJwks;
+}
+
+async function validateIdToken(idToken) {
+  const jwks = await getJwks();
+  const JWKS = jose.createLocalJWKSet(jwks);
+
+  // Verify signature and decode
+  const { payload } = await jose.jwtVerify(idToken, JWKS);
+
+  return payload;
+}
 
 // Home page - check if user is logged in
 app.get('/', (req, res) => {
@@ -92,8 +151,8 @@ app.get('/oauth/callback', async (req, res) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        client_id: process.env[`OAUTH_RISE_CLIENT_ID_${CONFIG.extensionName.toUpperCase().replace(/-/g, '_')}`],
-        client_secret: process.env[`OAUTH_RISE_CLIENT_SECRET_${CONFIG.extensionName.toUpperCase().replace(/-/g, '_')}`],
+        client_id: CONFIG.clientId,
+        client_secret: CONFIG.clientSecret,
       }),
     });
 
@@ -109,6 +168,7 @@ app.get('/oauth/callback', async (req, res) => {
     // Store credentials in session (HttpOnly cookie)
     req.session.oauth = {
       accessToken: tokens.access_token,
+      idToken: tokens.id_token,
       tokenType: tokens.token_type,
       expiresIn: tokens.expires_in,
       refreshToken: tokens.refresh_token,
@@ -134,18 +194,28 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// API endpoint that uses the OAuth token (example)
-app.get('/api/protected', (req, res) => {
-  if (!req.session.oauth) {
+// API endpoint that validates the id_token and returns user claims
+app.get('/api/protected', async (req, res) => {
+  if (!req.session.oauth?.idToken) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
 
-  // In a real app, you would use the access token to call protected APIs
-  res.json({
-    message: 'This is a protected endpoint',
-    tokenType: req.session.oauth.tokenType,
-    expiresAt: req.session.oauth.expiresAt
-  });
+  try {
+    // Validate id_token signature and decode claims
+    const claims = await validateIdToken(req.session.oauth.idToken);
+
+    res.json({
+      message: 'Token validated successfully',
+      sub: claims.sub,
+      email: claims.email,
+      name: claims.name,
+      exp: claims.exp,
+      iss: claims.iss,
+    });
+  } catch (error) {
+    console.error('Token validation failed:', error);
+    return res.status(401).json({ error: 'Invalid token', details: error.message });
+  }
 });
 
 // HTML rendering functions
@@ -209,6 +279,7 @@ function renderProfilePage(oauth) {
                 <p><strong>Token Type:</strong> ${oauth.tokenType}</p>
                 <p><strong>Expires In:</strong> ${oauth.expiresIn} seconds</p>
                 <p><strong>Retrieved At:</strong> ${oauth.retrievedAt}</p>
+                <p><strong>Has ID Token:</strong> ${oauth.idToken ? 'Yes' : 'No'}</p>
                 <p><strong>Has Refresh Token:</strong> ${oauth.refreshToken ? 'Yes' : 'No'}</p>
                 <p><strong>Scopes:</strong> ${oauth.scope || 'N/A'}</p>
             </div>
@@ -221,6 +292,7 @@ function renderProfilePage(oauth) {
                     <li>✓ Client authenticated with client_secret</li>
                     <li>✓ OAuth tokens never exposed to browser</li>
                     <li>✓ CSRF protection via state parameter</li>
+                    <li>✓ id_token validated via JWKS signature verification</li>
                 </ul>
             </div>
 
@@ -463,9 +535,11 @@ app.listen(PORT, () => {
     risePublicUrl: CONFIG.risePublicUrl,
     riseApiUrl: CONFIG.riseApiUrl,
     projectName: CONFIG.projectName,
-    extensionName: CONFIG.extensionName
+    extensionName: CONFIG.extensionName,
+    oidcIssuer: CONFIG.oidcIssuer,
   });
-  console.log('\nRequired environment variables:');
-  console.log(`  OAUTH_RISE_CLIENT_ID_${CONFIG.extensionName.toUpperCase().replace(/-/g, '_')}`);
-  console.log(`  OAUTH_RISE_CLIENT_SECRET_${CONFIG.extensionName.toUpperCase().replace(/-/g, '_')}`);
+  console.log('\nRequired environment variables (injected by Rise):');
+  console.log(`  ${EXT_PREFIX}_CLIENT_ID - Rise OAuth client ID`);
+  console.log(`  ${EXT_PREFIX}_CLIENT_SECRET - Rise OAuth client secret`);
+  console.log(`  ${EXT_PREFIX}_ISSUER - OIDC issuer URL for id_token validation`);
 });

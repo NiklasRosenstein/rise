@@ -237,11 +237,13 @@ impl OAuthProvider {
             }
         }
 
+        // New naming pattern: {EXT_NAME}_{KEY}
+        let normalized_name = ext.extension.to_uppercase().replace('-', "_");
+        let rise_client_id_ref = format!("{}_CLIENT_ID", normalized_name);
+        let rise_client_secret_ref_name = format!("{}_CLIENT_SECRET", normalized_name);
+        let issuer_ref = format!("{}_ISSUER", normalized_name);
+
         // Delete associated Rise client ID env var
-        let rise_client_id_ref = format!(
-            "OAUTH_RISE_CLIENT_ID_{}",
-            ext.extension.to_uppercase().replace('-', "_")
-        );
         if let Err(e) =
             db_env_vars::delete_project_env_var(&self.db_pool, ext.project_id, &rise_client_id_ref)
                 .await
@@ -257,25 +259,53 @@ impl OAuthProvider {
             );
         }
 
-        // Delete associated Rise client secret env var
+        // Delete associated Rise client secret env var (use the new naming pattern)
+        if let Err(e) = db_env_vars::delete_project_env_var(
+            &self.db_pool,
+            ext.project_id,
+            &rise_client_secret_ref_name,
+        )
+        .await
+        {
+            warn!(
+                "Failed to delete Rise client secret env var {} for OAuth extension: {:?}",
+                rise_client_secret_ref_name, e
+            );
+        } else {
+            info!(
+                "Deleted Rise client secret env var {} for OAuth extension",
+                rise_client_secret_ref_name
+            );
+        }
+
+        // Also try to delete with the spec's stored ref name (for backwards compatibility during migration)
         if let Some(ref rise_client_secret_ref) = spec.rise_client_secret_ref {
-            if let Err(e) = db_env_vars::delete_project_env_var(
-                &self.db_pool,
-                ext.project_id,
-                rise_client_secret_ref,
-            )
-            .await
-            {
-                warn!(
-                    "Failed to delete Rise client secret env var {} for OAuth extension: {:?}",
-                    rise_client_secret_ref, e
-                );
-            } else {
-                info!(
-                    "Deleted Rise client secret env var {} for OAuth extension",
-                    rise_client_secret_ref
-                );
+            if *rise_client_secret_ref != rise_client_secret_ref_name {
+                if let Err(e) = db_env_vars::delete_project_env_var(
+                    &self.db_pool,
+                    ext.project_id,
+                    rise_client_secret_ref,
+                )
+                .await
+                {
+                    warn!(
+                        "Failed to delete legacy Rise client secret env var {} for OAuth extension: {:?}",
+                        rise_client_secret_ref, e
+                    );
+                }
             }
+        }
+
+        // Delete issuer env var
+        if let Err(e) =
+            db_env_vars::delete_project_env_var(&self.db_pool, ext.project_id, &issuer_ref).await
+        {
+            warn!(
+                "Failed to delete issuer env var {} for OAuth extension: {:?}",
+                issuer_ref, e
+            );
+        } else {
+            info!("Deleted issuer env var {} for OAuth extension", issuer_ref);
         }
 
         // Permanently delete the extension
@@ -358,6 +388,14 @@ impl Extension for OAuthProvider {
 
         // Generate Rise client credentials if they don't exist
         let mut spec_updated = false;
+
+        // Normalize extension name for env var (uppercase, replace hyphens with underscores)
+        // New naming pattern: {EXT_NAME}_{KEY} (e.g., OAUTH_DEX_CLIENT_ID)
+        let normalized_name = extension_name.to_uppercase().replace('-', "_");
+        let rise_client_id_ref = format!("{}_CLIENT_ID", normalized_name);
+        let rise_client_secret_ref_name = format!("{}_CLIENT_SECRET", normalized_name);
+        let issuer_ref = format!("{}_ISSUER", normalized_name);
+
         if spec.rise_client_id.is_none() || spec.rise_client_secret_ref.is_none() {
             info!(
                 "Generating Rise client credentials for OAuth extension {}/{}",
@@ -367,11 +405,6 @@ impl Extension for OAuthProvider {
             // Generate credentials with deterministic client ID: {project_name}-{extension_name}
             let rise_client_id = format!("{}-{}", project.name, extension_name);
             let rise_client_secret = generate_rise_client_secret();
-
-            // Normalize extension name for env var (uppercase, replace hyphens with underscores)
-            let normalized_name = extension_name.to_uppercase().replace('-', "_");
-            let rise_client_id_ref = format!("OAUTH_RISE_CLIENT_ID_{}", normalized_name);
-            let rise_client_secret_ref = format!("OAUTH_RISE_CLIENT_SECRET_{}", normalized_name);
 
             // Encrypt the client secret
             let rise_client_secret_encrypted = self
@@ -396,7 +429,7 @@ impl Extension for OAuthProvider {
             db_env_vars::upsert_project_env_var(
                 db_pool,
                 project_id,
-                &rise_client_secret_ref,
+                &rise_client_secret_ref_name,
                 &rise_client_secret_encrypted,
                 true,  // is_secret
                 false, // not protected - managed by Rise
@@ -406,24 +439,19 @@ impl Extension for OAuthProvider {
 
             info!(
                 "Stored Rise client credentials as environment variables: {}, {}",
-                rise_client_id_ref, rise_client_secret_ref
+                rise_client_id_ref, rise_client_secret_ref_name
             );
 
             // Update spec with Rise credentials
             spec.rise_client_id = Some(rise_client_id);
-            spec.rise_client_secret_ref = Some(rise_client_secret_ref);
+            spec.rise_client_secret_ref = Some(rise_client_secret_ref_name.clone());
             spec.rise_client_secret_encrypted = Some(rise_client_secret_encrypted.clone());
 
             spec_updated = true;
         } else {
-            // Restore Rise client ID env var if missing
+            // Restore Rise client ID env var if missing (uses new naming pattern)
             if let Some(ref rise_client_id) = spec.rise_client_id {
-                let rise_client_id_ref = format!(
-                    "OAUTH_RISE_CLIENT_ID_{}",
-                    extension_name.to_uppercase().replace('-', "_")
-                );
-
-                // Check if env var exists
+                // Check if env var exists with new naming
                 let env_vars = db_env_vars::list_project_env_vars(db_pool, project_id)
                     .await
                     .unwrap_or_default();
@@ -504,6 +532,43 @@ impl Extension for OAuthProvider {
                     }
                 }
             }
+        }
+
+        // Inject issuer env var for OIDC discovery (id_token validation)
+        // Use spec.issuer if provided, otherwise derive from token_endpoint
+        let issuer_value = spec.issuer.clone().or_else(|| {
+            // Try to derive issuer from token_endpoint by removing common path suffixes
+            // e.g., "http://dex:5556/dex/token" -> "http://dex:5556/dex"
+            let token_url = Url::parse(&spec.token_endpoint).ok()?;
+            let mut path = token_url.path().to_string();
+            // Remove common token endpoint suffixes
+            for suffix in ["/token", "/token-request", "/oauth/token", "/oauth2/token"] {
+                if path.ends_with(suffix) {
+                    path = path.trim_end_matches(suffix).to_string();
+                    break;
+                }
+            }
+            let mut issuer_url = token_url.clone();
+            issuer_url.set_path(&path);
+            // Remove query and fragment
+            issuer_url.set_query(None);
+            issuer_url.set_fragment(None);
+            Some(issuer_url.to_string().trim_end_matches('/').to_string())
+        });
+
+        if let Some(ref issuer) = issuer_value {
+            db_env_vars::upsert_project_env_var(
+                db_pool,
+                project_id,
+                &issuer_ref,
+                issuer,
+                false, // not secret
+                false, // not protected
+            )
+            .await
+            .context("Failed to store issuer as environment variable")?;
+
+            debug!("Stored issuer env var {}: {}", issuer_ref, issuer);
         }
 
         // If spec was updated with Rise credentials, persist it
@@ -814,8 +879,8 @@ app.get('/oauth/callback', async (req, res) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code as string,
-        client_id: process.env.OAUTH_RISE_CLIENT_ID_OAUTH_PROVIDER!,
-        client_secret: process.env.OAUTH_RISE_CLIENT_SECRET_OAUTH_PROVIDER!
+        client_id: process.env.OAUTH_PROVIDER_CLIENT_ID!,
+        client_secret: process.env.OAUTH_PROVIDER_CLIENT_SECRET!
       })
     }
   ).then(r => r.json());
@@ -901,6 +966,12 @@ const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-pr
                     },
                     "description": "OAuth scopes to request",
                     "example": ["refresh_token"]
+                },
+                "issuer": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "OIDC issuer URL for id_token validation via JWKS discovery. If not provided, derived from token_endpoint.",
+                    "example": "https://accounts.google.com"
                 }
             }
         })
