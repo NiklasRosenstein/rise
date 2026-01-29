@@ -6,7 +6,7 @@ use crate::db::{extensions as db_extensions, projects as db_projects};
 use crate::server::state::AppState;
 use axum::{
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
     Json,
 };
@@ -47,6 +47,118 @@ fn generate_code_challenge(verifier: &str) -> String {
 
     // Base64url encode (no padding)
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash)
+}
+
+/// Validate CORS origin against allowed origins for a project
+///
+/// Returns the allowed origin if valid, None otherwise.
+/// Allowed origins:
+/// - localhost (any port) for local development
+/// - Rise public URL
+/// - Project deployment URLs (including custom domains)
+async fn validate_cors_origin(
+    pool: &sqlx::PgPool,
+    origin: &str,
+    project: &crate::db::models::Project,
+    rise_public_url: &str,
+    deployment_backend: &Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
+) -> Option<String> {
+    let origin_url = match Url::parse(origin) {
+        Ok(url) => url,
+        Err(_) => return None,
+    };
+
+    // Allow localhost for local development (any port)
+    if let Some(host) = origin_url.host_str() {
+        if host == "localhost" || host == "127.0.0.1" {
+            return Some(origin.to_string());
+        }
+    }
+
+    // Allow if origin matches Rise public URL (same origin)
+    if let Ok(rise_url) = Url::parse(rise_public_url) {
+        if origin_url.host() == rise_url.host()
+            && origin_url.port() == rise_url.port()
+            && origin_url.scheme() == rise_url.scheme()
+        {
+            return Some(origin.to_string());
+        }
+    }
+
+    // Check project's deployment URLs
+    let all_deployments =
+        match crate::db::deployments::get_active_deployments_for_project(pool, project.id).await {
+            Ok(deployments) => deployments,
+            Err(e) => {
+                warn!(
+                    "Failed to fetch active deployments for project {}: {:?}",
+                    project.name, e
+                );
+                return None;
+            }
+        };
+
+    for deployment in &all_deployments {
+        match deployment_backend
+            .get_deployment_urls(deployment, project)
+            .await
+        {
+            Ok(urls) => {
+                // Check primary URL
+                if !urls.primary_url.is_empty() {
+                    if let Ok(deployment_url) = Url::parse(&urls.primary_url) {
+                        if origin_url.host() == deployment_url.host()
+                            && origin_url.port() == deployment_url.port()
+                            && origin_url.scheme() == deployment_url.scheme()
+                        {
+                            return Some(origin.to_string());
+                        }
+                    }
+                }
+
+                // Check custom domain URLs
+                for custom_url in &urls.custom_domain_urls {
+                    if let Ok(custom_domain_url) = Url::parse(custom_url) {
+                        if origin_url.host() == custom_domain_url.host()
+                            && origin_url.port() == custom_domain_url.port()
+                            && origin_url.scheme() == custom_domain_url.scheme()
+                        {
+                            return Some(origin.to_string());
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to get deployment URLs for deployment {}: {:?}",
+                    deployment.deployment_id, e
+                );
+            }
+        }
+    }
+
+    None
+}
+
+/// Create CORS response headers for allowed origin
+fn cors_headers(origin: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    if let Ok(origin_value) = HeaderValue::from_str(origin) {
+        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin_value);
+    }
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("POST, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("Content-Type"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("86400"), // 24 hours
+    );
+    headers
 }
 
 /// Validate redirect URI against allowed origins
@@ -700,7 +812,7 @@ fn oauth2_error(
     )
 }
 
-/// RFC 6749-compliant token endpoint
+/// RFC 6749-compliant token endpoint with per-project CORS support
 ///
 /// POST /api/v1/projects/{project}/extensions/{extension}/oauth/token
 ///
@@ -711,17 +823,77 @@ fn oauth2_error(
 /// Client authentication:
 /// - Confidential clients: Use client_id + client_secret
 /// - Public clients: Use client_id + code_verifier (PKCE)
+///
+/// CORS:
+/// - Validates Origin header against project-specific allowed origins
+/// - Allows localhost (any port), Rise public URL, project deployment URLs
 pub async fn token_endpoint(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
     headers: axum::http::HeaderMap,
     body: String,
-) -> Result<Json<OAuth2TokenResponse>, (StatusCode, Json<OAuth2ErrorResponse>)> {
+) -> Response {
     debug!(
         "Token endpoint request for project={}, extension={}",
         project_name, extension_name
     );
 
+    // Extract Origin header for CORS validation (will be validated after we get the project)
+    let origin = headers
+        .get(header::ORIGIN)
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+
+    // Inner function to handle the actual token logic
+    let result = token_endpoint_inner(&state, &project_name, &extension_name, &headers, body).await;
+
+    // Get CORS headers if Origin was provided and project exists
+    let cors_headers = if let Some(ref origin_str) = origin {
+        // We need to get the project to validate CORS
+        if let Ok(Some(project)) = db_projects::find_by_name(&state.db_pool, &project_name).await {
+            validate_cors_origin(
+                &state.db_pool,
+                origin_str,
+                &project,
+                &state.public_url,
+                &state.deployment_backend,
+            )
+            .await
+            .map(|allowed| cors_headers(&allowed))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Build response with optional CORS headers
+    match result {
+        Ok(token_response) => {
+            let mut response = (StatusCode::OK, Json(token_response)).into_response();
+            if let Some(cors) = cors_headers {
+                response.headers_mut().extend(cors);
+            }
+            response
+        }
+        Err((status, error_json)) => {
+            let mut response = (status, error_json).into_response();
+            if let Some(cors) = cors_headers {
+                response.headers_mut().extend(cors);
+            }
+            response
+        }
+    }
+}
+
+/// Inner implementation of token endpoint logic
+async fn token_endpoint_inner(
+    state: &AppState,
+    project_name: &str,
+    extension_name: &str,
+    headers: &axum::http::HeaderMap,
+    body: String,
+) -> Result<OAuth2TokenResponse, (StatusCode, Json<OAuth2ErrorResponse>)> {
     // Parse request body (support both form-urlencoded and JSON)
     let content_type = headers
         .get(header::CONTENT_TYPE)
@@ -746,7 +918,7 @@ pub async fn token_endpoint(
     };
 
     // Get project
-    let project = db_projects::find_by_name(&state.db_pool, &project_name)
+    let project = db_projects::find_by_name(&state.db_pool, project_name)
         .await
         .map_err(|e| {
             error!("Database error: {:?}", e);
@@ -756,7 +928,7 @@ pub async fn token_endpoint(
 
     // Get OAuth extension
     let extension =
-        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, extension_name)
             .await
             .map_err(|e| {
                 error!("Database error: {:?}", e);
@@ -903,14 +1075,26 @@ pub async fn token_endpoint(
         }
     }
 
-    // Route to grant-specific handlers
+    // Route to grant-specific handlers (unwrap Json wrapper for inner return)
     match req.grant_type.as_str() {
-        "authorization_code" => {
-            handle_authorization_code_grant(state, project, extension_name, spec, req).await
-        }
-        "refresh_token" => {
-            handle_refresh_token_grant(state, project, extension_name, spec, req).await
-        }
+        "authorization_code" => handle_authorization_code_grant(
+            state.clone(),
+            project,
+            extension_name.to_string(),
+            spec,
+            req,
+        )
+        .await
+        .map(|Json(response)| response),
+        "refresh_token" => handle_refresh_token_grant(
+            state.clone(),
+            project,
+            extension_name.to_string(),
+            spec,
+            req,
+        )
+        .await
+        .map(|Json(response)| response),
         _ => Err(oauth2_error(
             "unsupported_grant_type",
             Some(format!("Unsupported grant_type: {}", req.grant_type)),
@@ -1137,4 +1321,61 @@ async fn handle_refresh_token_grant(
         scope,
         id_token: token_response.id_token,
     }))
+}
+
+/// CORS preflight handler for token endpoint
+///
+/// OPTIONS /api/v1/projects/{project}/extensions/{extension}/oauth/token
+///
+/// Validates the Origin header against project-specific allowed origins:
+/// - localhost (any port) for local development
+/// - Rise public URL
+/// - Project deployment URLs (including custom domains)
+pub async fn token_endpoint_options(
+    State(state): State<AppState>,
+    Path((project_name, _extension_name)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    // Get Origin header
+    let origin = match headers.get(header::ORIGIN).and_then(|h| h.to_str().ok()) {
+        Some(o) => o,
+        None => {
+            // No Origin header - not a CORS request, return empty 204
+            return StatusCode::NO_CONTENT.into_response();
+        }
+    };
+
+    // Get project to validate origin
+    let project = match db_projects::find_by_name(&state.db_pool, &project_name).await {
+        Ok(Some(p)) => p,
+        _ => {
+            // Project not found - reject CORS
+            return StatusCode::FORBIDDEN.into_response();
+        }
+    };
+
+    // Validate origin against project's allowed origins
+    match validate_cors_origin(
+        &state.db_pool,
+        origin,
+        &project,
+        &state.public_url,
+        &state.deployment_backend,
+    )
+    .await
+    {
+        Some(allowed_origin) => {
+            // Origin is allowed - return CORS headers
+            let cors = cors_headers(&allowed_origin);
+            (StatusCode::NO_CONTENT, cors).into_response()
+        }
+        None => {
+            // Origin not allowed
+            debug!(
+                "CORS origin '{}' not allowed for project '{}'",
+                origin, project_name
+            );
+            StatusCode::FORBIDDEN.into_response()
+        }
+    }
 }

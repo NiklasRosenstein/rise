@@ -17,9 +17,9 @@ pub fn oauth_routes() -> Router<AppState> {
             "/oauth/callback/{project}/{extension}",
             get(handlers::callback),
         )
-        // RFC 6749-compliant token endpoint
+        // RFC 6749-compliant token endpoint with CORS support
         .route(
             "/projects/{project}/extensions/{extension}/oauth/token",
-            post(handlers::token_endpoint),
+            post(handlers::token_endpoint).options(handlers::token_endpoint_options),
         )
 }
