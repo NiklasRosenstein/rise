@@ -594,6 +594,27 @@ Rise automatically generates client credentials when you create an OAuth extensi
 
 These are available as environment variables in your deployed applications.
 
+**Rise URL Environment Variables:**
+
+Rise injects URL environment variables into deployments for building OAuth URLs dynamically:
+
+| Environment Variable | Purpose | Example |
+|---------------------|---------|---------|
+| `RISE_PUBLIC_URL` | Browser redirects (authorize endpoint) | `http://localhost:3000` |
+| `RISE_API_URL` | Backend-to-backend API calls (token endpoint) | `http://host.minikube.internal:3000` |
+
+Use these instead of hardcoded URLs:
+
+```javascript
+// Browser redirect (PKCE authorize URL)
+const authUrl = `${process.env.RISE_PUBLIC_URL}/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize`;
+
+// Backend token exchange
+const tokenUrl = `${process.env.RISE_API_URL}/api/v1/projects/my-app/extensions/oauth-google/oauth/token`;
+```
+
+This separation is important in Kubernetes deployments where the internal URL (`RISE_API_URL`) differs from the public URL (`RISE_PUBLIC_URL`) that browsers can reach.
+
 **Security:**
 - Client secret validated with constant-time comparison
 - PKCE code_verifier validated against code_challenge (SHA-256 hash)
