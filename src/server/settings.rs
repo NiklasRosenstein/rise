@@ -25,17 +25,6 @@ pub struct ServerSettings {
     pub port: u16,
     pub public_url: String,
 
-    /// Internal URL for cluster-internal access to Rise API.
-    /// Used by deployed apps to reach Rise (e.g., for OAuth token endpoint).
-    ///
-    /// Examples:
-    /// - Local dev with Minikube: `http://host.minikube.internal:3000`
-    /// - Production K8s: `http://rise-backend.rise-system.svc.cluster.local:3000`
-    ///
-    /// If not set, defaults to public_url.
-    #[serde(default)]
-    pub internal_url: Option<String>,
-
     /// Cookie domain for session cookies (e.g., ".rise.dev" for all subdomains, "" for current host only)
     #[serde(default)]
     pub cookie_domain: String,

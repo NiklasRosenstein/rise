@@ -1288,7 +1288,6 @@ async fn handle_refresh_token_grant(
         })?,
         http_client: reqwest::Client::new(),
         api_domain: state.public_url.clone(),
-        internal_url: state.internal_url.clone(),
     });
 
     // Get upstream OAuth client secret
@@ -1516,10 +1515,10 @@ pub async fn oidc_discovery(
         )
     })?;
 
-    // Build Rise OIDC base URL using internal URL (for backend-to-backend calls)
+    // Build Rise OIDC base URL
     let rise_oidc_base = format!(
         "{}/oidc/{}/{}",
-        state.internal_url.trim_end_matches('/'),
+        state.public_url.trim_end_matches('/'),
         project_name,
         extension_name
     );

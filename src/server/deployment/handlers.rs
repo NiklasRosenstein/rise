@@ -243,12 +243,12 @@ async fn insert_rise_env_vars(
     deployment: &crate::db::models::Deployment,
     project: &crate::db::models::Project,
 ) -> Result<(), (StatusCode, String)> {
-    // 1. Insert RISE_API_URL (internal URL for backend-to-backend API calls)
+    // 1. Insert RISE_API_URL (URL for backend-to-backend API calls)
     crate::db::env_vars::upsert_deployment_env_var(
         &state.db_pool,
         deployment.id,
         "RISE_API_URL",
-        &state.internal_url,
+        &state.public_url,
         false, // Not a secret
         false, // is_retrievable
     )

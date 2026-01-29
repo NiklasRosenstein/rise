@@ -18,8 +18,6 @@ pub struct OAuthProviderConfig {
     pub encryption_provider: Arc<dyn EncryptionProvider>,
     pub http_client: reqwest::Client,
     pub api_domain: String,
-    /// Internal URL for backend-to-backend calls (used for OIDC issuer env var)
-    pub internal_url: String,
 }
 
 #[allow(dead_code)]
@@ -28,7 +26,6 @@ pub struct OAuthProvider {
     encryption_provider: Arc<dyn EncryptionProvider>,
     http_client: reqwest::Client,
     api_domain: String,
-    internal_url: String,
 }
 
 impl Clone for OAuthProvider {
@@ -38,7 +35,6 @@ impl Clone for OAuthProvider {
             encryption_provider: self.encryption_provider.clone(),
             http_client: self.http_client.clone(),
             api_domain: self.api_domain.clone(),
-            internal_url: self.internal_url.clone(),
         }
     }
 }
@@ -60,7 +56,6 @@ impl OAuthProvider {
             encryption_provider: config.encryption_provider,
             http_client: config.http_client,
             api_domain: config.api_domain,
-            internal_url: config.internal_url,
         }
     }
 
@@ -542,10 +537,10 @@ impl Extension for OAuthProvider {
         }
 
         // Inject issuer env var for OIDC discovery (id_token validation)
-        // Point to Rise's OIDC proxy using internal URL (for backend-to-backend calls)
+        // Point to Rise's OIDC proxy
         let rise_issuer = format!(
             "{}/oidc/{}/{}",
-            self.internal_url.trim_end_matches('/'),
+            self.api_domain.trim_end_matches('/'),
             project.name,
             extension_name
         );

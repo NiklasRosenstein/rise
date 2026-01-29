@@ -7,8 +7,6 @@ server:
   cookie_domain: ""  # Empty = current host only (for localhost:3000 access)
   # If you access via rise.local:3000, use ".rise.local" instead
   jwt_signing_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" # Generate with: openssl rand -base64 32
-  # Internal URL for Minikube deployments to reach Rise API
-  internal_url: "http://host.minikube.internal:3000"
 
 encryption:
   type: "aes-gcm-256"
