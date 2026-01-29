@@ -18,6 +18,8 @@ pub struct OAuthProviderConfig {
     pub encryption_provider: Arc<dyn EncryptionProvider>,
     pub http_client: reqwest::Client,
     pub api_domain: String,
+    /// Internal URL for backend-to-backend calls (used for OIDC issuer env var)
+    pub internal_url: String,
 }
 
 #[allow(dead_code)]
@@ -26,6 +28,7 @@ pub struct OAuthProvider {
     encryption_provider: Arc<dyn EncryptionProvider>,
     http_client: reqwest::Client,
     api_domain: String,
+    internal_url: String,
 }
 
 impl Clone for OAuthProvider {
@@ -35,6 +38,7 @@ impl Clone for OAuthProvider {
             encryption_provider: self.encryption_provider.clone(),
             http_client: self.http_client.clone(),
             api_domain: self.api_domain.clone(),
+            internal_url: self.internal_url.clone(),
         }
     }
 }
@@ -56,6 +60,7 @@ impl OAuthProvider {
             encryption_provider: config.encryption_provider,
             http_client: config.http_client,
             api_domain: config.api_domain,
+            internal_url: config.internal_url,
         }
     }
 
@@ -63,8 +68,10 @@ impl OAuthProvider {
     #[allow(dead_code)]
     pub fn compute_redirect_uri(&self, project_name: &str, extension_name: &str) -> String {
         format!(
-            "{}/api/v1/oauth/callback/{}/{}",
-            self.api_domain, project_name, extension_name
+            "{}/oidc/{}/{}/callback",
+            self.api_domain.trim_end_matches('/'),
+            project_name,
+            extension_name
         )
     }
 
@@ -535,41 +542,26 @@ impl Extension for OAuthProvider {
         }
 
         // Inject issuer env var for OIDC discovery (id_token validation)
-        // Use spec.issuer if provided, otherwise derive from token_endpoint
-        let issuer_value = spec.issuer.clone().or_else(|| {
-            // Try to derive issuer from token_endpoint by removing common path suffixes
-            // e.g., "http://dex:5556/dex/token" -> "http://dex:5556/dex"
-            let token_url = Url::parse(&spec.token_endpoint).ok()?;
-            let mut path = token_url.path().to_string();
-            // Remove common token endpoint suffixes
-            for suffix in ["/token", "/token-request", "/oauth/token", "/oauth2/token"] {
-                if path.ends_with(suffix) {
-                    path = path.trim_end_matches(suffix).to_string();
-                    break;
-                }
-            }
-            let mut issuer_url = token_url.clone();
-            issuer_url.set_path(&path);
-            // Remove query and fragment
-            issuer_url.set_query(None);
-            issuer_url.set_fragment(None);
-            Some(issuer_url.to_string().trim_end_matches('/').to_string())
-        });
+        // Point to Rise's OIDC proxy using internal URL (for backend-to-backend calls)
+        let rise_issuer = format!(
+            "{}/oidc/{}/{}",
+            self.internal_url.trim_end_matches('/'),
+            project.name,
+            extension_name
+        );
 
-        if let Some(ref issuer) = issuer_value {
-            db_env_vars::upsert_project_env_var(
-                db_pool,
-                project_id,
-                &issuer_ref,
-                issuer,
-                false, // not secret
-                false, // not protected
-            )
-            .await
-            .context("Failed to store issuer as environment variable")?;
+        db_env_vars::upsert_project_env_var(
+            db_pool,
+            project_id,
+            &issuer_ref,
+            &rise_issuer,
+            false, // not secret
+            false, // not protected
+        )
+        .await
+        .context("Failed to store issuer as environment variable")?;
 
-            debug!("Stored issuer env var {}: {}", issuer_ref, issuer);
-        }
+        debug!("Stored issuer env var {}: {}", issuer_ref, rise_issuer);
 
         // If spec was updated with Rise credentials, persist it
         if spec_updated {
@@ -828,7 +820,7 @@ async function login() {
   sessionStorage.setItem('pkce_verifier', codeVerifier);
 
   const authUrl = new URL(
-    `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize`
+    `https://api.rise.dev/oidc/my-app/oauth-provider/authorize`
   );
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
@@ -842,7 +834,7 @@ async function handleCallback() {
   const codeVerifier = sessionStorage.getItem('pkce_verifier');
 
   const tokens = await fetch(
-    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/token',
+    'https://api.rise.dev/oidc/my-app/oauth-provider/token',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -872,7 +864,7 @@ app.get('/oauth/callback', async (req, res) => {
   const { code } = req.query;
 
   const tokens = await fetch(
-    'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/token',
+    'https://api.rise.dev/oidc/my-app/oauth-provider/token',
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -899,7 +891,7 @@ For local development, add `redirect_uri` parameter:
 authUrl.searchParams.set('redirect_uri', 'http://localhost:3000/callback');
 
 // Backend flow
-const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?redirect_uri=http://localhost:3000/oauth/callback';
+const authUrl = 'https://api.rise.dev/oidc/my-app/oauth-provider/authorize?redirect_uri=http://localhost:3000/oauth/callback';
 ```
 
 ## Security Features

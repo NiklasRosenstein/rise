@@ -198,7 +198,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
     const backendUrl = CONFIG.backendUrl.replace(/\/$/, ''); // Remove trailing slash
     const displayProjectName = projectName || 'YOUR_PROJECT';
     const displayExtensionName = isEnabled ? instanceName : (instanceName || 'YOUR_EXTENSION_NAME');
-    const redirectUri = `${backendUrl}/api/v1/oauth/callback/${displayProjectName}/${displayExtensionName}`;
+    const redirectUri = `${backendUrl}/oidc/${displayProjectName}/${displayExtensionName}/callback`;
 
     // Use a ref to store the latest onChange callback
     const onChangeRef = React.useRef(onChange);
@@ -496,9 +496,9 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
     if (!isOpen) return null;
 
     const backendUrl = CONFIG.backendUrl.replace(/\/$/, '');
-    const authorizeUrl = `${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`;
-    const callbackUrl = `${backendUrl}/api/v1/oauth/callback/${projectName}/${extensionName}`;
-    const tokenUrl = `${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/token`;
+    const authorizeUrl = `${backendUrl}/oidc/${projectName}/${extensionName}/authorize`;
+    const callbackUrl = `${backendUrl}/oidc/${projectName}/${extensionName}/callback`;
+    const tokenUrl = `${backendUrl}/oidc/${projectName}/${extensionName}/token`;
 
     return (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={onClose}>
@@ -753,12 +753,12 @@ function OAuthDetailView({ extension, projectName }) {
 
     // Build URLs using actual backend URL
     const backendUrl = CONFIG.backendUrl.replace(/\/$/, ''); // Remove trailing slash
-    const callbackUrl = `${backendUrl}/api/v1/oauth/callback/${projectName}/${extensionName}`;
+    const callbackUrl = `${backendUrl}/oidc/${projectName}/${extensionName}/callback`;
 
     const handleTestOAuth = () => {
         // Include the current hash in the redirect URI so we return to the same page
         const redirectUri = window.location.href;
-        const authUrl = `/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
+        const authUrl = `/oidc/${projectName}/${extensionName}/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
         window.location.href = authUrl;
     };
 
@@ -897,12 +897,12 @@ function OAuthDetailView({ extension, projectName }) {
                                     <p className="text-sm text-green-700 dark:text-green-400">Authorize URL</p>
                                     <div className="flex items-center gap-2 mt-1">
                                         <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono break-all">
-                                            {`${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`}
+                                            {`${backendUrl}/oidc/${projectName}/${extensionName}/authorize`}
                                         </code>
                                         <button
                                             type="button"
                                             onClick={() => {
-                                                navigator.clipboard.writeText(`${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`);
+                                                navigator.clipboard.writeText(`${backendUrl}/oidc/${projectName}/${extensionName}/authorize`);
                                                 showToast('Authorize URL copied to clipboard', 'success');
                                             }}
                                             className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
@@ -916,12 +916,12 @@ function OAuthDetailView({ extension, projectName }) {
                                     <p className="text-sm text-green-700 dark:text-green-400">Token Endpoint</p>
                                     <div className="flex items-center gap-2 mt-1">
                                         <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono break-all">
-                                            {`${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/token`}
+                                            {`${backendUrl}/oidc/${projectName}/${extensionName}/token`}
                                         </code>
                                         <button
                                             type="button"
                                             onClick={() => {
-                                                navigator.clipboard.writeText(`${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/token`);
+                                                navigator.clipboard.writeText(`${backendUrl}/oidc/${projectName}/${extensionName}/token`);
                                                 showToast('Token endpoint copied to clipboard', 'success');
                                             }}
                                             className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"

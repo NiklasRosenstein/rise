@@ -554,10 +554,12 @@ impl SnowflakeOAuthProvisioner {
         let oauth_extension_name = self.generate_oauth_extension_name(extension_name);
 
         // Generate redirect URI - must match the format used by Generic OAuth extension
-        // Format: https://{domain}/api/v1/oauth/callback/{project_name}/{oauth_extension_name}
+        // Format: {RISE_PUBLIC_URL}/oidc/{project_name}/{oauth_extension_name}/callback
         let redirect_uri = format!(
-            "{}/api/v1/oauth/callback/{}/{}",
-            self.api_domain, project_name, oauth_extension_name
+            "{}/oidc/{}/{}/callback",
+            self.api_domain.trim_end_matches('/'),
+            project_name,
+            oauth_extension_name
         );
 
         // Update status
@@ -1021,8 +1023,10 @@ impl SnowflakeOAuthProvisioner {
         }
 
         let expected_redirect_uri = format!(
-            "{}/api/v1/oauth/callback/{}/{}",
-            self.api_domain, project_name, oauth_extension_name
+            "{}/oidc/{}/{}/callback",
+            self.api_domain.trim_end_matches('/'),
+            project_name,
+            oauth_extension_name
         );
 
         let current_redirect_uri = status.redirect_uri.as_deref().unwrap_or("");

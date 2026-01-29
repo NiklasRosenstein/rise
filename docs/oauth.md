@@ -11,6 +11,7 @@ Rise's Generic OAuth 2.0 extension enables end-user authentication with any OAut
   - PKCE (SPAs, RFC 7636-compliant)
   - Token endpoint with client credentials (backend apps, RFC 6749-compliant)
 - **Stateless OAuth Proxy**: Rise proxies OAuth flows, clients own their tokens after exchange
+- **OIDC Discovery Proxy**: Rise proxies OIDC discovery and JWKS endpoints, making apps work in local dev
 - **No Client Secret Exposure**: Secrets stored as encrypted environment variables on Rise
 - **Standards Compliant**: RFC 6749 (OAuth 2.0) and RFC 7636 (PKCE) support
 
@@ -21,7 +22,7 @@ Rise's Generic OAuth 2.0 extension enables end-user authentication with any OAut
 - Authorization codes single-use with 5-minute TTL
 - PKCE support for public clients (SPAs) prevents code interception attacks
 - Constant-time comparison for all secret validation
-- Clients manage token refresh via `/oauth/token` with `grant_type=refresh_token`
+- Clients manage token refresh via `/oidc/{project}/{extension}/token` with `grant_type=refresh_token`
 
 ## OAuth Flows
 
@@ -80,7 +81,7 @@ async function login() {
 
   // Build authorization URL
   const authUrl = new URL(
-    `https://api.rise.dev/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/authorize`
+    `https://api.rise.dev/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`
   );
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
@@ -99,7 +100,7 @@ async function handleCallback() {
   }
 
   // Exchange code for tokens
-  const tokenUrl = `https://api.rise.dev/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/token`;
+  const tokenUrl = `https://api.rise.dev/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`;
   const response = await fetch(tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -203,7 +204,7 @@ app.get('/oauth/callback', async (req, res) => {
   const { code } = req.query;
 
   const tokens = await fetch(
-    `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token`,
+    `https://api.rise.dev/oidc/my-app/oauth-google/token`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -230,7 +231,7 @@ from fastapi import FastAPI, Request
 async def callback(code: str, request: Request):
     async with httpx.AsyncClient() as client:
         response = await client.post(
-            "https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token",
+            "https://api.rise.dev/oidc/my-app/oauth-google/token",
             data={
                 "grant_type": "authorization_code",
                 "code": code,
@@ -255,7 +256,7 @@ struct Callback { code: String }
 async fn oauth_callback(Query(params): Query<Callback>) -> Redirect {
     let client = reqwest::Client::new();
     let tokens: serde_json::Value = client
-        .post("https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token")
+        .post("https://api.rise.dev/oidc/my-app/oauth-google/token")
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", &params.code),
@@ -281,7 +282,7 @@ async fn oauth_callback(Query(params): Query<Callback>) -> Redirect {
 Obtain client credentials from your OAuth provider:
 - **Client ID**: Public identifier
 - **Client Secret**: Secret key (never expose in frontend)
-- **Redirect URI**: Set to `https://api.{your-domain}/api/v1/oauth/callback/{project}/{extension}`
+- **Redirect URI**: Set to `https://api.{your-domain}/oidc/{project}/{extension}/callback`
 
 **2. Store Client Secret in Rise**
 
@@ -371,7 +372,7 @@ sessionStorage.setItem('pkce_verifier', codeVerifier);
 
 // Initiate OAuth with PKCE
 const localCallbackUrl = 'http://localhost:3000/oauth/callback';
-const authUrl = `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize?code_challenge=${codeChallenge}&code_challenge_method=S256&redirect_uri=${encodeURIComponent(localCallbackUrl)}`;
+const authUrl = `https://api.rise.dev/oidc/my-app/oauth-google/authorize?code_challenge=${codeChallenge}&code_challenge_method=S256&redirect_uri=${encodeURIComponent(localCallbackUrl)}`;
 window.location.href = authUrl;
 ```
 
@@ -381,7 +382,7 @@ window.location.href = authUrl;
 # Initiate OAuth
 def login
   redirect_uri = "http://localhost:3000/oauth/callback"
-  auth_url = "https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize?redirect_uri=#{CGI.escape(redirect_uri)}"
+  auth_url = "https://api.rise.dev/oidc/my-app/oauth-google/authorize?redirect_uri=#{CGI.escape(redirect_uri)}"
   redirect_to auth_url
 end
 ```
@@ -451,7 +452,7 @@ Clients manage their own token refresh by calling the `/oauth/token` endpoint:
 
 ```javascript
 const response = await fetch(
-  'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-google/oauth/token',
+  'https://api.rise.dev/oidc/my-app/oauth-google/token',
   {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -498,15 +499,15 @@ Rise proxies the refresh request to the upstream OAuth provider and returns fres
 **PKCE Flow (SPA):**
 
 ```
-GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?code_challenge=...&code_challenge_method=S256
-GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?code_challenge=...&code_challenge_method=S256&redirect_uri=http://localhost:3000/callback
+GET /oidc/{project}/{extension}/authorize?code_challenge=...&code_challenge_method=S256
+GET /oidc/{project}/{extension}/authorize?code_challenge=...&code_challenge_method=S256&redirect_uri=http://localhost:3000/callback
 ```
 
 **Token Endpoint Flow (Backend):**
 
 ```
-GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize
-GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?redirect_uri=http://localhost:3000/callback
+GET /oidc/{project}/{extension}/authorize
+GET /oidc/{project}/{extension}/authorize?redirect_uri=http://localhost:3000/callback
 ```
 
 **Query Parameters:**
@@ -518,7 +519,7 @@ GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize?redirect_u
 ### Callback Endpoint
 
 ```
-GET /api/v1/oauth/callback/{project}/{extension}?code=...&state=...
+GET /oidc/{project}/{extension}/callback?code=...&state=...
 ```
 
 **Response:**
@@ -534,7 +535,7 @@ The `code` parameter is an authorization code that can be exchanged for tokens a
 **Recommended:** This is the standards-compliant OAuth 2.0 token endpoint.
 
 ```
-POST /api/v1/projects/{project}/extensions/{extension}/oauth/token
+POST /oidc/{project}/{extension}/token
 Content-Type: application/x-www-form-urlencoded
 ```
 
@@ -584,6 +585,36 @@ Content-Type: application/x-www-form-urlencoded
 - `unsupported_grant_type` (400): Unknown grant_type
 - `server_error` (500): Internal server error
 
+### OIDC Discovery Endpoint
+
+Rise provides an OIDC-compliant discovery endpoint that proxies from the upstream provider and rewrites URLs to point to Rise's OIDC proxy.
+
+```
+GET /oidc/{project}/{extension}/.well-known/openid-configuration
+```
+
+**Response:** Standard OIDC discovery document with Rise URLs:
+
+```json
+{
+  "issuer": "https://api.rise.dev/oidc/my-app/oauth-google",
+  "authorization_endpoint": "https://api.rise.dev/oidc/my-app/oauth-google/authorize",
+  "token_endpoint": "https://api.rise.dev/oidc/my-app/oauth-google/token",
+  "jwks_uri": "https://api.rise.dev/oidc/my-app/oauth-google/jwks",
+  "...": "other fields from upstream provider"
+}
+```
+
+### JWKS Endpoint
+
+Rise proxies the JWKS (JSON Web Key Set) from the upstream OAuth provider.
+
+```
+GET /oidc/{project}/{extension}/jwks
+```
+
+**Response:** JWKS from upstream provider for id_token signature validation.
+
 **Client Credentials:**
 
 Rise automatically generates client credentials when you create an OAuth extension:
@@ -593,9 +624,10 @@ Rise automatically generates client credentials when you create an OAuth extensi
   - Env var: `OAUTH_GOOGLE_CLIENT_ID` (for extension named `oauth-google`)
 - `{EXTENSION}_CLIENT_SECRET` - Client secret (encrypted, random, for confidential clients)
   - Env var: `OAUTH_GOOGLE_CLIENT_SECRET` (for extension named `oauth-google`)
-- `{EXTENSION}_ISSUER` - OIDC issuer URL for id_token validation via JWKS discovery
+- `{EXTENSION}_ISSUER` - Rise OIDC proxy URL for id_token validation via JWKS discovery
   - Env var: `OAUTH_GOOGLE_ISSUER` (for extension named `oauth-google`)
-  - Used to fetch `/.well-known/openid-configuration` for JWKS
+  - Points to Rise's OIDC proxy: `{RISE_PUBLIC_URL}/oidc/{project}/{extension}`
+  - Proxies OIDC discovery and JWKS from upstream provider with URLs rewritten to Rise endpoints
 
 These are available as environment variables in your deployed applications. The extension name is normalized to uppercase with hyphens replaced by underscores.
 
@@ -612,10 +644,10 @@ Use these instead of hardcoded URLs:
 
 ```javascript
 // Browser redirect (PKCE authorize URL)
-const authUrl = `${process.env.RISE_PUBLIC_URL}/api/v1/projects/my-app/extensions/oauth-google/oauth/authorize`;
+const authUrl = `${process.env.RISE_PUBLIC_URL}/oidc/my-app/oauth-google/authorize`;
 
 // Backend token exchange
-const tokenUrl = `${process.env.RISE_API_URL}/api/v1/projects/my-app/extensions/oauth-google/oauth/token`;
+const tokenUrl = `${process.env.RISE_API_URL}/oidc/my-app/oauth-google/token`;
 ```
 
 This separation is important in Kubernetes deployments where the internal URL (`RISE_API_URL`) differs from the public URL (`RISE_PUBLIC_URL`) that browsers can reach.

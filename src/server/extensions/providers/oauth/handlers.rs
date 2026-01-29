@@ -234,7 +234,7 @@ async fn validate_redirect_uri(
 
 /// Initiate OAuth authorization flow
 ///
-/// GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize
+/// GET /oidc/{project}/{extension}/authorize
 ///
 /// Query params:
 /// - redirect_uri (optional): Where to redirect after auth (for local dev/custom domains)
@@ -410,7 +410,7 @@ pub async fn authorize(
 
     let redirect_uri = if let Some(port) = api_url.port() {
         format!(
-            "{}://{}:{}/api/v1/oauth/callback/{}/{}",
+            "{}://{}:{}/oidc/{}/{}/callback",
             api_url.scheme(),
             api_host,
             port,
@@ -419,7 +419,7 @@ pub async fn authorize(
         )
     } else {
         format!(
-            "{}://{}/api/v1/oauth/callback/{}/{}",
+            "{}://{}/oidc/{}/{}/callback",
             api_url.scheme(),
             api_host,
             project_name,
@@ -453,7 +453,7 @@ pub async fn authorize(
 
 /// Handle OAuth callback from provider
 ///
-/// GET /api/v1/oauth/callback/{project}/{extension}
+/// GET /oidc/{project}/{extension}/callback
 ///
 /// Query params:
 /// - code: Authorization code from provider
@@ -556,7 +556,7 @@ pub async fn callback(
 
     let redirect_uri = if let Some(port) = api_url.port() {
         format!(
-            "{}://{}:{}/api/v1/oauth/callback/{}/{}",
+            "{}://{}:{}/oidc/{}/{}/callback",
             api_url.scheme(),
             api_host,
             port,
@@ -565,7 +565,7 @@ pub async fn callback(
         )
     } else {
         format!(
-            "{}://{}/api/v1/oauth/callback/{}/{}",
+            "{}://{}/oidc/{}/{}/callback",
             api_url.scheme(),
             api_host,
             project_name,
@@ -690,10 +690,15 @@ pub async fn callback(
     state.oauth_state_store.invalidate(&req.state).await;
 
     // Determine final redirect URI
-    let final_redirect_uri = oauth_state.redirect_uri.ok_or((
+    let final_redirect_uri = oauth_state.redirect_uri.clone().ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
         "Missing redirect URI in state".to_string(),
     ))?;
+
+    debug!(
+        "OAuth callback: final_redirect_uri={}, oauth_state={:?}",
+        final_redirect_uri, oauth_state
+    );
 
     // Build redirect URL with authorization code (RFC 6749)
     let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
@@ -753,6 +758,11 @@ pub async fn callback(
             project_name, extension_name
         );
     }
+
+    info!(
+        "OAuth callback complete: redirecting to {}",
+        redirect_url.as_str()
+    );
 
     Ok(Redirect::to(redirect_url.as_str()).into_response())
 }
@@ -814,7 +824,7 @@ fn oauth2_error(
 
 /// RFC 6749-compliant token endpoint with per-project CORS support
 ///
-/// POST /api/v1/projects/{project}/extensions/{extension}/oauth/token
+/// POST /oidc/{project}/{extension}/token
 ///
 /// Grant types:
 /// - authorization_code: Exchange authorization code for tokens
@@ -1278,6 +1288,7 @@ async fn handle_refresh_token_grant(
         })?,
         http_client: reqwest::Client::new(),
         api_domain: state.public_url.clone(),
+        internal_url: state.internal_url.clone(),
     });
 
     // Get upstream OAuth client secret
@@ -1325,7 +1336,7 @@ async fn handle_refresh_token_grant(
 
 /// CORS preflight handler for token endpoint
 ///
-/// OPTIONS /api/v1/projects/{project}/extensions/{extension}/oauth/token
+/// OPTIONS /oidc/{project}/{extension}/token
 ///
 /// Validates the Origin header against project-specific allowed origins:
 /// - localhost (any port) for local development
@@ -1378,4 +1389,300 @@ pub async fn token_endpoint_options(
             StatusCode::FORBIDDEN.into_response()
         }
     }
+}
+
+/// Get upstream issuer URL from spec or derive from token_endpoint
+fn get_upstream_issuer(spec: &OAuthExtensionSpec) -> Option<String> {
+    // Use spec.issuer if provided, otherwise derive from token_endpoint
+    spec.issuer.clone().or_else(|| {
+        // Try to derive issuer from token_endpoint by removing common path suffixes
+        // e.g., "http://dex:5556/dex/token" -> "http://dex:5556/dex"
+        let token_url = Url::parse(&spec.token_endpoint).ok()?;
+        let mut path = token_url.path().to_string();
+        // Remove common token endpoint suffixes
+        for suffix in ["/token", "/token-request", "/oauth/token", "/oauth2/token"] {
+            if path.ends_with(suffix) {
+                path = path.trim_end_matches(suffix).to_string();
+                break;
+            }
+        }
+        let mut issuer_url = token_url.clone();
+        issuer_url.set_path(&path);
+        // Remove query and fragment
+        issuer_url.set_query(None);
+        issuer_url.set_fragment(None);
+        Some(issuer_url.to_string().trim_end_matches('/').to_string())
+    })
+}
+
+/// Proxy OIDC discovery document from upstream provider
+///
+/// GET /oidc/{project}/{extension}/.well-known/openid-configuration
+///
+/// Returns the OIDC discovery document with URLs rewritten to point to Rise's OIDC proxy:
+/// - issuer -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}
+/// - authorization_endpoint -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/authorize
+/// - token_endpoint -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/token
+/// - jwks_uri -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/jwks
+pub async fn oidc_discovery(
+    State(state): State<AppState>,
+    Path((project_name, extension_name)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    debug!(
+        "OIDC discovery request for project={}, extension={}",
+        project_name, extension_name
+    );
+
+    // Get project
+    let project = db_projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    // Get OAuth extension
+    let extension =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                "OAuth extension not configured".to_string(),
+            ))?;
+
+    // Verify extension type is oauth
+    if extension.extension_type != "oauth" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Extension '{}' is not an OAuth extension (type: {})",
+                extension_name, extension.extension_type
+            ),
+        ));
+    }
+
+    // Parse spec
+    let spec: OAuthExtensionSpec = serde_json::from_value(extension.spec.clone()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid spec: {}", e),
+        )
+    })?;
+
+    // Get upstream issuer
+    let upstream_issuer = get_upstream_issuer(&spec).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unable to determine upstream OIDC issuer".to_string(),
+    ))?;
+
+    // Fetch upstream discovery document
+    let discovery_url = format!(
+        "{}/.well-known/openid-configuration",
+        upstream_issuer.trim_end_matches('/')
+    );
+
+    let http_client = reqwest::Client::new();
+    let response = http_client.get(&discovery_url).send().await.map_err(|e| {
+        error!(
+            "Failed to fetch OIDC discovery from {}: {:?}",
+            discovery_url, e
+        );
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to fetch OIDC discovery: {}", e),
+        )
+    })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unable to read error response".to_string());
+        error!(
+            "OIDC discovery failed with status {}: {}",
+            status, error_text
+        );
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Upstream OIDC discovery failed: {}", status),
+        ));
+    }
+
+    let mut discovery: serde_json::Value = response.json().await.map_err(|e| {
+        error!("Failed to parse OIDC discovery response: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to parse OIDC discovery".to_string(),
+        )
+    })?;
+
+    // Build Rise OIDC base URL using internal URL (for backend-to-backend calls)
+    let rise_oidc_base = format!(
+        "{}/oidc/{}/{}",
+        state.internal_url.trim_end_matches('/'),
+        project_name,
+        extension_name
+    );
+
+    // Rewrite URLs to point to Rise's OIDC proxy
+    if let Some(obj) = discovery.as_object_mut() {
+        obj.insert(
+            "issuer".to_string(),
+            serde_json::Value::String(rise_oidc_base.clone()),
+        );
+        obj.insert(
+            "authorization_endpoint".to_string(),
+            serde_json::Value::String(format!("{}/authorize", rise_oidc_base)),
+        );
+        obj.insert(
+            "token_endpoint".to_string(),
+            serde_json::Value::String(format!("{}/token", rise_oidc_base)),
+        );
+        obj.insert(
+            "jwks_uri".to_string(),
+            serde_json::Value::String(format!("{}/jwks", rise_oidc_base)),
+        );
+    }
+
+    info!(
+        "Returning OIDC discovery for {}/{} with Rise OIDC base: {}",
+        project_name, extension_name, rise_oidc_base
+    );
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        Json(discovery),
+    ))
+}
+
+/// Proxy JWKS from upstream provider
+///
+/// GET /oidc/{project}/{extension}/jwks
+///
+/// Fetches the JWKS from the upstream OAuth provider and returns it.
+pub async fn oidc_jwks(
+    State(state): State<AppState>,
+    Path((project_name, extension_name)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    debug!(
+        "OIDC JWKS request for project={}, extension={}",
+        project_name, extension_name
+    );
+
+    // Get project
+    let project = db_projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    // Get OAuth extension
+    let extension =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                "OAuth extension not configured".to_string(),
+            ))?;
+
+    // Verify extension type is oauth
+    if extension.extension_type != "oauth" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Extension '{}' is not an OAuth extension (type: {})",
+                extension_name, extension.extension_type
+            ),
+        ));
+    }
+
+    // Parse spec
+    let spec: OAuthExtensionSpec = serde_json::from_value(extension.spec.clone()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid spec: {}", e),
+        )
+    })?;
+
+    // Get upstream issuer
+    let upstream_issuer = get_upstream_issuer(&spec).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unable to determine upstream OIDC issuer".to_string(),
+    ))?;
+
+    // Fetch upstream discovery to get jwks_uri
+    let discovery_url = format!(
+        "{}/.well-known/openid-configuration",
+        upstream_issuer.trim_end_matches('/')
+    );
+
+    let http_client = reqwest::Client::new();
+    let discovery_response = http_client.get(&discovery_url).send().await.map_err(|e| {
+        error!(
+            "Failed to fetch OIDC discovery from {}: {:?}",
+            discovery_url, e
+        );
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to fetch OIDC discovery: {}", e),
+        )
+    })?;
+
+    if !discovery_response.status().is_success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "Upstream OIDC discovery failed".to_string(),
+        ));
+    }
+
+    let discovery: serde_json::Value = discovery_response.json().await.map_err(|e| {
+        error!("Failed to parse OIDC discovery response: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to parse OIDC discovery".to_string(),
+        )
+    })?;
+
+    // Get jwks_uri from discovery
+    let jwks_uri = discovery.get("jwks_uri").and_then(|v| v.as_str()).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "No jwks_uri in OIDC discovery".to_string(),
+    ))?;
+
+    // Fetch JWKS
+    let jwks_response = http_client.get(jwks_uri).send().await.map_err(|e| {
+        error!("Failed to fetch JWKS from {}: {:?}", jwks_uri, e);
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to fetch JWKS: {}", e),
+        )
+    })?;
+
+    if !jwks_response.status().is_success() {
+        let status = jwks_response.status();
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Upstream JWKS fetch failed: {}", status),
+        ));
+    }
+
+    let jwks: serde_json::Value = jwks_response.json().await.map_err(|e| {
+        error!("Failed to parse JWKS response: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to parse JWKS".to_string(),
+        )
+    })?;
+
+    info!(
+        "Returning JWKS for {}/{} from upstream: {}",
+        project_name, extension_name, jwks_uri
+    );
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        Json(jwks),
+    ))
 }

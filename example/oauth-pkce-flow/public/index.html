@@ -262,7 +262,7 @@
 
             // Build the OAuth authorization URL
             const authUrl = new URL(
-                `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/authorize`,
+                `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`,
                 CONFIG.riseApiUrl
             );
 
@@ -304,7 +304,7 @@
 
                 // Exchange authorization code for tokens using PKCE
                 const tokenUrl = new URL(
-                    `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/token`,
+                    `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`,
                     CONFIG.riseApiUrl
                 );
 

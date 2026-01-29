@@ -15,26 +15,21 @@ function requireEnv(name, description) {
   return value;
 }
 
-// Derive env var prefix from extension name
-// e.g., "oauth-dex" -> "OAUTH_DEX"
-const EXTENSION_NAME = process.env.EXTENSION_NAME || 'oauth-dex';
-const EXT_PREFIX = EXTENSION_NAME.toUpperCase().replace(/-/g, '_');
-
-// Configuration - adjust for your setup
+// Configuration - adjust for your setup.
 const CONFIG = {
   // RISE_PUBLIC_URL: Browser-reachable URL for OAuth authorize redirects
   risePublicUrl: process.env.RISE_PUBLIC_URL || 'http://localhost:3000',
   // RISE_API_URL: Internal URL for backend-to-backend API calls (token exchange)
   riseApiUrl: process.env.RISE_API_URL || 'http://localhost:3000',
   projectName: process.env.PROJECT_NAME || 'oauth-demo',
-  extensionName: EXTENSION_NAME,
+  extensionName: 'oauth-dex',
   sessionSecret: process.env.SESSION_SECRET || 'change-this-in-production',
   // OAuth credentials injected by Rise as {EXT}_CLIENT_ID, {EXT}_CLIENT_SECRET, {EXT}_ISSUER
   // These are REQUIRED - fail fast if not set
-  clientId: requireEnv(`${EXT_PREFIX}_CLIENT_ID`, 'Rise OAuth client ID'),
-  clientSecret: requireEnv(`${EXT_PREFIX}_CLIENT_SECRET`, 'Rise OAuth client secret'),
+  clientId: requireEnv(`OAUTH_DEX_CLIENT_ID`, 'Rise OAuth client ID'),
+  clientSecret: requireEnv(`OAUTH_DEX_CLIENT_SECRET`, 'Rise OAuth client secret'),
   // OIDC issuer for id_token validation via JWKS discovery
-  oidcIssuer: requireEnv(`${EXT_PREFIX}_ISSUER`, 'OIDC issuer URL'),
+  oidcIssuer: requireEnv(`OAUTH_DEX_ISSUER`, 'OIDC issuer URL'),
 };
 
 // Session middleware for storing OAuth tokens
@@ -105,7 +100,7 @@ app.get('/', (req, res) => {
 app.get('/login', (req, res) => {
   // Build the OAuth authorization URL (uses RISE_PUBLIC_URL for browser redirect)
   const authUrl = new URL(
-    `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/authorize`,
+    `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`,
     CONFIG.risePublicUrl
   );
 
@@ -139,7 +134,7 @@ app.get('/oauth/callback', async (req, res) => {
 
     // Exchange the authorization code for OAuth tokens (uses RISE_API_URL for backend call)
     const tokenUrl = new URL(
-      `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/token`,
+      `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`,
       CONFIG.riseApiUrl
     );
 
@@ -538,8 +533,4 @@ app.listen(PORT, () => {
     extensionName: CONFIG.extensionName,
     oidcIssuer: CONFIG.oidcIssuer,
   });
-  console.log('\nRequired environment variables (injected by Rise):');
-  console.log(`  ${EXT_PREFIX}_CLIENT_ID - Rise OAuth client ID`);
-  console.log(`  ${EXT_PREFIX}_CLIENT_SECRET - Rise OAuth client secret`);
-  console.log(`  ${EXT_PREFIX}_ISSUER - OIDC issuer URL for id_token validation`);
 });

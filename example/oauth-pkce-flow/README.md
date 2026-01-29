@@ -48,7 +48,7 @@ staticClients:
   redirectURIs:
   # ... existing URIs ...
   # OAuth extension callback
-  - http://localhost:3000/api/v1/oauth/callback/oauth-demo/oauth-dex
+  - http://localhost:3000/oidc/oauth-demo/oauth-dex/callback
   name: 'Rise Backend'
   secret: rise-backend-secret
 ```

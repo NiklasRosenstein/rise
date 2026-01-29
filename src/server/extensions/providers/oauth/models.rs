@@ -38,7 +38,7 @@ pub struct OAuthExtensionSpec {
 /// Extension status - system-computed metadata
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct OAuthExtensionStatus {
-    /// Computed redirect URI: https://api.{domain}/oauth/callback/{project}/{extension}
+    /// Computed redirect URI: {RISE_PUBLIC_URL}/oidc/{project}/{extension}/callback
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redirect_uri: Option<String>,
     /// When the extension was configured

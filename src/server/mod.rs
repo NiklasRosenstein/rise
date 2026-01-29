@@ -98,8 +98,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
         .route("/version", axum::routing::get(version_info))
-        .merge(auth::routes::public_routes())
-        .merge(extensions::providers::oauth::routes::oauth_routes());
+        .merge(auth::routes::public_routes());
 
     // Protected routes (require authentication)
     let protected_routes = Router::new()
@@ -124,6 +123,8 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .nest("/api/v1", api_routes)
         // Root-level auth routes for custom domain support via Ingress routing
         .merge(auth::routes::rise_auth_routes())
+        // OAuth/OIDC routes at root level (before frontend fallback)
+        .merge(extensions::providers::oauth::routes::oauth_routes())
         .merge(frontend::routes::frontend_routes())
         .with_state(state.clone())
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));

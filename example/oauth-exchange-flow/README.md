@@ -1,6 +1,6 @@
 # OAuth Token Endpoint Flow Example
 
-This example demonstrates the **RFC 6749-compliant token endpoint flow** for server-rendered applications. The backend exchanges an authorization code for OAuth credentials using the `/oauth/token` endpoint, enabling secure server-side token storage with HttpOnly cookies.
+This example demonstrates the **RFC 6749-compliant token endpoint flow** for server-rendered applications. The backend exchanges an authorization code for OAuth credentials using the `/oidc/{project}/{extension}/token` endpoint, enabling secure server-side token storage with HttpOnly cookies.
 
 ## Prerequisites
 
@@ -17,13 +17,13 @@ Same setup as the fragment flow example:
 
 ```bash
 # Create a project (if you haven't already)
-rise project create oauth-demo --visibility public
+rise project create --visibility public
 
 # Store the Dex client secret
-rise env set oauth-demo DEX_CLIENT_SECRET "rise-backend-secret" --secret
+rise env set DEX_CLIENT_SECRET "rise-backend-secret" --secret
 
 # Create the OAuth extension
-rise extension create oauth-demo oauth-dex \
+rise extension create oauth-dex \
   --type oauth \
   --spec '{
     "provider_name": "Dex (Local Dev)",
@@ -46,7 +46,7 @@ staticClients:
   redirectURIs:
   # ... existing URIs ...
   # OAuth extension callback
-  - http://localhost:3000/api/v1/oauth/callback/oauth-demo/oauth-dex
+  - http://localhost:3000/oidc/oauth-demo/oauth-dex/callback
   name: 'Rise Backend'
   secret: rise-backend-secret
 ```
@@ -73,12 +73,12 @@ The app will be available at `http://localhost:8080`.
 
 ## How It Works
 
-1. **User clicks "Login"**: Server redirects to Rise OAuth authorization endpoint
+1. **User clicks "Login"**: Server redirects to Rise OAuth authorization endpoint (`/oidc/{project}/{extension}/authorize`)
 2. **Rise redirects to Dex**: User authenticates (username: `admin@example.com`, password: `password`)
-3. **Dex redirects to Rise callback**: With authorization code
+3. **Dex redirects to Rise callback**: With authorization code (`/oidc/{project}/{extension}/callback`)
 4. **Rise exchanges code for tokens**: Calls Dex token endpoint
 5. **Rise redirects to app callback**: With authorization code in query param (`?code=...`)
-6. **App backend exchanges code**: Calls Rise `/oauth/token` endpoint with client credentials
+6. **App backend exchanges code**: Calls Rise token endpoint (`/oidc/{project}/{extension}/token`) with client credentials
 7. **Rise returns OAuth tokens**: Access token, refresh token, etc.
 8. **App stores in session**: HttpOnly cookie (XSS-safe)
 

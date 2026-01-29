@@ -596,6 +596,7 @@ impl AppState {
                 encryption_provider: encryption_provider_for_oauth,
                 http_client: reqwest::Client::new(),
                 api_domain: public_url.clone(),
+                internal_url: internal_url.clone(),
             },
         );
 
