@@ -837,6 +837,103 @@ function OAuthDetailView({ extension, projectName }) {
                             )}
                         </div>
                     </section>
+
+                    {/* Rise Client Configuration (for integrating applications) */}
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Rise Client Configuration</h2>
+                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-600 dark:border-green-700 rounded p-4">
+                            <p className="text-sm text-green-800 dark:text-green-200 mb-3">
+                                Use these values in your application to integrate with this OAuth extension:
+                            </p>
+                            <div className="space-y-3">
+                                <div>
+                                    <p className="text-sm text-green-700 dark:text-green-400">Rise Client ID</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono">
+                                            {spec.rise_client_id || `${projectName}-${extensionName}`}
+                                        </code>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                const clientId = spec.rise_client_id || `${projectName}-${extensionName}`;
+                                                navigator.clipboard.writeText(clientId);
+                                                showToast('Client ID copied to clipboard', 'success');
+                                            }}
+                                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
+                                            title="Copy client ID"
+                                        >
+                                            Copy
+                                        </button>
+                                    </div>
+                                    <p className="text-xs text-green-600 dark:text-green-500 mt-1">
+                                        Format: {'{project}-{extension}'} (deterministic, safe to embed in frontend code)
+                                    </p>
+                                </div>
+                                {spec.rise_client_secret_ref && (
+                                    <div>
+                                        <p className="text-sm text-green-700 dark:text-green-400">Rise Client Secret (env var)</p>
+                                        <div className="flex items-center gap-2 mt-1">
+                                            <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono">
+                                                {spec.rise_client_secret_ref}
+                                            </code>
+                                            <button
+                                                type="button"
+                                                onClick={() => {
+                                                    navigator.clipboard.writeText(spec.rise_client_secret_ref);
+                                                    showToast('Secret env var name copied to clipboard', 'success');
+                                                }}
+                                                className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
+                                                title="Copy env var name"
+                                            >
+                                                Copy
+                                            </button>
+                                        </div>
+                                        <p className="text-xs text-green-600 dark:text-green-500 mt-1">
+                                            Available in your deployed app. Use for confidential client flows (backend apps).
+                                        </p>
+                                    </div>
+                                )}
+                                <div>
+                                    <p className="text-sm text-green-700 dark:text-green-400">Authorize URL</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono break-all">
+                                            {`${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`}
+                                        </code>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(`${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize`);
+                                                showToast('Authorize URL copied to clipboard', 'success');
+                                            }}
+                                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
+                                            title="Copy authorize URL"
+                                        >
+                                            Copy
+                                        </button>
+                                    </div>
+                                </div>
+                                <div>
+                                    <p className="text-sm text-green-700 dark:text-green-400">Token Endpoint</p>
+                                    <div className="flex items-center gap-2 mt-1">
+                                        <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono break-all">
+                                            {`${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/token`}
+                                        </code>
+                                        <button
+                                            type="button"
+                                            onClick={() => {
+                                                navigator.clipboard.writeText(`${backendUrl}/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/token`);
+                                                showToast('Token endpoint copied to clipboard', 'success');
+                                            }}
+                                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
+                                            title="Copy token endpoint"
+                                        >
+                                            Copy
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </section>
                 </div>
 
                 {/* Right column - Actions */}
