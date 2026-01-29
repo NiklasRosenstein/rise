@@ -591,43 +591,56 @@ pub async fn callback(
         )
     })?;
 
-    // Generate authorization code for client to exchange for tokens
-    let authorization_code = generate_state_token();
+    // Detect if this is a test flow (redirect to Rise UI) vs real application flow
+    let is_test_flow = final_redirect_uri.starts_with(&state.public_url)
+        || final_redirect_uri.starts_with("http://localhost:")
+        || final_redirect_uri.starts_with("http://127.0.0.1:");
 
-    // Store encrypted tokens in authorization code state (5-minute TTL, single-use)
-    let code_state = OAuthCodeState {
-        project_id: project.id,
-        extension_name: extension_name.clone(),
-        created_at: Utc::now(),
-        code_challenge: oauth_state.client_code_challenge.clone(),
-        code_challenge_method: oauth_state.client_code_challenge_method.clone(),
-        access_token_encrypted,
-        refresh_token_encrypted,
-        id_token_encrypted,
-        expires_at,
-    };
+    if !is_test_flow {
+        // Real application flow: Generate authorization code for token exchange
+        let authorization_code = generate_state_token();
 
-    state
-        .oauth_code_store
-        .insert(authorization_code.clone(), code_state)
-        .await;
+        // Store encrypted tokens in authorization code state (5-minute TTL, single-use)
+        let code_state = OAuthCodeState {
+            project_id: project.id,
+            extension_name: extension_name.clone(),
+            created_at: Utc::now(),
+            code_challenge: oauth_state.client_code_challenge.clone(),
+            code_challenge_method: oauth_state.client_code_challenge_method.clone(),
+            access_token_encrypted,
+            refresh_token_encrypted,
+            id_token_encrypted,
+            expires_at,
+        };
 
-    // Add authorization code as query parameter (RFC 6749)
-    redirect_url
-        .query_pairs_mut()
-        .append_pair("code", &authorization_code);
+        state
+            .oauth_code_store
+            .insert(authorization_code.clone(), code_state)
+            .await;
 
-    // Pass through application's CSRF state
-    if let Some(app_state) = oauth_state.application_state {
+        // Add authorization code as query parameter (RFC 6749)
         redirect_url
             .query_pairs_mut()
-            .append_pair("state", &app_state);
-    }
+            .append_pair("code", &authorization_code);
 
-    info!(
-        "Generated authorization code for project {} extension {}",
-        project_name, extension_name
-    );
+        // Pass through application's CSRF state
+        if let Some(app_state) = oauth_state.application_state {
+            redirect_url
+                .query_pairs_mut()
+                .append_pair("state", &app_state);
+        }
+
+        info!(
+            "Generated authorization code for project {} extension {}",
+            project_name, extension_name
+        );
+    } else {
+        // Test flow: Skip code generation, just redirect back to UI
+        info!(
+            "Completed test OAuth flow for project {} extension {} (no code generated)",
+            project_name, extension_name
+        );
+    }
 
     Ok(Redirect::to(redirect_url.as_str()).into_response())
 }

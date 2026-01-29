@@ -756,12 +756,8 @@ function OAuthDetailView({ extension, projectName }) {
     const callbackUrl = `${backendUrl}/api/v1/oauth/callback/${projectName}/${extensionName}`;
 
     const handleTestOAuth = () => {
-        // Store the current hash location to return to after OAuth
-        const currentHash = window.location.hash.substring(1);
-        sessionStorage.setItem('oauth_return_path', currentHash);
-
-        // Use the origin as redirect URI (hash router doesn't work with fragments)
-        const redirectUri = window.location.origin + '/';
+        // Include the current hash in the redirect URI so we return to the same page
+        const redirectUri = window.location.href;
         const authUrl = `/api/v1/projects/${projectName}/extensions/${extensionName}/oauth/authorize?redirect_uri=${encodeURIComponent(redirectUri)}`;
         window.location.href = authUrl;
     };
