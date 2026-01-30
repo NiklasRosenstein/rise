@@ -1,4 +1,4 @@
-use crate::server::auth::jwt::Claims;
+use crate::db::models::User;
 use crate::server::state::AppState;
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, Json};
 use serde::{Deserialize, Serialize};
@@ -55,11 +55,11 @@ impl IntoResponse for EncryptError {
 /// Rate limited to 100 requests per hour per user.
 pub async fn encrypt_handler(
     State(state): State<AppState>,
-    Extension(claims): Extension<Claims>,
+    Extension(user): Extension<User>,
     Json(req): Json<EncryptRequest>,
 ) -> Result<Json<EncryptResponse>, EncryptError> {
     // Check rate limit (100 req/hour per user)
-    let key = format!("encrypt:{}", claims.sub);
+    let key = format!("encrypt:{}", user.id);
     let count = state.encrypt_rate_limiter.get(&key).await.unwrap_or(0);
 
     if count >= 100 {
