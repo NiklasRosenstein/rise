@@ -66,12 +66,6 @@ pub async fn encrypt_handler(
         return Err(EncryptError::RateLimitExceeded { retry_after: 3600 });
     }
 
-    // Increment counter
-    state
-        .encrypt_rate_limiter
-        .insert(key.clone(), count + 1)
-        .await;
-
     // Encrypt using encryption provider
     let encryption_provider = state
         .encryption_provider
@@ -82,6 +76,12 @@ pub async fn encrypt_handler(
         .encrypt(&req.plaintext)
         .await
         .map_err(|e| EncryptError::EncryptionFailed(e.to_string()))?;
+
+    // Increment counter only after successful encryption
+    state
+        .encrypt_rate_limiter
+        .insert(key.clone(), count + 1)
+        .await;
 
     Ok(Json(EncryptResponse { encrypted }))
 }
