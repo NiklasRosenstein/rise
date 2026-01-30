@@ -427,13 +427,13 @@ impl Extension for OAuthProvider {
             .await
             .context("Failed to store Rise client ID as environment variable")?;
 
-            // Store client secret as environment variable (encrypted, secret)
+            // Store client secret as environment variable (encrypted, readable by user)
             db_env_vars::upsert_project_env_var(
                 db_pool,
                 project_id,
                 &rise_client_secret_ref_name,
                 &rise_client_secret_encrypted,
-                true,  // is_secret
+                false, // not secret - users need to read this
                 false, // not protected - managed by Rise
             )
             .await
@@ -501,7 +501,7 @@ impl Extension for OAuthProvider {
                             project_id,
                             rise_client_secret_ref,
                             encrypted,
-                            true,  // is_secret
+                            false, // not secret - users need to read this
                             false, // not protected
                         )
                         .await
@@ -523,7 +523,7 @@ impl Extension for OAuthProvider {
                             project_id,
                             rise_client_secret_ref,
                             &rise_client_secret_encrypted,
-                            true,  // is_secret
+                            false, // not secret - users need to read this
                             false, // not protected
                         )
                         .await
