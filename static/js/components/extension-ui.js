@@ -259,6 +259,8 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
         // Include encrypted client secret if set
         if (clientSecretEncrypted) {
             newSpec.client_secret_encrypted = clientSecretEncrypted;
+            // Unset deprecated client_secret_ref when using encrypted secret
+            newSpec.client_secret_ref = null;
         }
 
         onChangeRef.current(newSpec);
@@ -851,10 +853,14 @@ function OAuthDetailView({ extension, projectName }) {
                                 <p className="text-sm text-gray-600 dark:text-gray-500">Client ID</p>
                                 <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">{spec.client_id || 'N/A'}</p>
                             </div>
-                            <div>
-                                <p className="text-sm text-gray-600 dark:text-gray-500">Client Secret Reference</p>
-                                <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">{spec.client_secret_ref || 'N/A'}</p>
-                            </div>
+                            {spec.client_secret_ref && (
+                                <div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">
+                                        Client Secret Reference <span className="text-yellow-600 dark:text-yellow-400 text-xs">(deprecated)</span>
+                                    </p>
+                                    <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">{spec.client_secret_ref}</p>
+                                </div>
+                            )}
                         </div>
                     </section>
 
