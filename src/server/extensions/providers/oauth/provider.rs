@@ -442,8 +442,8 @@ impl Extension for OAuthProvider {
                 project_id,
                 &rise_client_secret_ref_name,
                 &rise_client_secret_encrypted,
-                false, // not secret - users need to read this
-                false, // not protected - managed by Rise
+                true,  // secret - encrypted in storage
+                false, // not protected - users need to read this
             )
             .await
             .context("Failed to store Rise client secret as environment variable")?;
@@ -510,8 +510,8 @@ impl Extension for OAuthProvider {
                             project_id,
                             rise_client_secret_ref,
                             encrypted,
-                            false, // not secret - users need to read this
-                            false, // not protected
+                            true,  // secret - encrypted in storage
+                            false, // not protected - users need to read this
                         )
                         .await
                         .context("Failed to restore Rise client secret")?;
@@ -532,8 +532,8 @@ impl Extension for OAuthProvider {
                             project_id,
                             rise_client_secret_ref,
                             &rise_client_secret_encrypted,
-                            false, // not secret - users need to read this
-                            false, // not protected
+                            true,  // secret - encrypted in storage
+                            false, // not protected - users need to read this
                         )
                         .await
                         .context("Failed to store Rise client secret")?;
