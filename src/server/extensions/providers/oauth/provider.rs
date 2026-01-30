@@ -214,31 +214,6 @@ impl OAuthProvider {
             ext.project_id, ext.extension
         );
 
-        // Parse spec to get client_secret_ref
-        let spec: OAuthExtensionSpec =
-            serde_json::from_value(ext.spec).context("Failed to parse OAuth extension spec")?;
-
-        // Delete associated environment variable (upstream OAuth client secret)
-        if !spec.client_secret_ref.is_empty() {
-            if let Err(e) = db_env_vars::delete_project_env_var(
-                &self.db_pool,
-                ext.project_id,
-                &spec.client_secret_ref,
-            )
-            .await
-            {
-                warn!(
-                    "Failed to delete environment variable {} for OAuth extension: {:?}",
-                    spec.client_secret_ref, e
-                );
-            } else {
-                info!(
-                    "Deleted environment variable {} for OAuth extension",
-                    spec.client_secret_ref
-                );
-            }
-        }
-
         // New naming pattern: {EXT_NAME}_{KEY}
         let normalized_name = ext.extension.to_uppercase().replace('-', "_");
         let rise_client_id_ref = format!("{}_CLIENT_ID", normalized_name);
