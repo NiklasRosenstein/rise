@@ -43,7 +43,7 @@ Rise client IDs are deterministic and follow the pattern `{project-name}-{extens
 # For project "my-app" and extension "oauth-google": my-app-oauth-google
 
 # Option 2: Fetch from extension spec (requires Rise auth token)
-rise extension show my-app oauth-google --output json | jq -r '.spec.rise_client_id'
+rise extension show oauth-google -p my-app --output json | jq -r '.spec.rise_client_id'
 # Output: "my-app-oauth-google"
 ```
 
@@ -296,8 +296,8 @@ Encrypt the secret and store it directly in the extension spec:
 # Encrypt the secret
 ENCRYPTED=$(rise encrypt "your_client_secret_here")
 
-# Use in extension spec
-rise extension create my-app oauth-provider \
+# Use in extension spec (assuming rise.toml has project = "my-app")
+rise extension create oauth-provider \
   --type oauth \
   --spec '{
     "provider_name": "My OAuth Provider",
@@ -307,6 +307,9 @@ rise extension create my-app oauth-provider \
     "token_endpoint": "https://provider.com/oauth/token",
     "scopes": ["openid", "email", "profile"]
   }'
+
+# Or specify project explicitly with -p flag:
+# rise extension create oauth-provider -p my-app --type oauth --spec '{...}'
 ```
 
 Or encrypt via stdin:
@@ -326,7 +329,7 @@ Store the secret as an encrypted environment variable and reference it:
 rise env set my-app OAUTH_GOOGLE_SECRET "your_client_secret_here" --secret
 
 # Reference in extension spec
-rise extension create my-app oauth-provider \
+rise extension create oauth-provider -p my-app \
   --type oauth \
   --spec '{
     "provider_name": "My OAuth Provider",
@@ -353,7 +356,7 @@ rise extension create my-app oauth-provider \
 ENCRYPTED=$(rise encrypt "your_client_secret_here")
 
 # Create extension with encrypted secret
-rise extension create my-app oauth-provider \
+rise extension create oauth-provider -p my-app \
   --type oauth \
   --spec '{
     "provider_name": "My OAuth Provider",
@@ -371,7 +374,7 @@ rise extension create my-app oauth-provider \
 **Snowflake:**
 
 ```bash
-rise extension create analytics oauth-snowflake \
+rise extension create oauth-snowflake -p analytics \
   --type oauth \
   --spec '{
     "provider_name": "Snowflake Production",
@@ -387,7 +390,7 @@ rise extension create analytics oauth-snowflake \
 **Google:**
 
 ```bash
-rise extension create my-app oauth-google \
+rise extension create oauth-google -p my-app \
   --type oauth \
   --spec '{
     "provider_name": "Google",
@@ -403,7 +406,7 @@ rise extension create my-app oauth-google \
 **GitHub:**
 
 ```bash
-rise extension create my-app oauth-github \
+rise extension create oauth-github -p my-app \
   --type oauth \
   --spec '{
     "provider_name": "GitHub",

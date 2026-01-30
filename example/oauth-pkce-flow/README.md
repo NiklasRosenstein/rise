@@ -22,7 +22,7 @@ rise project create oauth-demo --visibility public
 ENCRYPTED=$(rise encrypt "rise-backend-secret")
 
 # Create the OAuth extension with encrypted secret
-rise extension create oauth-demo oauth-dex \
+rise extension create oauth-dex -p oauth-demo \
   --type oauth \
   --spec '{
     "provider_name": "Dex (Local Dev)",
