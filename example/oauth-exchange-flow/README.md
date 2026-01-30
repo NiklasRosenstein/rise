@@ -13,11 +13,9 @@ This example demonstrates the **RFC 6749-compliant token endpoint flow** for ser
 
 ### 1. Create the OAuth Extension
 
-Same setup as the fragment flow example:
-
 ```bash
 # Create a project (if you haven't already)
-rise project create --visibility public
+rise project create oauth-demo --visibility public
 
 # Store the Dex client secret
 rise env set DEX_CLIENT_SECRET "rise-backend-secret" --secret
@@ -35,6 +33,8 @@ rise extension create oauth-dex \
     "scopes": ["openid", "email", "profile"]
   }'
 ```
+
+The extension will automatically generate Rise client credentials (`OAUTH_DEX_CLIENT_ID` and `OAUTH_DEX_CLIENT_SECRET`) that your backend uses to exchange authorization codes for tokens.
 
 ### 2. Update Dex Configuration
 
@@ -105,8 +105,12 @@ rise deployment create oauth-demo
 When deployed:
 - The app listens on port 8080 (Rise's default)
 - OAuth callbacks will redirect to your deployed app's domain
-- Set environment variables for production:
-  - `RISE_API_URL`: Your Rise API domain (e.g., `https://api.rise.example.com`)
+- Rise automatically injects these environment variables:
+  - `RISE_API_URL`: Your Rise API domain
+  - `RISE_PUBLIC_URL`: Your Rise public URL
+  - `OAUTH_DEX_CLIENT_ID`: Rise client ID for token exchange
+  - `OAUTH_DEX_CLIENT_SECRET`: Rise client secret for token exchange
+- Set these environment variables manually:
   - `PROJECT_NAME`: `oauth-demo` (or your project name)
   - `EXTENSION_NAME`: `oauth-dex` (or your extension name)
   - `SESSION_SECRET`: Generate with `openssl rand -base64 32`
@@ -120,6 +124,8 @@ Configure the application using environment variables:
 - `PROJECT_NAME`: Rise project name (default: `oauth-demo`)
 - `EXTENSION_NAME`: OAuth extension name (default: `oauth-dex`)
 - `SESSION_SECRET`: Secret for session encryption (change in production!)
+- `OAUTH_DEX_CLIENT_ID`: Rise client ID (auto-injected when deployed)
+- `OAUTH_DEX_CLIENT_SECRET`: Rise client secret (auto-injected when deployed)
 
 ## Testing
 
