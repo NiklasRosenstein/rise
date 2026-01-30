@@ -19,7 +19,13 @@ pub async fn encrypt_command(config: &Config, plaintext: Option<String>) -> Resu
     let plaintext = match plaintext {
         Some(p) => p,
         None => {
-            use std::io::Read;
+            use std::io::{IsTerminal, Read};
+
+            // If stdin is a TTY, print helpful message
+            if std::io::stdin().is_terminal() {
+                eprintln!("Enter secret to encrypt (press Ctrl+D when done):");
+            }
+
             let mut buffer = String::new();
             std::io::stdin()
                 .read_to_string(&mut buffer)
