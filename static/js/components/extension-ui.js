@@ -817,7 +817,6 @@ function OAuthDetailView({ extension, projectName }) {
 
     // Build URLs using actual backend URL
     const backendUrl = CONFIG.backendUrl.replace(/\/$/, ''); // Remove trailing slash
-    const callbackUrl = `${backendUrl}/oidc/${projectName}/${extensionName}/callback`;
 
     const handleTestOAuth = () => {
         // Include the current hash in the redirect URI so we return to the same page
