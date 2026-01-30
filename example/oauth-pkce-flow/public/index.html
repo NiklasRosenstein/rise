@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>OAuth PKCE Flow - Rise</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+            padding: 2rem;
+        }
+
+        .container {
+            background: white;
+            padding: 2rem 3rem;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+            max-width: 700px;
+            width: 100%;
+        }
+
+        h1 {
+            font-size: 2rem;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        p {
+            font-size: 1rem;
+            color: #666;
+            margin-bottom: 1.5rem;
+            line-height: 1.6;
+        }
+
+        .badge {
+            display: inline-block;
+            background: #f0f0f0;
+            padding: 0.5rem 1rem;
+            border-radius: 8px;
+            font-size: 0.85rem;
+            color: #667eea;
+            font-weight: 600;
+            margin-bottom: 1.5rem;
+        }
+
+        button {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            font-size: 1rem;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: transform 0.2s, box-shadow 0.2s;
+            margin-right: 0.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .token-display {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 1rem;
+            margin-top: 1.5rem;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.85rem;
+            word-break: break-all;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+
+        .token-display pre {
+            margin: 0;
+            white-space: pre-wrap;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        .status {
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-top: 1rem;
+        }
+
+        .status.success {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+
+        .footer {
+            margin-top: 2rem;
+            font-size: 0.85rem;
+            color: #999;
+            text-align: center;
+        }
+
+        code {
+            background: #f0f0f0;
+            padding: 0.2rem 0.4rem;
+            border-radius: 4px;
+            font-family: 'Monaco', 'Courier New', monospace;
+            font-size: 0.9em;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>OAuth PKCE Flow Example</h1>
+        <div class="badge">PKCE Flow (RFC 7636)</div>
+
+        <p>
+            This example demonstrates the <strong>PKCE (Proof Key for Code Exchange) OAuth flow</strong> for SPAs.
+            PKCE prevents authorization code interception attacks without requiring client secrets.
+        </p>
+
+        <div id="logged-out" class="hidden">
+            <p>Click below to initiate the PKCE flow. You'll be redirected to Dex (local dev) for authentication.</p>
+            <button onclick="login()">Login with OAuth (PKCE)</button>
+        </div>
+
+        <div id="exchanging" class="hidden">
+            <div class="status info">
+                ⏳ Exchanging authorization code for tokens...
+            </div>
+        </div>
+
+        <div id="logged-in" class="hidden">
+            <div class="status success">
+                ✓ Successfully authenticated! Access token retrieved via PKCE flow.
+            </div>
+
+            <div class="token-display">
+                <strong>Access Token:</strong>
+                <pre id="access-token"></pre>
+            </div>
+
+            <div class="token-display">
+                <strong>Token Type:</strong>
+                <pre id="token-type"></pre>
+            </div>
+
+            <div class="token-display">
+                <strong>Expires In:</strong>
+                <pre id="expires-in"></pre>
+            </div>
+
+            <div class="token-display" id="id-token-display" class="hidden">
+                <strong>ID Token:</strong>
+                <pre id="id-token"></pre>
+            </div>
+
+            <div class="token-display" id="refresh-token-display" class="hidden">
+                <strong>Refresh Token:</strong>
+                <pre id="refresh-token"></pre>
+            </div>
+
+            <div style="margin-top: 1.5rem;">
+                <button onclick="logout()">Logout</button>
+            </div>
+        </div>
+
+        <div class="footer">
+            <strong>How PKCE works:</strong><br>
+            1. Generate code_verifier (random 128 chars)<br>
+            2. Hash it with SHA-256 → code_challenge<br>
+            3. Send code_challenge to authorization endpoint<br>
+            4. After auth, exchange code + code_verifier for tokens<br>
+            5. Rise validates verifier matches challenge
+        </div>
+    </div>
+
+    <script>
+        // Configuration - adjust these for your setup
+        const CONFIG = {
+            // Rise API base URL (local development)
+            riseApiUrl: 'http://localhost:3000',
+            // Project name - must exist in Rise
+            projectName: 'oauth-demo',
+            // Extension name - must be created as OAuth extension
+            extensionName: 'oauth-dex',
+            // Client ID is deterministic: {projectName}-{extensionName}
+            get clientId() {
+                return `${this.projectName}-${this.extensionName}`;
+            },
+            // Redirect URI for local development
+            redirectUri: window.location.origin + window.location.pathname
+        };
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', async () => {
+            // Check if we have an authorization code in the URL
+            const urlParams = new URLSearchParams(window.location.search);
+            const code = urlParams.get('code');
+
+            if (code) {
+                await exchangeCodeForTokens(code);
+            } else {
+                // Check if we have tokens in localStorage
+                const tokens = getStoredTokens();
+                if (tokens) {
+                    displayTokens(tokens);
+                } else {
+                    showLoggedOut();
+                }
+            }
+        });
+
+        async function login() {
+            // Generate PKCE code verifier (random 128-character string)
+            const codeVerifier = generateRandomString(128);
+
+            // Generate code challenge (SHA-256 hash of verifier, base64url-encoded)
+            const codeChallenge = await sha256Base64Url(codeVerifier);
+
+            // Store code verifier for later use (when exchanging code for tokens)
+            sessionStorage.setItem('pkce_code_verifier', codeVerifier);
+
+            // Build the OAuth authorization URL
+            const authUrl = new URL(
+                `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`,
+                CONFIG.riseApiUrl
+            );
+
+            // Add PKCE parameters
+            authUrl.searchParams.set('code_challenge', codeChallenge);
+            authUrl.searchParams.set('code_challenge_method', 'S256');
+
+            // Add redirect_uri for local development
+            authUrl.searchParams.set('redirect_uri', CONFIG.redirectUri);
+
+            // Optional: Add application state for CSRF protection
+            const state = generateState();
+            authUrl.searchParams.set('state', state);
+            sessionStorage.setItem('oauth_state', state);
+
+            // Redirect to OAuth flow
+            window.location.href = authUrl.toString();
+        }
+
+        async function exchangeCodeForTokens(code) {
+            showExchanging();
+
+            try {
+                // Verify state if we set one
+                const urlParams = new URLSearchParams(window.location.search);
+                const storedState = sessionStorage.getItem('oauth_state');
+                const returnedState = urlParams.get('state');
+                if (storedState && storedState !== returnedState) {
+                    throw new Error('State mismatch - possible CSRF attack');
+                }
+                sessionStorage.removeItem('oauth_state');
+
+                // Get the code verifier we stored earlier
+                const codeVerifier = sessionStorage.getItem('pkce_code_verifier');
+                if (!codeVerifier) {
+                    throw new Error('No code verifier found - please restart the flow');
+                }
+                sessionStorage.removeItem('pkce_code_verifier');
+
+                // Exchange authorization code for tokens using PKCE
+                const tokenUrl = new URL(
+                    `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`,
+                    CONFIG.riseApiUrl
+                );
+
+                const response = await fetch(tokenUrl, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                    },
+                    body: new URLSearchParams({
+                        grant_type: 'authorization_code',
+                        code: code,
+                        client_id: CONFIG.clientId,
+                        code_verifier: codeVerifier
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error_description || error.error || 'Token exchange failed');
+                }
+
+                const tokens = await response.json();
+
+                // Store tokens in localStorage (or sessionStorage for better security)
+                storeTokens(tokens);
+
+                // Clean URL by removing query parameters
+                window.history.replaceState(null, '', window.location.pathname);
+
+                // Display tokens
+                displayTokens(tokens);
+            } catch (error) {
+                showError(error.message);
+                showLoggedOut();
+            }
+        }
+
+        function displayTokens(tokens) {
+            document.getElementById('logged-out').classList.add('hidden');
+            document.getElementById('exchanging').classList.add('hidden');
+            document.getElementById('logged-in').classList.remove('hidden');
+
+            document.getElementById('access-token').textContent = tokens.access_token;
+            document.getElementById('token-type').textContent = tokens.token_type || 'Bearer';
+            document.getElementById('expires-in').textContent = tokens.expires_in
+                ? `${tokens.expires_in} seconds`
+                : 'Not provided';
+
+            if (tokens.id_token) {
+                document.getElementById('id-token-display').classList.remove('hidden');
+                document.getElementById('id-token').textContent = tokens.id_token;
+            }
+
+            if (tokens.refresh_token) {
+                document.getElementById('refresh-token-display').classList.remove('hidden');
+                document.getElementById('refresh-token').textContent = tokens.refresh_token;
+            }
+        }
+
+        function showLoggedOut() {
+            document.getElementById('logged-out').classList.remove('hidden');
+            document.getElementById('exchanging').classList.add('hidden');
+            document.getElementById('logged-in').classList.add('hidden');
+        }
+
+        function showExchanging() {
+            document.getElementById('logged-out').classList.add('hidden');
+            document.getElementById('exchanging').classList.remove('hidden');
+            document.getElementById('logged-in').classList.add('hidden');
+        }
+
+        function logout() {
+            localStorage.removeItem('oauth_tokens');
+            sessionStorage.removeItem('pkce_code_verifier');
+            sessionStorage.removeItem('oauth_state');
+            showLoggedOut();
+        }
+
+        function storeTokens(tokens) {
+            localStorage.setItem('oauth_tokens', JSON.stringify(tokens));
+        }
+
+        function getStoredTokens() {
+            const stored = localStorage.getItem('oauth_tokens');
+            return stored ? JSON.parse(stored) : null;
+        }
+
+        function generateState() {
+            const array = new Uint8Array(16);
+            crypto.getRandomValues(array);
+            return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+        }
+
+        function generateRandomString(length) {
+            const charset = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+            const array = new Uint8Array(length);
+            crypto.getRandomValues(array);
+            return Array.from(array, byte => charset[byte % charset.length]).join('');
+        }
+
+        async function sha256Base64Url(str) {
+            const encoder = new TextEncoder();
+            const data = encoder.encode(str);
+
+            // PKCE requires secure contexts (HTTPS or localhost) for Web Crypto API
+            if (!crypto.subtle) {
+                throw new Error('PKCE requires HTTPS or localhost. crypto.subtle is not available in insecure contexts.');
+            }
+
+            const hash = await crypto.subtle.digest('SHA-256', data);
+
+            // Convert to base64url
+            const base64 = btoa(String.fromCharCode(...new Uint8Array(hash)));
+            return base64
+                .replace(/\+/g, '-')
+                .replace(/\//g, '_')
+                .replace(/=/g, '');
+        }
+
+        function showError(message) {
+            const container = document.querySelector('.container');
+            const errorDiv = document.createElement('div');
+            errorDiv.className = 'status error';
+            errorDiv.textContent = '✗ Error: ' + message;
+            container.insertBefore(errorDiv, container.firstChild);
+
+            // Remove error after 10 seconds
+            setTimeout(() => errorDiv.remove(), 10000);
+        }
+    </script>
+</body>
+</html>

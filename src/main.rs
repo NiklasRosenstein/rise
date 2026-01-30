@@ -106,6 +106,11 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "dom")]
     Domain(DomainCommands),
+    /// Encrypt a secret for use in extension specs
+    Encrypt {
+        /// Secret to encrypt (or read from stdin if not provided)
+        plaintext: Option<String>,
+    },
     /// Environment variable management commands
     #[command(subcommand)]
     #[command(visible_alias = "e")]
@@ -453,7 +458,7 @@ enum EnvCommands {
         #[arg(long)]
         secret: bool,
         /// Mark secret as protected (cannot be decrypted via API). Default is true (protected). Use --protected=false to allow decryption.
-        #[arg(long, short = 'p', default_value = "true")]
+        #[arg(long, default_value = "true")]
         protected: bool,
     },
     /// List environment variables for a project
@@ -672,7 +677,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
         ))
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .init();
 
     let cli = Cli::parse();
@@ -728,6 +733,9 @@ async fn main() -> Result<()> {
         Commands::Backend(_) => {
             // Already handled above before config loading
             unreachable!("Backend commands should have been handled earlier")
+        }
+        Commands::Encrypt { plaintext } => {
+            cli::encrypt::encrypt_command(&config, plaintext.clone()).await?;
         }
         Commands::Project(project_cmd) => match project_cmd {
             ProjectCommands::Create {

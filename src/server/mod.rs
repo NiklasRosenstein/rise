@@ -98,8 +98,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
         .route("/version", axum::routing::get(version_info))
-        .merge(auth::routes::public_routes())
-        .merge(extensions::providers::oauth::routes::oauth_routes());
+        .merge(auth::routes::public_routes());
 
     // Protected routes (require authentication)
     let protected_routes = Router::new()
@@ -112,6 +111,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(workload_identity::routes::routes())
         .merge(env_vars::routes::routes())
         .merge(extensions::routes::routes())
+        .merge(encryption::routes::routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
@@ -124,6 +124,8 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .nest("/api/v1", api_routes)
         // Root-level auth routes for custom domain support via Ingress routing
         .merge(auth::routes::rise_auth_routes())
+        // OAuth/OIDC routes at root level (before frontend fallback)
+        .merge(extensions::providers::oauth::routes::oauth_routes())
         .merge(frontend::routes::frontend_routes())
         .with_state(state.clone())
         .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
@@ -242,6 +244,7 @@ async fn run_kubernetes_controller_loop(
         node_selector,
         image_pull_secret_name,
         access_classes,
+        host_aliases,
     ) = match settings.deployment_controller.clone() {
         Some(settings::DeploymentControllerSettings::Kubernetes {
             kubeconfig,
@@ -261,6 +264,7 @@ async fn run_kubernetes_controller_loop(
             node_selector,
             image_pull_secret_name,
             access_classes,
+            host_aliases,
         }) => (
             kubeconfig,
             production_ingress_url_template,
@@ -279,6 +283,7 @@ async fn run_kubernetes_controller_loop(
             node_selector,
             image_pull_secret_name,
             access_classes,
+            host_aliases,
         ),
         None => {
             anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
@@ -335,6 +340,7 @@ async fn run_kubernetes_controller_loop(
             rise_jwks_json: jwks_json,
             // Use public_url as issuer
             rise_issuer: settings.server.public_url.clone(),
+            host_aliases,
         },
     )?);
 

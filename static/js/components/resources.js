@@ -632,7 +632,7 @@ function EnvVarsList({ projectName, deploymentId }) {
                                                 onClick={async () => {
                                                     try {
                                                         const response = await api.getEnvVarValue(projectName, env.key);
-                                                        await navigator.clipboard.writeText(response.value);
+                                                        await copyToClipboard(response.value);
                                                         showToast('Secret copied to clipboard!', 'success');
                                                     } catch (err) {
                                                         showToast(`Failed to copy secret: ${err.message}`, 'error');

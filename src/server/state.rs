@@ -54,12 +54,11 @@ pub struct AppState {
     pub extension_registry: Arc<crate::server::extensions::registry::ExtensionRegistry>,
     pub oauth_state_store:
         Arc<moka::future::Cache<String, crate::server::extensions::providers::oauth::OAuthState>>,
-    pub oauth_exchange_store: Arc<
-        moka::future::Cache<
-            String,
-            crate::server::extensions::providers::oauth::OAuthExchangeState,
-        >,
+    pub oauth_code_store: Arc<
+        moka::future::Cache<String, crate::server::extensions::providers::oauth::OAuthCodeState>,
     >,
+    /// Rate limiter for encrypt endpoint (key: "encrypt:{user_id}", value: request count)
+    pub encrypt_rate_limiter: Arc<moka::future::Cache<String, u32>>,
     pub access_classes:
         Arc<std::collections::HashMap<String, crate::server::settings::AccessClass>>,
     /// Production ingress URL template (for custom domain validation)
@@ -182,6 +181,7 @@ async fn init_kubernetes_backend(
         node_selector,
         image_pull_secret_name,
         access_classes,
+        host_aliases,
         ..
     }) = &settings.deployment_controller
     {
@@ -237,6 +237,7 @@ async fn init_kubernetes_backend(
                 access_classes: filtered_access_classes,
                 rise_jwks_json: jwks_json,
                 rise_issuer: settings.server.public_url.clone(),
+                host_aliases: host_aliases.clone(),
             },
         )?;
 
@@ -666,14 +667,23 @@ impl AppState {
         );
         tracing::info!("Initialized OAuth state store for OAuth extensions");
 
-        // Initialize OAuth exchange token store (5 minute TTL, single-use)
-        let oauth_exchange_store = Arc::new(
+        // Initialize OAuth authorization code store (5 minute TTL, single-use)
+        let oauth_code_store = Arc::new(
             moka::future::Cache::builder()
                 .time_to_live(Duration::from_secs(300))
                 .max_capacity(10_000) // Prevent memory exhaustion
                 .build(),
         );
-        tracing::info!("Initialized OAuth exchange token store for secure backend flow");
+        tracing::info!("Initialized OAuth authorization code store for secure backend flow");
+
+        // Initialize encrypt endpoint rate limiter (100 requests/hour per user)
+        let encrypt_rate_limiter = Arc::new(
+            moka::future::Cache::builder()
+                .time_to_live(Duration::from_secs(3600)) // 1 hour
+                .max_capacity(10_000) // Prevent memory exhaustion
+                .build(),
+        );
+        tracing::info!("Initialized encrypt endpoint rate limiter (100 req/hour per user)");
 
         // Extract access_classes from deployment controller settings
         // Filter out null values (used to remove inherited access classes)
@@ -716,7 +726,8 @@ impl AppState {
             deployment_backend,
             extension_registry,
             oauth_state_store,
-            oauth_exchange_store,
+            oauth_code_store,
+            encrypt_rate_limiter,
             access_classes,
             production_ingress_url_template,
             staging_ingress_url_template,

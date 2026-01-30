@@ -1,0 +1,9 @@
+version = 1
+
+[project]
+name = "oauth-demo"
+access_class = "public"
+custom_domains = []
+
+[project.env]
+DEX_CLIENT_SECRET = "rise-backend-secret"

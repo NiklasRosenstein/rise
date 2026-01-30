@@ -1,12 +1,12 @@
 use super::models::{
-    AuthorizeFlowQuery, CallbackRequest, OAuthExchangeState, OAuthExtensionSpec,
-    OAuthExtensionStatus, OAuthFlowType, OAuthState, TokenResponse,
+    AuthorizeFlowQuery, CallbackRequest, OAuth2ErrorResponse, OAuth2TokenResponse, OAuthCodeState,
+    OAuthExtensionSpec, OAuthExtensionStatus, OAuthState, TokenRequest, TokenResponse,
 };
-use crate::db::{extensions as db_extensions, projects as db_projects, user_oauth_tokens};
+use crate::db::{extensions as db_extensions, projects as db_projects};
 use crate::server::state::AppState;
 use axum::{
     extract::{Path, Query, State},
-    http::{header, StatusCode},
+    http::{header, HeaderMap, HeaderValue, StatusCode},
     response::{IntoResponse, Redirect, Response},
     Json,
 };
@@ -15,7 +15,6 @@ use chrono::{Duration, Utc};
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use url::Url;
-use uuid::Uuid;
 
 /// Generate a random state token for CSRF protection
 fn generate_state_token() -> String {
@@ -24,11 +23,6 @@ fn generate_state_token() -> String {
     (0..32)
         .map(|_| format!("{:02x}", rng.gen::<u8>()))
         .collect()
-}
-
-/// Generate a random session ID
-fn generate_session_id() -> String {
-    Uuid::new_v4().to_string()
 }
 
 /// Generate a PKCE code verifier (random string)
@@ -55,17 +49,116 @@ fn generate_code_challenge(verifier: &str) -> String {
     base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash)
 }
 
-/// Extract session ID from cookie header
-fn extract_session_id_from_cookie(cookie_header: Option<&str>) -> Option<String> {
-    // TODO: Use proper cookie parsing library
-    cookie_header?.split(';').find_map(|cookie| {
-        let cookie = cookie.trim();
-        if cookie.starts_with("rise_oauth_session=") {
-            Some(cookie.trim_start_matches("rise_oauth_session=").to_string())
-        } else {
-            None
+/// Validate CORS origin against allowed origins for a project
+///
+/// Returns the allowed origin if valid, None otherwise.
+/// Allowed origins:
+/// - localhost (any port) for local development
+/// - Rise public URL
+/// - Project deployment URLs (including custom domains)
+async fn validate_cors_origin(
+    pool: &sqlx::PgPool,
+    origin: &str,
+    project: &crate::db::models::Project,
+    rise_public_url: &str,
+    deployment_backend: &Arc<dyn crate::server::deployment::controller::DeploymentBackend>,
+) -> Option<String> {
+    let origin_url = match Url::parse(origin) {
+        Ok(url) => url,
+        Err(_) => return None,
+    };
+
+    // Allow localhost for local development (any port)
+    if let Some(host) = origin_url.host_str() {
+        if host == "localhost" || host == "127.0.0.1" {
+            return Some(origin.to_string());
         }
-    })
+    }
+
+    // Allow if origin matches Rise public URL (same origin)
+    if let Ok(rise_url) = Url::parse(rise_public_url) {
+        if origin_url.host() == rise_url.host()
+            && origin_url.port() == rise_url.port()
+            && origin_url.scheme() == rise_url.scheme()
+        {
+            return Some(origin.to_string());
+        }
+    }
+
+    // Check project's deployment URLs
+    let all_deployments =
+        match crate::db::deployments::get_active_deployments_for_project(pool, project.id).await {
+            Ok(deployments) => deployments,
+            Err(e) => {
+                warn!(
+                    "Failed to fetch active deployments for project {}: {:?}",
+                    project.name, e
+                );
+                return None;
+            }
+        };
+
+    for deployment in &all_deployments {
+        match deployment_backend
+            .get_deployment_urls(deployment, project)
+            .await
+        {
+            Ok(urls) => {
+                // Check primary URL
+                if !urls.primary_url.is_empty() {
+                    if let Ok(deployment_url) = Url::parse(&urls.primary_url) {
+                        if origin_url.host() == deployment_url.host()
+                            && origin_url.port() == deployment_url.port()
+                            && origin_url.scheme() == deployment_url.scheme()
+                        {
+                            return Some(origin.to_string());
+                        }
+                    }
+                }
+
+                // Check custom domain URLs
+                for custom_url in &urls.custom_domain_urls {
+                    if let Ok(custom_domain_url) = Url::parse(custom_url) {
+                        if origin_url.host() == custom_domain_url.host()
+                            && origin_url.port() == custom_domain_url.port()
+                            && origin_url.scheme() == custom_domain_url.scheme()
+                        {
+                            return Some(origin.to_string());
+                        }
+                    }
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to get deployment URLs for deployment {}: {:?}",
+                    deployment.deployment_id, e
+                );
+            }
+        }
+    }
+
+    None
+}
+
+/// Create CORS response headers for allowed origin
+fn cors_headers(origin: &str) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    if let Ok(origin_value) = HeaderValue::from_str(origin) {
+        headers.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, origin_value);
+    }
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_METHODS,
+        HeaderValue::from_static("POST, OPTIONS"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_ALLOW_HEADERS,
+        HeaderValue::from_static("Content-Type"),
+    );
+    headers.insert(
+        header::ACCESS_CONTROL_MAX_AGE,
+        HeaderValue::from_static("86400"), // 24 hours
+    );
+    headers
 }
 
 /// Validate redirect URI against allowed origins
@@ -141,17 +234,17 @@ async fn validate_redirect_uri(
 
 /// Initiate OAuth authorization flow
 ///
-/// GET /api/v1/projects/{project}/extensions/{extension}/oauth/authorize
+/// GET /oidc/{project}/{extension}/authorize
 ///
 /// Query params:
 /// - redirect_uri (optional): Where to redirect after auth (for local dev/custom domains)
 /// - state (optional): Application's CSRF state parameter (passed through to final redirect)
-/// - flow (optional): "fragment" (default, for SPAs) or "exchange" (for backend apps)
+/// - code_challenge (optional): PKCE code challenge for public clients (SPAs)
+/// - code_challenge_method (optional): PKCE method ("S256" or "plain", defaults to "S256")
 pub async fn authorize(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
     Query(req): Query<AuthorizeFlowQuery>,
-    headers: axum::http::HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
     debug!(
         "OAuth authorize request for project={}, extension={}",
@@ -193,168 +286,36 @@ pub async fn authorize(
         )
     })?;
 
-    // Extract session ID from cookie (if present)
-    let cookie_header = headers.get(header::COOKIE).and_then(|h| h.to_str().ok());
-    let existing_session_id = extract_session_id_from_cookie(cookie_header);
-
-    debug!("Existing session ID from cookie: {:?}", existing_session_id);
-
-    // Check for cached token if we have a session ID
-    if let Some(ref session_id) = existing_session_id {
-        match user_oauth_tokens::get_by_session(
-            &state.db_pool,
-            project.id,
-            &extension_name,
-            session_id,
-        )
-        .await
+    // Validate PKCE parameters if provided
+    if let Some(ref code_challenge) = req.code_challenge {
+        // RFC 7636: code_challenge must be 43-128 characters, base64url charset
+        if code_challenge.len() < 43 || code_challenge.len() > 128 {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "code_challenge must be 43-128 characters".to_string(),
+            ));
+        }
+        if !code_challenge
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
         {
-            Ok(Some(cached_token)) => {
-                debug!("Found cached OAuth token for session {}", session_id);
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "code_challenge contains invalid characters (must be base64url)".to_string(),
+            ));
+        }
 
-                // Check if token is still valid or can be refreshed
-                if let Some(expires_at) = cached_token.expires_at {
-                    if expires_at > Utc::now() {
-                        // Token is still valid, use it immediately
-                        info!("Cached token still valid, redirecting with cached token");
-
-                        // Update last_accessed_at
-                        if let Err(e) =
-                            user_oauth_tokens::update_last_accessed(&state.db_pool, cached_token.id)
-                                .await
-                        {
-                            warn!("Failed to update last_accessed_at: {:?}", e);
-                        }
-
-                        // Decrypt tokens
-                        let encryption_provider = state.encryption_provider.as_ref().ok_or((
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Encryption provider not configured".to_string(),
-                        ))?;
-
-                        let access_token = encryption_provider
-                            .decrypt(&cached_token.access_token_encrypted)
-                            .await
-                            .map_err(|e| {
-                                (
-                                    StatusCode::INTERNAL_SERVER_ERROR,
-                                    format!("Failed to decrypt access token: {}", e),
-                                )
-                            })?;
-
-                        let id_token =
-                            if let Some(ref id_token_encrypted) = cached_token.id_token_encrypted {
-                                Some(
-                                    encryption_provider
-                                        .decrypt(id_token_encrypted)
-                                        .await
-                                        .map_err(|e| {
-                                            (
-                                                StatusCode::INTERNAL_SERVER_ERROR,
-                                                format!("Failed to decrypt ID token: {}", e),
-                                            )
-                                        })?,
-                                )
-                            } else {
-                                None
-                            };
-
-                        // Determine final redirect URI
-                        let final_redirect_uri = req.redirect_uri.unwrap_or_else(|| {
-                            // Default to project's primary URL
-                            format!(
-                                "https://{}.{}",
-                                project_name,
-                                state.public_url.trim_start_matches("https://api.")
-                            )
-                        });
-
-                        // Build redirect URL based on requested flow type
-                        let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("Invalid redirect URI: {}", e),
-                            )
-                        })?;
-
-                        match req.flow {
-                            OAuthFlowType::Fragment => {
-                                // Fragment flow: Return tokens in URL fragment
-                                let expires_in = (expires_at - Utc::now()).num_seconds();
-                                let mut fragment_parts = vec![
-                                    format!("access_token={}", access_token),
-                                    format!("token_type=Bearer"),
-                                    format!("expires_in={}", expires_in),
-                                ];
-
-                                if let Some(id_token) = id_token {
-                                    fragment_parts.push(format!("id_token={}", id_token));
-                                }
-
-                                if let Some(app_state) = req.state {
-                                    fragment_parts.push(format!("state={}", app_state));
-                                }
-
-                                redirect_url.set_fragment(Some(&fragment_parts.join("&")));
-                            }
-                            OAuthFlowType::Exchange => {
-                                // Exchange flow: Generate exchange token for backend to retrieve
-                                let exchange_token = generate_state_token();
-
-                                let exchange_state = OAuthExchangeState {
-                                    project_id: project.id,
-                                    extension_name: extension_name.clone(),
-                                    session_id: session_id.clone(),
-                                    created_at: Utc::now(),
-                                };
-
-                                // Store exchange token in cache (5-minute TTL)
-                                state
-                                    .oauth_exchange_store
-                                    .insert(exchange_token.clone(), exchange_state)
-                                    .await;
-
-                                // Return exchange token in query parameter
-                                redirect_url
-                                    .query_pairs_mut()
-                                    .append_pair("exchange_token", &exchange_token);
-
-                                // Pass through application's CSRF state if provided
-                                if let Some(app_state) = req.state {
-                                    redirect_url
-                                        .query_pairs_mut()
-                                        .append_pair("state", &app_state);
-                                }
-                            }
-                        }
-
-                        return Ok(Redirect::to(redirect_url.as_str()).into_response());
-                    } else if cached_token.refresh_token_encrypted.is_some() {
-                        // Token expired but we have a refresh token - refresh it
-                        debug!("Cached token expired, attempting refresh");
-                        // TODO: Implement inline token refresh
-                        // For now, fall through to full OAuth flow
-                    } else {
-                        // Token expired and no refresh token - delete it
-                        debug!("Cached token expired without refresh token, deleting");
-                        if let Err(e) =
-                            user_oauth_tokens::delete(&state.db_pool, cached_token.id).await
-                        {
-                            warn!("Failed to delete expired token: {:?}", e);
-                        }
-                    }
-                }
-            }
-            Ok(None) => {
-                debug!("No cached token found for session {}", session_id);
-            }
-            Err(e) => {
-                warn!("Error checking for cached token: {:?}", e);
-            }
+        let method = req.code_challenge_method.as_deref().unwrap_or("S256");
+        if method != "S256" && method != "plain" {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Unsupported code_challenge_method '{}'. Only 'S256' and 'plain' are supported.",
+                    method
+                ),
+            ));
         }
     }
-
-    // No valid cached token - proceed with full OAuth flow
 
     // Determine final redirect URI
     let final_redirect_uri = if let Some(ref uri) = req.redirect_uri {
@@ -421,10 +382,10 @@ pub async fn authorize(
         application_state: req.state,
         project_name: project_name.clone(),
         extension_name: extension_name.clone(),
-        session_id: existing_session_id,
-        flow_type: req.flow,
         code_verifier,
         created_at: Utc::now(),
+        client_code_challenge: req.code_challenge,
+        client_code_challenge_method: req.code_challenge_method,
     };
 
     // Store state in cache (TTL configured on cache builder)
@@ -449,7 +410,7 @@ pub async fn authorize(
 
     let redirect_uri = if let Some(port) = api_url.port() {
         format!(
-            "{}://{}:{}/api/v1/oauth/callback/{}/{}",
+            "{}://{}:{}/oidc/{}/{}/callback",
             api_url.scheme(),
             api_host,
             port,
@@ -458,7 +419,7 @@ pub async fn authorize(
         )
     } else {
         format!(
-            "{}://{}/api/v1/oauth/callback/{}/{}",
+            "{}://{}/oidc/{}/{}/callback",
             api_url.scheme(),
             api_host,
             project_name,
@@ -492,7 +453,7 @@ pub async fn authorize(
 
 /// Handle OAuth callback from provider
 ///
-/// GET /api/v1/oauth/callback/{project}/{extension}
+/// GET /oidc/{project}/{extension}/callback
 ///
 /// Query params:
 /// - code: Authorization code from provider
@@ -543,42 +504,30 @@ pub async fn callback(
         )
     })?;
 
-    // Resolve client_secret from environment variable
-    let env_vars = crate::db::env_vars::list_project_env_vars(&state.db_pool, project.id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // Resolve OAuth provider's client secret (prefers encrypted in spec, falls back to env var ref)
+    let encryption_provider = state.encryption_provider.as_ref().ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Encryption provider not configured".to_string(),
+    ))?;
 
-    let env_var = env_vars
-        .iter()
-        .find(|var| var.key == spec.client_secret_ref)
-        .ok_or_else(|| {
+    use super::provider::{OAuthProvider, OAuthProviderConfig};
+    let oauth_provider = OAuthProvider::new(OAuthProviderConfig {
+        db_pool: state.db_pool.clone(),
+        encryption_provider: encryption_provider.clone(),
+        http_client: reqwest::Client::new(),
+        api_domain: state.public_url.clone(),
+    });
+
+    let client_secret = oauth_provider
+        .resolve_oauth_client_secret(project.id, &spec)
+        .await
+        .map_err(|e| {
+            error!("Failed to resolve OAuth client secret: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!(
-                    "Environment variable '{}' not found for OAuth client secret",
-                    spec.client_secret_ref
-                ),
+                format!("Failed to resolve OAuth client secret: {}", e),
             )
         })?;
-
-    let client_secret = if env_var.is_secret {
-        let encryption_provider = state.encryption_provider.as_ref().ok_or((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Encryption provider not configured".to_string(),
-        ))?;
-
-        encryption_provider
-            .decrypt(&env_var.value)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to decrypt OAuth client secret: {}", e),
-                )
-            })?
-    } else {
-        env_var.value.clone()
-    };
 
     // Compute callback redirect URI - must match exactly what was sent in authorize request
     let api_url = Url::parse(&state.public_url).map_err(|e| {
@@ -595,7 +544,7 @@ pub async fn callback(
 
     let redirect_uri = if let Some(port) = api_url.port() {
         format!(
-            "{}://{}:{}/api/v1/oauth/callback/{}/{}",
+            "{}://{}:{}/oidc/{}/{}/callback",
             api_url.scheme(),
             api_host,
             port,
@@ -604,7 +553,7 @@ pub async fn callback(
         )
     } else {
         format!(
-            "{}://{}/api/v1/oauth/callback/{}/{}",
+            "{}://{}/oidc/{}/{}/callback",
             api_url.scheme(),
             api_host,
             project_name,
@@ -699,31 +648,8 @@ pub async fn callback(
         None => None,
     };
 
-    // Determine session ID (use existing or generate new)
-    let session_id = oauth_state.session_id.unwrap_or_else(generate_session_id);
-
-    // Store user OAuth token in database
+    // Calculate token expiration
     let expires_at = Some(Utc::now() + Duration::seconds(token_response.expires_in));
-    user_oauth_tokens::upsert(
-        &state.db_pool,
-        project.id,
-        &extension_name,
-        &session_id,
-        &access_token_encrypted,
-        refresh_token_encrypted.as_deref(),
-        id_token_encrypted.as_deref(),
-        expires_at,
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to store user OAuth token: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to store token: {}", e),
-        )
-    })?;
-
-    info!("Successfully stored OAuth token for session {}", session_id);
 
     // Update extension status
     let status = OAuthExtensionStatus {
@@ -752,12 +678,17 @@ pub async fn callback(
     state.oauth_state_store.invalidate(&req.state).await;
 
     // Determine final redirect URI
-    let final_redirect_uri = oauth_state.redirect_uri.ok_or((
+    let final_redirect_uri = oauth_state.redirect_uri.clone().ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
         "Missing redirect URI in state".to_string(),
     ))?;
 
-    // Build redirect URL - different flow based on oauth_state.flow_type
+    debug!(
+        "OAuth callback: final_redirect_uri={}, oauth_state={:?}",
+        final_redirect_uri, oauth_state
+    );
+
+    // Build redirect URL with authorization code (RFC 6749)
     let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -765,97 +696,778 @@ pub async fn callback(
         )
     })?;
 
-    match oauth_state.flow_type {
-        OAuthFlowType::Fragment => {
-            // Fragment flow: Return tokens directly in URL fragment (for SPAs)
-            let mut fragment_parts = vec![
-                format!("access_token={}", token_response.access_token),
-                format!("token_type={}", token_response.token_type),
-                format!("expires_in={}", token_response.expires_in),
-            ];
+    // Detect if this is a test flow (redirect to Rise UI) vs real application flow
+    let is_test_flow = final_redirect_uri.starts_with(&state.public_url)
+        || final_redirect_uri.starts_with("http://localhost:")
+        || final_redirect_uri.starts_with("http://127.0.0.1:");
 
-            if let Some(id_token) = token_response.id_token {
-                fragment_parts.push(format!("id_token={}", id_token));
-            }
+    if !is_test_flow {
+        // Real application flow: Generate authorization code for token exchange
+        let authorization_code = generate_state_token();
 
-            // Pass through application's CSRF state
-            if let Some(app_state) = oauth_state.application_state {
-                fragment_parts.push(format!("state={}", app_state));
-            }
+        // Store encrypted tokens in authorization code state (5-minute TTL, single-use)
+        let code_state = OAuthCodeState {
+            project_id: project.id,
+            extension_name: extension_name.clone(),
+            created_at: Utc::now(),
+            redirect_uri: oauth_state.redirect_uri.clone(),
+            code_challenge: oauth_state.client_code_challenge.clone(),
+            code_challenge_method: oauth_state.client_code_challenge_method.clone(),
+            access_token_encrypted,
+            refresh_token_encrypted,
+            id_token_encrypted,
+            expires_at,
+        };
 
-            redirect_url.set_fragment(Some(&fragment_parts.join("&")));
+        state
+            .oauth_code_store
+            .insert(authorization_code.clone(), code_state)
+            .await;
 
-            debug!("Fragment flow: Returning tokens in URL fragment");
-        }
-        OAuthFlowType::Exchange => {
-            // Exchange flow: Generate exchange token for backend to retrieve (for server-rendered apps)
-            let exchange_token = generate_state_token(); // Reuse same random token generator
+        // Add authorization code as query parameter (RFC 6749)
+        redirect_url
+            .query_pairs_mut()
+            .append_pair("code", &authorization_code);
 
-            let exchange_state = OAuthExchangeState {
-                project_id: project.id,
-                extension_name: extension_name.clone(),
-                session_id: session_id.clone(),
-                created_at: Utc::now(),
-            };
-
-            // Store exchange token in cache (5-minute TTL, single-use)
-            state
-                .oauth_exchange_store
-                .insert(exchange_token.clone(), exchange_state)
-                .await;
-
-            // Add exchange token as query parameter
+        // Pass through application's CSRF state
+        if let Some(app_state) = oauth_state.application_state {
             redirect_url
                 .query_pairs_mut()
-                .append_pair("exchange_token", &exchange_token);
+                .append_pair("state", &app_state);
+        }
 
-            // Pass through application's CSRF state
-            if let Some(app_state) = oauth_state.application_state {
-                redirect_url
-                    .query_pairs_mut()
-                    .append_pair("state", &app_state);
+        info!(
+            "Generated authorization code for project {} extension {}",
+            project_name, extension_name
+        );
+    } else {
+        // Test flow: Skip code generation, just redirect back to UI
+        info!(
+            "Completed test OAuth flow for project {} extension {} (no code generated)",
+            project_name, extension_name
+        );
+    }
+
+    info!(
+        "OAuth callback complete: redirecting to {}",
+        redirect_url.as_str()
+    );
+
+    Ok(Redirect::to(redirect_url.as_str()).into_response())
+}
+
+/// Validate PKCE code_verifier against code_challenge
+/// Returns true if valid, false otherwise
+fn validate_pkce(code_verifier: &str, code_challenge: &str, code_challenge_method: &str) -> bool {
+    use sha2::{Digest, Sha256};
+    use subtle::ConstantTimeEq;
+
+    match code_challenge_method {
+        "S256" => {
+            // SHA256 hash the verifier
+            let mut hasher = Sha256::new();
+            hasher.update(code_verifier.as_bytes());
+            let hash = hasher.finalize();
+
+            // Base64url encode (no padding)
+            let computed_challenge = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash);
+
+            // Constant-time comparison
+            computed_challenge
+                .as_bytes()
+                .ct_eq(code_challenge.as_bytes())
+                .into()
+        }
+        "plain" => {
+            // Direct comparison
+            code_verifier
+                .as_bytes()
+                .ct_eq(code_challenge.as_bytes())
+                .into()
+        }
+        _ => false,
+    }
+}
+
+/// Create OAuth2 error response
+fn oauth2_error(
+    error: &str,
+    description: Option<String>,
+) -> (StatusCode, Json<OAuth2ErrorResponse>) {
+    let status_code = match error {
+        "invalid_request" => StatusCode::BAD_REQUEST,
+        "invalid_client" => StatusCode::UNAUTHORIZED,
+        "invalid_grant" => StatusCode::BAD_REQUEST,
+        "unsupported_grant_type" => StatusCode::BAD_REQUEST,
+        _ => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+
+    (
+        status_code,
+        Json(OAuth2ErrorResponse {
+            error: error.to_string(),
+            error_description: description,
+        }),
+    )
+}
+
+/// RFC 6749-compliant token endpoint with per-project CORS support
+///
+/// POST /oidc/{project}/{extension}/token
+///
+/// Grant types:
+/// - authorization_code: Exchange authorization code for tokens
+/// - refresh_token: Refresh access token
+///
+/// Client authentication:
+/// - Confidential clients: Use client_id + client_secret
+/// - Public clients: Use client_id + code_verifier (PKCE)
+///
+/// CORS:
+/// - Validates Origin header against project-specific allowed origins
+/// - Allows localhost (any port), Rise public URL, project deployment URLs
+pub async fn token_endpoint(
+    State(state): State<AppState>,
+    Path((project_name, extension_name)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+    body: String,
+) -> Response {
+    debug!(
+        "Token endpoint request for project={}, extension={}",
+        project_name, extension_name
+    );
+
+    // Extract Origin header for CORS validation (will be validated after we get the project)
+    let origin = headers
+        .get(header::ORIGIN)
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+
+    // Inner function to handle the actual token logic
+    let result = token_endpoint_inner(&state, &project_name, &extension_name, &headers, body).await;
+
+    // Get CORS headers if Origin was provided and project exists
+    let validated_cors_headers = if let Some(ref origin_str) = origin {
+        // We need to get the project to validate CORS
+        if let Ok(Some(project)) = db_projects::find_by_name(&state.db_pool, &project_name).await {
+            validate_cors_origin(
+                &state.db_pool,
+                origin_str,
+                &project,
+                &state.public_url,
+                &state.deployment_backend,
+            )
+            .await
+            .map(|allowed| cors_headers(&allowed))
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Build response with CORS headers
+    // For error responses, always include CORS headers if Origin was provided (even if validation failed)
+    // This ensures proper CORS error handling in the browser
+    match result {
+        Ok(token_response) => {
+            let mut response = (StatusCode::OK, Json(token_response)).into_response();
+            if let Some(cors) = validated_cors_headers {
+                response.headers_mut().extend(cors);
             }
+            response
+        }
+        Err((status, error_json)) => {
+            let mut response = (status, error_json).into_response();
+            // For errors, use validated CORS headers if available, otherwise echo back Origin
+            if let Some(cors) = validated_cors_headers {
+                response.headers_mut().extend(cors);
+            } else if let Some(origin_str) = origin {
+                // Even if CORS validation failed, include CORS headers so browser gets proper error
+                response.headers_mut().extend(cors_headers(&origin_str));
+            }
+            response
+        }
+    }
+}
 
-            info!(
-                "Exchange flow: Generated exchange token for session {}",
-                session_id
-            );
+/// Inner implementation of token endpoint logic
+async fn token_endpoint_inner(
+    state: &AppState,
+    project_name: &str,
+    extension_name: &str,
+    headers: &axum::http::HeaderMap,
+    body: String,
+) -> Result<OAuth2TokenResponse, (StatusCode, Json<OAuth2ErrorResponse>)> {
+    // Parse request body (support both form-urlencoded and JSON)
+    let content_type = headers
+        .get(header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .unwrap_or("application/x-www-form-urlencoded");
+
+    let req: TokenRequest = if content_type.contains("application/json") {
+        serde_json::from_str(&body).map_err(|e| {
+            oauth2_error(
+                "invalid_request",
+                Some(format!("Invalid JSON request body: {}", e)),
+            )
+        })?
+    } else {
+        // Parse as form-urlencoded
+        serde_urlencoded::from_str(&body).map_err(|e| {
+            oauth2_error(
+                "invalid_request",
+                Some(format!("Invalid form-urlencoded request body: {}", e)),
+            )
+        })?
+    };
+
+    // Get project
+    let project = db_projects::find_by_name(&state.db_pool, project_name)
+        .await
+        .map_err(|e| {
+            error!("Database error: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?
+        .ok_or_else(|| oauth2_error("invalid_request", Some("Project not found".to_string())))?;
+
+    // Get OAuth extension
+    let extension =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, extension_name)
+            .await
+            .map_err(|e| {
+                error!("Database error: {:?}", e);
+                oauth2_error("server_error", Some("Internal server error".to_string()))
+            })?
+            .ok_or_else(|| {
+                oauth2_error(
+                    "invalid_request",
+                    Some("OAuth extension not configured".to_string()),
+                )
+            })?;
+
+    // Verify extension type
+    if extension.extension_type != "oauth" {
+        return Err(oauth2_error(
+            "invalid_request",
+            Some(format!(
+                "Extension '{}' is not an OAuth extension",
+                extension_name
+            )),
+        ));
+    }
+
+    // Parse spec
+    let spec: OAuthExtensionSpec = serde_json::from_value(extension.spec.clone()).map_err(|e| {
+        error!("Invalid extension spec: {:?}", e);
+        oauth2_error(
+            "server_error",
+            Some("Invalid extension configuration".to_string()),
+        )
+    })?;
+
+    // Validate client_id
+    let rise_client_id = spec.rise_client_id.as_ref().ok_or_else(|| {
+        error!("Rise client ID not configured for extension");
+        oauth2_error(
+            "server_error",
+            Some("OAuth extension not fully configured".to_string()),
+        )
+    })?;
+
+    if &req.client_id != rise_client_id {
+        return Err(oauth2_error(
+            "invalid_client",
+            Some("Invalid client_id".to_string()),
+        ));
+    }
+
+    // Grant-specific authentication validation
+    let has_client_secret = req.client_secret.is_some();
+    let has_code_verifier = req.code_verifier.is_some();
+
+    match req.grant_type.as_str() {
+        "authorization_code" => {
+            // authorization_code grant: REQUIRE client_secret OR code_verifier (PKCE)
+            if !has_client_secret && !has_code_verifier {
+                return Err(oauth2_error(
+                    "invalid_request",
+                    Some("Missing client authentication: provide either client_secret (confidential clients) or code_verifier (public clients with PKCE)".to_string()),
+                ));
+            }
+            // For authorization_code grant, client_secret and code_verifier are mutually exclusive
+            if has_client_secret && has_code_verifier {
+                return Err(oauth2_error(
+                    "invalid_request",
+                    Some("Client authentication methods are mutually exclusive: provide either client_secret (confidential clients) or code_verifier (public clients), not both".to_string()),
+                ));
+            }
+        }
+        "refresh_token" => {
+            // refresh_token grant: ALLOW client_secret (confidential) or no auth (public)
+            // REJECT code_verifier (PKCE is only for authorization_code grant)
+            if has_code_verifier {
+                return Err(oauth2_error(
+                    "invalid_request",
+                    Some("code_verifier not supported for refresh_token grant (PKCE is only for authorization_code)".to_string()),
+                ));
+            }
+            // Note: client_secret is optional for refresh_token grant (public clients)
+        }
+        _ => {
+            // Unknown grant type will be rejected later
         }
     }
 
-    // Set session cookie
-    let cookie_value = format!(
-        "rise_oauth_session={}; HttpOnly; Secure; SameSite=Lax; Max-Age={}; Path=/",
-        session_id,
-        90 * 24 * 60 * 60 // 90 days
-    );
+    // If client_secret provided, validate it
+    if let Some(ref client_secret) = req.client_secret {
+        // Get encryption provider
+        let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
+            error!("Encryption provider not configured");
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?;
 
-    // Build response with cookie
-    let mut response = Redirect::to(redirect_url.as_str()).into_response();
-    response
-        .headers_mut()
-        .insert(header::SET_COOKIE, cookie_value.parse().unwrap());
+        // Resolve stored Rise client secret (prefer encrypted in spec, fall back to env var ref)
+        let stored_secret = if let Some(ref encrypted) = spec.rise_client_secret_encrypted {
+            // Decrypt from spec
+            encryption_provider.decrypt(encrypted).await.map_err(|e| {
+                error!("Failed to decrypt Rise client secret from spec: {:?}", e);
+                oauth2_error("server_error", Some("Internal server error".to_string()))
+            })?
+        } else if let Some(ref rise_client_secret_ref) = spec.rise_client_secret_ref {
+            // Legacy: Get from env vars
+            use crate::db::env_vars as db_env_vars;
+            let env_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id)
+                .await
+                .map_err(|e| {
+                    error!("Failed to list env vars: {:?}", e);
+                    oauth2_error("server_error", Some("Internal server error".to_string()))
+                })?;
 
-    Ok(response)
+            let env_var = env_vars
+                .iter()
+                .find(|v| v.key == *rise_client_secret_ref)
+                .ok_or_else(|| {
+                    error!(
+                        "Rise client secret env var not found: {}",
+                        rise_client_secret_ref
+                    );
+                    oauth2_error(
+                        "invalid_client",
+                        Some("Client credentials not configured".to_string()),
+                    )
+                })?;
+
+            encryption_provider
+                .decrypt(&env_var.value)
+                .await
+                .map_err(|e| {
+                    error!("Failed to decrypt Rise client secret from env var: {:?}", e);
+                    oauth2_error("server_error", Some("Internal server error".to_string()))
+                })?
+        } else {
+            error!("No Rise client secret configured (rise_client_secret_encrypted or rise_client_secret_ref required)");
+            return Err(oauth2_error(
+                "server_error",
+                Some("OAuth extension not fully configured".to_string()),
+            ));
+        };
+
+        // Constant-time comparison
+        use subtle::ConstantTimeEq;
+        let is_valid: bool = client_secret
+            .as_bytes()
+            .ct_eq(stored_secret.as_bytes())
+            .into();
+        if !is_valid {
+            return Err(oauth2_error(
+                "invalid_client",
+                Some("Invalid client_secret".to_string()),
+            ));
+        }
+    }
+
+    // Route to grant-specific handlers (unwrap Json wrapper for inner return)
+    match req.grant_type.as_str() {
+        "authorization_code" => handle_authorization_code_grant(
+            state.clone(),
+            project,
+            extension_name.to_string(),
+            spec,
+            req,
+        )
+        .await
+        .map(|Json(response)| response),
+        "refresh_token" => handle_refresh_token_grant(
+            state.clone(),
+            project,
+            extension_name.to_string(),
+            spec,
+            req,
+        )
+        .await
+        .map(|Json(response)| response),
+        _ => Err(oauth2_error(
+            "unsupported_grant_type",
+            Some(format!("Unsupported grant_type: {}", req.grant_type)),
+        )),
+    }
 }
 
-/// Exchange a temporary token for OAuth credentials (Exchange Flow)
+/// Handle authorization_code grant type
+async fn handle_authorization_code_grant(
+    state: AppState,
+    project: crate::db::models::Project,
+    extension_name: String,
+    spec: OAuthExtensionSpec,
+    req: TokenRequest,
+) -> Result<Json<OAuth2TokenResponse>, (StatusCode, Json<OAuth2ErrorResponse>)> {
+    // SECURITY: Ensure mutual exclusivity of authentication methods
+    // This is defensive programming - the check should already have happened in token_endpoint_inner
+    if req.client_secret.is_some() && req.code_verifier.is_some() {
+        return Err(oauth2_error(
+            "invalid_request",
+            Some("Authentication methods must be mutually exclusive".to_string()),
+        ));
+    }
+
+    // Validate required parameters
+    let code = req.code.ok_or_else(|| {
+        oauth2_error(
+            "invalid_request",
+            Some("Missing required parameter: code".to_string()),
+        )
+    })?;
+
+    // SECURITY: Consume authorization code immediately (atomic get-and-remove)
+    // This prevents race conditions where the same code could be used twice.
+    // Validations happen after removal - if they fail, code is already consumed.
+    // This is acceptable per RFC 6749: codes MUST be single-use.
+    let code_state = state.oauth_code_store.remove(&code).await.ok_or_else(|| {
+        oauth2_error(
+            "invalid_grant",
+            Some("Invalid or expired authorization code".to_string()),
+        )
+    })?;
+
+    // Verify project and extension match
+    if code_state.project_id != project.id || code_state.extension_name != extension_name {
+        return Err(oauth2_error(
+            "invalid_grant",
+            Some("Authorization code mismatch".to_string()),
+        ));
+    }
+
+    // RFC 6749 Section 4.1.3: Validate redirect_uri matches authorization request
+    // If redirect_uri was included in authorization, it MUST be included here and match exactly
+    if let Some(ref stored_redirect_uri) = code_state.redirect_uri {
+        match &req.redirect_uri {
+            Some(req_redirect_uri) if req_redirect_uri == stored_redirect_uri => {
+                // Match - validation passed
+            }
+            Some(_) => {
+                return Err(oauth2_error(
+                    "invalid_grant",
+                    Some("redirect_uri does not match authorization request".to_string()),
+                ));
+            }
+            None => {
+                return Err(oauth2_error(
+                    "invalid_request",
+                    Some("redirect_uri required (was provided during authorization)".to_string()),
+                ));
+            }
+        }
+    } else if req.redirect_uri.is_some() {
+        // redirect_uri provided in token request but not in authorization request
+        return Err(oauth2_error(
+            "invalid_request",
+            Some("redirect_uri was not provided during authorization".to_string()),
+        ));
+    }
+
+    // CRITICAL: If code_verifier provided, challenge must have been provided during authz
+    // This prevents bypassing authentication by providing code_verifier without prior code_challenge
+    if req.code_verifier.is_some() && code_state.code_challenge.is_none() {
+        return Err(oauth2_error(
+            "invalid_request",
+            Some("code_verifier requires prior code_challenge during authorization".to_string()),
+        ));
+    }
+
+    // PKCE validation if code_challenge was provided during authorization
+    if let Some(ref code_challenge) = code_state.code_challenge {
+        // PKCE flow - require code_verifier
+        let code_verifier = req.code_verifier.ok_or_else(|| {
+            oauth2_error(
+                "invalid_request",
+                Some("Missing code_verifier for PKCE flow".to_string()),
+            )
+        })?;
+
+        // RFC 7636: code_verifier must be 43-128 characters, unreserved charset [A-Za-z0-9-._~]
+        if code_verifier.len() < 43 || code_verifier.len() > 128 {
+            return Err(oauth2_error(
+                "invalid_request",
+                Some("code_verifier must be 43-128 characters".to_string()),
+            ));
+        }
+        if !code_verifier
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || "-._~".contains(c))
+        {
+            return Err(oauth2_error(
+                "invalid_request",
+                Some("code_verifier contains invalid characters".to_string()),
+            ));
+        }
+
+        let code_challenge_method = code_state
+            .code_challenge_method
+            .as_deref()
+            .unwrap_or("S256");
+
+        if !validate_pkce(&code_verifier, code_challenge, code_challenge_method) {
+            return Err(oauth2_error(
+                "invalid_grant",
+                Some("PKCE validation failed".to_string()),
+            ));
+        }
+
+        debug!("PKCE validation successful");
+    }
+
+    // Note: For non-PKCE flows, client_secret was already validated in token_endpoint()
+
+    // Decrypt tokens from code_state (tokens stored directly in authorization code cache)
+    let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
+        error!("Encryption provider not configured");
+        oauth2_error("server_error", Some("Internal server error".to_string()))
+    })?;
+
+    let access_token = encryption_provider
+        .decrypt(&code_state.access_token_encrypted)
+        .await
+        .map_err(|e| {
+            error!("Failed to decrypt access token: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?;
+
+    let refresh_token = if let Some(ref encrypted) = code_state.refresh_token_encrypted {
+        Some(encryption_provider.decrypt(encrypted).await.map_err(|e| {
+            error!("Failed to decrypt refresh token: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?)
+    } else {
+        None
+    };
+
+    let id_token = if let Some(ref encrypted) = code_state.id_token_encrypted {
+        Some(encryption_provider.decrypt(encrypted).await.map_err(|e| {
+            error!("Failed to decrypt ID token: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?)
+    } else {
+        None
+    };
+
+    // Calculate expires_in (seconds from now)
+    let expires_in = code_state.expires_at.map(|expires_at| {
+        let now = Utc::now();
+        let duration = expires_at.signed_duration_since(now);
+        duration.num_seconds().max(0) // Don't return negative values
+    });
+
+    // Build scope from extension spec
+    let scope = if spec.scopes.is_empty() {
+        None
+    } else {
+        Some(spec.scopes.join(" "))
+    };
+
+    info!(
+        "Authorization code grant successful for project {} extension {}",
+        project.name, extension_name
+    );
+
+    Ok(Json(OAuth2TokenResponse {
+        access_token,
+        token_type: "Bearer".to_string(),
+        expires_in,
+        refresh_token,
+        scope,
+        id_token,
+    }))
+}
+
+/// Handle refresh_token grant type
+async fn handle_refresh_token_grant(
+    state: AppState,
+    project: crate::db::models::Project,
+    extension_name: String,
+    spec: OAuthExtensionSpec,
+    req: TokenRequest,
+) -> Result<Json<OAuth2TokenResponse>, (StatusCode, Json<OAuth2ErrorResponse>)> {
+    // Validate required parameters
+    let refresh_token = req.refresh_token.ok_or_else(|| {
+        oauth2_error(
+            "invalid_request",
+            Some("Missing required parameter: refresh_token".to_string()),
+        )
+    })?;
+
+    // Call OAuth provider's refresh_token method
+    use super::provider::{OAuthProvider, OAuthProviderConfig};
+
+    let oauth_provider = OAuthProvider::new(OAuthProviderConfig {
+        db_pool: state.db_pool.clone(),
+        encryption_provider: state.encryption_provider.clone().ok_or_else(|| {
+            error!("Encryption provider not configured");
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?,
+        http_client: reqwest::Client::new(),
+        api_domain: state.public_url.clone(),
+    });
+
+    // Get upstream OAuth client secret (prefers encrypted in spec, falls back to env var ref)
+    let client_secret = oauth_provider
+        .resolve_oauth_client_secret(project.id, &spec)
+        .await
+        .map_err(|e| {
+            error!("Failed to resolve OAuth client secret: {:?}", e);
+            oauth2_error("server_error", Some("Internal server error".to_string()))
+        })?;
+
+    // Refresh tokens with upstream provider
+    let token_response = oauth_provider
+        .refresh_token(&spec, &client_secret, &refresh_token)
+        .await
+        .map_err(|e| {
+            error!("Failed to refresh token with upstream provider: {:?}", e);
+            oauth2_error("invalid_grant", Some("Failed to refresh token".to_string()))
+        })?;
+
+    // Calculate expires_in
+    let expires_in = Some(token_response.expires_in);
+
+    // Build scope
+    let scope = if spec.scopes.is_empty() {
+        None
+    } else {
+        Some(spec.scopes.join(" "))
+    };
+
+    info!(
+        "Refresh token grant successful for project {} extension {}",
+        project.name, extension_name
+    );
+
+    Ok(Json(OAuth2TokenResponse {
+        access_token: token_response.access_token,
+        token_type: token_response.token_type,
+        expires_in,
+        refresh_token: token_response.refresh_token,
+        scope,
+        id_token: token_response.id_token,
+    }))
+}
+
+/// CORS preflight handler for token endpoint
 ///
-/// POST /api/v1/projects/{project}/extensions/{extension}/oauth/exchange
+/// OPTIONS /oidc/{project}/{extension}/token
 ///
-/// Query params:
-/// - exchange_token: Temporary exchange token from callback
+/// Validates the Origin header against project-specific allowed origins:
+/// - localhost (any port) for local development
+/// - Rise public URL
+/// - Project deployment URLs (including custom domains)
+pub async fn token_endpoint_options(
+    State(state): State<AppState>,
+    Path((project_name, _extension_name)): Path<(String, String)>,
+    headers: axum::http::HeaderMap,
+) -> Response {
+    // Get Origin header
+    let origin = match headers.get(header::ORIGIN).and_then(|h| h.to_str().ok()) {
+        Some(o) => o,
+        None => {
+            // No Origin header - not a CORS request, return empty 204
+            return StatusCode::NO_CONTENT.into_response();
+        }
+    };
+
+    // Get project to validate origin
+    let project = match db_projects::find_by_name(&state.db_pool, &project_name).await {
+        Ok(Some(p)) => p,
+        _ => {
+            // Project not found - reject CORS
+            return StatusCode::FORBIDDEN.into_response();
+        }
+    };
+
+    // Validate origin against project's allowed origins
+    match validate_cors_origin(
+        &state.db_pool,
+        origin,
+        &project,
+        &state.public_url,
+        &state.deployment_backend,
+    )
+    .await
+    {
+        Some(allowed_origin) => {
+            // Origin is allowed - return CORS headers
+            let cors = cors_headers(&allowed_origin);
+            (StatusCode::NO_CONTENT, cors).into_response()
+        }
+        None => {
+            // Origin not allowed
+            debug!(
+                "CORS origin '{}' not allowed for project '{}'",
+                origin, project_name
+            );
+            StatusCode::FORBIDDEN.into_response()
+        }
+    }
+}
+
+/// Get upstream issuer URL from spec or derive from token_endpoint
+fn get_upstream_issuer(spec: &OAuthExtensionSpec) -> Option<String> {
+    // Use spec.issuer if provided, otherwise derive from token_endpoint
+    spec.issuer.clone().or_else(|| {
+        // Try to derive issuer from token_endpoint by removing common path suffixes
+        // e.g., "http://dex:5556/dex/token" -> "http://dex:5556/dex"
+        let token_url = Url::parse(&spec.token_endpoint).ok()?;
+        let mut path = token_url.path().to_string();
+        // Remove common token endpoint suffixes
+        for suffix in ["/token", "/token-request", "/oauth/token", "/oauth2/token"] {
+            if path.ends_with(suffix) {
+                path = path.trim_end_matches(suffix).to_string();
+                break;
+            }
+        }
+        let mut issuer_url = token_url.clone();
+        issuer_url.set_path(&path);
+        // Remove query and fragment
+        issuer_url.set_query(None);
+        issuer_url.set_fragment(None);
+        Some(issuer_url.to_string().trim_end_matches('/').to_string())
+    })
+}
+
+/// Proxy OIDC discovery document from upstream provider
 ///
-/// This endpoint is called by backend applications that received an exchange_token
-/// from the OAuth callback. They exchange it for the actual OAuth credentials.
-/// Requires service account authentication (RISE_SERVICE_ACCOUNT_TOKEN).
-pub async fn exchange_credentials(
+/// GET /oidc/{project}/{extension}/.well-known/openid-configuration
+///
+/// Returns the OIDC discovery document with URLs rewritten to point to Rise's OIDC proxy:
+/// - issuer -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}
+/// - authorization_endpoint -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/authorize
+/// - token_endpoint -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/token
+/// - jwks_uri -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/jwks
+pub async fn oidc_discovery(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
-    Query(params): Query<super::models::ExchangeTokenRequest>,
-) -> Result<Json<super::models::CredentialsResponse>, (StatusCode, String)> {
+) -> Result<impl IntoResponse, (StatusCode, String)> {
     debug!(
-        "Exchange credentials request for project={}, extension={}",
+        "OIDC discovery request for project={}, extension={}",
         project_name, extension_name
     );
 
@@ -865,96 +1477,250 @@ pub async fn exchange_credentials(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Retrieve and validate exchange token (single-use, 5-minute TTL)
-    let exchange_state = state
-        .oauth_exchange_store
-        .get(&params.exchange_token)
-        .await
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            "Invalid or expired exchange token".to_string(),
-        ))?;
+    // Get OAuth extension
+    let extension =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                "OAuth extension not configured".to_string(),
+            ))?;
 
-    // Invalidate exchange token immediately (single-use)
-    state
-        .oauth_exchange_store
-        .invalidate(&params.exchange_token)
-        .await;
-
-    debug!(
-        "Exchange token validated and invalidated for session {}",
-        exchange_state.session_id
-    );
-
-    // Verify project and extension match
-    if exchange_state.project_id != project.id || exchange_state.extension_name != extension_name {
+    // Verify extension type is oauth
+    if extension.extension_type != "oauth" {
         return Err((
             StatusCode::BAD_REQUEST,
-            "Exchange token does not match project/extension".to_string(),
+            format!(
+                "Extension '{}' is not an OAuth extension (type: {})",
+                extension_name, extension.extension_type
+            ),
         ));
     }
 
-    // Get tokens from database
-    let token = user_oauth_tokens::get_by_session(
-        &state.db_pool,
-        project.id,
-        &extension_name,
-        &exchange_state.session_id,
-    )
-    .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-    .ok_or((
-        StatusCode::NOT_FOUND,
-        "OAuth token not found for this session".to_string(),
-    ))?;
+    // Parse spec
+    let spec: OAuthExtensionSpec = serde_json::from_value(extension.spec.clone()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid spec: {}", e),
+        )
+    })?;
 
-    // Update last_accessed_at
-    if let Err(e) = user_oauth_tokens::update_last_accessed(&state.db_pool, token.id).await {
-        warn!("Failed to update last_accessed_at: {:?}", e);
-    }
-
-    // Decrypt tokens
-    let encryption_provider = state.encryption_provider.as_ref().ok_or((
+    // Get upstream issuer
+    let upstream_issuer = get_upstream_issuer(&spec).ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
-        "Encryption provider not configured".to_string(),
+        "Unable to determine upstream OIDC issuer".to_string(),
     ))?;
 
-    let access_token = encryption_provider
-        .decrypt(&token.access_token_encrypted)
-        .await
-        .map_err(|e| {
-            error!("Failed to decrypt access token: {:?}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to decrypt access token: {}", e),
-            )
-        })?;
-
-    let refresh_token = match &token.refresh_token_encrypted {
-        Some(refresh_token_encrypted) => Some(
-            encryption_provider
-                .decrypt(refresh_token_encrypted)
-                .await
-                .map_err(|e| {
-                    error!("Failed to decrypt refresh token: {:?}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to decrypt refresh token: {}", e),
-                    )
-                })?,
-        ),
-        None => None,
-    };
-
-    info!(
-        "Exchange successful for session {} on project {} extension {}",
-        exchange_state.session_id, project_name, extension_name
+    // Fetch upstream discovery document
+    let discovery_url = format!(
+        "{}/.well-known/openid-configuration",
+        upstream_issuer.trim_end_matches('/')
     );
 
-    Ok(Json(super::models::CredentialsResponse {
-        access_token,
-        token_type: "Bearer".to_string(),
-        expires_at: token.expires_at.unwrap_or_else(Utc::now),
-        refresh_token, // Include refresh token for backend apps
-    }))
+    let http_client = reqwest::Client::new();
+    let response = http_client.get(&discovery_url).send().await.map_err(|e| {
+        error!(
+            "Failed to fetch OIDC discovery from {}: {:?}",
+            discovery_url, e
+        );
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to fetch OIDC discovery: {}", e),
+        )
+    })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unable to read error response".to_string());
+        error!(
+            "OIDC discovery failed with status {}: {}",
+            status, error_text
+        );
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Upstream OIDC discovery failed: {}", status),
+        ));
+    }
+
+    let mut discovery: serde_json::Value = response.json().await.map_err(|e| {
+        error!("Failed to parse OIDC discovery response: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to parse OIDC discovery".to_string(),
+        )
+    })?;
+
+    // Build Rise OIDC base URL
+    let rise_oidc_base = format!(
+        "{}/oidc/{}/{}",
+        state.public_url.trim_end_matches('/'),
+        project_name,
+        extension_name
+    );
+
+    // Rewrite URLs to point to Rise's OIDC proxy
+    if let Some(obj) = discovery.as_object_mut() {
+        obj.insert(
+            "issuer".to_string(),
+            serde_json::Value::String(rise_oidc_base.clone()),
+        );
+        obj.insert(
+            "authorization_endpoint".to_string(),
+            serde_json::Value::String(format!("{}/authorize", rise_oidc_base)),
+        );
+        obj.insert(
+            "token_endpoint".to_string(),
+            serde_json::Value::String(format!("{}/token", rise_oidc_base)),
+        );
+        obj.insert(
+            "jwks_uri".to_string(),
+            serde_json::Value::String(format!("{}/jwks", rise_oidc_base)),
+        );
+    }
+
+    info!(
+        "Returning OIDC discovery for {}/{} with Rise OIDC base: {}",
+        project_name, extension_name, rise_oidc_base
+    );
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        Json(discovery),
+    ))
+}
+
+/// Proxy JWKS from upstream provider
+///
+/// GET /oidc/{project}/{extension}/jwks
+///
+/// Fetches the JWKS from the upstream OAuth provider and returns it.
+pub async fn oidc_jwks(
+    State(state): State<AppState>,
+    Path((project_name, extension_name)): Path<(String, String)>,
+) -> Result<impl IntoResponse, (StatusCode, String)> {
+    debug!(
+        "OIDC JWKS request for project={}, extension={}",
+        project_name, extension_name
+    );
+
+    // Get project
+    let project = db_projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    // Get OAuth extension
+    let extension =
+        db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+            .ok_or((
+                StatusCode::NOT_FOUND,
+                "OAuth extension not configured".to_string(),
+            ))?;
+
+    // Verify extension type is oauth
+    if extension.extension_type != "oauth" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Extension '{}' is not an OAuth extension (type: {})",
+                extension_name, extension.extension_type
+            ),
+        ));
+    }
+
+    // Parse spec
+    let spec: OAuthExtensionSpec = serde_json::from_value(extension.spec.clone()).map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Invalid spec: {}", e),
+        )
+    })?;
+
+    // Get upstream issuer
+    let upstream_issuer = get_upstream_issuer(&spec).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Unable to determine upstream OIDC issuer".to_string(),
+    ))?;
+
+    // Fetch upstream discovery to get jwks_uri
+    let discovery_url = format!(
+        "{}/.well-known/openid-configuration",
+        upstream_issuer.trim_end_matches('/')
+    );
+
+    let http_client = reqwest::Client::new();
+    let discovery_response = http_client.get(&discovery_url).send().await.map_err(|e| {
+        error!(
+            "Failed to fetch OIDC discovery from {}: {:?}",
+            discovery_url, e
+        );
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to fetch OIDC discovery: {}", e),
+        )
+    })?;
+
+    if !discovery_response.status().is_success() {
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            "Upstream OIDC discovery failed".to_string(),
+        ));
+    }
+
+    let discovery: serde_json::Value = discovery_response.json().await.map_err(|e| {
+        error!("Failed to parse OIDC discovery response: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to parse OIDC discovery".to_string(),
+        )
+    })?;
+
+    // Get jwks_uri from discovery
+    let jwks_uri = discovery.get("jwks_uri").and_then(|v| v.as_str()).ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "No jwks_uri in OIDC discovery".to_string(),
+    ))?;
+
+    // Fetch JWKS
+    let jwks_response = http_client.get(jwks_uri).send().await.map_err(|e| {
+        error!("Failed to fetch JWKS from {}: {:?}", jwks_uri, e);
+        (
+            StatusCode::BAD_GATEWAY,
+            format!("Failed to fetch JWKS: {}", e),
+        )
+    })?;
+
+    if !jwks_response.status().is_success() {
+        let status = jwks_response.status();
+        return Err((
+            StatusCode::BAD_GATEWAY,
+            format!("Upstream JWKS fetch failed: {}", status),
+        ));
+    }
+
+    let jwks: serde_json::Value = jwks_response.json().await.map_err(|e| {
+        error!("Failed to parse JWKS response: {:?}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Failed to parse JWKS".to_string(),
+        )
+    })?;
+
+    info!(
+        "Returning JWKS for {}/{} from upstream: {}",
+        project_name, extension_name, jwks_uri
+    );
+
+    Ok((
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        Json(jwks),
+    ))
 }

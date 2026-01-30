@@ -1,6 +1,30 @@
 // Utility functions for Rise Dashboard
 // This file depends on React being loaded first
 
+// Clipboard helper with fallback for non-secure contexts
+async function copyToClipboard(text) {
+    // Try modern Clipboard API first (requires secure context)
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        return navigator.clipboard.writeText(text);
+    }
+
+    // Fallback for non-secure contexts (HTTP)
+    const textarea = document.createElement('textarea');
+    textarea.value = text;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+
+    try {
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+    } catch (err) {
+        document.body.removeChild(textarea);
+        throw new Error('Clipboard not available');
+    }
+}
+
 // Date formatting
 function formatDate(dateString) {
     const date = new Date(dateString);
