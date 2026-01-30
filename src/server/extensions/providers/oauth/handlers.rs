@@ -865,7 +865,9 @@ pub async fn token_endpoint(
         None
     };
 
-    // Build response with optional CORS headers
+    // Build response with CORS headers
+    // For error responses, always include CORS headers if Origin was provided (even if validation failed)
+    // This ensures proper CORS error handling in the browser
     match result {
         Ok(token_response) => {
             let mut response = (StatusCode::OK, Json(token_response)).into_response();
@@ -876,8 +878,12 @@ pub async fn token_endpoint(
         }
         Err((status, error_json)) => {
             let mut response = (status, error_json).into_response();
+            // For errors, use validated CORS headers if available, otherwise echo back Origin
             if let Some(cors) = cors_headers {
                 response.headers_mut().extend(cors);
+            } else if let Some(origin_str) = origin {
+                // Even if CORS validation failed, include CORS headers so browser gets proper error
+                response.headers_mut().extend(cors_headers(&origin_str));
             }
             response
         }
