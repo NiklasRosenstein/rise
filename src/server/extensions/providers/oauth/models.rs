@@ -110,6 +110,9 @@ pub struct OAuthCodeState {
     pub extension_name: String,
     /// When this authorization code was created
     pub created_at: DateTime<Utc>,
+    /// Redirect URI from authorization request (for validation during token exchange per RFC 6749)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub redirect_uri: Option<String>,
     /// PKCE code challenge from client (if PKCE flow)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_challenge: Option<String>,
@@ -151,6 +154,8 @@ pub struct TokenRequest {
     pub code: Option<String>,
     /// Refresh token (for refresh_token grant)
     pub refresh_token: Option<String>,
+    /// Redirect URI (must match authorization request per RFC 6749 Section 4.1.3)
+    pub redirect_uri: Option<String>,
     /// Rise client ID (required)
     pub client_id: String,
     /// Rise client secret (for confidential clients)
