@@ -18,18 +18,17 @@ First, create an OAuth extension that points to the local Dex instance:
 # Create a project (if you haven't already)
 rise project create oauth-demo --visibility public
 
-# The OAuth extension needs a client secret stored as an environment variable
-# For local Dex, the secret is "rise-backend-secret"
-rise env set DEX_CLIENT_SECRET "rise-backend-secret" --secret
+# Encrypt the Dex client secret (for local Dex, it's "rise-backend-secret")
+ENCRYPTED=$(rise encrypt "rise-backend-secret")
 
-# Create the OAuth extension
-rise extension create oauth-dex \
+# Create the OAuth extension with encrypted secret
+rise extension create oauth-demo oauth-dex \
   --type oauth \
   --spec '{
     "provider_name": "Dex (Local Dev)",
     "description": "Local Dex OIDC provider for development",
     "client_id": "rise-backend",
-    "client_secret_ref": "DEX_CLIENT_SECRET",
+    "client_secret_encrypted": "'"$ENCRYPTED"'",
     "authorization_endpoint": "http://localhost:5556/dex/auth",
     "token_endpoint": "http://localhost:5556/dex/token",
     "scopes": ["openid", "email", "profile"]

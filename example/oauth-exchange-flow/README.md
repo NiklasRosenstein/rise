@@ -17,17 +17,17 @@ This example demonstrates the **RFC 6749-compliant token endpoint flow** for ser
 # Create a project (if you haven't already)
 rise project create oauth-demo --visibility public
 
-# Store the Dex client secret
-rise env set DEX_CLIENT_SECRET "rise-backend-secret" --secret
+# Encrypt the Dex client secret
+ENCRYPTED=$(rise encrypt "rise-backend-secret")
 
-# Create the OAuth extension
-rise extension create oauth-dex \
+# Create the OAuth extension with encrypted secret
+rise extension create oauth-demo oauth-dex \
   --type oauth \
   --spec '{
     "provider_name": "Dex (Local Dev)",
     "description": "Local Dex OIDC provider for development",
     "client_id": "rise-backend",
-    "client_secret_ref": "DEX_CLIENT_SECRET",
+    "client_secret_encrypted": "'"$ENCRYPTED"'",
     "authorization_endpoint": "http://localhost:5556/dex/auth",
     "token_endpoint": "http://localhost:5556/dex/token",
     "scopes": ["openid", "email", "profile"]
