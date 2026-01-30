@@ -719,8 +719,8 @@ app.get('/oauth/callback', async (req, res) => {
       body: new URLSearchParams({
         grant_type: 'authorization_code',
         code: code,
-        client_id: process.env.OAUTH_RISE_CLIENT_ID_${extensionName.toUpperCase().replace(/-/g, '_')},
-        client_secret: process.env.OAUTH_RISE_CLIENT_SECRET_${extensionName.toUpperCase().replace(/-/g, '_')}
+        client_id: process.env.${extensionName.toUpperCase().replace(/-/g, '_')}_CLIENT_ID,
+        client_secret: process.env.${extensionName.toUpperCase().replace(/-/g, '_')}_CLIENT_SECRET
       })
     });
 
