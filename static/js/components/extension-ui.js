@@ -190,6 +190,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
     const [clientId, setClientId] = useState(spec?.client_id || '');
     const [clientSecretPlaintext, setClientSecretPlaintext] = useState('');
     const [clientSecretEncrypted, setClientSecretEncrypted] = useState(spec?.client_secret_encrypted || '');
+    const [hasExistingSecret, setHasExistingSecret] = useState(!!spec?.client_secret_encrypted);
     const [showSecret, setShowSecret] = useState(false);
     const [isEncrypting, setIsEncrypting] = useState(false);
     const [authorizationEndpoint, setAuthorizationEndpoint] = useState(spec?.authorization_endpoint || '');
@@ -220,6 +221,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
             const response = await api.encryptSecret(clientSecretPlaintext);
             setClientSecretEncrypted(response.encrypted);
             setClientSecretPlaintext(''); // Clear plaintext immediately after encryption
+            setHasExistingSecret(true);
             showToast('Client secret encrypted successfully', 'success');
         } catch (err) {
             if (err.message.includes('429') || err.message.includes('rate limit')) {
@@ -330,7 +332,8 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
 
                 <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Client Secret {clientSecretEncrypted && <span className="text-green-600 dark:text-green-400">(✓ Encrypted)</span>}
+                        Client Secret {hasExistingSecret && !clientSecretPlaintext && <span className="text-gray-500 dark:text-gray-400">(configured)</span>}
+                        {clientSecretPlaintext && <span className="text-blue-600 dark:text-blue-400">(will be updated)</span>}
                     </label>
                     <div className="flex gap-2">
                         <div className="flex-1 relative">
@@ -361,7 +364,9 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                         </button>
                     </div>
                     <p className="text-sm text-gray-600 dark:text-gray-400">
-                        Enter the OAuth client secret from your provider and click "Encrypt" to securely store it
+                        {hasExistingSecret
+                            ? "Secret is configured. Leave blank to keep current secret, or enter a new value and click Encrypt to update it."
+                            : "Enter the OAuth client secret from your provider and click Encrypt to securely store it"}
                     </p>
                 </div>
 
@@ -484,14 +489,10 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                     <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Setup Steps</h2>
                     <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
                         <ol className="text-sm text-yellow-900 dark:text-yellow-200 list-decimal list-inside space-y-2">
-                            <li>Configure redirect URI in OAuth provider</li>
-                            <li>Get client ID and secret from provider</li>
-                            <li>Store secret as encrypted env var:
-                                <code className="block bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded mt-1 text-xs">
-                                    rise env set {displayProjectName} {clientSecretRef || 'OAUTH_SECRET'} "..." --secret
-                                </code>
-                            </li>
-                            <li>Fill out the form and enable</li>
+                            <li>Register OAuth app with provider and get client credentials</li>
+                            <li>Configure redirect URI in provider: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded text-xs">{redirectUri}</code></li>
+                            <li>Enter client secret below (it will be encrypted automatically)</li>
+                            <li>Save this extension</li>
                         </ol>
                     </div>
                 </section>
