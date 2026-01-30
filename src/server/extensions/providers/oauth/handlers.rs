@@ -1121,6 +1121,15 @@ async fn handle_authorization_code_grant(
     spec: OAuthExtensionSpec,
     req: TokenRequest,
 ) -> Result<Json<OAuth2TokenResponse>, (StatusCode, Json<OAuth2ErrorResponse>)> {
+    // SECURITY: Ensure mutual exclusivity of authentication methods
+    // This is defensive programming - the check should already have happened in token_endpoint_inner
+    if req.client_secret.is_some() && req.code_verifier.is_some() {
+        return Err(oauth2_error(
+            "invalid_request",
+            Some("Authentication methods must be mutually exclusive".to_string()),
+        ));
+    }
+
     // Validate required parameters
     let code = req.code.ok_or_else(|| {
         oauth2_error(
