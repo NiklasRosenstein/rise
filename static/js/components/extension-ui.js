@@ -431,9 +431,13 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                             </code>
                             <button
                                 type="button"
-                                onClick={() => {
-                                    navigator.clipboard.writeText(redirectUri);
-                                    showToast('Redirect URI copied to clipboard', 'success');
+                                onClick={async () => {
+                                    try {
+                                        await copyToClipboard(redirectUri);
+                                        showToast('Redirect URI copied to clipboard', 'success');
+                                    } catch (err) {
+                                        showToast(`Failed to copy: ${err.message}`, 'error');
+                                    }
                                 }}
                                 className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
                                 title="Copy redirect URI"
@@ -918,10 +922,14 @@ function OAuthDetailView({ extension, projectName }) {
                                         </code>
                                         <button
                                             type="button"
-                                            onClick={() => {
-                                                const clientId = spec.rise_client_id || `${projectName}-${extensionName}`;
-                                                navigator.clipboard.writeText(clientId);
-                                                showToast('Client ID copied to clipboard', 'success');
+                                            onClick={async () => {
+                                                try {
+                                                    const clientId = spec.rise_client_id || `${projectName}-${extensionName}`;
+                                                    await copyToClipboard(clientId);
+                                                    showToast('Client ID copied to clipboard', 'success');
+                                                } catch (err) {
+                                                    showToast(`Failed to copy: ${err.message}`, 'error');
+                                                }
                                             }}
                                             className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
                                             title="Copy client ID"
@@ -942,9 +950,13 @@ function OAuthDetailView({ extension, projectName }) {
                                             </code>
                                             <button
                                                 type="button"
-                                                onClick={() => {
-                                                    navigator.clipboard.writeText(spec.rise_client_secret_ref);
-                                                    showToast('Secret env var name copied to clipboard', 'success');
+                                                onClick={async () => {
+                                                    try {
+                                                        await copyToClipboard(spec.rise_client_secret_ref);
+                                                        showToast('Secret env var name copied to clipboard', 'success');
+                                                    } catch (err) {
+                                                        showToast(`Failed to copy: ${err.message}`, 'error');
+                                                    }
                                                 }}
                                                 className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
                                                 title="Copy env var name"
@@ -965,9 +977,13 @@ function OAuthDetailView({ extension, projectName }) {
                                         </code>
                                         <button
                                             type="button"
-                                            onClick={() => {
-                                                navigator.clipboard.writeText(`${backendUrl}/oidc/${projectName}/${extensionName}/authorize`);
-                                                showToast('Authorize URL copied to clipboard', 'success');
+                                            onClick={async () => {
+                                                try {
+                                                    await copyToClipboard(`${backendUrl}/oidc/${projectName}/${extensionName}/authorize`);
+                                                    showToast('Authorize URL copied to clipboard', 'success');
+                                                } catch (err) {
+                                                    showToast(`Failed to copy: ${err.message}`, 'error');
+                                                }
                                             }}
                                             className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
                                             title="Copy authorize URL"
@@ -984,9 +1000,13 @@ function OAuthDetailView({ extension, projectName }) {
                                         </code>
                                         <button
                                             type="button"
-                                            onClick={() => {
-                                                navigator.clipboard.writeText(`${backendUrl}/oidc/${projectName}/${extensionName}/token`);
-                                                showToast('Token endpoint copied to clipboard', 'success');
+                                            onClick={async () => {
+                                                try {
+                                                    await copyToClipboard(`${backendUrl}/oidc/${projectName}/${extensionName}/token`);
+                                                    showToast('Token endpoint copied to clipboard', 'success');
+                                                } catch (err) {
+                                                    showToast(`Failed to copy: ${err.message}`, 'error');
+                                                }
                                             }}
                                             className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
                                             title="Copy token endpoint"
