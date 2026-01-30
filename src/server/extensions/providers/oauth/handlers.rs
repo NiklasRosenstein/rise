@@ -710,6 +710,7 @@ pub async fn callback(
             project_id: project.id,
             extension_name: extension_name.clone(),
             created_at: Utc::now(),
+            redirect_uri: oauth_state.redirect_uri.clone(),
             code_challenge: oauth_state.client_code_challenge.clone(),
             code_challenge_method: oauth_state.client_code_challenge_method.clone(),
             access_token_encrypted,
@@ -846,7 +847,7 @@ pub async fn token_endpoint(
     let result = token_endpoint_inner(&state, &project_name, &extension_name, &headers, body).await;
 
     // Get CORS headers if Origin was provided and project exists
-    let cors_headers = if let Some(ref origin_str) = origin {
+    let validated_cors_headers = if let Some(ref origin_str) = origin {
         // We need to get the project to validate CORS
         if let Ok(Some(project)) = db_projects::find_by_name(&state.db_pool, &project_name).await {
             validate_cors_origin(
@@ -865,19 +866,25 @@ pub async fn token_endpoint(
         None
     };
 
-    // Build response with optional CORS headers
+    // Build response with CORS headers
+    // For error responses, always include CORS headers if Origin was provided (even if validation failed)
+    // This ensures proper CORS error handling in the browser
     match result {
         Ok(token_response) => {
             let mut response = (StatusCode::OK, Json(token_response)).into_response();
-            if let Some(cors) = cors_headers {
+            if let Some(cors) = validated_cors_headers {
                 response.headers_mut().extend(cors);
             }
             response
         }
         Err((status, error_json)) => {
             let mut response = (status, error_json).into_response();
-            if let Some(cors) = cors_headers {
+            // For errors, use validated CORS headers if available, otherwise echo back Origin
+            if let Some(cors) = validated_cors_headers {
                 response.headers_mut().extend(cors);
+            } else if let Some(origin_str) = origin {
+                // Even if CORS validation failed, include CORS headers so browser gets proper error
+                response.headers_mut().extend(cors_headers(&origin_str));
             }
             response
         }
@@ -1115,6 +1122,15 @@ async fn handle_authorization_code_grant(
     spec: OAuthExtensionSpec,
     req: TokenRequest,
 ) -> Result<Json<OAuth2TokenResponse>, (StatusCode, Json<OAuth2ErrorResponse>)> {
+    // SECURITY: Ensure mutual exclusivity of authentication methods
+    // This is defensive programming - the check should already have happened in token_endpoint_inner
+    if req.client_secret.is_some() && req.code_verifier.is_some() {
+        return Err(oauth2_error(
+            "invalid_request",
+            Some("Authentication methods must be mutually exclusive".to_string()),
+        ));
+    }
+
     // Validate required parameters
     let code = req.code.ok_or_else(|| {
         oauth2_error(
@@ -1139,6 +1155,34 @@ async fn handle_authorization_code_grant(
         return Err(oauth2_error(
             "invalid_grant",
             Some("Authorization code mismatch".to_string()),
+        ));
+    }
+
+    // RFC 6749 Section 4.1.3: Validate redirect_uri matches authorization request
+    // If redirect_uri was included in authorization, it MUST be included here and match exactly
+    if let Some(ref stored_redirect_uri) = code_state.redirect_uri {
+        match &req.redirect_uri {
+            Some(req_redirect_uri) if req_redirect_uri == stored_redirect_uri => {
+                // Match - validation passed
+            }
+            Some(_) => {
+                return Err(oauth2_error(
+                    "invalid_grant",
+                    Some("redirect_uri does not match authorization request".to_string()),
+                ));
+            }
+            None => {
+                return Err(oauth2_error(
+                    "invalid_request",
+                    Some("redirect_uri required (was provided during authorization)".to_string()),
+                ));
+            }
+        }
+    } else if req.redirect_uri.is_some() {
+        // redirect_uri provided in token request but not in authorization request
+        return Err(oauth2_error(
+            "invalid_request",
+            Some("redirect_uri was not provided during authorization".to_string()),
         ));
     }
 
