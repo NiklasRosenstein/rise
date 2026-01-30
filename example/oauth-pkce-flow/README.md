@@ -71,6 +71,14 @@ The app will be accessible at `https://oauth-demo.{your-domain}`.
 
 ## How It Works
 
+### Important: HTTPS Requirement
+
+**PKCE requires HTTPS or localhost** to work properly. The Web Crypto API (`crypto.subtle`) required for SHA-256 hashing is only available in secure contexts. This example will **not work** over plain HTTP (except for `localhost`).
+
+For production deployments, always use HTTPS. For local development:
+- Use `localhost` (secure context by default)
+- Or set up a local HTTPS proxy (e.g., `mkcert` + nginx)
+
 ### PKCE Flow Steps
 
 1. **SPA generates code verifier**: Random 128-character string (base64url-safe)
