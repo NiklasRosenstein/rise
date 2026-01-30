@@ -231,6 +231,20 @@ class RiseAPI {
         });
     }
 
+    // Encryption endpoints
+
+    /**
+     * Encrypt a plaintext secret for use in extension specs
+     * @param {string} plaintext - The plaintext secret to encrypt
+     * @returns {Promise<{encrypted: string}>} The encrypted value
+     */
+    async encryptSecret(plaintext) {
+        return this.request('/encrypt', {
+            method: 'POST',
+            body: JSON.stringify({ plaintext })
+        });
+    }
+
     // Extension endpoints
 
     /**

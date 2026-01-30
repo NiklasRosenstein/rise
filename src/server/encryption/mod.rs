@@ -1,4 +1,6 @@
+pub mod handlers;
 pub mod providers;
+pub mod routes;
 
 use anyhow::Result;
 use async_trait::async_trait;

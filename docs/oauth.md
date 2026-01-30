@@ -286,22 +286,80 @@ Obtain client credentials from your OAuth provider:
 
 **2. Store Client Secret in Rise**
 
+There are two ways to store the OAuth provider's client secret:
+
+**Option A: Encrypted in Extension Spec (Recommended)**
+
+Encrypt the secret and store it directly in the extension spec:
+
 ```bash
-rise env set my-app OAUTH_GOOGLE_SECRET "your_client_secret_here" --secret
+# Encrypt the secret
+ENCRYPTED=$(rise encrypt "your_client_secret_here")
+
+# Use in extension spec
+rise extension create my-app oauth-provider \
+  --type oauth \
+  --spec '{
+    "provider_name": "My OAuth Provider",
+    "client_id": "your_client_id",
+    "client_secret_encrypted": "'"$ENCRYPTED"'",
+    "authorization_endpoint": "https://provider.com/oauth/authorize",
+    "token_endpoint": "https://provider.com/oauth/token",
+    "scopes": ["openid", "email", "profile"]
+  }'
 ```
+
+Or encrypt via stdin:
+
+```bash
+echo "your_client_secret_here" | rise encrypt
+```
+
+The `rise encrypt` command is rate-limited to 100 requests per hour per user.
+
+**Option B: Environment Variable Reference (Legacy)**
+
+Store the secret as an encrypted environment variable and reference it:
+
+```bash
+# Store as environment variable
+rise env set my-app OAUTH_GOOGLE_SECRET "your_client_secret_here" --secret
+
+# Reference in extension spec
+rise extension create my-app oauth-provider \
+  --type oauth \
+  --spec '{
+    "provider_name": "My OAuth Provider",
+    "client_id": "your_client_id",
+    "client_secret_ref": "OAUTH_GOOGLE_SECRET",
+    "authorization_endpoint": "https://provider.com/oauth/authorize",
+    "token_endpoint": "https://provider.com/oauth/token",
+    "scopes": ["openid", "email", "profile"]
+  }'
+```
+
+**Which should you use?**
+
+- **New extensions**: Use `client_secret_encrypted` (Option A) for simpler configuration
+- **Existing extensions**: Continue using `client_secret_ref` (Option B) - it will be supported indefinitely
+- **Migration**: Optional - both patterns work identically
 
 ### Creating OAuth Extension
 
-**Generic Provider:**
+**Generic Provider (using encrypted secret):**
 
 ```bash
+# Encrypt the client secret
+ENCRYPTED=$(rise encrypt "your_client_secret_here")
+
+# Create extension with encrypted secret
 rise extension create my-app oauth-provider \
   --type oauth \
   --spec '{
     "provider_name": "My OAuth Provider",
     "description": "OAuth authentication for my app",
     "client_id": "your_client_id",
-    "client_secret_ref": "OAUTH_PROVIDER_SECRET",
+    "client_secret_encrypted": "'"$ENCRYPTED"'",
     "authorization_endpoint": "https://provider.com/oauth/authorize",
     "token_endpoint": "https://provider.com/oauth/token",
     "scopes": ["openid", "email", "profile"]

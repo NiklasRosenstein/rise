@@ -188,7 +188,10 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
     const [providerName, setProviderName] = useState(spec?.provider_name || '');
     const [description, setDescription] = useState(spec?.description || '');
     const [clientId, setClientId] = useState(spec?.client_id || '');
-    const [clientSecretRef, setClientSecretRef] = useState(spec?.client_secret_ref || '');
+    const [clientSecretPlaintext, setClientSecretPlaintext] = useState('');
+    const [clientSecretEncrypted, setClientSecretEncrypted] = useState(spec?.client_secret_encrypted || '');
+    const [showSecret, setShowSecret] = useState(false);
+    const [isEncrypting, setIsEncrypting] = useState(false);
     const [authorizationEndpoint, setAuthorizationEndpoint] = useState(spec?.authorization_endpoint || '');
     const [tokenEndpoint, setTokenEndpoint] = useState(spec?.token_endpoint || '');
     const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
@@ -206,6 +209,29 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
         onChangeRef.current = onChange;
     }, [onChange]);
 
+    // Encrypt client secret when user enters it
+    const handleEncryptSecret = async () => {
+        if (!clientSecretPlaintext || clientSecretPlaintext.trim() === '') {
+            return;
+        }
+
+        setIsEncrypting(true);
+        try {
+            const response = await api.encryptSecret(clientSecretPlaintext);
+            setClientSecretEncrypted(response.encrypted);
+            setClientSecretPlaintext(''); // Clear plaintext immediately after encryption
+            showToast('Client secret encrypted successfully', 'success');
+        } catch (err) {
+            if (err.message.includes('429') || err.message.includes('rate limit')) {
+                showToast('Rate limit exceeded. Please try again later (100 requests per hour).', 'error');
+            } else {
+                showToast(`Failed to encrypt secret: ${err.message}`, 'error');
+            }
+        } finally {
+            setIsEncrypting(false);
+        }
+    };
+
     // Update parent when values change
     useEffect(() => {
         // Parse scopes from comma-separated string
@@ -218,7 +244,6 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
         const newSpec = {
             provider_name: providerName,
             client_id: clientId,
-            client_secret_ref: clientSecretRef,
             authorization_endpoint: authorizationEndpoint,
             token_endpoint: tokenEndpoint,
             scopes: scopesArray,
@@ -229,8 +254,13 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
             newSpec.description = description;
         }
 
+        // Include encrypted client secret if set
+        if (clientSecretEncrypted) {
+            newSpec.client_secret_encrypted = clientSecretEncrypted;
+        }
+
         onChangeRef.current(newSpec);
-    }, [providerName, description, clientId, clientSecretRef, authorizationEndpoint, tokenEndpoint, scopes]);
+    }, [providerName, description, clientId, clientSecretEncrypted, authorizationEndpoint, tokenEndpoint, scopes]);
 
     // Common provider templates
     const providerTemplates = {
@@ -298,15 +328,42 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                     helperText="OAuth client identifier from your provider"
                 />
 
-                <FormField
-                    label="Client Secret Environment Variable"
-                    id="oauth-client-secret-ref"
-                    value={clientSecretRef}
-                    onChange={(e) => setClientSecretRef(e.target.value)}
-                    placeholder="e.g., OAUTH_SNOWFLAKE_SECRET"
-                    required
-                    helperText="Name of the environment variable containing the client secret (must be set as secret env var)"
-                />
+                <div className="space-y-2">
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Client Secret {clientSecretEncrypted && <span className="text-green-600 dark:text-green-400">(✓ Encrypted)</span>}
+                    </label>
+                    <div className="flex gap-2">
+                        <div className="flex-1 relative">
+                            <input
+                                type={showSecret ? "text" : "password"}
+                                id="oauth-client-secret"
+                                value={clientSecretPlaintext}
+                                onChange={(e) => setClientSecretPlaintext(e.target.value)}
+                                placeholder={clientSecretEncrypted ? "••••••••" : "Enter client secret"}
+                                disabled={isEncrypting}
+                                className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50"
+                            />
+                            <button
+                                type="button"
+                                onClick={() => setShowSecret(!showSecret)}
+                                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                            >
+                                {showSecret ? '👁️' : '👁️‍🗨️'}
+                            </button>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleEncryptSecret}
+                            disabled={!clientSecretPlaintext || clientSecretPlaintext.trim() === '' || isEncrypting}
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            {isEncrypting ? 'Encrypting...' : 'Encrypt'}
+                        </button>
+                    </div>
+                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                        Enter the OAuth client secret from your provider and click "Encrypt" to securely store it
+                    </p>
+                </div>
 
                 <FormField
                     label="Authorization Endpoint"

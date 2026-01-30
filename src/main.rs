@@ -106,6 +106,11 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "dom")]
     Domain(DomainCommands),
+    /// Encrypt a secret for use in extension specs
+    Encrypt {
+        /// Secret to encrypt (or read from stdin if not provided)
+        plaintext: Option<String>,
+    },
     /// Environment variable management commands
     #[command(subcommand)]
     #[command(visible_alias = "e")]
@@ -728,6 +733,9 @@ async fn main() -> Result<()> {
         Commands::Backend(_) => {
             // Already handled above before config loading
             unreachable!("Backend commands should have been handled earlier")
+        }
+        Commands::Encrypt { plaintext } => {
+            cli::encrypt::encrypt_command(&config, plaintext.clone()).await?;
         }
         Commands::Project(project_cmd) => match project_cmd {
             ProjectCommands::Create {

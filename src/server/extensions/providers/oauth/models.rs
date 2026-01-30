@@ -12,8 +12,12 @@ pub struct OAuthExtensionSpec {
     pub description: String,
     /// OAuth client ID (for upstream provider)
     pub client_id: String,
-    /// Environment variable name containing the client secret (e.g., "OAUTH_SNOWFLAKE_CLIENT_SECRET")
-    pub client_secret_ref: String,
+    /// DEPRECATED: Environment variable name containing the client secret (for backward compatibility)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret_ref: Option<String>,
+    /// Encrypted client secret stored directly in spec (preferred over client_secret_ref)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_secret_encrypted: Option<String>,
     /// OAuth provider authorization URL
     pub authorization_endpoint: String,
     /// OAuth provider token URL

@@ -111,6 +111,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(workload_identity::routes::routes())
         .merge(env_vars::routes::routes())
         .merge(extensions::routes::routes())
+        .merge(encryption::routes::routes())
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,

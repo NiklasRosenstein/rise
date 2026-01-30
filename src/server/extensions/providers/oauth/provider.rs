@@ -104,6 +104,34 @@ impl OAuthProvider {
         Ok(client_secret)
     }
 
+    /// Resolve OAuth provider's client_secret from spec (prefers encrypted, falls back to ref)
+    #[allow(dead_code)]
+    pub async fn resolve_oauth_client_secret(
+        &self,
+        project_id: Uuid,
+        spec: &OAuthExtensionSpec,
+    ) -> Result<String> {
+        // Prefer client_secret_encrypted if set
+        if let Some(ref encrypted) = spec.client_secret_encrypted {
+            return self
+                .encryption_provider
+                .decrypt(encrypted)
+                .await
+                .context("Failed to decrypt OAuth client secret from spec");
+        }
+
+        // Fall back to client_secret_ref (legacy env var pattern)
+        if let Some(ref client_secret_ref) = spec.client_secret_ref {
+            return self
+                .resolve_client_secret(project_id, client_secret_ref)
+                .await;
+        }
+
+        Err(anyhow!(
+            "No client secret configured (set client_secret_encrypted or client_secret_ref)"
+        ))
+    }
+
     /// Exchange authorization code for tokens
     #[allow(dead_code)]
     pub async fn exchange_code_for_tokens(
@@ -214,6 +242,10 @@ impl OAuthProvider {
             ext.project_id, ext.extension
         );
 
+        // Parse spec to get legacy client secret ref if exists
+        let spec: OAuthExtensionSpec = serde_json::from_value(ext.spec.clone())
+            .context("Failed to parse OAuth extension spec")?;
+
         // New naming pattern: {EXT_NAME}_{KEY}
         let normalized_name = ext.extension.to_uppercase().replace('-', "_");
         let rise_client_id_ref = format!("{}_CLIENT_ID", normalized_name);
@@ -318,8 +350,10 @@ impl Extension for OAuthProvider {
         if spec.client_id.is_empty() {
             return Err(anyhow!("client_id is required"));
         }
-        if spec.client_secret_ref.is_empty() {
-            return Err(anyhow!("client_secret_ref is required"));
+        if spec.client_secret_encrypted.is_none() && spec.client_secret_ref.is_none() {
+            return Err(anyhow!(
+                "Either client_secret_encrypted or client_secret_ref must be set"
+            ));
         }
         if spec.authorization_endpoint.is_empty() {
             return Err(anyhow!("authorization_endpoint is required"));
