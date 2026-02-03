@@ -96,7 +96,7 @@ app.get('/', (req, res) => {
 
 // Initiate OAuth flow
 app.get('/login', (req, res) => {
-  // Build the OAuth authorization URL (uses RISE_PUBLIC_URL for browser redirect)
+  // Build the OAuth authorization URL (uses RISE_ISSUER for browser redirect)
   const authUrl = new URL(
     `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`,
     CONFIG.riseIssuer
@@ -130,7 +130,7 @@ app.get('/oauth/callback', async (req, res) => {
       return res.status(400).send(renderErrorPage('No authorization code received'));
     }
 
-    // Exchange the authorization code for OAuth tokens (uses RISE_PUBLIC_URL for backend call)
+    // Exchange the authorization code for OAuth tokens (uses RISE_ISSUER for backend call)
     const tokenUrl = new URL(
       `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`,
       CONFIG.riseIssuer
@@ -525,8 +525,7 @@ function escapeHtml(text) {
 app.listen(PORT, () => {
   console.log(`OAuth Token Endpoint Flow Example running on http://localhost:${PORT}`);
   console.log('Configuration:', {
-    risePublicUrl: CONFIG.riseIssuer,
-    riseApiUrl: CONFIG.riseApiUrl,
+    riseIssuer: CONFIG.riseIssuer,
     projectName: CONFIG.projectName,
     extensionName: CONFIG.extensionName,
     oidcIssuer: CONFIG.oidcIssuer,
