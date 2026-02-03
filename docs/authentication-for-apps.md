@@ -140,23 +140,26 @@ Install: `npm install jose cookie-parser`
 
 ### Example: Python/Flask
 
-Using `authlib` which handles OIDC discovery and JWKS automatically:
+Using `joserfc` which handles JWKS fetching and JWT validation:
 
 ```python
-from authlib.jose import jwt
-from authlib.integrations.flask_client import OAuth
+from joserfc import jwt
+from joserfc.jwk import JWKRegistry
+import requests
 from flask import request, jsonify, g
 import os
 
 RISE_ISSUER = os.environ.get('RISE_ISSUER', 'http://rise.local:3000')
 RISE_APP_URL = os.environ.get('RISE_APP_URL')
 
-# Initialize OAuth with OIDC discovery
-oauth = OAuth()
-oauth.register(
-    name='rise',
-    server_metadata_url=f'{RISE_ISSUER}/.well-known/openid-configuration',
-)
+# Fetch JWKS once at startup (or cache with TTL)
+def get_jwks_registry():
+    config_url = f'{RISE_ISSUER}/.well-known/openid-configuration'
+    config = requests.get(config_url).json()
+    jwks = requests.get(config['jwks_uri']).json()
+    return JWKRegistry.import_key_set(jwks)
+
+jwks_registry = get_jwks_registry()
 
 @app.before_request
 def authenticate():
@@ -167,13 +170,11 @@ def authenticate():
         return jsonify({'error': 'No authentication token'}), 401
 
     try:
-        # Verify and decode JWT (automatically fetches JWKS)
-        claims = jwt.decode(
-            token,
-            oauth.rise.server_metadata()['jwks'],
-            claims_options={'aud': {'essential': True, 'value': RISE_APP_URL}}
-        )
-        claims.validate()
+        # Verify and decode JWT
+        claims = jwt.decode(token, jwks_registry)
+
+        # Validate issuer and audience
+        claims.validate(iss=RISE_ISSUER, aud=RISE_APP_URL)
 
         g.user = {
             'id': claims['sub'],
@@ -185,7 +186,7 @@ def authenticate():
         return jsonify({'error': 'Invalid token'}), 401
 ```
 
-Install: `pip install authlib requests`
+Install: `pip install joserfc requests`
 
 ## Authorization Based on Groups
 
