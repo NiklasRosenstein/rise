@@ -20,7 +20,7 @@ pub(crate) use method::{BuildMethod, BuildOptions};
 pub(crate) use railpack::{build_with_buildctl, BuildctlFrontend, RailpackBuildOptions};
 pub(crate) use registry::docker_login;
 
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
@@ -199,17 +199,20 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 .unwrap_or_else(|| Path::new(&options.app_path).join("Dockerfile"));
 
             // Preprocess Dockerfile for SSL if cert is available
-            let (_temp_dir, effective_dockerfile) = if ssl_cert_path.is_some() {
+            let (_temp_dir, effective_dockerfile, ssl_strategy) = if ssl_cert_path.is_some() {
                 if original_dockerfile_path.exists() {
                     info!("SSL_CERT_FILE detected, preprocessing Dockerfile for secret mounts");
-                    let (temp_dir, processed_path) =
-                        dockerfile_ssl::preprocess_dockerfile_for_ssl(&original_dockerfile_path)?;
-                    (Some(temp_dir), processed_path)
+                    let (temp_dir, processed_path, strategy) =
+                        dockerfile_ssl::preprocess_dockerfile_for_ssl(
+                            &original_dockerfile_path,
+                            ssl_cert_path.as_ref().unwrap(),
+                        )?;
+                    (Some(temp_dir), processed_path, Some(strategy))
                 } else {
-                    (None, original_dockerfile_path)
+                    (None, original_dockerfile_path, None)
                 }
             } else {
-                (None, original_dockerfile_path)
+                (None, original_dockerfile_path, None)
             };
 
             // Parse env vars into HashMap for secrets
@@ -222,12 +225,26 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 }
             }
 
-            // Add SSL cert as a secret if available
-            if let Some(ref cert_path) = ssl_cert_path {
-                secrets.insert(
-                    "SSL_CERT_FILE".to_string(),
-                    cert_path.to_string_lossy().to_string(),
-                );
+            // Add SSL cert based on mount strategy
+            if let (Some(ref cert_path), Some(strategy)) = (&ssl_cert_path, ssl_strategy) {
+                match strategy {
+                    dockerfile_ssl::SslMountStrategy::Secret => {
+                        // Use secret mount (default for certs ≤ 500KiB)
+                        secrets.insert(
+                            "SSL_CERT_FILE".to_string(),
+                            cert_path.to_string_lossy().to_string(),
+                        );
+                    }
+                    dockerfile_ssl::SslMountStrategy::Bind => {
+                        // Copy cert to build context for bind mount (certs > 500KiB)
+                        let cert_dest = Path::new(&options.app_path).join(".rise-ssl-cert.crt");
+                        std::fs::copy(cert_path, &cert_dest).context(format!(
+                            "Failed to copy SSL certificate to build context: {}",
+                            cert_dest.display()
+                        ))?;
+                        debug!("Copied SSL certificate to build context for bind mount");
+                    }
+                }
             }
 
             build_with_buildctl(

@@ -475,8 +475,9 @@ When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise
 **How it works:**
 1. Rise preprocesses your Dockerfile to add `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` to each RUN command
 2. The secret mount makes the certificate available at multiple standard system paths during RUN commands
-3. The certificate is passed to BuildKit via `--secret id=SSL_CERT_FILE,src=<path>`
-4. Certificates are NOT embedded in the final image (only available during build)
+3. All SSL-related environment variables are exported for cross-ecosystem compatibility
+4. The certificate is passed to BuildKit via `--secret id=SSL_CERT_FILE,src=<path>` (or bind mount for large certificates)
+5. Certificates are NOT embedded in the final image (only available during build)
 
 **Supported certificate paths:**
 - `/etc/ssl/certs/ca-certificates.crt` (Debian, Ubuntu, Arch)
@@ -484,6 +485,15 @@ When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise
 - `/etc/ssl/ca-bundle.pem` (OpenSUSE, SLES)
 - `/etc/ssl/cert.pem` (Alpine Linux)
 - `/usr/lib/ssl/cert.pem` (OpenSSL default)
+
+**Exported SSL environment variables:**
+- `SSL_CERT_FILE` - Standard (curl, wget, Git)
+- `NIX_SSL_CERT_FILE` - Nix package manager
+- `NODE_EXTRA_CA_CERTS` - Node.js and npm
+- `REQUESTS_CA_BUNDLE` - Python requests library
+- `AWS_CA_BUNDLE` - AWS SDK/CLI
+
+All variables are set to `/etc/ssl/certs/ca-certificates.crt` during RUN commands, ensuring compatibility with various build tools and ecosystems.
 
 **Example:**
 ```bash
@@ -507,9 +517,23 @@ RUN pip install -r requirements.txt
 
 Processed (internal):
 ```dockerfile
-RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... apt-get update && apt-get install -y curl
-RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... pip install -r requirements.txt
+RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && apt-get update && apt-get install -y curl
+RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && pip install -r requirements.txt
 ```
+
+### Large Certificate Handling
+
+BuildKit has a 500KiB limit for secrets passed via `--mount=type=secret`. Rise automatically handles this:
+
+- **Certificates ≤ 500KiB**: Uses secure `--mount=type=secret` approach (default)
+- **Certificates > 500KiB**: Automatically falls back to `--mount=type=bind` by copying the certificate to the build context
+
+This ensures builds work seamlessly regardless of certificate bundle size. The fallback is logged for transparency:
+```
+SSL certificate file is 650000 bytes, exceeding BuildKit's 500KiB secret limit. Using bind mount instead of secret mount.
+```
+
+**Security Note**: Bind mounts add the certificate to the build context temporarily (as `.rise-ssl-cert.crt`). It's only available during `RUN` commands and not included in the final image layers.
 
 **Note:** The `docker:build` backend does not support BuildKit secrets. If SSL_CERT_FILE is set, you'll see a warning recommending `docker:buildx` instead.
 

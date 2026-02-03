@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 use tracing::{debug, info, warn};
 
-use super::dockerfile_ssl::preprocess_dockerfile_for_ssl;
+use super::dockerfile_ssl::{preprocess_dockerfile_for_ssl, SslMountStrategy};
 use super::registry::docker_push;
 
 /// Options for building with Docker/Podman
@@ -56,32 +56,38 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     }
 
     // Preprocess Dockerfile for SSL if using buildx and SSL cert is available
-    let (_temp_dir, effective_dockerfile) = if options.use_buildx && ssl_cert_path.is_some() {
-        let original_dockerfile = options
-            .dockerfile
-            .map(|df| Path::new(options.app_path).join(df))
-            .unwrap_or_else(|| Path::new(options.app_path).join("Dockerfile"));
+    let (_temp_dir, effective_dockerfile, ssl_strategy) =
+        if options.use_buildx && ssl_cert_path.is_some() {
+            let original_dockerfile = options
+                .dockerfile
+                .map(|df| Path::new(options.app_path).join(df))
+                .unwrap_or_else(|| Path::new(options.app_path).join("Dockerfile"));
 
-        if original_dockerfile.exists() {
-            info!("SSL_CERT_FILE detected, preprocessing Dockerfile for secret mounts");
-            let (temp_dir, processed_path) = preprocess_dockerfile_for_ssl(&original_dockerfile)?;
-            (Some(temp_dir), Some(processed_path))
+            if original_dockerfile.exists() {
+                info!("SSL_CERT_FILE detected, preprocessing Dockerfile for secret mounts");
+                let (temp_dir, processed_path, strategy) = preprocess_dockerfile_for_ssl(
+                    &original_dockerfile,
+                    ssl_cert_path.as_ref().unwrap(),
+                )?;
+                (Some(temp_dir), Some(processed_path), Some(strategy))
+            } else {
+                (
+                    None,
+                    options
+                        .dockerfile
+                        .map(|df| Path::new(options.app_path).join(df)),
+                    None,
+                )
+            }
         } else {
             (
                 None,
                 options
                     .dockerfile
                     .map(|df| Path::new(options.app_path).join(df)),
+                None,
             )
-        }
-    } else {
-        (
-            None,
-            options
-                .dockerfile
-                .map(|df| Path::new(options.app_path).join(df)),
-        )
-    };
+        };
 
     let mut cmd = Command::new(options.container_cli);
 
@@ -123,11 +129,29 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     // Add platform flag for consistent architecture
     cmd.arg("--platform").arg("linux/amd64");
 
-    // Add SSL certificate secret if using buildx and cert is available
+    // Add SSL certificate based on mount strategy
     if options.use_buildx {
-        if let Some(ref cert_path) = ssl_cert_path {
-            cmd.arg("--secret")
-                .arg(format!("id=SSL_CERT_FILE,src={}", cert_path.display()));
+        if let (Some(ref cert_path), Some(strategy)) = (&ssl_cert_path, ssl_strategy) {
+            match strategy {
+                SslMountStrategy::Secret => {
+                    // Use secret mount (default for certs ≤ 500KiB)
+                    cmd.arg("--secret")
+                        .arg(format!("id=SSL_CERT_FILE,src={}", cert_path.display()));
+                }
+                SslMountStrategy::Bind => {
+                    // Copy cert to build context for bind mount (certs > 500KiB)
+                    let build_context_path =
+                        Path::new(options.build_context.unwrap_or(options.app_path));
+                    let cert_dest = build_context_path.join(".rise-ssl-cert.crt");
+                    std::fs::copy(cert_path, &cert_dest).with_context(|| {
+                        format!(
+                            "Failed to copy SSL certificate to build context: {}",
+                            cert_dest.display()
+                        )
+                    })?;
+                    debug!("Copied SSL certificate to build context for bind mount");
+                }
+            }
         }
     }
 
