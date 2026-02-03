@@ -79,7 +79,10 @@ pub(crate) struct BuildOptions {
     pub buildpacks: Vec<String>,
     pub env: Vec<String>,
     pub container_cli: Option<String>,
-    pub managed_buildkit: bool,
+    /// None = auto-detect based on SSL_CERT_FILE and BUILDKIT_HOST
+    /// Some(true) = explicitly enable managed buildkit
+    /// Some(false) = explicitly disable managed buildkit
+    pub managed_buildkit: Option<bool>,
     pub railpack_embed_ssl_cert: bool,
     pub push: bool,
     /// Path to Dockerfile (relative to app_path / rise.toml location)
@@ -168,12 +171,17 @@ impl BuildOptions {
                 env
             },
 
-            // Boolean options - use Option chaining with Config getters as final fallback
+            // Boolean options - preserve None if not set anywhere for auto-detection
             managed_buildkit: build_args
                 .managed_buildkit
                 .or_else(|| project_config.as_ref().and_then(|c| c.managed_buildkit))
-                .unwrap_or_else(|| config.get_managed_buildkit()),
-
+                .or_else(|| {
+                    std::env::var("RISE_MANAGED_BUILDKIT")
+                        .ok()
+                        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                })
+                .or(config.managed_buildkit),
+            // Don't unwrap_or here - keep as None if not set anywhere
             railpack_embed_ssl_cert: build_args
                 .railpack_embed_ssl_cert
                 .or_else(|| {
@@ -253,6 +261,7 @@ pub(crate) fn select_build_method(
     app_path: &str,
     backend: Option<&str>,
     dockerfile: Option<&str>,
+    container_cli: &str,
 ) -> Result<(BuildMethod, Option<String>)> {
     // Determine dockerfile path
     let (dockerfile_path, dockerfile_relative) = if let Some(df) = dockerfile {
@@ -280,17 +289,28 @@ pub(crate) fn select_build_method(
     } else {
         // Auto-detect based on dockerfile presence
         if dockerfile_path.exists() && dockerfile_path.is_file() {
-            info!(
-                "Detected {}, using docker backend",
-                dockerfile_relative.as_deref().unwrap_or("Dockerfile")
-            );
-            Ok((
-                BuildMethod::Docker { use_buildx: false },
-                dockerfile_relative,
-            ))
+            // Check if buildx is available
+            let use_buildx = super::docker::is_buildx_available(container_cli);
+            if use_buildx {
+                info!(
+                    "Detected {}, using docker:buildx backend",
+                    dockerfile_relative.as_deref().unwrap_or("Dockerfile")
+                );
+            } else {
+                info!(
+                    "Detected {}, using docker backend",
+                    dockerfile_relative.as_deref().unwrap_or("Dockerfile")
+                );
+            }
+            Ok((BuildMethod::Docker { use_buildx }, dockerfile_relative))
         } else {
-            info!("No Dockerfile found, using pack backend");
-            Ok((BuildMethod::Pack, None))
+            info!("No Dockerfile found, using railpack backend");
+            Ok((
+                BuildMethod::Railpack {
+                    use_buildctl: false,
+                },
+                None,
+            ))
         }
     }
 }

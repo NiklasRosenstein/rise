@@ -55,26 +55,43 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
         &options.app_path,
         options.backend.as_deref(),
         options.dockerfile.as_deref(),
+        container_cli,
     )?;
 
+    // Determine if we should use managed buildkit
+    let managed_buildkit = match options.managed_buildkit {
+        Some(value) => {
+            // Explicitly set by user (CLI flag, config, or env var)
+            value
+        }
+        None => {
+            // Auto-detect: enable if all conditions met:
+            // 1. Backend requires BuildKit
+            // 2. SSL_CERT_FILE is set (needs injection)
+            // 3. BUILDKIT_HOST is NOT set (user not managing their own)
+            std::env::var("BUILDKIT_HOST").is_err()
+                && requires_buildkit(&build_method)
+                && std::env::var("SSL_CERT_FILE").is_ok()
+        }
+    };
+
     // Handle BuildKit daemon management
-    let buildkit_host = if requires_buildkit(&build_method) && options.managed_buildkit {
-        // Priority 1: Use existing BUILDKIT_HOST if set
+    let buildkit_host = if requires_buildkit(&build_method) && managed_buildkit {
+        // Check if user already has BUILDKIT_HOST (even if managed_buildkit=true)
         if let Ok(existing_host) = std::env::var("BUILDKIT_HOST") {
             info!("Using existing BUILDKIT_HOST: {}", existing_host);
             Some(existing_host)
         } else {
-            // Priority 2: Create/manage our own buildkit daemon
+            // Create/manage our own buildkit daemon
             let ssl_cert_path = std::env::var("SSL_CERT_FILE").ok().map(PathBuf::from);
-
             Some(ensure_managed_buildkit_daemon(
                 ssl_cert_path.as_deref(),
                 container_cli,
             )?)
         }
     } else {
-        // Managed buildkit not enabled, warn if SSL cert is set
-        check_ssl_cert_and_warn(&build_method, options.managed_buildkit);
+        // Check for SSL cert warnings if managed buildkit disabled
+        check_ssl_cert_and_warn(&build_method, managed_buildkit);
         None
     };
 
@@ -124,7 +141,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if options.container_cli.is_some() {
                 warn!("--container-cli flag is ignored when using pack build method");
             }
-            if options.managed_buildkit {
+            if options.managed_buildkit.is_some() {
                 warn!("--managed-buildkit flag is ignored when using pack build method");
             }
             if options.railpack_embed_ssl_cert {
