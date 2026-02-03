@@ -143,11 +143,28 @@ Install: `npm install jose cookie-parser`
 Using `joserfc` which handles JWKS fetching and JWT validation:
 
 ```python
+from typing import TypedDict, Optional
 from joserfc import jwt
 from joserfc.jwk import JWKRegistry
 import requests
 from flask import request, jsonify, g
 import os
+
+class RiseClaims(TypedDict):
+    sub: str
+    email: str
+    name: Optional[str]
+    groups: list[str]
+    iat: int
+    exp: int
+    iss: str
+    aud: str
+
+class UserInfo(TypedDict):
+    id: str
+    email: str
+    name: Optional[str]
+    groups: list[str]
 
 RISE_ISSUER = os.environ.get('RISE_ISSUER', 'http://rise.local:3000')
 RISE_APP_URL = os.environ.get('RISE_APP_URL')
@@ -171,17 +188,18 @@ def authenticate():
 
     try:
         # Verify and decode JWT
-        claims = jwt.decode(token, jwks_registry)
+        claims: RiseClaims = jwt.decode(token, jwks_registry)
 
         # Validate issuer and audience
         claims.validate(iss=RISE_ISSUER, aud=RISE_APP_URL)
 
-        g.user = {
+        user_info: UserInfo = {
             'id': claims['sub'],
             'email': claims['email'],
             'name': claims.get('name'),
             'groups': claims.get('groups', [])
         }
+        g.user = user_info
     except Exception as e:
         return jsonify({'error': 'Invalid token'}), 401
 ```
@@ -192,23 +210,25 @@ Install: `pip install joserfc requests`
 
 You can use the `groups` claim to implement team-based authorization:
 
-```javascript
-function requireTeam(teamName) {
-  return (req, res, next) => {
+```typescript
+import type { Request, Response, NextFunction } from 'express';
+
+function requireTeam(teamName: string) {
+  return (req: Request, res: Response, next: NextFunction) => {
     if (!req.user) {
       return res.status(401).send('Not authenticated');
     }
-    
+
     if (!req.user.groups.includes(teamName)) {
       return res.status(403).send('Access denied - not a member of required team');
     }
-    
+
     next();
   };
 }
 
 // Protect routes by team membership
-app.get('/admin', requireTeam('admin'), (req, res) => {
+app.get('/admin', requireTeam('admin'), (req: Request, res: Response) => {
   res.send('Admin panel');
 });
 ```
