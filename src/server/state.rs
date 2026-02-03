@@ -39,7 +39,6 @@ pub struct AppState {
     pub db_pool: PgPool,
     pub jwt_validator: Arc<JwtValidator>,
     pub jwt_signer: Arc<JwtSigner>,
-    pub jwks_json: String,
     pub oauth_client: Arc<OAuthClient>,
     pub registry_provider: Arc<dyn RegistryProvider>,
     pub oci_client: Arc<crate::server::oci::OciClient>,
@@ -160,7 +159,6 @@ async fn init_kubernetes_backend(
     settings: &Settings,
     controller_state: Arc<ControllerState>,
     registry_provider: Arc<dyn RegistryProvider>,
-    jwks_json: String,
 ) -> Result<Arc<dyn DeploymentBackend>> {
     use crate::server::settings::DeploymentControllerSettings;
 
@@ -235,8 +233,6 @@ async fn init_kubernetes_backend(
                 node_selector: node_selector.clone(),
                 image_pull_secret_name: image_pull_secret_name.clone(),
                 access_classes: filtered_access_classes,
-                rise_jwks_json: jwks_json,
-                rise_issuer: settings.server.public_url.clone(),
                 host_aliases: host_aliases.clone(),
             },
         )?;
@@ -298,13 +294,6 @@ impl AppState {
             "Initialized JWT signer for ingress authentication (expiry: {}s)",
             settings.server.jwt_expiry_seconds
         );
-
-        // Generate JWKS JSON for RS256 public keys to pass to deployed applications
-        let jwks = jwt_signer
-            .generate_jwks()
-            .context("Failed to generate JWKS for deployment controller")?;
-        let jwks_json = serde_json::to_string(&jwks).context("Failed to serialize JWKS to JSON")?;
-        tracing::info!("Generated JWKS for RS256 JWT verification in deployed apps");
 
         // Initialize OAuth2 client
         let oauth_client = Arc::new(
@@ -476,13 +465,7 @@ impl AppState {
                 db_pool: db_pool.clone(),
                 encryption_provider: encryption_provider.clone(),
             });
-            init_kubernetes_backend(
-                settings,
-                controller_state,
-                registry_provider.clone(),
-                jwks_json.clone(),
-            )
-            .await?
+            init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
         };
 
         // Initialize extension registry
@@ -712,7 +695,6 @@ impl AppState {
             db_pool,
             jwt_validator,
             jwt_signer,
-            jwks_json,
             oauth_client,
             registry_provider,
             oci_client,
