@@ -226,6 +226,9 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             }
 
             // Add SSL cert based on mount strategy
+            // Track cert file for cleanup if we copy it to build context
+            let mut cert_cleanup_path: Option<PathBuf> = None;
+
             if let (Some(ref cert_path), Some(strategy)) = (&ssl_cert_path, ssl_strategy) {
                 match strategy {
                     dockerfile_ssl::SslMountStrategy::Secret => {
@@ -243,11 +246,12 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                             cert_dest.display()
                         ))?;
                         debug!("Copied SSL certificate to build context for bind mount");
+                        cert_cleanup_path = Some(cert_dest);
                     }
                 }
             }
 
-            build_with_buildctl(
+            let build_result = build_with_buildctl(
                 &options.app_path,
                 &effective_dockerfile,
                 &options.image_tag,
@@ -255,7 +259,27 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 buildkit_host.as_deref(),
                 &secrets,
                 BuildctlFrontend::Dockerfile,
-            )?;
+            );
+
+            // Clean up temporary SSL certificate file if we created one
+            if let Some(cert_path) = cert_cleanup_path {
+                if cert_path.exists() {
+                    if let Err(e) = std::fs::remove_file(&cert_path) {
+                        warn!(
+                            "Failed to clean up temporary SSL certificate file {}: {}",
+                            cert_path.display(),
+                            e
+                        );
+                    } else {
+                        debug!(
+                            "Cleaned up temporary SSL certificate file: {}",
+                            cert_path.display()
+                        );
+                    }
+                }
+            }
+
+            build_result?;
         }
     }
 

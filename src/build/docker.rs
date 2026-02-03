@@ -1,7 +1,7 @@
 // Docker/Dockerfile builds
 
 use anyhow::{bail, Context, Result};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
 use tracing::{debug, info, warn};
 
@@ -130,6 +130,9 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     cmd.arg("--platform").arg("linux/amd64");
 
     // Add SSL certificate based on mount strategy
+    // Track cert file for cleanup if we copy it to build context
+    let mut cert_cleanup_path: Option<PathBuf> = None;
+
     if options.use_buildx {
         if let (Some(ref cert_path), Some(strategy)) = (&ssl_cert_path, ssl_strategy) {
             match strategy {
@@ -150,6 +153,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
                         )
                     })?;
                     debug!("Copied SSL certificate to build context for bind mount");
+                    cert_cleanup_path = Some(cert_dest);
                 }
             }
         }
@@ -205,6 +209,24 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     let status = cmd
         .status()
         .with_context(|| format!("Failed to execute {} build", options.container_cli))?;
+
+    // Clean up temporary SSL certificate file if we created one
+    if let Some(cert_path) = cert_cleanup_path {
+        if cert_path.exists() {
+            if let Err(e) = std::fs::remove_file(&cert_path) {
+                warn!(
+                    "Failed to clean up temporary SSL certificate file {}: {}",
+                    cert_path.display(),
+                    e
+                );
+            } else {
+                debug!(
+                    "Cleaned up temporary SSL certificate file: {}",
+                    cert_path.display()
+                );
+            }
+        }
+    }
 
     if !status.success() {
         bail!(
