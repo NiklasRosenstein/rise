@@ -98,7 +98,7 @@ const RISE_APP_URL = process.env.RISE_APP_URL;
 
 // Create JWKS fetcher (automatically handles caching and discovery)
 const JWKS = createRemoteJWKSet(
-  new URL(`${RISE_ISSUER}/.well-known/openid-configuration`)
+  new URL(`${RISE_ISSUER}/api/v1/auth/jwks`)
 );
 
 interface RiseClaims {
@@ -187,11 +187,15 @@ def authenticate():
         return jsonify({'error': 'No authentication token'}), 401
 
     try:
-        # Verify and decode JWT
-        claims: RiseClaims = jwt.decode(token, jwks_registry)
-
-        # Validate issuer and audience
-        claims.validate(iss=RISE_ISSUER, aud=RISE_APP_URL)
+        # Verify and decode JWT (including issuer and audience validation)
+        claims: RiseClaims = jwt.decode(
+            token,
+            jwks_registry,
+            claims_options={
+                "iss": {"value": RISE_ISSUER},
+                "aud": {"value": RISE_APP_URL},
+            },
+        )
 
         user_info: UserInfo = {
             'id': claims['sub'],

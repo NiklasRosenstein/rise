@@ -1772,6 +1772,7 @@ pub async fn openid_configuration(
     let config = serde_json::json!({
         "issuer": state.public_url,
         "jwks_uri": jwks_uri,
+        "response_types_supported": ["code", "token", "id_token"],
         "id_token_signing_alg_values_supported": ["RS256", "HS256"],
         "subject_types_supported": ["public"],
         "claims_supported": ["sub", "email", "name", "groups", "iat", "exp", "iss", "aud"]
