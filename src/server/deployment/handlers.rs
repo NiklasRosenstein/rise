@@ -229,8 +229,7 @@ fn convert_status_to_db(status: DeploymentStatus) -> DbDeploymentStatus {
 /// Insert Rise-provided environment variables into a deployment
 ///
 /// This function adds the following environment variables:
-/// - RISE_PUBLIC_URL: Rise server URL (for API calls and browser redirects)
-/// - RISE_ISSUER: The Rise backend URL (issuer of JWTs)
+/// - RISE_ISSUER: Rise server URL (base URL for all Rise endpoints and JWT issuer)
 /// - RISE_APP_URL: Canonical URL where the app is accessible
 /// - RISE_APP_URLS: JSON array of all URLs where the app can be accessed
 ///
@@ -242,25 +241,7 @@ async fn insert_rise_env_vars(
     deployment: &crate::db::models::Deployment,
     project: &crate::db::models::Project,
 ) -> Result<(), (StatusCode, String)> {
-    // 1. Insert RISE_PUBLIC_URL (Rise server URL for API calls and browser redirects)
-    crate::db::env_vars::upsert_deployment_env_var(
-        &state.db_pool,
-        deployment.id,
-        "RISE_PUBLIC_URL",
-        &state.public_url,
-        false, // Not a secret
-        false, // is_retrievable
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to insert RISE_PUBLIC_URL env var: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to insert RISE_PUBLIC_URL: {}", e),
-        )
-    })?;
-
-    // 2. Insert RISE_ISSUER
+    // 1. Insert RISE_ISSUER
     crate::db::env_vars::upsert_deployment_env_var(
         &state.db_pool,
         deployment.id,
@@ -278,7 +259,7 @@ async fn insert_rise_env_vars(
         )
     })?;
 
-    // 3. Generate RISE_APP_URL and RISE_APP_URLS
+    // 2. Generate RISE_APP_URL and RISE_APP_URLS
     let deployment_urls = state
         .deployment_backend
         .get_deployment_urls(deployment, project)

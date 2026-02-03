@@ -1767,7 +1767,7 @@ impl KubernetesController {
         .await?;
 
         // Format as Kubernetes EnvVar objects
-        // Note: PORT, RISE_ISSUER, RISE_PUBLIC_URL, RISE_APP_URL, and RISE_APP_URLS
+        // Note: PORT, RISE_ISSUER, RISE_APP_URL, and RISE_APP_URLS
         // are persisted in deployment_env_vars and loaded from the database
         let k8s_env_vars: Vec<EnvVar> = env_vars
             .into_iter()

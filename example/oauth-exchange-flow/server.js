@@ -17,8 +17,8 @@ function requireEnv(name, description) {
 
 // Configuration - adjust for your setup.
 const CONFIG = {
-  // RISE_PUBLIC_URL: Rise server URL for both browser redirects and API calls
-  risePublicUrl: process.env.RISE_PUBLIC_URL || 'http://localhost:3000',
+  // RISE_ISSUER: Rise server URL (base URL for all Rise endpoints)
+  riseIssuer: process.env.RISE_ISSUER || 'http://localhost:3000',
   projectName: process.env.PROJECT_NAME || 'oauth-demo',
   extensionName: 'oauth-dex',
   sessionSecret: process.env.SESSION_SECRET || 'change-this-in-production',
@@ -99,7 +99,7 @@ app.get('/login', (req, res) => {
   // Build the OAuth authorization URL (uses RISE_PUBLIC_URL for browser redirect)
   const authUrl = new URL(
     `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`,
-    CONFIG.risePublicUrl
+    CONFIG.riseIssuer
   );
 
   // Set redirect URI to our callback
@@ -133,7 +133,7 @@ app.get('/oauth/callback', async (req, res) => {
     // Exchange the authorization code for OAuth tokens (uses RISE_PUBLIC_URL for backend call)
     const tokenUrl = new URL(
       `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`,
-      CONFIG.risePublicUrl
+      CONFIG.riseIssuer
     );
 
     const response = await fetch(tokenUrl.toString(), {
@@ -525,7 +525,7 @@ function escapeHtml(text) {
 app.listen(PORT, () => {
   console.log(`OAuth Token Endpoint Flow Example running on http://localhost:${PORT}`);
   console.log('Configuration:', {
-    risePublicUrl: CONFIG.risePublicUrl,
+    risePublicUrl: CONFIG.riseIssuer,
     riseApiUrl: CONFIG.riseApiUrl,
     projectName: CONFIG.projectName,
     extensionName: CONFIG.extensionName,

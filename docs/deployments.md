@@ -205,8 +205,7 @@ Rise automatically injects the following environment variables into every deploy
 | Variable | Description | Example Value |
 |----------|-------------|---------------|
 | `PORT` | HTTP port the container should listen on | `8080` |
-| `RISE_ISSUER` | JWT issuer URL for token validation | `https://rise.example.com` |
-| `RISE_PUBLIC_URL` | Rise server URL for API calls and browser redirects | `https://rise.example.com` |
+| `RISE_ISSUER` | Rise server URL (base URL for all Rise endpoints) and JWT issuer | `https://rise.example.com` |
 | `RISE_APP_URL` | Canonical URL where your app is accessible (primary custom domain or default project URL) | `https://myapp.example.com` |
 | `RISE_APP_URLS` | JSON array of all URLs where your app can be accessed | `["https://myapp.rise.dev", "https://myapp.example.com"]` |
 

@@ -106,7 +106,7 @@ When deployed:
 - The app listens on port 8080 (Rise's default)
 - OAuth callbacks will redirect to your deployed app's domain
 - Rise automatically injects these environment variables:
-  - `RISE_PUBLIC_URL`: Your Rise server URL (for both browser redirects and API calls)
+  - `RISE_ISSUER`: Rise server URL (base URL for all Rise endpoints)
   - `OAUTH_DEX_CLIENT_ID`: Rise client ID for token exchange
   - `OAUTH_DEX_CLIENT_SECRET`: Rise client secret for token exchange
 - Set these environment variables manually:
@@ -119,7 +119,7 @@ When deployed:
 Configure the application using environment variables:
 
 - `PORT`: Server port (default: `8080`)
-- `RISE_PUBLIC_URL`: Rise server URL (default: `http://localhost:3000`)
+- `RISE_ISSUER`: Rise server URL (default: `http://localhost:3000`)
 - `PROJECT_NAME`: Rise project name (default: `oauth-demo`)
 - `EXTENSION_NAME`: OAuth extension name (default: `oauth-dex`)
 - `SESSION_SECRET`: Secret for session encryption (change in production!)

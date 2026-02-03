@@ -80,8 +80,7 @@ Example discovery response:
 
 Your deployed application automatically receives:
 
-- **RISE_ISSUER**: The expected JWT issuer (`iss` claim) and base URL for OpenID discovery (e.g., `http://localhost:3000`)
-- **RISE_PUBLIC_URL**: Rise server URL for API calls and browser redirects (same as RISE_ISSUER)
+- **RISE_ISSUER**: Rise server URL (base URL for all Rise endpoints) and JWT issuer for validation (e.g., `http://localhost:3000`)
 - **RISE_APP_URL**: Canonical URL where your app is accessible (primary custom domain or default project URL)
 - **RISE_APP_URLS**: JSON array of all URLs your app is accessible at (primary ingress + custom domains), e.g., `["http://myapp.rise.local:8080", "https://myapp.example.com"]`
 - **PORT**: The HTTP port your container should listen on (default: 8080)
