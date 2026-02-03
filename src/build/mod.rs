@@ -226,8 +226,9 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             }
 
             // Add SSL cert based on mount strategy
-            // Track cert file for cleanup if we copy it to build context
+            // Track cert file and dockerignore for cleanup if we copy cert to build context
             let mut cert_cleanup_path: Option<PathBuf> = None;
+            let mut dockerignore_cleanup: Option<(PathBuf, Option<String>)> = None;
 
             if let (Some(ref cert_path), Some(strategy)) = (&ssl_cert_path, ssl_strategy) {
                 match strategy {
@@ -247,6 +248,46 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                         ))?;
                         debug!("Copied SSL certificate to build context for bind mount");
                         cert_cleanup_path = Some(cert_dest);
+
+                        // Add .rise-ssl-cert.crt to .dockerignore to prevent it from being copied into the image
+                        let dockerignore_path = Path::new(&options.app_path).join(".dockerignore");
+                        let original_content = if dockerignore_path.exists() {
+                            Some(std::fs::read_to_string(&dockerignore_path).context(format!(
+                                "Failed to read .dockerignore: {}",
+                                dockerignore_path.display()
+                            ))?)
+                        } else {
+                            None
+                        };
+
+                        // Check if .rise-ssl-cert.crt is already ignored
+                        let needs_entry = original_content
+                            .as_ref()
+                            .map(|content| {
+                                !content.lines().any(|line| {
+                                    let trimmed = line.trim();
+                                    trimmed == ".rise-ssl-cert.crt"
+                                        || trimmed == ".rise-*"
+                                        || trimmed == ".rise*"
+                                })
+                            })
+                            .unwrap_or(true);
+
+                        if needs_entry {
+                            let new_content = if let Some(ref content) = original_content {
+                                format!("{}\n.rise-ssl-cert.crt\n", content.trim_end())
+                            } else {
+                                ".rise-ssl-cert.crt\n".to_string()
+                            };
+
+                            std::fs::write(&dockerignore_path, &new_content).context(format!(
+                                "Failed to write .dockerignore: {}",
+                                dockerignore_path.display()
+                            ))?;
+
+                            debug!("Added .rise-ssl-cert.crt to .dockerignore");
+                            dockerignore_cleanup = Some((dockerignore_path, original_content));
+                        }
                     }
                 }
             }
@@ -261,7 +302,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 BuildctlFrontend::Dockerfile,
             );
 
-            // Clean up temporary SSL certificate file if we created one
+            // Clean up temporary SSL certificate file and .dockerignore if we created/modified them
             if let Some(cert_path) = cert_cleanup_path {
                 if cert_path.exists() {
                     if let Err(e) = std::fs::remove_file(&cert_path) {
@@ -275,6 +316,35 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                             "Cleaned up temporary SSL certificate file: {}",
                             cert_path.display()
                         );
+                    }
+                }
+            }
+
+            // Restore .dockerignore to original state
+            if let Some((dockerignore_path, original_content)) = dockerignore_cleanup {
+                if let Some(content) = original_content {
+                    // Restore original .dockerignore
+                    if let Err(e) = std::fs::write(&dockerignore_path, content) {
+                        warn!(
+                            "Failed to restore .dockerignore {}: {}",
+                            dockerignore_path.display(),
+                            e
+                        );
+                    } else {
+                        debug!("Restored .dockerignore to original state");
+                    }
+                } else {
+                    // Remove .dockerignore if it didn't exist before
+                    if dockerignore_path.exists() {
+                        if let Err(e) = std::fs::remove_file(&dockerignore_path) {
+                            warn!(
+                                "Failed to remove temporary .dockerignore {}: {}",
+                                dockerignore_path.display(),
+                                e
+                            );
+                        } else {
+                            debug!("Removed temporary .dockerignore");
+                        }
                     }
                 }
             }
