@@ -178,7 +178,7 @@ impl BuildOptions {
                 .or_else(|| {
                     std::env::var("RISE_MANAGED_BUILDKIT")
                         .ok()
-                        .map(|v| v == "true")
+                        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
                 })
                 .or(config.managed_buildkit),
             // Don't unwrap_or here - keep as None if not set anywhere
