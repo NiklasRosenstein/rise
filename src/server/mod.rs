@@ -120,6 +120,8 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 
     let app = Router::new()
         .nest("/api/v1", api_routes)
+        // Well-known routes at root level (per OIDC spec)
+        .merge(auth::routes::well_known_routes())
         // Root-level auth routes for custom domain support via Ingress routing
         .merge(auth::routes::rise_auth_routes())
         // OAuth/OIDC routes at root level (before frontend fallback)
