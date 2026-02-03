@@ -1757,6 +1757,29 @@ pub async fn jwks(
     Ok(Json(jwks))
 }
 
+/// OpenID Connect Discovery endpoint
+///
+/// Returns OpenID Provider metadata as per OpenID Connect Discovery 1.0.
+/// Applications can use this to discover the JWKS endpoint and other metadata.
+#[instrument(skip(state))]
+pub async fn openid_configuration(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+    tracing::debug!("OpenID configuration endpoint called");
+
+    let jwks_uri = format!("{}/api/v1/auth/jwks", state.public_url);
+
+    let config = serde_json::json!({
+        "issuer": state.public_url,
+        "jwks_uri": jwks_uri,
+        "id_token_signing_alg_values_supported": ["RS256", "HS256"],
+        "subject_types_supported": ["public"],
+        "claims_supported": ["sub", "email", "name", "groups", "iat", "exp", "iss", "aud"]
+    });
+
+    Ok(Json(config))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

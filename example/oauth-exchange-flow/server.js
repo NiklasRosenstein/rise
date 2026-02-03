@@ -17,10 +17,8 @@ function requireEnv(name, description) {
 
 // Configuration - adjust for your setup.
 const CONFIG = {
-  // RISE_PUBLIC_URL: Browser-reachable URL for OAuth authorize redirects
+  // RISE_PUBLIC_URL: Rise server URL for both browser redirects and API calls
   risePublicUrl: process.env.RISE_PUBLIC_URL || 'http://localhost:3000',
-  // RISE_API_URL: Internal URL for backend-to-backend API calls (token exchange)
-  riseApiUrl: process.env.RISE_API_URL || 'http://localhost:3000',
   projectName: process.env.PROJECT_NAME || 'oauth-demo',
   extensionName: 'oauth-dex',
   sessionSecret: process.env.SESSION_SECRET || 'change-this-in-production',
@@ -132,10 +130,10 @@ app.get('/oauth/callback', async (req, res) => {
       return res.status(400).send(renderErrorPage('No authorization code received'));
     }
 
-    // Exchange the authorization code for OAuth tokens (uses RISE_API_URL for backend call)
+    // Exchange the authorization code for OAuth tokens (uses RISE_PUBLIC_URL for backend call)
     const tokenUrl = new URL(
       `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`,
-      CONFIG.riseApiUrl
+      CONFIG.risePublicUrl
     );
 
     const response = await fetch(tokenUrl.toString(), {

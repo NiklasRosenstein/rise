@@ -18,6 +18,10 @@ pub fn public_routes() -> Router<AppState> {
         .route("/auth/logout", get(handlers::oauth_logout))
         .route("/auth/cli-success", get(handlers::cli_auth_success))
         .route("/auth/jwks", get(handlers::jwks))
+        .route(
+            "/.well-known/openid-configuration",
+            get(handlers::openid_configuration),
+        )
 }
 
 /// Routes for `/.rise/auth/*` path (for custom domain support via Ingress routing)

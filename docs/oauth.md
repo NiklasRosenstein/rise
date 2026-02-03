@@ -698,20 +698,17 @@ Rise injects URL environment variables into deployments for building OAuth URLs 
 
 | Environment Variable | Purpose | Example |
 |---------------------|---------|---------|
-| `RISE_PUBLIC_URL` | Browser redirects (authorize endpoint) | `http://localhost:3000` |
-| `RISE_API_URL` | Backend-to-backend API calls (token endpoint) | `http://host.minikube.internal:3000` |
+| `RISE_PUBLIC_URL` | Rise server URL for both browser redirects and API calls | `http://localhost:3000` |
 
-Use these instead of hardcoded URLs:
+Use this instead of hardcoded URLs:
 
 ```javascript
 // Browser redirect (PKCE authorize URL)
 const authUrl = `${process.env.RISE_PUBLIC_URL}/oidc/my-app/oauth-google/authorize`;
 
 // Backend token exchange
-const tokenUrl = `${process.env.RISE_API_URL}/oidc/my-app/oauth-google/token`;
+const tokenUrl = `${process.env.RISE_PUBLIC_URL}/oidc/my-app/oauth-google/token`;
 ```
-
-This separation is important in Kubernetes deployments where the internal URL (`RISE_API_URL`) differs from the public URL (`RISE_PUBLIC_URL`) that browsers can reach.
 
 **Security:**
 - Client secret validated with constant-time comparison

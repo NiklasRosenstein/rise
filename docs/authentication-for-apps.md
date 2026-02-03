@@ -53,59 +53,134 @@ The `rise_jwt` cookie contains a JWT token with the following structure:
 
 ## Validating the JWT
 
-Rise provides the public keys needed to validate JWTs through the `RISE_JWKS` environment variable.
+Rise provides the public keys needed to validate JWTs through the standard OpenID Connect Discovery endpoint.
+
+### OpenID Connect Discovery
+
+Applications should use the OpenID Connect Discovery 1.0 specification to discover the JWKS endpoint:
+
+1. **Fetch OpenID configuration** from `${RISE_ISSUER}/.well-known/openid-configuration`
+2. **Extract `jwks_uri`** from the configuration response
+3. **Fetch JWKS** from the `jwks_uri` endpoint
+4. **Cache the JWKS** (recommended: 1 hour) to avoid excessive requests
+5. **Use the JWKS** to validate JWT signatures
+
+Example discovery response:
+```json
+{
+  "issuer": "https://rise.example.com",
+  "jwks_uri": "https://rise.example.com/api/v1/auth/jwks",
+  "id_token_signing_alg_values_supported": ["RS256", "HS256"],
+  "subject_types_supported": ["public"],
+  "claims_supported": ["sub", "email", "name", "groups", "iat", "exp", "iss", "aud"]
+}
+```
 
 ### Environment Variables
 
 Your deployed application automatically receives:
 
-- **RISE_JWKS**: JSON Web Key Set (JWKS) containing RS256 public keys for JWT verification
-- **RISE_ISSUER**: The expected JWT issuer (`iss` claim), typically the Rise backend URL (e.g., `http://localhost:3000`)
+- **RISE_ISSUER**: The expected JWT issuer (`iss` claim) and base URL for OpenID discovery (e.g., `http://localhost:3000`)
+- **RISE_PUBLIC_URL**: Rise server URL for API calls and browser redirects (same as RISE_ISSUER)
+- **RISE_APP_URL**: Canonical URL where your app is accessible (primary custom domain or default project URL)
 - **RISE_APP_URLS**: JSON array of all URLs your app is accessible at (primary ingress + custom domains), e.g., `["http://myapp.rise.local:8080", "https://myapp.example.com"]`
+- **PORT**: The HTTP port your container should listen on (default: 8080)
 
 ### Example: Node.js/JavaScript
 
 ```javascript
-const jwksClient = require('jwks-rsa');
+const fetch = require('node-fetch');
 const jwt = require('jsonwebtoken');
+const jwkToPem = require('jwk-to-pem');
 
-// Parse JWKS from environment variable
-const jwks = JSON.parse(process.env.RISE_JWKS || '{"keys":[]}');
+const RISE_ISSUER = process.env.RISE_ISSUER || 'http://localhost:3000';
 
-// Create JWKS client
-const client = jwksClient({
-  jwksUri: null, // Not needed - we have the keys directly
-  cache: true,
-  rateLimit: true
-});
+// Cache for JWKS (refresh periodically in production)
+let cachedJWKS = null;
+let jwksFetchTime = null;
+const JWKS_CACHE_DURATION = 3600000; // 1 hour in milliseconds
 
-// Or use the keys directly
-function getKey(header, callback) {
-  const key = jwks.keys.find(k => k.kid === header.kid);
-  if (!key) {
-    return callback(new Error('Key not found'));
+// Fetch JWKS from OpenID configuration discovery
+async function fetchJWKS() {
+  const configUrl = `${RISE_ISSUER}/.well-known/openid-configuration`;
+
+  try {
+    const configResponse = await fetch(configUrl);
+    if (!configResponse.ok) {
+      throw new Error(`Failed to fetch OpenID configuration: ${configResponse.status}`);
+    }
+    const config = await configResponse.json();
+
+    const jwksResponse = await fetch(config.jwks_uri);
+    if (!jwksResponse.ok) {
+      throw new Error(`Failed to fetch JWKS: ${jwksResponse.status}`);
+    }
+    const jwks = await jwksResponse.json();
+
+    return jwks;
+  } catch (error) {
+    console.error('Failed to fetch JWKS:', error);
+    return null;
   }
-  // Convert JWK to PEM format or use directly with library
-  callback(null, key);
+}
+
+// Get JWKS with caching
+async function getJWKS() {
+  const now = Date.now();
+
+  // Return cached JWKS if valid
+  if (cachedJWKS && jwksFetchTime && (now - jwksFetchTime) < JWKS_CACHE_DURATION) {
+    return cachedJWKS;
+  }
+
+  // Fetch fresh JWKS
+  cachedJWKS = await fetchJWKS();
+  jwksFetchTime = now;
+
+  return cachedJWKS;
+}
+
+// Convert JWKS to a key lookup function for jsonwebtoken
+function getKey(header, callback) {
+  getJWKS().then(jwks => {
+    if (!jwks || !jwks.keys) {
+      return callback(new Error('JWKS not available - JWT validation unavailable'));
+    }
+
+    const key = jwks.keys.find(k => k.kid === header.kid);
+    if (!key) {
+      return callback(new Error(`Key with kid "${header.kid}" not found in JWKS`));
+    }
+
+    try {
+      const pem = jwkToPem(key);
+      callback(null, pem);
+    } catch (err) {
+      callback(err);
+    }
+  }).catch(err => {
+    callback(err);
+  });
 }
 
 // Verify JWT from cookie
 function verifyRiseJwt(req, res, next) {
   const token = req.cookies.rise_jwt;
-  
+
   if (!token) {
     return res.status(401).send('No authentication token');
   }
 
   jwt.verify(token, getKey, {
     algorithms: ['RS256'],
-    issuer: process.env.RISE_ISSUER || 'https://rise.example.com',
-    audience: process.env.APP_URL || 'https://myapp.apps.rise.example.com'
+    issuer: RISE_ISSUER,
+    // Note: We skip audience validation here since the audience varies by deployment
+    // In production, you should validate the audience matches your app's URL
   }, (err, decoded) => {
     if (err) {
       return res.status(401).send('Invalid token');
     }
-    
+
     // Token is valid, attach user info to request
     req.user = {
       id: decoded.sub,
@@ -113,7 +188,7 @@ function verifyRiseJwt(req, res, next) {
       name: decoded.name,
       groups: decoded.groups || []
     };
-    
+
     next();
   });
 }
@@ -128,39 +203,84 @@ app.use(verifyRiseJwt);
 ```python
 import os
 import json
+import time
+import requests
 from jose import jwt, jwk
-from jose.utils import base64url_decode
-from flask import request, jsonify
+from flask import request, jsonify, g
 
-# Load JWKS from environment
-jwks = json.loads(os.environ.get('RISE_JWKS', '{"keys":[]}'))
+RISE_ISSUER = os.environ.get('RISE_ISSUER', 'http://localhost:3000')
+
+# Cache for JWKS (refresh periodically in production)
+_jwks_cache = None
+_jwks_cache_time = 0
+JWKS_CACHE_DURATION = 3600  # 1 hour in seconds
+
+def fetch_jwks():
+    """Fetch JWKS from OpenID configuration discovery"""
+    config_url = f'{RISE_ISSUER}/.well-known/openid-configuration'
+
+    try:
+        # Fetch OpenID configuration
+        config_response = requests.get(config_url)
+        config_response.raise_for_status()
+        config = config_response.json()
+
+        # Fetch JWKS from jwks_uri
+        jwks_response = requests.get(config['jwks_uri'])
+        jwks_response.raise_for_status()
+        return jwks_response.json()
+    except Exception as e:
+        print(f'Failed to fetch JWKS: {e}')
+        return None
+
+def get_jwks():
+    """Get JWKS with caching"""
+    global _jwks_cache, _jwks_cache_time
+
+    now = time.time()
+
+    # Return cached JWKS if valid
+    if _jwks_cache and (now - _jwks_cache_time) < JWKS_CACHE_DURATION:
+        return _jwks_cache
+
+    # Fetch fresh JWKS
+    _jwks_cache = fetch_jwks()
+    _jwks_cache_time = now
+
+    return _jwks_cache
 
 def verify_rise_jwt(token):
     """Verify and decode Rise JWT token"""
     try:
+        # Fetch JWKS
+        jwks = get_jwks()
+        if not jwks or 'keys' not in jwks:
+            raise ValueError('JWKS not available - JWT validation unavailable')
+
         # Decode header to get key ID
         headers = jwt.get_unverified_header(token)
         kid = headers['kid']
-        
+
         # Find matching key in JWKS
         key = next((k for k in jwks['keys'] if k['kid'] == kid), None)
         if not key:
-            raise ValueError('Key not found in JWKS')
-        
+            raise ValueError(f'Key with kid "{kid}" not found in JWKS')
+
         # Convert JWK to PEM for verification
         public_key = jwk.construct(key)
-        
+
         # Verify and decode token
         claims = jwt.decode(
             token,
             public_key.to_pem(),
             algorithms=['RS256'],
-            issuer=os.environ.get('RISE_ISSUER', 'https://rise.example.com'),
-            audience=os.environ.get('APP_URL', 'https://myapp.apps.rise.example.com')
+            issuer=RISE_ISSUER
+            # Note: We skip audience validation here since the audience varies by deployment
+            # In production, you should validate the audience matches your app's URL
         )
-        
+
         return claims
-        
+
     except Exception as e:
         raise ValueError(f'Token validation failed: {str(e)}')
 
@@ -168,13 +288,13 @@ def verify_rise_jwt(token):
 def authenticate():
     """Middleware to authenticate requests using Rise JWT"""
     token = request.cookies.get('rise_jwt')
-    
+
     if not token:
         return jsonify({'error': 'No authentication token'}), 401
-    
+
     try:
         claims = verify_rise_jwt(token)
-        
+
         # Attach user info to request context
         g.user = {
             'id': claims['sub'],
@@ -192,11 +312,14 @@ def authenticate():
 package main
 
 import (
+    "context"
     "encoding/json"
     "fmt"
     "net/http"
     "os"
-    
+    "sync"
+    "time"
+
     "github.com/golang-jwt/jwt/v5"
     "github.com/lestrrat-go/jwx/v2/jwk"
 )
@@ -209,56 +332,129 @@ type RiseClaims struct {
     jwt.RegisteredClaims
 }
 
-func getJWKS() (jwk.Set, error) {
-    jwksJSON := os.Getenv("RISE_JWKS")
-    if jwksJSON == "" {
-        jwksJSON = `{"keys":[]}`
+type OpenIDConfig struct {
+    Issuer  string `json:"issuer"`
+    JwksURI string `json:"jwks_uri"`
+}
+
+var (
+    cachedJWKS      jwk.Set
+    jwksCacheTime   time.Time
+    jwksCacheMutex  sync.RWMutex
+    jwksCacheDuration = 1 * time.Hour
+)
+
+func fetchJWKS() (jwk.Set, error) {
+    riseIssuer := os.Getenv("RISE_ISSUER")
+    if riseIssuer == "" {
+        riseIssuer = "http://localhost:3000"
     }
-    
-    return jwk.Parse([]byte(jwksJSON))
+
+    // Fetch OpenID configuration
+    configURL := fmt.Sprintf("%s/.well-known/openid-configuration", riseIssuer)
+    resp, err := http.Get(configURL)
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch OpenID configuration: %w", err)
+    }
+    defer resp.Body.Close()
+
+    if resp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("failed to fetch OpenID configuration: status %d", resp.StatusCode)
+    }
+
+    var config OpenIDConfig
+    if err := json.NewDecoder(resp.Body).Decode(&config); err != nil {
+        return nil, fmt.Errorf("failed to decode OpenID configuration: %w", err)
+    }
+
+    // Fetch JWKS from jwks_uri
+    jwksResp, err := http.Get(config.JwksURI)
+    if err != nil {
+        return nil, fmt.Errorf("failed to fetch JWKS: %w", err)
+    }
+    defer jwksResp.Body.Close()
+
+    if jwksResp.StatusCode != http.StatusOK {
+        return nil, fmt.Errorf("failed to fetch JWKS: status %d", jwksResp.StatusCode)
+    }
+
+    keySet, err := jwk.Parse(jwksResp.Body)
+    if err != nil {
+        return nil, fmt.Errorf("failed to parse JWKS: %w", err)
+    }
+
+    return keySet, nil
+}
+
+func getJWKS() (jwk.Set, error) {
+    jwksCacheMutex.RLock()
+    if cachedJWKS != nil && time.Since(jwksCacheTime) < jwksCacheDuration {
+        defer jwksCacheMutex.RUnlock()
+        return cachedJWKS, nil
+    }
+    jwksCacheMutex.RUnlock()
+
+    jwksCacheMutex.Lock()
+    defer jwksCacheMutex.Unlock()
+
+    // Double-check after acquiring write lock
+    if cachedJWKS != nil && time.Since(jwksCacheTime) < jwksCacheDuration {
+        return cachedJWKS, nil
+    }
+
+    // Fetch fresh JWKS
+    keySet, err := fetchJWKS()
+    if err != nil {
+        return nil, err
+    }
+
+    cachedJWKS = keySet
+    jwksCacheTime = time.Now()
+
+    return cachedJWKS, nil
 }
 
 func verifyRiseJWT(tokenString string) (*RiseClaims, error) {
     keySet, err := getJWKS()
     if err != nil {
-        return nil, fmt.Errorf("failed to parse JWKS: %w", err)
+        return nil, fmt.Errorf("failed to get JWKS: %w", err)
     }
-    
+
     token, err := jwt.ParseWithClaims(tokenString, &RiseClaims{}, func(token *jwt.Token) (interface{}, error) {
         // Verify algorithm
         if _, ok := token.Method.(*jwt.SigningMethodRSA); !ok {
             return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
         }
-        
+
         // Get key ID from token header
         kid, ok := token.Header["kid"].(string)
         if !ok {
             return nil, fmt.Errorf("kid header missing")
         }
-        
+
         // Find matching key in JWKS
         key, found := keySet.LookupKeyID(kid)
         if !found {
             return nil, fmt.Errorf("key not found in JWKS")
         }
-        
+
         // Convert JWK to RSA public key
         var rawKey interface{}
         if err := key.Raw(&rawKey); err != nil {
             return nil, fmt.Errorf("failed to get raw key: %w", err)
         }
-        
+
         return rawKey, nil
     })
-    
+
     if err != nil {
         return nil, err
     }
-    
+
     if claims, ok := token.Claims.(*RiseClaims); ok && token.Valid {
         return claims, nil
     }
-    
+
     return nil, fmt.Errorf("invalid token")
 }
 
@@ -269,13 +465,13 @@ func authMiddleware(next http.Handler) http.Handler {
             http.Error(w, "No authentication token", http.StatusUnauthorized)
             return
         }
-        
+
         claims, err := verifyRiseJWT(cookie.Value)
         if err != nil {
             http.Error(w, fmt.Sprintf("Invalid token: %v", err), http.StatusUnauthorized)
             return
         }
-        
+
         // Attach user info to context
         ctx := context.WithValue(r.Context(), "user", claims)
         next.ServeHTTP(w, r.WithContext(ctx))
