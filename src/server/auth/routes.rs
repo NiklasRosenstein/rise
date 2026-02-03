@@ -20,6 +20,18 @@ pub fn public_routes() -> Router<AppState> {
         .route("/auth/jwks", get(handlers::jwks))
 }
 
+/// Root-level well-known routes (must be at root per OIDC spec)
+///
+/// These routes must be mounted at the root level (not under `/api/v1`) to comply
+/// with OpenID Connect Discovery 1.0 specification which requires the discovery
+/// endpoint to be at `/.well-known/openid-configuration` relative to the issuer URL.
+pub fn well_known_routes() -> Router<AppState> {
+    Router::new().route(
+        "/.well-known/openid-configuration",
+        get(handlers::openid_configuration),
+    )
+}
+
 /// Routes for `/.rise/auth/*` path (for custom domain support via Ingress routing)
 ///
 /// These routes are mounted at the root level (not under `/api/v1`) to allow

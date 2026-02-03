@@ -44,14 +44,12 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let settings_clone = settings.clone();
     let controller_state_clone = controller_state.clone();
     let registry_provider = state.registry_provider.clone();
-    let jwks_json = state.jwks_json.clone();
     let handle = tokio::spawn(async move {
         #[cfg(feature = "k8s")]
         {
             if let Err(e) = run_kubernetes_controller_loop(
                 controller_state_clone,
                 registry_provider,
-                jwks_json,
                 settings_clone,
             )
             .await
@@ -122,6 +120,8 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 
     let app = Router::new()
         .nest("/api/v1", api_routes)
+        // Well-known routes at root level (per OIDC spec)
+        .merge(auth::routes::well_known_routes())
         // Root-level auth routes for custom domain support via Ingress routing
         .merge(auth::routes::rise_auth_routes())
         // OAuth/OIDC routes at root level (before frontend fallback)
@@ -217,7 +217,6 @@ async fn run_ecr_controller_loop(
 async fn run_kubernetes_controller_loop(
     controller_state: ControllerState,
     registry_provider: Arc<dyn crate::server::registry::RegistryProvider>,
-    jwks_json: String,
     settings: settings::Settings,
 ) -> Result<()> {
     // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
@@ -336,10 +335,6 @@ async fn run_kubernetes_controller_loop(
             node_selector,
             image_pull_secret_name,
             access_classes,
-            // Use JWKS from main server
-            rise_jwks_json: jwks_json,
-            // Use public_url as issuer
-            rise_issuer: settings.server.public_url.clone(),
             host_aliases,
         },
     )?);

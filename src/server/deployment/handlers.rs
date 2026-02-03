@@ -229,91 +229,19 @@ fn convert_status_to_db(status: DeploymentStatus) -> DbDeploymentStatus {
 /// Insert Rise-provided environment variables into a deployment
 ///
 /// This function adds the following environment variables:
-/// - RISE_API_URL: Internal URL for backend-to-backend API calls (e.g., OAuth token endpoint)
-/// - RISE_PUBLIC_URL: Public URL for browser redirects (e.g., OAuth authorize endpoint)
-/// - RISE_JWKS: JSON Web Key Set for JWT validation
-/// - RISE_ISSUER: The Rise backend URL (issuer of JWTs)
+/// - RISE_ISSUER: Rise server URL (base URL for all Rise endpoints and JWT issuer)
 /// - RISE_APP_URL: Canonical URL where the app is accessible
 /// - RISE_APP_URLS: JSON array of all URLs where the app can be accessed
 ///
 /// These environment variables are visible in the Rise UI and allow deployed applications
-/// to validate Rise-issued JWTs, call Rise APIs, and know their own URLs.
+/// to validate Rise-issued JWTs (via /.well-known/openid-configuration), call Rise APIs,
+/// and know their own URLs.
 async fn insert_rise_env_vars(
     state: &AppState,
     deployment: &crate::db::models::Deployment,
     project: &crate::db::models::Project,
 ) -> Result<(), (StatusCode, String)> {
-    // 1. Insert RISE_API_URL (URL for backend-to-backend API calls)
-    crate::db::env_vars::upsert_deployment_env_var(
-        &state.db_pool,
-        deployment.id,
-        "RISE_API_URL",
-        &state.public_url,
-        false, // Not a secret
-        false, // is_retrievable
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to insert RISE_API_URL env var: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to insert RISE_API_URL: {}", e),
-        )
-    })?;
-
-    // 2. Insert RISE_PUBLIC_URL (public URL for browser redirects)
-    crate::db::env_vars::upsert_deployment_env_var(
-        &state.db_pool,
-        deployment.id,
-        "RISE_PUBLIC_URL",
-        &state.public_url,
-        false, // Not a secret
-        false, // is_retrievable
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to insert RISE_PUBLIC_URL env var: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to insert RISE_PUBLIC_URL: {}", e),
-        )
-    })?;
-
-    // 3. Generate RISE_JWKS
-    let jwks = state.jwt_signer.generate_jwks().map_err(|e| {
-        error!("Failed to generate JWKS: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to generate JWKS: {}", e),
-        )
-    })?;
-    let jwks_json = serde_json::to_string(&jwks).map_err(|e| {
-        error!("Failed to serialize JWKS: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to serialize JWKS: {}", e),
-        )
-    })?;
-
-    // Insert RISE_JWKS
-    crate::db::env_vars::upsert_deployment_env_var(
-        &state.db_pool,
-        deployment.id,
-        "RISE_JWKS",
-        &jwks_json,
-        false, // Not a secret - public keys
-        false, // is_retrievable
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to insert RISE_JWKS env var: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to insert RISE_JWKS: {}", e),
-        )
-    })?;
-
-    // 4. Insert RISE_ISSUER
+    // 1. Insert RISE_ISSUER
     crate::db::env_vars::upsert_deployment_env_var(
         &state.db_pool,
         deployment.id,
@@ -331,7 +259,7 @@ async fn insert_rise_env_vars(
         )
     })?;
 
-    // 5. Generate RISE_APP_URL and RISE_APP_URLS
+    // 2. Generate RISE_APP_URL and RISE_APP_URLS
     let deployment_urls = state
         .deployment_backend
         .get_deployment_urls(deployment, project)

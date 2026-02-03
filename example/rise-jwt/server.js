@@ -1,52 +1,86 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const jwkToPem = require('jwk-to-pem');
+const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Load JWKS from environment variable (provided by Rise)
-const RISE_JWKS = process.env.RISE_JWKS ? JSON.parse(process.env.RISE_JWKS) : null;
 const RISE_ISSUER = process.env.RISE_ISSUER || 'http://localhost:3000';
 const RISE_APP_URLS = process.env.RISE_APP_URLS ? JSON.parse(process.env.RISE_APP_URLS) : null;
 
-// Convert JWKS to a key lookup function for jsonwebtoken
-function getKey(header, callback) {
-  if (!RISE_JWKS || !RISE_JWKS.keys) {
-    return callback(new Error('RISE_JWKS not configured - JWT validation unavailable'));
-  }
+// Cache for JWKS (refresh periodically in production)
+let cachedJWKS = null;
+let jwksFetchTime = null;
+const JWKS_CACHE_DURATION = 3600000; // 1 hour in milliseconds
 
-  const key = RISE_JWKS.keys.find(k => k.kid === header.kid);
-  if (!key) {
-    return callback(new Error(`Key with kid "${header.kid}" not found in JWKS`));
-  }
+// Fetch JWKS from OpenID configuration discovery
+async function fetchJWKS() {
+  const configUrl = `${RISE_ISSUER}/.well-known/openid-configuration`;
 
   try {
-    // Convert JWK to PEM format using jwk-to-pem
-    const pem = jwkToPem(key);
-    callback(null, pem);
-  } catch (err) {
-    callback(err);
+    const configResponse = await fetch(configUrl);
+    if (!configResponse.ok) {
+      throw new Error(`Failed to fetch OpenID configuration: ${configResponse.status}`);
+    }
+    const config = await configResponse.json();
+
+    const jwksResponse = await fetch(config.jwks_uri);
+    if (!jwksResponse.ok) {
+      throw new Error(`Failed to fetch JWKS: ${jwksResponse.status}`);
+    }
+    const jwks = await jwksResponse.json();
+
+    return jwks;
+  } catch (error) {
+    console.error('Failed to fetch JWKS:', error);
+    return null;
   }
+}
+
+// Get JWKS with caching
+async function getJWKS() {
+  const now = Date.now();
+
+  // Return cached JWKS if valid
+  if (cachedJWKS && jwksFetchTime && (now - jwksFetchTime) < JWKS_CACHE_DURATION) {
+    return cachedJWKS;
+  }
+
+  // Fetch fresh JWKS
+  cachedJWKS = await fetchJWKS();
+  jwksFetchTime = now;
+
+  return cachedJWKS;
+}
+
+// Convert JWKS to a key lookup function for jsonwebtoken
+function getKey(header, callback) {
+  getJWKS().then(jwks => {
+    if (!jwks || !jwks.keys) {
+      return callback(new Error('JWKS not available - JWT validation unavailable'));
+    }
+
+    const key = jwks.keys.find(k => k.kid === header.kid);
+    if (!key) {
+      return callback(new Error(`Key with kid "${header.kid}" not found in JWKS`));
+    }
+
+    try {
+      const pem = jwkToPem(key);
+      callback(null, pem);
+    } catch (err) {
+      callback(err);
+    }
+  }).catch(err => {
+    callback(err);
+  });
 }
 
 // Utility: Validate and decode JWT
 async function validateJWT(token) {
   return new Promise((resolve, reject) => {
-    // If JWKS is not available, fall back to decode-only (insecure, for demo)
-    if (!RISE_JWKS) {
-      console.warn('WARNING: RISE_JWKS not set - JWT signature validation is DISABLED');
-      console.warn('This is INSECURE and should only be used for local testing');
-
-      // Decode without verification (INSECURE - for demo only)
-      const decoded = jwt.decode(token, { complete: false });
-      if (!decoded) {
-        return reject(new Error('Failed to decode JWT'));
-      }
-      return resolve({ claims: decoded, verified: false });
-    }
-
-    // Verify JWT signature using JWKS
+    // Verify JWT signature using JWKS fetched from discovery endpoint
     jwt.verify(token, getKey, {
       algorithms: ['RS256'],
       issuer: RISE_ISSUER,

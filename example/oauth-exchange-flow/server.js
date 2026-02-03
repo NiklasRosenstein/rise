@@ -17,10 +17,8 @@ function requireEnv(name, description) {
 
 // Configuration - adjust for your setup.
 const CONFIG = {
-  // RISE_PUBLIC_URL: Browser-reachable URL for OAuth authorize redirects
-  risePublicUrl: process.env.RISE_PUBLIC_URL || 'http://localhost:3000',
-  // RISE_API_URL: Internal URL for backend-to-backend API calls (token exchange)
-  riseApiUrl: process.env.RISE_API_URL || 'http://localhost:3000',
+  // RISE_ISSUER: Rise server URL (base URL for all Rise endpoints)
+  riseIssuer: process.env.RISE_ISSUER || 'http://localhost:3000',
   projectName: process.env.PROJECT_NAME || 'oauth-demo',
   extensionName: 'oauth-dex',
   sessionSecret: process.env.SESSION_SECRET || 'change-this-in-production',
@@ -98,10 +96,10 @@ app.get('/', (req, res) => {
 
 // Initiate OAuth flow
 app.get('/login', (req, res) => {
-  // Build the OAuth authorization URL (uses RISE_PUBLIC_URL for browser redirect)
+  // Build the OAuth authorization URL (uses RISE_ISSUER for browser redirect)
   const authUrl = new URL(
     `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`,
-    CONFIG.risePublicUrl
+    CONFIG.riseIssuer
   );
 
   // Set redirect URI to our callback
@@ -132,10 +130,10 @@ app.get('/oauth/callback', async (req, res) => {
       return res.status(400).send(renderErrorPage('No authorization code received'));
     }
 
-    // Exchange the authorization code for OAuth tokens (uses RISE_API_URL for backend call)
+    // Exchange the authorization code for OAuth tokens (uses RISE_ISSUER for backend call)
     const tokenUrl = new URL(
       `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`,
-      CONFIG.riseApiUrl
+      CONFIG.riseIssuer
     );
 
     const response = await fetch(tokenUrl.toString(), {
@@ -527,8 +525,7 @@ function escapeHtml(text) {
 app.listen(PORT, () => {
   console.log(`OAuth Token Endpoint Flow Example running on http://localhost:${PORT}`);
   console.log('Configuration:', {
-    risePublicUrl: CONFIG.risePublicUrl,
-    riseApiUrl: CONFIG.riseApiUrl,
+    riseIssuer: CONFIG.riseIssuer,
     projectName: CONFIG.projectName,
     extensionName: CONFIG.extensionName,
     oidcIssuer: CONFIG.oidcIssuer,

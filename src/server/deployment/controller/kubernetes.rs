@@ -122,10 +122,6 @@ pub struct KubernetesControllerConfig {
     pub node_selector: std::collections::HashMap<String, String>,
     pub image_pull_secret_name: Option<String>,
     pub access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
-    /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
-    pub rise_jwks_json: String,
-    /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
-    pub rise_issuer: String,
     /// Host aliases to inject into pod specs (hostname -> IP address)
     pub host_aliases: std::collections::HashMap<String, String>,
 }
@@ -157,12 +153,6 @@ pub struct KubernetesController {
     /// Value: last observed resourceVersion from Kubernetes API
     /// Lost on controller restart → causes one re-apply, then cached again
     resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
-    /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
-    #[allow(dead_code)]
-    rise_jwks_json: String,
-    /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
-    #[allow(dead_code)]
-    rise_issuer: String,
     /// Host aliases to inject into pod specs (hostname -> IP address)
     host_aliases: std::collections::HashMap<String, String>,
 }
@@ -195,8 +185,6 @@ impl KubernetesController {
             image_pull_secret_name: config.image_pull_secret_name,
             access_classes: config.access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            rise_jwks_json: config.rise_jwks_json,
-            rise_issuer: config.rise_issuer,
             host_aliases: config.host_aliases,
         })
     }
@@ -1779,8 +1767,8 @@ impl KubernetesController {
         .await?;
 
         // Format as Kubernetes EnvVar objects
-        // Note: PORT, RISE_JWKS, RISE_ISSUER, RISE_APP_URL, and RISE_APP_URLS are now
-        // persisted in deployment_env_vars and loaded from the database
+        // Note: PORT, RISE_ISSUER, RISE_APP_URL, and RISE_APP_URLS
+        // are persisted in deployment_env_vars and loaded from the database
         let k8s_env_vars: Vec<EnvVar> = env_vars
             .into_iter()
             .map(|(key, value)| EnvVar {
@@ -3975,8 +3963,6 @@ mod tests {
             image_pull_secret_name: None,
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            rise_jwks_json: r#"{"keys":[]}"#.to_string(),
-            rise_issuer: "http://localhost:3000".to_string(),
             host_aliases: std::collections::HashMap::new(),
         }
     }
@@ -4446,8 +4432,6 @@ mod tests {
             image_pull_secret_name: None,
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            rise_jwks_json: r#"{"keys":[]}"#.to_string(),
-            rise_issuer: "http://localhost:3000".to_string(),
             host_aliases: std::collections::HashMap::new(),
         }
     }

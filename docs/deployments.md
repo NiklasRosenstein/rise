@@ -198,6 +198,28 @@ rise d c my-app --group default
 rise d c my-app --follow --timeout 5m || exit 1
 ```
 
+## Auto-Injected Environment Variables
+
+Rise automatically injects the following environment variables into every deployment:
+
+| Variable | Description | Example Value |
+|----------|-------------|---------------|
+| `PORT` | HTTP port the container should listen on | `8080` |
+| `RISE_ISSUER` | Rise server URL (base URL for all Rise endpoints) and JWT issuer | `https://rise.example.com` |
+| `RISE_APP_URL` | Canonical URL where your app is accessible (primary custom domain or default project URL) | `https://myapp.example.com` |
+| `RISE_APP_URLS` | JSON array of all URLs where your app can be accessed | `["https://myapp.rise.dev", "https://myapp.example.com"]` |
+
+### Using RISE_ISSUER for JWT Validation
+
+To validate Rise-issued JWTs, applications should:
+
+1. Fetch OpenID configuration from `${RISE_ISSUER}/.well-known/openid-configuration`
+2. Extract the `jwks_uri` from the configuration
+3. Fetch the JWKS from `jwks_uri`
+4. Use the JWKS to validate JWT signatures
+
+See [Authentication for Apps](./authentication-for-apps.md) for detailed examples.
+
 ## Next Steps
 
 - **Use service accounts in CI/CD**: See [Authentication](authentication.md#service-accounts-workload-identity)
