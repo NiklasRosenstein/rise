@@ -8,6 +8,15 @@ use tracing::{debug, info, warn};
 use super::dockerfile_ssl::preprocess_dockerfile_for_ssl;
 use super::registry::docker_push;
 
+/// Check if buildx is available for the given container CLI
+pub(crate) fn is_buildx_available(container_cli: &str) -> bool {
+    Command::new(container_cli)
+        .args(["buildx", "version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
+
 /// Options for building with Docker/Podman
 pub(crate) struct DockerBuildOptions<'a> {
     pub app_path: &'a str,
@@ -91,10 +100,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
 
     if options.use_buildx {
         // Check buildx availability
-        let buildx_check = Command::new(options.container_cli)
-            .args(["buildx", "version"])
-            .output();
-        if buildx_check.is_err() {
+        if !is_buildx_available(options.container_cli) {
             bail!(
                 "{} buildx not available. Install it or use docker:build backend instead.",
                 options.container_cli
