@@ -6,3 +6,12 @@ access_class = "private"
 custom_domains = []
 
 [project.env]
+
+# Build-time environment variables (optional)
+# These are passed to the build process and can configure build behavior
+# Uncomment to configure Node.js version and npm version:
+# [build]
+# backend = "pack"
+# builder = "paketobuildpacks/builder-jammy-base"
+# buildpacks = ["paketo-buildpacks/nodejs"]
+# env = ["BP_NODE_VERSION=20.*", "BP_NPM_VERSION=latest"]

@@ -215,6 +215,105 @@ rise build myapp:latest --backend railpack -e CUSTOM_VAR=value
 - Available in all build steps defined in the Railpack plan
 - Railpack frontend exposes them as environment variables during build
 
+### Security Considerations
+
+**IMPORTANT: Build-time variables are for build configuration only!**
+
+Build-time environment variables are used during the image build process and should only contain build-related configuration (compiler versions, build flags, feature toggles, etc.). They should NEVER contain runtime secrets.
+
+**❌ Bad - Runtime secrets as build-time variables:**
+```toml
+[build]
+# NEVER do this - these are runtime secrets!
+env = ["DATABASE_PASSWORD=hunter2", "API_KEY=secret123"]
+```
+
+```bash
+# NEVER do this - runtime secrets don't belong in builds!
+rise build myapp:latest -e DATABASE_PASSWORD=secret123
+```
+
+**✅ Good - Build configuration only:**
+```toml
+[build]
+# These configure the build process, not the running application
+env = ["NODE_ENV=production", "BUILD_VERSION=1.2.3", "BP_NODE_VERSION=20"]
+```
+
+```bash
+# Build-time configuration that affects compilation/packaging
+rise build myapp:latest -e NODE_ENV=production -e OPTIMIZATION_LEVEL=2
+```
+
+**Build-Time vs Runtime Variables:**
+
+| Aspect | Build-Time Variables | Runtime Variables |
+|--------|---------------------|-------------------|
+| **Purpose** | Configure build process (compiler flags, tool versions) | Configure running application (DB credentials, API keys) |
+| **Set via** | `build.env` in `rise.toml`, `-e` flag | `rise env set` command |
+| **Used during** | Image building only | Container runtime |
+| **Storage** | Not stored (ephemeral, config files) | Database (encrypted for secrets) |
+| **Examples** | `NODE_ENV`, `BUILD_VERSION`, `BP_PYTHON_VERSION` | `DATABASE_URL`, `API_KEY`, `JWT_SECRET` |
+
+**For runtime secrets**, always use `rise env set --secret`:
+```bash
+# Runtime secrets - injected into running containers
+rise env set my-app DATABASE_PASSWORD hunter2 --secret
+rise env set my-app API_KEY abc123xyz --secret
+
+# Non-secret runtime config
+rise env set my-app LOG_LEVEL info
+```
+
+**Reading from environment (build-time only):**
+You can reference environment variables without hardcoding values in `rise.toml`:
+```toml
+[build]
+env = ["BUILD_VERSION"]  # Reads BUILD_VERSION from your shell environment
+```
+
+This is useful for CI/CD where you want to inject build metadata (git commit SHA, build number) without hardcoding it in config files.
+
+### Troubleshooting Build-Time Variables
+
+**Problem: Environment variable not available in Dockerfile**
+
+Docker backend requires explicit `ARG` declarations:
+```dockerfile
+ARG NODE_ENV
+ARG BUILD_VERSION
+RUN echo "Building version $BUILD_VERSION"
+```
+
+Then pass via CLI or rise.toml:
+```bash
+rise build myapp:latest -e NODE_ENV=production -e BUILD_VERSION=1.0.0
+```
+
+**Problem: Variable contains secret but needs to be in rise.toml**
+
+Don't put the secret value in rise.toml. Instead, use the `KEY` format (without `=VALUE`) to read from your environment:
+
+```toml
+[build]
+env = ["API_KEY"]  # Will read from environment
+```
+
+Then set in your shell before building:
+```bash
+export API_KEY=secret123
+rise build myapp:latest
+```
+
+**Problem: CLI -e flags are overriding rise.toml values**
+
+This is by design! CLI flags are **merged** with rise.toml values, not replaced:
+- All `env` values from rise.toml are included
+- CLI `-e` flags are appended
+- Result: rise.toml env + CLI env
+
+To completely override, don't use rise.toml for that variable.
+
 ## Project Configuration (rise.toml)
 
 You can create a `rise.toml` or `.rise.toml` file in your project directory to define default build options. This allows you to avoid repeating CLI flags for every build.

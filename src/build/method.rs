@@ -36,9 +36,20 @@ pub struct BuildArgs {
     #[arg(long = "buildpack", short = 'b')]
     pub buildpacks: Vec<String>,
 
-    /// Environment variables to pass to the build. Can be specified multiple times.
-    /// Format: KEY=VALUE or KEY (to pass from environment)
-    #[arg(long = "env", short = 'e')]
+    /// Build-time environment variables (for build configuration only).
+    /// Format: KEY=VALUE (with explicit value) or KEY (reads from current environment).
+    ///
+    /// Examples:
+    ///   -e NODE_ENV=production -e API_VERSION=1.2.3
+    ///   -e DATABASE_URL  (reads DATABASE_URL from current environment)
+    ///
+    /// Can also be configured in rise.toml under [build] section.
+    /// CLI values are merged with rise.toml values.
+    ///
+    /// WARNING: Build-time variables are for build configuration (compiler flags,
+    /// tool versions, feature toggles), NOT runtime secrets. For runtime secrets,
+    /// use 'rise env set --secret' instead.
+    #[arg(long = "env", short = 'e', value_name = "KEY=VALUE")]
     pub env: Vec<String>,
 
     /// Container CLI to use (docker or podman)
