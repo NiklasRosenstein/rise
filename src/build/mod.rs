@@ -234,7 +234,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                     // Add to secrets map so build_with_buildctl can pass it as --local
                     // We use a special marker to indicate this is a local context, not a secret
                     secrets.insert(
-                        "RISE_SSL_CERT_LOCAL_CONTEXT".to_string(),
+                        dockerfile_ssl::SSL_CERT_LOCAL_CONTEXT_MARKER.to_string(),
                         context.context_path.to_string_lossy().to_string(),
                     );
 

@@ -5,7 +5,9 @@ use std::path::Path;
 use std::process::Command;
 use tracing::{debug, info, warn};
 
-use super::dockerfile_ssl::{preprocess_dockerfile_for_ssl, SslCertContext};
+use super::dockerfile_ssl::{
+    preprocess_dockerfile_for_ssl, SslCertContext, SSL_CERT_BUILD_CONTEXT,
+};
 use super::registry::docker_push;
 
 /// Options for building with Docker/Podman
@@ -130,12 +132,15 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
             // Create temp directory with cert for bind mount
             // Using a named build context keeps the cert separate from the main context,
             // preventing accidental inclusion via generic COPY commands; it can still be
-            // referenced explicitly via COPY --from=rise-ssl-cert if desired.
+            // referenced explicitly via COPY --from={SSL_CERT_BUILD_CONTEXT} if desired.
             let context = SslCertContext::new(cert_path)?;
 
             // Add named build context for SSL certificate
-            cmd.arg("--build-context")
-                .arg(format!("rise-ssl-cert={}", context.context_path.display()));
+            cmd.arg("--build-context").arg(format!(
+                "{}={}",
+                SSL_CERT_BUILD_CONTEXT,
+                context.context_path.display()
+            ));
 
             Some(context)
         } else {

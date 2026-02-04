@@ -8,6 +8,7 @@ use std::process::Command;
 use tracing::{debug, info, warn};
 
 use super::buildkit::ensure_buildx_builder;
+use super::dockerfile_ssl::{SSL_CERT_BUILD_CONTEXT, SSL_CERT_LOCAL_CONTEXT_MARKER};
 use super::ssl::embed_ssl_cert_in_plan;
 
 /// BuildKit frontend type for buildctl
@@ -367,9 +368,10 @@ pub(crate) fn build_with_buildctl(
 
     // Add secrets and local contexts
     for (key, value) in secrets {
-        // Special handling for RISE_SSL_CERT_LOCAL_CONTEXT - use --local for named build context
-        if key == "RISE_SSL_CERT_LOCAL_CONTEXT" {
-            cmd.arg("--local").arg(format!("rise-ssl-cert={}", value));
+        // Special handling for SSL_CERT_LOCAL_CONTEXT_MARKER - use --local for named build context
+        if key == SSL_CERT_LOCAL_CONTEXT_MARKER {
+            cmd.arg("--local")
+                .arg(format!("{}={}", SSL_CERT_BUILD_CONTEXT, value));
         }
         // Special handling for SSL_CERT_FILE - use src= to read from file
         else if key == "SSL_CERT_FILE" {
