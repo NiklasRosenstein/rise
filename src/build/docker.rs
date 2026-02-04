@@ -131,8 +131,9 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     let _ssl_cert_context: Option<SslCertContext> = if options.use_buildx {
         if let Some(ref cert_path) = ssl_cert_path {
             // Create temp directory with cert for bind mount
-            // Using a named build context keeps the cert separate from the main context
-            // and prevents it from being copied into the image via COPY commands
+            // Using a named build context keeps the cert separate from the main context,
+            // preventing accidental inclusion via generic COPY commands; it can still be
+            // referenced explicitly via COPY --from=rise-ssl-cert if desired.
             let context = SslCertContext::new(cert_path)?;
 
             // Add named build context for SSL certificate
