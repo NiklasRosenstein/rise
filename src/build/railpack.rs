@@ -365,10 +365,14 @@ pub(crate) fn build_with_buildctl(
         cmd.env("BUILDKIT_HOST", host);
     }
 
-    // Add secrets
+    // Add secrets and local contexts
     for (key, value) in secrets {
+        // Special handling for RISE_SSL_CERT_LOCAL_CONTEXT - use --local for named build context
+        if key == "RISE_SSL_CERT_LOCAL_CONTEXT" {
+            cmd.arg("--local").arg(format!("rise-ssl-cert={}", value));
+        }
         // Special handling for SSL_CERT_FILE - use src= to read from file
-        if key == "SSL_CERT_FILE" {
+        else if key == "SSL_CERT_FILE" {
             cmd.arg("--secret").arg(format!("id={},src={}", key, value));
         } else {
             // For other secrets, read from environment variable

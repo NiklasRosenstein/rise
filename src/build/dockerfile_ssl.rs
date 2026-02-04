@@ -18,6 +18,44 @@ pub(crate) enum SslMountStrategy {
     Bind,   // Use --mount=type=bind (> 500KiB)
 }
 
+/// RAII struct for managing SSL certificate build context
+///
+/// When using bind mount strategy for large certificates, this creates a temporary
+/// directory containing the certificate and automatically cleans it up when dropped.
+pub(crate) struct SslCertContext {
+    _temp_dir: TempDir,
+    /// Path to the temporary directory containing ca-certificates.crt
+    pub context_path: PathBuf,
+}
+
+impl SslCertContext {
+    /// Create SSL cert build context for bind mount strategy
+    ///
+    /// Creates a temp directory with ca-certificates.crt inside, suitable for use as
+    /// a named build context that keeps the cert separate from the main build context.
+    pub fn new(ssl_cert_path: &Path) -> Result<Self> {
+        let temp_dir =
+            TempDir::new().context("Failed to create temp directory for SSL certificate")?;
+        let cert_dest = temp_dir.path().join("ca-certificates.crt");
+        std::fs::copy(ssl_cert_path, &cert_dest).with_context(|| {
+            format!(
+                "Failed to copy SSL certificate to temp directory: {}",
+                cert_dest.display()
+            )
+        })?;
+
+        debug!(
+            "Created SSL cert build context in temp directory: {}",
+            temp_dir.path().display()
+        );
+
+        Ok(Self {
+            context_path: temp_dir.path().to_path_buf(),
+            _temp_dir: temp_dir,
+        })
+    }
+}
+
 /// Determine SSL mount strategy based on certificate file size
 fn determine_ssl_mount_strategy(ssl_cert_path: &Path) -> Result<SslMountStrategy> {
     let metadata =
@@ -48,7 +86,7 @@ fn generate_ssl_mount_spec(strategy: SslMountStrategy) -> String {
             .iter()
             .map(|path| {
                 format!(
-                    "--mount=type=bind,from=context,source=.rise-ssl-cert.crt,target={},readonly",
+                    "--mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target={},readonly",
                     path
                 )
             })

@@ -1,11 +1,11 @@
 // Docker/Dockerfile builds
 
 use anyhow::{bail, Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::Command;
 use tracing::{debug, info, warn};
 
-use super::dockerfile_ssl::{preprocess_dockerfile_for_ssl, SslMountStrategy};
+use super::dockerfile_ssl::{preprocess_dockerfile_for_ssl, SslCertContext, SslMountStrategy};
 use super::registry::docker_push;
 
 /// Options for building with Docker/Podman
@@ -130,81 +130,35 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     cmd.arg("--platform").arg("linux/amd64");
 
     // Add SSL certificate based on mount strategy
-    // Track cert file and dockerignore for cleanup if we copy cert to build context
-    let mut cert_cleanup_path: Option<PathBuf> = None;
-    let mut dockerignore_cleanup: Option<(PathBuf, Option<String>)> = None;
-
-    if options.use_buildx {
+    // RAII cleanup via SslCertContext drop
+    let _ssl_cert_context: Option<SslCertContext> = if options.use_buildx {
         if let (Some(ref cert_path), Some(strategy)) = (&ssl_cert_path, ssl_strategy) {
             match strategy {
                 SslMountStrategy::Secret => {
                     // Use secret mount (default for certs ≤ 500KiB)
                     cmd.arg("--secret")
                         .arg(format!("id=SSL_CERT_FILE,src={}", cert_path.display()));
+                    None
                 }
                 SslMountStrategy::Bind => {
-                    // Copy cert to build context for bind mount (certs > 500KiB)
-                    let build_context_path =
-                        Path::new(options.build_context.unwrap_or(options.app_path));
-                    let cert_dest = build_context_path.join(".rise-ssl-cert.crt");
-                    std::fs::copy(cert_path, &cert_dest).with_context(|| {
-                        format!(
-                            "Failed to copy SSL certificate to build context: {}",
-                            cert_dest.display()
-                        )
-                    })?;
-                    debug!("Copied SSL certificate to build context for bind mount");
-                    cert_cleanup_path = Some(cert_dest);
+                    // Create temp directory with cert for bind mount (certs > 500KiB)
+                    // Using a named build context keeps the cert separate from the main context
+                    // and prevents it from being copied into the image via COPY commands
+                    let context = SslCertContext::new(cert_path)?;
 
-                    // Add .rise-ssl-cert.crt to .dockerignore to prevent it from being copied into the image
-                    let dockerignore_path = build_context_path.join(".dockerignore");
-                    let original_content = if dockerignore_path.exists() {
-                        Some(
-                            std::fs::read_to_string(&dockerignore_path).with_context(|| {
-                                format!(
-                                    "Failed to read .dockerignore: {}",
-                                    dockerignore_path.display()
-                                )
-                            })?,
-                        )
-                    } else {
-                        None
-                    };
+                    // Add named build context for SSL certificate
+                    cmd.arg("--build-context")
+                        .arg(format!("rise-ssl-cert={}", context.context_path.display()));
 
-                    // Check if .rise-ssl-cert.crt is already ignored
-                    let needs_entry = original_content
-                        .as_ref()
-                        .map(|content| {
-                            !content.lines().any(|line| {
-                                let trimmed = line.trim();
-                                trimmed == ".rise-ssl-cert.crt"
-                                    || trimmed == ".rise-*"
-                                    || trimmed == ".rise*"
-                            })
-                        })
-                        .unwrap_or(true);
-
-                    if needs_entry {
-                        let new_content = if let Some(ref content) = original_content {
-                            format!("{}\n.rise-ssl-cert.crt\n", content.trim_end())
-                        } else {
-                            ".rise-ssl-cert.crt\n".to_string()
-                        };
-
-                        std::fs::write(&dockerignore_path, &new_content).with_context(|| {
-                            format!(
-                                "Failed to write .dockerignore: {}",
-                                dockerignore_path.display()
-                            )
-                        })?;
-
-                        debug!("Added .rise-ssl-cert.crt to .dockerignore");
-                        dockerignore_cleanup = Some((dockerignore_path, original_content));
-                    }
+                    Some(context)
                 }
             }
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     // Add proxy build arguments
     let proxy_vars = super::proxy::read_and_transform_proxy_vars();
@@ -257,52 +211,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
         .status()
         .with_context(|| format!("Failed to execute {} build", options.container_cli))?;
 
-    // Clean up temporary SSL certificate file and .dockerignore if we created/modified them
-    if let Some(cert_path) = cert_cleanup_path {
-        if cert_path.exists() {
-            if let Err(e) = std::fs::remove_file(&cert_path) {
-                warn!(
-                    "Failed to clean up temporary SSL certificate file {}: {}",
-                    cert_path.display(),
-                    e
-                );
-            } else {
-                debug!(
-                    "Cleaned up temporary SSL certificate file: {}",
-                    cert_path.display()
-                );
-            }
-        }
-    }
-
-    // Restore .dockerignore to original state
-    if let Some((dockerignore_path, original_content)) = dockerignore_cleanup {
-        if let Some(content) = original_content {
-            // Restore original .dockerignore
-            if let Err(e) = std::fs::write(&dockerignore_path, content) {
-                warn!(
-                    "Failed to restore .dockerignore {}: {}",
-                    dockerignore_path.display(),
-                    e
-                );
-            } else {
-                debug!("Restored .dockerignore to original state");
-            }
-        } else {
-            // Remove .dockerignore if it didn't exist before
-            if dockerignore_path.exists() {
-                if let Err(e) = std::fs::remove_file(&dockerignore_path) {
-                    warn!(
-                        "Failed to remove temporary .dockerignore {}: {}",
-                        dockerignore_path.display(),
-                        e
-                    );
-                } else {
-                    debug!("Removed temporary .dockerignore");
-                }
-            }
-        }
-    }
+    // Note: SslCertContext cleanup is automatic via RAII when it goes out of scope
 
     if !status.success() {
         bail!(
