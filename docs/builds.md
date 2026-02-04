@@ -526,14 +526,20 @@ RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.c
 BuildKit has a 500KiB limit for secrets passed via `--mount=type=secret`. Rise automatically handles this:
 
 - **Certificates ≤ 500KiB**: Uses secure `--mount=type=secret` approach (default)
-- **Certificates > 500KiB**: Automatically falls back to `--mount=type=bind` by copying the certificate to the build context
+- **Certificates > 500KiB**: Automatically falls back to `--mount=type=bind` using a named build context
 
 This ensures builds work seamlessly regardless of certificate bundle size. The fallback is logged for transparency:
 ```
 SSL certificate file is 650000 bytes, exceeding BuildKit's 500KiB secret limit. Using bind mount instead of secret mount.
 ```
 
-**Security Note**: Bind mounts add the certificate to the build context temporarily (as `.rise-ssl-cert.crt`). It's only available during `RUN` commands and not included in the final image layers.
+**How it works for large certificates:**
+- Rise creates a temporary directory containing only the certificate
+- The temp directory is passed as a named build context (`rise-ssl-cert`)
+- The certificate is bind-mounted into RUN commands from this separate context
+- The temp directory is automatically cleaned up after the build
+
+**Security Note**: The named build context keeps the certificate completely separate from your main build context. It cannot be copied into the image via `COPY . .` or similar commands - it's only available during `RUN` commands as a bind mount.
 
 **Note:** The `docker:build` backend does not support BuildKit secrets. If SSL_CERT_FILE is set, you'll see a warning recommending `docker:buildx` instead.
 
