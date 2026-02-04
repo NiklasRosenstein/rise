@@ -6,17 +6,9 @@
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use tempfile::TempDir;
-use tracing::{debug, info};
+use tracing::debug;
 
 use super::ssl::{SSL_CERT_PATHS, SSL_ENV_VARS};
-
-const BUILDKIT_SECRET_SIZE_LIMIT: u64 = 500 * 1024; // 500KiB
-
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub(crate) enum SslMountStrategy {
-    Secret, // Use --mount=type=secret (≤ 500KiB)
-    Bind,   // Use --mount=type=bind (> 500KiB)
-}
 
 /// RAII struct for managing SSL certificate build context
 ///
@@ -56,43 +48,22 @@ impl SslCertContext {
     }
 }
 
-/// Determine SSL mount strategy based on certificate file size
-fn determine_ssl_mount_strategy(ssl_cert_path: &Path) -> Result<SslMountStrategy> {
-    let metadata =
-        std::fs::metadata(ssl_cert_path).context("Failed to get SSL certificate file metadata")?;
-    let size = metadata.len();
-
-    if size > BUILDKIT_SECRET_SIZE_LIMIT {
-        info!(
-            "SSL certificate file is {} bytes, exceeding BuildKit's 500KiB secret limit. \
-             Using bind mount instead of secret mount.",
-            size
-        );
-        Ok(SslMountStrategy::Bind)
-    } else {
-        Ok(SslMountStrategy::Secret)
-    }
-}
-
 /// Generate the mount specification string for all SSL certificate paths
-fn generate_ssl_mount_spec(strategy: SslMountStrategy) -> String {
-    match strategy {
-        SslMountStrategy::Secret => SSL_CERT_PATHS
-            .iter()
-            .map(|path| format!("--mount=type=secret,id=SSL_CERT_FILE,target={}", path))
-            .collect::<Vec<_>>()
-            .join(" "),
-        SslMountStrategy::Bind => SSL_CERT_PATHS
-            .iter()
-            .map(|path| {
-                format!(
-                    "--mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target={},readonly",
-                    path
-                )
-            })
-            .collect::<Vec<_>>()
-            .join(" "),
-    }
+///
+/// Always uses bind mount strategy with a named build context to avoid BuildKit's
+/// 500KiB secret size limit and ensure the certificate cannot be copied into the
+/// image via COPY commands.
+fn generate_ssl_mount_spec() -> String {
+    SSL_CERT_PATHS
+        .iter()
+        .map(|path| {
+            format!(
+                "--mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target={},readonly",
+                path
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 /// Generate export statements for all SSL environment variables
@@ -143,8 +114,8 @@ fn inject_mount_into_run(line: &str, mount_spec: &str) -> String {
         let ws = &rest[..ws_end];
         let command = &rest[ws_end..];
 
-        // Already has mount specification for SSL_CERT_FILE?
-        if command.contains("--mount=type=secret,id=SSL_CERT_FILE") {
+        // Already has mount specification for rise-ssl-cert?
+        if command.contains("--mount=type=bind,from=rise-ssl-cert") {
             return line.to_string();
         }
 
@@ -240,9 +211,9 @@ fn extract_run_flags(command: &str) -> (String, String) {
     (flags.join(" "), actual_command_parts.join(" "))
 }
 
-/// Inject SSL certificate secret mounts into RUN commands in a Dockerfile
-fn inject_ssl_mounts(dockerfile_content: &str, strategy: SslMountStrategy) -> String {
-    let mount_spec = generate_ssl_mount_spec(strategy);
+/// Inject SSL certificate bind mounts into RUN commands in a Dockerfile
+fn inject_ssl_mounts(dockerfile_content: &str) -> String {
+    let mount_spec = generate_ssl_mount_spec();
     let mut result = String::new();
     let lines: Vec<&str> = dockerfile_content.lines().collect();
     let mut i = 0;
@@ -294,7 +265,7 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
     // Check if already has SSL mount
     if run_lines
         .iter()
-        .any(|line| line.contains("--mount=type=secret,id=SSL_CERT_FILE"))
+        .any(|line| line.contains("--mount=type=bind,from=rise-ssl-cert"))
     {
         // Already processed, return as-is
         return run_lines.join("\n") + "\n";
@@ -427,8 +398,8 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
 ///
 /// When SSL_CERT_FILE is set, this function:
 /// 1. Reads the original Dockerfile
-/// 2. Injects `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` into each RUN command
-///    for all common SSL certificate paths
+/// 2. Injects `--mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=<path>,readonly`
+///    into each RUN command for all common SSL certificate paths
 /// 3. Exports all SSL environment variables before the command:
 ///    - SSL_CERT_FILE (curl, wget, Git)
 ///    - NIX_SSL_CERT_FILE (Nix package manager)
@@ -441,16 +412,18 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
 /// Using `export` ensures the variables are available for all commands in the RUN instruction,
 /// including multiline commands with backslash continuations.
 ///
-/// The caller should pass `--secret id=SSL_CERT_FILE,src=<path>` to the build command.
+/// The caller should:
+/// 1. Create an SslCertContext to set up the named build context
+/// 2. Pass `--build-context rise-ssl-cert=<context_path>` to buildx
+/// 3. Or pass `--local rise-ssl-cert=<context_path>` to buildctl
 ///
 /// Returns:
 /// - TempDir: Temporary directory containing the processed Dockerfile (must be kept alive)
 /// - PathBuf: Path to the processed Dockerfile
-/// - SslMountStrategy: The mount strategy to use (Secret or Bind)
 pub(crate) fn preprocess_dockerfile_for_ssl(
     original_dockerfile: &Path,
-    ssl_cert_file: &Path,
-) -> Result<(TempDir, PathBuf, SslMountStrategy)> {
+    _ssl_cert_file: &Path,
+) -> Result<(TempDir, PathBuf)> {
     let content = std::fs::read_to_string(original_dockerfile).with_context(|| {
         format!(
             "Failed to read Dockerfile: {}",
@@ -458,10 +431,7 @@ pub(crate) fn preprocess_dockerfile_for_ssl(
         )
     })?;
 
-    // Determine mount strategy based on certificate size
-    let strategy = determine_ssl_mount_strategy(ssl_cert_file)?;
-
-    let processed = inject_ssl_mounts(&content, strategy);
+    let processed = inject_ssl_mounts(&content);
 
     debug!("Processed Dockerfile with SSL mounts:\n{}", processed);
 
@@ -473,7 +443,7 @@ pub(crate) fn preprocess_dockerfile_for_ssl(
     let temp_dockerfile = temp_dir.path().join(filename);
     std::fs::write(&temp_dockerfile, processed).context("Failed to write processed Dockerfile")?;
 
-    Ok((temp_dir, temp_dockerfile, strategy))
+    Ok((temp_dir, temp_dockerfile))
 }
 
 #[cfg(test)]
@@ -494,7 +464,7 @@ mod tests {
 
     #[test]
     fn test_inject_mount_into_run() {
-        let mount_spec = generate_ssl_mount_spec(SslMountStrategy::Secret);
+        let mount_spec = generate_ssl_mount_spec();
 
         // Simple RUN command
         let result = inject_mount_into_run("RUN apt-get update", &mount_spec);
@@ -510,7 +480,7 @@ mod tests {
 
         // RUN with existing mount (should not duplicate)
         let line_with_mount =
-            "RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl apt-get update";
+            "RUN --mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=/etc/ssl,readonly apt-get update";
         let result = inject_mount_into_run(line_with_mount, &mount_spec);
         assert_eq!(result, line_with_mount);
 
@@ -573,10 +543,10 @@ RUN pip install -r requirements.txt
 CMD ["python", "app.py"]
 "#;
 
-        let result = inject_ssl_mounts(dockerfile, SslMountStrategy::Secret);
+        let result = inject_ssl_mounts(dockerfile);
 
-        // Should contain mount spec in RUN lines
-        assert!(result.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        // Should contain bind mount spec in RUN lines
+        assert!(result.contains("--mount=type=bind,from=rise-ssl-cert"));
 
         // Should contain all SSL environment variables
         assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
@@ -598,7 +568,7 @@ CMD ["python", "app.py"]
         let mount_count = result
             .lines()
             .filter(|line| {
-                line.contains("RUN") && line.contains("--mount=type=secret,id=SSL_CERT_FILE")
+                line.contains("RUN") && line.contains("--mount=type=bind,from=rise-ssl-cert")
             })
             .count();
         assert_eq!(mount_count, 2);
@@ -613,13 +583,13 @@ RUN apt-get update -y && \
     apt-get clean
 "#;
 
-        let result = inject_ssl_mounts(dockerfile, SslMountStrategy::Secret);
+        let result = inject_ssl_mounts(dockerfile);
         println!("Result:\n{}", result);
 
         let lines: Vec<&str> = result.lines().collect();
 
         // First line should have mount, all SSL exports, and the backslash at the end
-        assert!(lines[1].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(lines[1].contains("--mount=type=bind,from=rise-ssl-cert"));
         assert!(lines[1].contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
         assert!(lines[1].contains("export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
         assert!(lines[1].contains("export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"));
@@ -636,7 +606,7 @@ RUN apt-get update -y && \
         assert!(lines[4].trim().starts_with("apt-get clean"));
 
         // Verify no mount or export on continuation lines
-        assert!(!lines[2].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(!lines[2].contains("--mount=type=bind,from=rise-ssl-cert"));
         assert!(!lines[2].contains("export"));
 
         // Verify no parentheses anywhere
@@ -651,10 +621,10 @@ RUN apt-get update -y && \
 RUN --mount=type=bind,source=uv.lock,target=uv.lock uv sync --locked
 "#;
 
-        let result = inject_ssl_mounts(dockerfile, SslMountStrategy::Secret);
+        let result = inject_ssl_mounts(dockerfile);
 
-        // Should have both SSL mounts and the original bind mount
-        assert!(result.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        // Should have both SSL bind mounts and the original bind mount
+        assert!(result.contains("--mount=type=bind,from=rise-ssl-cert"));
         assert!(result.contains("--mount=type=bind,source=uv.lock,target=uv.lock"));
 
         // All SSL environment variables should be exported
@@ -700,14 +670,14 @@ RUN --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
     uv sync --locked
 "#;
 
-        let result = inject_ssl_mounts(dockerfile, SslMountStrategy::Secret);
+        let result = inject_ssl_mounts(dockerfile);
         println!("Result:\n{}", result);
 
         let lines: Vec<&str> = result.lines().collect();
         let run_line = lines[1];
 
-        // Should have SSL mounts and both original bind mounts
-        assert!(run_line.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        // Should have SSL bind mounts and both original bind mounts
+        assert!(run_line.contains("--mount=type=bind,from=rise-ssl-cert"));
         assert!(run_line.contains("--mount=type=bind,source=pyproject.toml,target=pyproject.toml"));
         assert!(run_line.contains("--mount=type=bind,source=uv.lock,target=uv.lock"));
 

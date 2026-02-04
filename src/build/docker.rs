@@ -5,7 +5,7 @@ use std::path::Path;
 use std::process::Command;
 use tracing::{debug, info, warn};
 
-use super::dockerfile_ssl::{preprocess_dockerfile_for_ssl, SslCertContext, SslMountStrategy};
+use super::dockerfile_ssl::{preprocess_dockerfile_for_ssl, SslCertContext};
 use super::registry::docker_push;
 
 /// Options for building with Docker/Podman
@@ -56,38 +56,35 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     }
 
     // Preprocess Dockerfile for SSL if using buildx and SSL cert is available
-    let (_temp_dir, effective_dockerfile, ssl_strategy) =
-        if options.use_buildx && ssl_cert_path.is_some() {
-            let original_dockerfile = options
-                .dockerfile
-                .map(|df| Path::new(options.app_path).join(df))
-                .unwrap_or_else(|| Path::new(options.app_path).join("Dockerfile"));
+    let (_temp_dir, effective_dockerfile) = if options.use_buildx && ssl_cert_path.is_some() {
+        let original_dockerfile = options
+            .dockerfile
+            .map(|df| Path::new(options.app_path).join(df))
+            .unwrap_or_else(|| Path::new(options.app_path).join("Dockerfile"));
 
-            if original_dockerfile.exists() {
-                info!("SSL_CERT_FILE detected, preprocessing Dockerfile for secret mounts");
-                let (temp_dir, processed_path, strategy) = preprocess_dockerfile_for_ssl(
-                    &original_dockerfile,
-                    ssl_cert_path.as_ref().unwrap(),
-                )?;
-                (Some(temp_dir), Some(processed_path), Some(strategy))
-            } else {
-                (
-                    None,
-                    options
-                        .dockerfile
-                        .map(|df| Path::new(options.app_path).join(df)),
-                    None,
-                )
-            }
+        if original_dockerfile.exists() {
+            info!("SSL_CERT_FILE detected, preprocessing Dockerfile for bind mounts");
+            let (temp_dir, processed_path) = preprocess_dockerfile_for_ssl(
+                &original_dockerfile,
+                ssl_cert_path.as_ref().unwrap(),
+            )?;
+            (Some(temp_dir), Some(processed_path))
         } else {
             (
                 None,
                 options
                     .dockerfile
                     .map(|df| Path::new(options.app_path).join(df)),
-                None,
             )
-        };
+        }
+    } else {
+        (
+            None,
+            options
+                .dockerfile
+                .map(|df| Path::new(options.app_path).join(df)),
+        )
+    };
 
     let mut cmd = Command::new(options.container_cli);
 
@@ -129,30 +126,20 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     // Add platform flag for consistent architecture
     cmd.arg("--platform").arg("linux/amd64");
 
-    // Add SSL certificate based on mount strategy
+    // Add SSL certificate using named build context (bind mount)
     // RAII cleanup via SslCertContext drop
     let _ssl_cert_context: Option<SslCertContext> = if options.use_buildx {
-        if let (Some(ref cert_path), Some(strategy)) = (&ssl_cert_path, ssl_strategy) {
-            match strategy {
-                SslMountStrategy::Secret => {
-                    // Use secret mount (default for certs ≤ 500KiB)
-                    cmd.arg("--secret")
-                        .arg(format!("id=SSL_CERT_FILE,src={}", cert_path.display()));
-                    None
-                }
-                SslMountStrategy::Bind => {
-                    // Create temp directory with cert for bind mount (certs > 500KiB)
-                    // Using a named build context keeps the cert separate from the main context
-                    // and prevents it from being copied into the image via COPY commands
-                    let context = SslCertContext::new(cert_path)?;
+        if let Some(ref cert_path) = ssl_cert_path {
+            // Create temp directory with cert for bind mount
+            // Using a named build context keeps the cert separate from the main context
+            // and prevents it from being copied into the image via COPY commands
+            let context = SslCertContext::new(cert_path)?;
 
-                    // Add named build context for SSL certificate
-                    cmd.arg("--build-context")
-                        .arg(format!("rise-ssl-cert={}", context.context_path.display()));
+            // Add named build context for SSL certificate
+            cmd.arg("--build-context")
+                .arg(format!("rise-ssl-cert={}", context.context_path.display()));
 
-                    Some(context)
-                }
-            }
+            Some(context)
         } else {
             None
         }

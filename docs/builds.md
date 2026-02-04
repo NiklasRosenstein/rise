@@ -470,14 +470,16 @@ rise build myapp:latest --backend railpack
 
 ## Build-Time SSL Certificate Injection (Docker/Buildctl)
 
-When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise automatically injects SSL certificates into your Dockerfile's RUN commands using BuildKit secrets.
+When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise automatically injects SSL certificates into your Dockerfile's RUN commands using BuildKit bind mounts.
 
 **How it works:**
-1. Rise preprocesses your Dockerfile to add `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` to each RUN command
-2. The secret mount makes the certificate available at multiple standard system paths during RUN commands
-3. All SSL-related environment variables are exported for cross-ecosystem compatibility
-4. The certificate is passed to BuildKit via `--secret id=SSL_CERT_FILE,src=<path>` (or bind mount for large certificates)
-5. Certificates are NOT embedded in the final image (only available during build)
+1. Rise creates a temporary directory containing only the certificate file
+2. The temp directory is passed as a named build context (`rise-ssl-cert`)
+3. Rise preprocesses your Dockerfile to add `--mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=<path>,readonly` to each RUN command
+4. The bind mount makes the certificate available at multiple standard system paths during RUN commands
+5. All SSL-related environment variables are exported for cross-ecosystem compatibility
+6. The temp directory is automatically cleaned up after the build
+7. Certificates are NOT embedded in the final image (only available during build)
 
 **Supported certificate paths:**
 - `/etc/ssl/certs/ca-certificates.crt` (Debian, Ubuntu, Arch)
@@ -517,29 +519,21 @@ RUN pip install -r requirements.txt
 
 Processed (internal):
 ```dockerfile
-RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && apt-get update && apt-get install -y curl
-RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && pip install -r requirements.txt
+RUN --mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=/etc/ssl/certs/ca-certificates.crt,readonly --mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=/etc/pki/tls/certs/ca-bundle.crt,readonly ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && apt-get update && apt-get install -y curl
+RUN --mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=/etc/ssl/certs/ca-certificates.crt,readonly --mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=/etc/pki/tls/certs/ca-bundle.crt,readonly ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && pip install -r requirements.txt
 ```
 
-### Large Certificate Handling
+### Security and Named Build Context
 
-BuildKit has a 500KiB limit for secrets passed via `--mount=type=secret`. Rise automatically handles this:
+Rise uses a **named build context** approach for SSL certificates, which provides important security benefits:
 
-- **Certificates ≤ 500KiB**: Uses secure `--mount=type=secret` approach (default)
-- **Certificates > 500KiB**: Automatically falls back to `--mount=type=bind` using a named build context
-
-This ensures builds work seamlessly regardless of certificate bundle size. The fallback is logged for transparency:
-```
-SSL certificate file is 650000 bytes, exceeding BuildKit's 500KiB secret limit. Using bind mount instead of secret mount.
-```
-
-**How it works for large certificates:**
-- Rise creates a temporary directory containing only the certificate
+- The certificate is kept in a **separate temporary directory**, not in your main build context
 - The temp directory is passed as a named build context (`rise-ssl-cert`)
-- The certificate is bind-mounted into RUN commands from this separate context
+- The certificate cannot be copied into the image via `COPY . .` or similar commands
+- It's only available during `RUN` commands as a readonly bind mount
 - The temp directory is automatically cleaned up after the build
 
-**Security Note**: The named build context keeps the certificate completely separate from your main build context. It cannot be copied into the image via `COPY . .` or similar commands - it's only available during `RUN` commands as a bind mount.
+This approach works seamlessly with any certificate size, avoiding BuildKit's 500KiB secret size limit while maintaining security.
 
 **Note:** The `docker:build` backend does not support BuildKit secrets. If SSL_CERT_FILE is set, you'll see a warning recommending `docker:buildx` instead.
 

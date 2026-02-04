@@ -20,7 +20,7 @@ pub(crate) use method::{BuildMethod, BuildOptions};
 pub(crate) use railpack::{build_with_buildctl, BuildctlFrontend, RailpackBuildOptions};
 pub(crate) use registry::docker_login;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
@@ -199,20 +199,19 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 .unwrap_or_else(|| Path::new(&options.app_path).join("Dockerfile"));
 
             // Preprocess Dockerfile for SSL if cert is available
-            let (_temp_dir, effective_dockerfile, ssl_strategy) = if ssl_cert_path.is_some() {
+            let (_temp_dir, effective_dockerfile) = if ssl_cert_path.is_some() {
                 if original_dockerfile_path.exists() {
-                    info!("SSL_CERT_FILE detected, preprocessing Dockerfile for secret mounts");
-                    let (temp_dir, processed_path, strategy) =
-                        dockerfile_ssl::preprocess_dockerfile_for_ssl(
-                            &original_dockerfile_path,
-                            ssl_cert_path.as_ref().unwrap(),
-                        )?;
-                    (Some(temp_dir), processed_path, Some(strategy))
+                    info!("SSL_CERT_FILE detected, preprocessing Dockerfile for bind mounts");
+                    let (temp_dir, processed_path) = dockerfile_ssl::preprocess_dockerfile_for_ssl(
+                        &original_dockerfile_path,
+                        ssl_cert_path.as_ref().unwrap(),
+                    )?;
+                    (Some(temp_dir), processed_path)
                 } else {
-                    (None, original_dockerfile_path, None)
+                    (None, original_dockerfile_path)
                 }
             } else {
-                (None, original_dockerfile_path, None)
+                (None, original_dockerfile_path)
             };
 
             // Parse env vars into HashMap for secrets
@@ -225,35 +224,23 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 }
             }
 
-            // Add SSL cert based on mount strategy
+            // Add SSL cert using named build context (bind mount)
             // RAII cleanup via SslCertContext drop
             let _ssl_cert_context: Option<dockerfile_ssl::SslCertContext> =
-                if let (Some(ref cert_path), Some(strategy)) = (&ssl_cert_path, ssl_strategy) {
-                    match strategy {
-                        dockerfile_ssl::SslMountStrategy::Secret => {
-                            // Use secret mount (default for certs ≤ 500KiB)
-                            secrets.insert(
-                                "SSL_CERT_FILE".to_string(),
-                                cert_path.to_string_lossy().to_string(),
-                            );
-                            None
-                        }
-                        dockerfile_ssl::SslMountStrategy::Bind => {
-                            // Create temp directory with cert for bind mount (certs > 500KiB)
-                            // Using a separate local context keeps the cert separate from the main context
-                            // and prevents it from being copied into the image via COPY commands
-                            let context = dockerfile_ssl::SslCertContext::new(cert_path)?;
+                if let Some(ref cert_path) = ssl_cert_path {
+                    // Create temp directory with cert for bind mount
+                    // Using a separate local context keeps the cert separate from the main context
+                    // and prevents it from being copied into the image via COPY commands
+                    let context = dockerfile_ssl::SslCertContext::new(cert_path)?;
 
-                            // Add to secrets map so build_with_buildctl can pass it as --local
-                            // We use a special marker to indicate this is a local context, not a secret
-                            secrets.insert(
-                                "RISE_SSL_CERT_LOCAL_CONTEXT".to_string(),
-                                context.context_path.to_string_lossy().to_string(),
-                            );
+                    // Add to secrets map so build_with_buildctl can pass it as --local
+                    // We use a special marker to indicate this is a local context, not a secret
+                    secrets.insert(
+                        "RISE_SSL_CERT_LOCAL_CONTEXT".to_string(),
+                        context.context_path.to_string_lossy().to_string(),
+                    );
 
-                            Some(context)
-                        }
-                    }
+                    Some(context)
                 } else {
                     None
                 };
