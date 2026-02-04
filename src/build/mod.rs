@@ -230,7 +230,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 if let Some(ref cert_path) = ssl_cert_path {
                     // Create temp directory with cert for bind mount
                     // Using a separate local context keeps the cert separate from the main context
-                    // and prevents it from being copied into the image via COPY commands
+                    // and reduces risk of accidental inclusion via generic COPY commands
                     let context = dockerfile_ssl::SslCertContext::new(cert_path)?;
 
                     // Add to local_contexts map for buildctl --local argument

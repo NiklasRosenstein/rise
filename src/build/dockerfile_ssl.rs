@@ -11,7 +11,8 @@ use tracing::debug;
 use super::ssl::{SSL_CERT_PATHS, SSL_ENV_VARS};
 
 /// Name of the SSL certificate build context used in BuildKit
-pub(crate) const SSL_CERT_BUILD_CONTEXT: &str = "rise-ssl-cert";
+/// Uses an internal naming convention to prevent collisions with user-supplied build contexts
+pub(crate) const SSL_CERT_BUILD_CONTEXT: &str = "__rise_internal_ssl_cert__";
 
 /// RAII struct for managing SSL certificate build context
 ///
@@ -54,8 +55,8 @@ impl SslCertContext {
 /// Generate the mount specification string for all SSL certificate paths
 ///
 /// Always uses bind mount strategy with a named build context to avoid BuildKit's
-/// 500KiB secret size limit and ensure the certificate cannot be copied into the
-/// image via COPY commands.
+/// 500KiB secret size limit and reduce risk of accidental inclusion in the final
+/// image via generic COPY commands.
 fn generate_ssl_mount_spec() -> String {
     SSL_CERT_PATHS
         .iter()
@@ -387,7 +388,7 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
 ///
 /// This function:
 /// 1. Reads the original Dockerfile
-/// 2. Injects `--mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=<path>,readonly`
+/// 2. Injects `--mount=type=bind,from=__rise_internal_ssl_cert__,source=ca-certificates.crt,target=<path>,readonly`
 ///    into each RUN command for all common SSL certificate paths
 /// 3. Exports all SSL environment variables before the command:
 ///    - SSL_CERT_FILE (curl, wget, Git)
@@ -403,8 +404,8 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
 ///
 /// The caller should:
 /// 1. Create an SslCertContext to set up the named build context
-/// 2. Pass `--build-context rise-ssl-cert=<context_path>` to buildx
-/// 3. Or pass `--local rise-ssl-cert=<context_path>` to buildctl
+/// 2. Pass `--build-context __rise_internal_ssl_cert__=<context_path>` to buildx
+/// 3. Or pass `--local __rise_internal_ssl_cert__=<context_path>` to buildctl
 ///
 /// Returns:
 /// - TempDir: Temporary directory containing the processed Dockerfile (must be kept alive)
@@ -538,7 +539,7 @@ CMD ["python", "app.py"]
         let result = inject_ssl_mounts(dockerfile);
 
         // Should contain bind mount spec in RUN lines
-        assert!(result.contains("--mount=type=bind,from=rise-ssl-cert"));
+        assert!(result.contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
 
         // Should contain all SSL environment variables
         assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
@@ -560,7 +561,8 @@ CMD ["python", "app.py"]
         let mount_count = result
             .lines()
             .filter(|line| {
-                line.contains("RUN") && line.contains("--mount=type=bind,from=rise-ssl-cert")
+                line.contains("RUN")
+                    && line.contains("--mount=type=bind,from=__rise_internal_ssl_cert__")
             })
             .count();
         assert_eq!(mount_count, 2);
@@ -581,7 +583,7 @@ RUN apt-get update -y && \
         let lines: Vec<&str> = result.lines().collect();
 
         // First line should have mount, all SSL exports, and the backslash at the end
-        assert!(lines[1].contains("--mount=type=bind,from=rise-ssl-cert"));
+        assert!(lines[1].contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
         assert!(lines[1].contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
         assert!(lines[1].contains("export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
         assert!(lines[1].contains("export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"));
@@ -598,7 +600,7 @@ RUN apt-get update -y && \
         assert!(lines[4].trim().starts_with("apt-get clean"));
 
         // Verify no mount or export on continuation lines
-        assert!(!lines[2].contains("--mount=type=bind,from=rise-ssl-cert"));
+        assert!(!lines[2].contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
         assert!(!lines[2].contains("export"));
 
         // Verify no parentheses anywhere
@@ -616,7 +618,7 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock uv sync --locked
         let result = inject_ssl_mounts(dockerfile);
 
         // Should have both SSL bind mounts and the original bind mount
-        assert!(result.contains("--mount=type=bind,from=rise-ssl-cert"));
+        assert!(result.contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
         assert!(result.contains("--mount=type=bind,source=uv.lock,target=uv.lock"));
 
         // All SSL environment variables should be exported
@@ -669,7 +671,7 @@ RUN --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
         let run_line = lines[1];
 
         // Should have SSL bind mounts and both original bind mounts
-        assert!(run_line.contains("--mount=type=bind,from=rise-ssl-cert"));
+        assert!(run_line.contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
         assert!(run_line.contains("--mount=type=bind,source=pyproject.toml,target=pyproject.toml"));
         assert!(run_line.contains("--mount=type=bind,source=uv.lock,target=uv.lock"));
 

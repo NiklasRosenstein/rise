@@ -52,8 +52,9 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     // Warn if SSL cert is set but buildx is not being used
     if ssl_cert_path.is_some() && !options.use_buildx {
         warn!(
-            "SSL_CERT_FILE is set but docker:build does not support BuildKit secrets. \
-             Use 'docker:buildx' backend for SSL certificate support during builds."
+            "SSL_CERT_FILE is set but docker:build does not support BuildKit features \
+             required for SSL certificate bind mounts. Use 'docker:buildx' backend for \
+             SSL certificate support during builds."
         );
     }
 
@@ -131,8 +132,8 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
         if let Some(ref cert_path) = ssl_cert_path {
             // Create temp directory with cert for bind mount
             // Using a named build context keeps the cert separate from the main context,
-            // preventing accidental inclusion via generic COPY commands; it can still be
-            // referenced explicitly via COPY --from={SSL_CERT_BUILD_CONTEXT} if desired.
+            // reducing risk of accidental inclusion via generic COPY commands (though it
+            // can still be referenced explicitly via COPY --from={SSL_CERT_BUILD_CONTEXT}).
             let context = SslCertContext::new(cert_path)?;
 
             // Add named build context for SSL certificate

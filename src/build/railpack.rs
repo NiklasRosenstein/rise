@@ -312,7 +312,7 @@ fn build_with_buildx(
 /// - For file secrets (like SSL_CERT_FILE): key=secret_id, value=file_path
 ///
 /// The `local_contexts` HashMap contains named build contexts:
-/// - key: context name (e.g., "rise-ssl-cert")
+/// - key: context name (e.g., "__rise_internal_ssl_cert__")
 /// - value: local path to the context directory
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn build_with_buildctl(
