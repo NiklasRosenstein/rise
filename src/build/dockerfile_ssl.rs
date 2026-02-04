@@ -114,11 +114,6 @@ fn inject_mount_into_run(line: &str, mount_spec: &str) -> String {
         let ws = &rest[..ws_end];
         let command = &rest[ws_end..];
 
-        // Already has mount specification for rise-ssl-cert?
-        if command.contains("--mount=type=bind,from=rise-ssl-cert") {
-            return line.to_string();
-        }
-
         // Separate existing RUN flags from the actual command
         let (flags, actual_command) = extract_run_flags(command);
 
@@ -261,15 +256,6 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
 
     // Multiline RUN - need to extract ALL flags from ALL lines
     let first_line = run_lines[0];
-
-    // Check if already has SSL mount
-    if run_lines
-        .iter()
-        .any(|line| line.contains("--mount=type=bind,from=rise-ssl-cert"))
-    {
-        // Already processed, return as-is
-        return run_lines.join("\n") + "\n";
-    }
 
     // Extract RUN prefix and whitespace
     let trimmed = first_line.trim_start();
@@ -478,11 +464,15 @@ mod tests {
         assert!(result.contains("&& apt-get update"));
         assert!(!result.contains("("));
 
-        // RUN with existing mount (should not duplicate)
+        // RUN with existing mount - we always inject (mounts and exports)
+        // This ensures SSL env vars are always added, even if there are existing mounts
         let line_with_mount =
-            "RUN --mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=/etc/ssl,readonly apt-get update";
+            "RUN --mount=type=bind,source=some-file,target=/app/file apt-get update";
         let result = inject_mount_into_run(line_with_mount, &mount_spec);
-        assert_eq!(result, line_with_mount);
+        assert!(result.contains(&mount_spec));
+        assert!(result.contains("--mount=type=bind,source=some-file,target=/app/file"));
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("&& apt-get update"));
 
         // RUN with leading whitespace
         let result = inject_mount_into_run("    RUN apt-get update", &mount_spec);
