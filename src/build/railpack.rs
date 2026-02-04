@@ -307,9 +307,9 @@ fn build_with_buildx(
 /// - Dockerfile: Uses `--frontend=dockerfile.v0` for standard Dockerfiles
 /// - Railpack: Uses `--frontend=gateway.v0` with railpack-frontend
 ///
-/// The `secrets` HashMap contains:
-/// - For regular secrets: key=env_var_name, value is ignored (reads from env)
-/// - For file secrets (like SSL_CERT_FILE): key=secret_id, value=file_path
+/// The `secrets` HashMap contains environment variable secrets:
+/// - key: environment variable name
+/// - value: value is ignored (secrets are read from the current environment)
 ///
 /// The `local_contexts` HashMap contains named build contexts:
 /// - key: context name (e.g., "__rise_internal_ssl_cert__")
@@ -378,14 +378,8 @@ pub(crate) fn build_with_buildctl(
     }
 
     // Add secrets
-    for (key, value) in secrets {
-        // Special handling for SSL_CERT_FILE - use src= to read from file
-        if key == "SSL_CERT_FILE" {
-            cmd.arg("--secret").arg(format!("id={},src={}", key, value));
-        } else {
-            // For other secrets, read from environment variable
-            cmd.arg("--secret").arg(format!("id={},env={}", key, key));
-        }
+    for key in secrets.keys() {
+        cmd.arg("--secret").arg(format!("id={},env={}", key, key));
     }
 
     if push {
