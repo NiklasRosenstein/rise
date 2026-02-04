@@ -13,10 +13,6 @@ use super::ssl::{SSL_CERT_PATHS, SSL_ENV_VARS};
 /// Name of the SSL certificate build context used in BuildKit
 pub(crate) const SSL_CERT_BUILD_CONTEXT: &str = "rise-ssl-cert";
 
-/// Special marker key used to pass SSL cert local context path via secrets map
-/// This is used with buildctl to indicate a --local argument instead of --secret
-pub(crate) const SSL_CERT_LOCAL_CONTEXT_MARKER: &str = "RISE_SSL_CERT_LOCAL_CONTEXT";
-
 /// RAII struct for managing SSL certificate build context
 ///
 /// When using bind mount strategy for large certificates, this creates a temporary

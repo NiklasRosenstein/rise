@@ -21,6 +21,7 @@ pub(crate) use railpack::{build_with_buildctl, BuildctlFrontend, RailpackBuildOp
 pub(crate) use registry::docker_login;
 
 use anyhow::{bail, Result};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
@@ -224,6 +225,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
 
             // Add SSL cert using named build context (bind mount)
             // RAII cleanup via SslCertContext drop
+            let mut local_contexts = HashMap::new();
             let _ssl_cert_context: Option<dockerfile_ssl::SslCertContext> =
                 if let Some(ref cert_path) = ssl_cert_path {
                     // Create temp directory with cert for bind mount
@@ -231,10 +233,9 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                     // and prevents it from being copied into the image via COPY commands
                     let context = dockerfile_ssl::SslCertContext::new(cert_path)?;
 
-                    // Add to secrets map so build_with_buildctl can pass it as --local
-                    // We use a special marker to indicate this is a local context, not a secret
-                    secrets.insert(
-                        dockerfile_ssl::SSL_CERT_LOCAL_CONTEXT_MARKER.to_string(),
+                    // Add to local_contexts map for buildctl --local argument
+                    local_contexts.insert(
+                        dockerfile_ssl::SSL_CERT_BUILD_CONTEXT.to_string(),
                         context.context_path.to_string_lossy().to_string(),
                     );
 
@@ -250,6 +251,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 options.push,
                 buildkit_host.as_deref(),
                 &secrets,
+                &local_contexts,
                 BuildctlFrontend::Dockerfile,
             )?;
 

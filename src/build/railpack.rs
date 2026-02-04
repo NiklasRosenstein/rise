@@ -8,7 +8,6 @@ use std::process::Command;
 use tracing::{debug, info, warn};
 
 use super::buildkit::ensure_buildx_builder;
-use super::dockerfile_ssl::{SSL_CERT_BUILD_CONTEXT, SSL_CERT_LOCAL_CONTEXT_MARKER};
 use super::ssl::embed_ssl_cert_in_plan;
 
 /// BuildKit frontend type for buildctl
@@ -203,6 +202,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             options.push,
             options.buildkit_host,
             &all_secrets,
+            &HashMap::new(), // No local contexts for Railpack
             BuildctlFrontend::Railpack,
         )?;
     } else {
@@ -310,6 +310,11 @@ fn build_with_buildx(
 /// The `secrets` HashMap contains:
 /// - For regular secrets: key=env_var_name, value is ignored (reads from env)
 /// - For file secrets (like SSL_CERT_FILE): key=secret_id, value=file_path
+///
+/// The `local_contexts` HashMap contains named build contexts:
+/// - key: context name (e.g., "rise-ssl-cert")
+/// - value: local path to the context directory
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn build_with_buildctl(
     app_path: &str,
     dockerfile_or_plan: &Path,
@@ -317,6 +322,7 @@ pub(crate) fn build_with_buildctl(
     push: bool,
     buildkit_host: Option<&str>,
     secrets: &HashMap<String, String>,
+    local_contexts: &HashMap<String, String>,
     frontend: BuildctlFrontend,
 ) -> Result<()> {
     // Check buildctl availability
@@ -366,15 +372,15 @@ pub(crate) fn build_with_buildctl(
         cmd.env("BUILDKIT_HOST", host);
     }
 
-    // Add secrets and local contexts
+    // Add local contexts (named build contexts)
+    for (name, path) in local_contexts {
+        cmd.arg("--local").arg(format!("{}={}", name, path));
+    }
+
+    // Add secrets
     for (key, value) in secrets {
-        // Special handling for SSL_CERT_LOCAL_CONTEXT_MARKER - use --local for named build context
-        if key == SSL_CERT_LOCAL_CONTEXT_MARKER {
-            cmd.arg("--local")
-                .arg(format!("{}={}", SSL_CERT_BUILD_CONTEXT, value));
-        }
         // Special handling for SSL_CERT_FILE - use src= to read from file
-        else if key == "SSL_CERT_FILE" {
+        if key == "SSL_CERT_FILE" {
             cmd.arg("--secret").arg(format!("id={},src={}", key, value));
         } else {
             // For other secrets, read from environment variable
