@@ -535,7 +535,7 @@ Rise uses a **named build context** approach for SSL certificates, which provide
 
 This approach works seamlessly with any certificate size, avoiding BuildKit's 500KiB secret size limit while maintaining security.
 
-**Note:** The `docker:build` backend does not support BuildKit secrets. If SSL_CERT_FILE is set, you'll see a warning recommending `docker:buildx` instead.
+**Note:** The `docker:build` backend does not support the BuildKit features required for this bind-mount/named-context SSL certificate mechanism. If `SSL_CERT_FILE` is set, you'll see a warning recommending `docker:buildx` (or another BuildKit-enabled backend) instead.
 
 ## Proxy Support
 
