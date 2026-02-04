@@ -460,10 +460,59 @@ pub async fn code_exchange(
         // Don't fail the login if group sync fails
     }
 
-    // Return the ID token (which contains user claims)
-    Ok(Json(LoginResponse {
-        token: token_info.id_token,
-    }))
+    // Validate the IdP JWT to extract claims
+    let mut expected_claims = HashMap::new();
+    expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+
+    let claims = state
+        .jwt_validator
+        .validate(
+            &token_info.id_token,
+            &state.auth_settings.issuer,
+            &expected_claims,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to validate ID token: {:#}", e);
+            (StatusCode::UNAUTHORIZED, "Invalid token".to_string())
+        })?;
+
+    // Extract email from claims
+    let email = claims
+        .get("email")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| (StatusCode::BAD_REQUEST, "Email claim missing".to_string()))?;
+
+    // Find or create user
+    let user = users::find_or_create(&state.db_pool, email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find/create user: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to process user".to_string(),
+            )
+        })?;
+
+    // Issue Rise JWT for CLI authentication
+    let rise_jwt = state
+        .jwt_signer
+        .sign_ui_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to sign Rise JWT: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to create token".to_string(),
+            )
+        })?;
+
+    tracing::info!(
+        "CLI login successful for user {} - issued Rise JWT",
+        user.email
+    );
+
+    Ok(Json(LoginResponse { token: rise_jwt }))
 }
 
 /// Exchange device code for token (Device Flow)
@@ -492,8 +541,80 @@ pub async fn device_exchange(
                 // Don't fail the login if group sync fails
             }
 
+            // Validate the IdP JWT to extract claims
+            let mut expected_claims = HashMap::new();
+            expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
+
+            let claims = match state
+                .jwt_validator
+                .validate(
+                    &token_info.id_token,
+                    &state.auth_settings.issuer,
+                    &expected_claims,
+                )
+                .await
+            {
+                Ok(claims) => claims,
+                Err(e) => {
+                    tracing::error!("Failed to validate ID token: {:#}", e);
+                    return Json(DeviceExchangeResponse {
+                        token: None,
+                        error: Some("invalid_token".to_string()),
+                        error_description: Some("Failed to validate ID token".to_string()),
+                    });
+                }
+            };
+
+            // Extract email from claims
+            let email = match claims.get("email").and_then(|v| v.as_str()) {
+                Some(email) => email,
+                None => {
+                    tracing::error!("Email claim missing from ID token");
+                    return Json(DeviceExchangeResponse {
+                        token: None,
+                        error: Some("invalid_token".to_string()),
+                        error_description: Some("Email claim missing".to_string()),
+                    });
+                }
+            };
+
+            // Find or create user
+            let user = match users::find_or_create(&state.db_pool, email).await {
+                Ok(user) => user,
+                Err(e) => {
+                    tracing::error!("Failed to find/create user: {:#}", e);
+                    return Json(DeviceExchangeResponse {
+                        token: None,
+                        error: Some("server_error".to_string()),
+                        error_description: Some("Failed to process user".to_string()),
+                    });
+                }
+            };
+
+            // Issue Rise JWT for CLI authentication
+            let rise_jwt = match state
+                .jwt_signer
+                .sign_ui_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
+                .await
+            {
+                Ok(jwt) => jwt,
+                Err(e) => {
+                    tracing::error!("Failed to sign Rise JWT: {:#}", e);
+                    return Json(DeviceExchangeResponse {
+                        token: None,
+                        error: Some("server_error".to_string()),
+                        error_description: Some("Failed to create token".to_string()),
+                    });
+                }
+            };
+
+            tracing::info!(
+                "CLI device login successful for user {} - issued Rise JWT",
+                user.email
+            );
+
             Json(DeviceExchangeResponse {
-                token: Some(token_info.id_token),
+                token: Some(rise_jwt),
                 error: None,
                 error_description: None,
             })
