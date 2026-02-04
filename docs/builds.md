@@ -470,13 +470,16 @@ rise build myapp:latest --backend railpack
 
 ## Build-Time SSL Certificate Injection (Docker/Buildctl)
 
-When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise automatically injects SSL certificates into your Dockerfile's RUN commands using BuildKit secrets.
+When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise automatically injects SSL certificates into your Dockerfile's RUN commands using BuildKit bind mounts.
 
 **How it works:**
-1. Rise preprocesses your Dockerfile to add `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` to each RUN command
-2. The secret mount makes the certificate available at multiple standard system paths during RUN commands
-3. The certificate is passed to BuildKit via `--secret id=SSL_CERT_FILE,src=<path>`
-4. Certificates are NOT embedded in the final image (only available during build)
+1. Rise creates a temporary directory containing only the certificate file
+2. The temp directory is passed as an internal named build context (`__rise_internal_ssl_cert__`)
+3. Rise preprocesses your Dockerfile to add `--mount=type=bind,from=__rise_internal_ssl_cert__,source=ca-certificates.crt,target=<path>,readonly` to each RUN command
+4. The bind mount makes the certificate available at multiple standard system paths during RUN commands
+5. All SSL-related environment variables are exported for cross-ecosystem compatibility
+6. The temp directory is automatically cleaned up after the build
+7. Certificates are NOT embedded in the final image (only available during build)
 
 **Supported certificate paths:**
 - `/etc/ssl/certs/ca-certificates.crt` (Debian, Ubuntu, Arch)
@@ -484,6 +487,15 @@ When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise
 - `/etc/ssl/ca-bundle.pem` (OpenSUSE, SLES)
 - `/etc/ssl/cert.pem` (Alpine Linux)
 - `/usr/lib/ssl/cert.pem` (OpenSSL default)
+
+**Exported SSL environment variables:**
+- `SSL_CERT_FILE` - Standard (curl, wget, Git)
+- `NIX_SSL_CERT_FILE` - Nix package manager
+- `NODE_EXTRA_CA_CERTS` - Node.js and npm
+- `REQUESTS_CA_BUNDLE` - Python requests library
+- `AWS_CA_BUNDLE` - AWS SDK/CLI
+
+All variables are set to `/etc/ssl/certs/ca-certificates.crt` during RUN commands, ensuring compatibility with various build tools and ecosystems.
 
 **Example:**
 ```bash
@@ -507,11 +519,23 @@ RUN pip install -r requirements.txt
 
 Processed (internal):
 ```dockerfile
-RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... apt-get update && apt-get install -y curl
-RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... pip install -r requirements.txt
+RUN --mount=type=bind,from=__rise_internal_ssl_cert__,source=ca-certificates.crt,target=/etc/ssl/certs/ca-certificates.crt,readonly --mount=type=bind,from=__rise_internal_ssl_cert__,source=ca-certificates.crt,target=/etc/pki/tls/certs/ca-bundle.crt,readonly ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && apt-get update && apt-get install -y curl
+RUN --mount=type=bind,from=__rise_internal_ssl_cert__,source=ca-certificates.crt,target=/etc/ssl/certs/ca-certificates.crt,readonly --mount=type=bind,from=__rise_internal_ssl_cert__,source=ca-certificates.crt,target=/etc/pki/tls/certs/ca-bundle.crt,readonly ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && pip install -r requirements.txt
 ```
 
-**Note:** The `docker:build` backend does not support BuildKit secrets. If SSL_CERT_FILE is set, you'll see a warning recommending `docker:buildx` instead.
+### Security and Named Build Context
+
+Rise uses a **named build context** approach for SSL certificates, which provides important security benefits:
+
+- The certificate is kept in a **separate temporary directory**, not in your main build context
+- The temp directory is passed as an internal named build context (`__rise_internal_ssl_cert__`)
+- The certificate reduces risk of accidental inclusion via `COPY . .` or similar commands (though advanced users can still reference it explicitly via `COPY --from=__rise_internal_ssl_cert__` if needed)
+- Rise automatically injects the certificate into `RUN` commands as readonly bind mounts
+- The temp directory is automatically cleaned up after the build
+
+This approach works seamlessly with any certificate size, avoiding BuildKit's 500KiB secret size limit while maintaining security.
+
+**Note:** The `docker:build` backend does not support BuildKit features required for SSL certificate bind mounts. If SSL_CERT_FILE is set, you'll see a warning recommending `docker:buildx` instead.
 
 ## Proxy Support
 

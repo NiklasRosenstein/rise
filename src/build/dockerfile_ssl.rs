@@ -8,15 +8,75 @@ use std::path::{Path, PathBuf};
 use tempfile::TempDir;
 use tracing::debug;
 
-use super::ssl::SSL_CERT_PATHS;
+use super::ssl::{SSL_CERT_PATHS, SSL_ENV_VARS};
+
+/// Name of the SSL certificate build context used in BuildKit
+/// Uses an internal naming convention to prevent collisions with user-supplied build contexts
+pub(crate) const SSL_CERT_BUILD_CONTEXT: &str = "__rise_internal_ssl_cert__";
+
+/// RAII struct for managing SSL certificate build context
+///
+/// When using bind mount strategy for large certificates, this creates a temporary
+/// directory containing the certificate and automatically cleans it up when dropped.
+pub(crate) struct SslCertContext {
+    _temp_dir: TempDir,
+    /// Path to the temporary directory containing ca-certificates.crt
+    pub context_path: PathBuf,
+}
+
+impl SslCertContext {
+    /// Create SSL cert build context for bind mount strategy
+    ///
+    /// Creates a temp directory with ca-certificates.crt inside, suitable for use as
+    /// a named build context that keeps the cert separate from the main build context.
+    pub fn new(ssl_cert_path: &Path) -> Result<Self> {
+        let temp_dir =
+            TempDir::new().context("Failed to create temp directory for SSL certificate")?;
+        let cert_dest = temp_dir.path().join("ca-certificates.crt");
+        std::fs::copy(ssl_cert_path, &cert_dest).with_context(|| {
+            format!(
+                "Failed to copy SSL certificate to temp directory: {}",
+                cert_dest.display()
+            )
+        })?;
+
+        debug!(
+            "Created SSL cert build context in temp directory: {}",
+            temp_dir.path().display()
+        );
+
+        Ok(Self {
+            context_path: temp_dir.path().to_path_buf(),
+            _temp_dir: temp_dir,
+        })
+    }
+}
 
 /// Generate the mount specification string for all SSL certificate paths
+///
+/// Always uses bind mount strategy with a named build context to avoid BuildKit's
+/// 500KiB secret size limit and reduce risk of accidental inclusion in the final
+/// image via generic COPY commands.
 fn generate_ssl_mount_spec() -> String {
     SSL_CERT_PATHS
         .iter()
-        .map(|path| format!("--mount=type=secret,id=SSL_CERT_FILE,target={}", path))
+        .map(|path| {
+            format!(
+                "--mount=type=bind,from={},source=ca-certificates.crt,target={},readonly",
+                SSL_CERT_BUILD_CONTEXT, path
+            )
+        })
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// Generate export statements for all SSL environment variables
+fn generate_ssl_exports(ssl_cert_path: &str) -> String {
+    SSL_ENV_VARS
+        .iter()
+        .map(|var| format!("export {}={}", var, ssl_cert_path))
+        .collect::<Vec<_>>()
+        .join(" && ")
 }
 
 /// Check if a line is a RUN instruction
@@ -58,25 +118,21 @@ fn inject_mount_into_run(line: &str, mount_spec: &str) -> String {
         let ws = &rest[..ws_end];
         let command = &rest[ws_end..];
 
-        // Already has mount specification for SSL_CERT_FILE?
-        if command.contains("--mount=type=secret,id=SSL_CERT_FILE") {
-            return line.to_string();
-        }
-
         // Separate existing RUN flags from the actual command
         let (flags, actual_command) = extract_run_flags(command);
 
         // Use the first SSL_CERT_PATH as the environment variable
         let ssl_cert_path = SSL_CERT_PATHS[0];
 
-        // Build the new command with SSL_CERT_FILE env var
+        // Build the new command with all SSL env vars
         let wrapped_command = if actual_command.is_empty() {
             // No command yet (continuation expected)
             String::new()
         } else {
             format!(
-                "export SSL_CERT_FILE={} && {}",
-                ssl_cert_path, actual_command
+                "{} && {}",
+                generate_ssl_exports(ssl_cert_path),
+                actual_command
             )
         };
 
@@ -101,8 +157,9 @@ fn inject_mount_into_run(line: &str, mount_spec: &str) -> String {
             String::new()
         } else {
             format!(
-                "export SSL_CERT_FILE={} && {}",
-                ssl_cert_path, actual_command
+                "{} && {}",
+                generate_ssl_exports(ssl_cert_path),
+                actual_command
             )
         };
 
@@ -153,7 +210,7 @@ fn extract_run_flags(command: &str) -> (String, String) {
     (flags.join(" "), actual_command_parts.join(" "))
 }
 
-/// Inject SSL certificate secret mounts into RUN commands in a Dockerfile
+/// Inject SSL certificate bind mounts into RUN commands in a Dockerfile
 fn inject_ssl_mounts(dockerfile_content: &str) -> String {
     let mount_spec = generate_ssl_mount_spec();
     let mut result = String::new();
@@ -203,15 +260,6 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
 
     // Multiline RUN - need to extract ALL flags from ALL lines
     let first_line = run_lines[0];
-
-    // Check if already has SSL mount
-    if run_lines
-        .iter()
-        .any(|line| line.contains("--mount=type=secret,id=SSL_CERT_FILE"))
-    {
-        // Already processed, return as-is
-        return run_lines.join("\n") + "\n";
-    }
 
     // Extract RUN prefix and whitespace
     let trimmed = first_line.trim_start();
@@ -281,26 +329,38 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
         // Single line command
         if all_flags_str.is_empty() {
             result.push(format!(
-                "{}RUN {} export SSL_CERT_FILE={} && {}",
-                leading_ws, mount_spec, ssl_cert_path, command_lines[0]
+                "{}RUN {} {} && {}",
+                leading_ws,
+                mount_spec,
+                generate_ssl_exports(ssl_cert_path),
+                command_lines[0]
             ));
         } else {
             result.push(format!(
-                "{}RUN {} {} export SSL_CERT_FILE={} && {}",
-                leading_ws, mount_spec, all_flags_str, ssl_cert_path, command_lines[0]
+                "{}RUN {} {} {} && {}",
+                leading_ws,
+                mount_spec,
+                all_flags_str,
+                generate_ssl_exports(ssl_cert_path),
+                command_lines[0]
             ));
         }
     } else {
         // Multiline command - put export on first line with backslash, command on continuation
         if all_flags_str.is_empty() {
             result.push(format!(
-                "{}RUN {} export SSL_CERT_FILE={} && \\",
-                leading_ws, mount_spec, ssl_cert_path
+                "{}RUN {} {} && \\",
+                leading_ws,
+                mount_spec,
+                generate_ssl_exports(ssl_cert_path)
             ));
         } else {
             result.push(format!(
-                "{}RUN {} {} export SSL_CERT_FILE={} && \\",
-                leading_ws, mount_spec, all_flags_str, ssl_cert_path
+                "{}RUN {} {} {} && \\",
+                leading_ws,
+                mount_spec,
+                all_flags_str,
+                generate_ssl_exports(ssl_cert_path)
             ));
         }
 
@@ -326,19 +386,30 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
 
 /// Preprocess a Dockerfile to inject SSL certificate mounts into RUN commands
 ///
-/// When SSL_CERT_FILE is set, this function:
+/// This function:
 /// 1. Reads the original Dockerfile
-/// 2. Injects `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` into each RUN command
-///    for all common SSL certificate paths
-/// 3. Exports SSL_CERT_FILE environment variable before the command:
-///    `RUN --mount=... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && original_command`
+/// 2. Injects `--mount=type=bind,from=__rise_internal_ssl_cert__,source=ca-certificates.crt,target=<path>,readonly`
+///    into each RUN command for all common SSL certificate paths
+/// 3. Exports all SSL environment variables before the command:
+///    - SSL_CERT_FILE (curl, wget, Git)
+///    - NIX_SSL_CERT_FILE (Nix package manager)
+///    - NODE_EXTRA_CA_CERTS (Node.js and npm)
+///    - REQUESTS_CA_BUNDLE (Python requests library)
+///    - AWS_CA_BUNDLE (AWS SDK/CLI)
 /// 4. Writes the processed Dockerfile to a temporary directory
 /// 5. Returns the temp directory (for lifetime) and the path to the processed file
 ///
-/// Using `export` ensures the variable is available for all commands in the RUN instruction,
+/// Using `export` ensures the variables are available for all commands in the RUN instruction,
 /// including multiline commands with backslash continuations.
 ///
-/// The caller should pass `--secret id=SSL_CERT_FILE,src=<path>` to the build command.
+/// The caller should:
+/// 1. Create an SslCertContext to set up the named build context
+/// 2. Pass `--build-context __rise_internal_ssl_cert__=<context_path>` to buildx
+/// 3. Or pass `--local __rise_internal_ssl_cert__=<context_path>` to buildctl
+///
+/// Returns:
+/// - TempDir: Temporary directory containing the processed Dockerfile (must be kept alive)
+/// - PathBuf: Path to the processed Dockerfile
 pub(crate) fn preprocess_dockerfile_for_ssl(
     original_dockerfile: &Path,
 ) -> Result<(TempDir, PathBuf)> {
@@ -382,34 +453,52 @@ mod tests {
 
     #[test]
     fn test_inject_mount_into_run() {
-        let mount_spec =
-            "--mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt";
+        let mount_spec = generate_ssl_mount_spec();
 
         // Simple RUN command
-        let result = inject_mount_into_run("RUN apt-get update", mount_spec);
-        assert!(result.contains(mount_spec));
+        let result = inject_mount_into_run("RUN apt-get update", &mount_spec);
+        assert!(result.contains(&mount_spec));
+        // Verify all 5 SSL environment variables are exported
         assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
         assert!(result.contains("&& apt-get update"));
         assert!(!result.contains("("));
 
-        // RUN with existing mount (should not duplicate)
+        // RUN with existing mount - we always inject (mounts and exports)
+        // This ensures SSL env vars are always added, even if there are existing mounts
         let line_with_mount =
-            "RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl apt-get update";
-        let result = inject_mount_into_run(line_with_mount, mount_spec);
-        assert_eq!(result, line_with_mount);
-
-        // RUN with leading whitespace
-        let result = inject_mount_into_run("    RUN apt-get update", mount_spec);
-        assert!(result.starts_with("    RUN"));
-        assert!(result.contains(mount_spec));
+            "RUN --mount=type=bind,source=some-file,target=/app/file apt-get update";
+        let result = inject_mount_into_run(line_with_mount, &mount_spec);
+        assert!(result.contains(&mount_spec));
+        assert!(result.contains("--mount=type=bind,source=some-file,target=/app/file"));
         assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
         assert!(result.contains("&& apt-get update"));
 
-        // RUN with existing flags
-        let result = inject_mount_into_run("RUN --network=host apt-get update", mount_spec);
-        assert!(result.contains(mount_spec));
-        assert!(result.contains("--network=host"));
+        // RUN with leading whitespace
+        let result = inject_mount_into_run("    RUN apt-get update", &mount_spec);
+        assert!(result.starts_with("    RUN"));
+        assert!(result.contains(&mount_spec));
+        // Verify all 5 SSL environment variables are exported
         assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("&& apt-get update"));
+
+        // RUN with existing flags
+        let result = inject_mount_into_run("RUN --network=host apt-get update", &mount_spec);
+        assert!(result.contains(&mount_spec));
+        assert!(result.contains("--network=host"));
+        // Verify all 5 SSL environment variables are exported
+        assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
         assert!(result.contains("&& apt-get update"));
     }
 
@@ -449,11 +538,15 @@ CMD ["python", "app.py"]
 
         let result = inject_ssl_mounts(dockerfile);
 
-        // Should contain mount spec in RUN lines
-        assert!(result.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        // Should contain bind mount spec in RUN lines
+        assert!(result.contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
 
-        // Should contain export SSL_CERT_FILE env var
+        // Should contain all SSL environment variables
         assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
 
         // Should not wrap commands in parentheses
         assert!(!result.contains("("));
@@ -468,7 +561,8 @@ CMD ["python", "app.py"]
         let mount_count = result
             .lines()
             .filter(|line| {
-                line.contains("RUN") && line.contains("--mount=type=secret,id=SSL_CERT_FILE")
+                line.contains("RUN")
+                    && line.contains("--mount=type=bind,from=__rise_internal_ssl_cert__")
             })
             .count();
         assert_eq!(mount_count, 2);
@@ -488,9 +582,13 @@ RUN apt-get update -y && \
 
         let lines: Vec<&str> = result.lines().collect();
 
-        // First line should have mount, export, and the backslash at the end
-        assert!(lines[1].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        // First line should have mount, all SSL exports, and the backslash at the end
+        assert!(lines[1].contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
         assert!(lines[1].contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(lines[1].contains("export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(lines[1].contains("export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(lines[1].contains("export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(lines[1].contains("export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
         assert!(
             lines[1].ends_with(" \\"),
             "First line should end with backslash continuation"
@@ -502,7 +600,7 @@ RUN apt-get update -y && \
         assert!(lines[4].trim().starts_with("apt-get clean"));
 
         // Verify no mount or export on continuation lines
-        assert!(!lines[2].contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        assert!(!lines[2].contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
         assert!(!lines[2].contains("export"));
 
         // Verify no parentheses anywhere
@@ -519,12 +617,16 @@ RUN --mount=type=bind,source=uv.lock,target=uv.lock uv sync --locked
 
         let result = inject_ssl_mounts(dockerfile);
 
-        // Should have both SSL mounts and the original bind mount
-        assert!(result.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        // Should have both SSL bind mounts and the original bind mount
+        assert!(result.contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
         assert!(result.contains("--mount=type=bind,source=uv.lock,target=uv.lock"));
 
-        // export should come AFTER all mount flags
+        // All SSL environment variables should be exported
         assert!(result.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(result.contains("export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
 
         // The shell command should be "uv sync --locked"
         assert!(result.contains("&& uv sync --locked"));
@@ -568,13 +670,17 @@ RUN --mount=type=bind,source=pyproject.toml,target=pyproject.toml \
         let lines: Vec<&str> = result.lines().collect();
         let run_line = lines[1];
 
-        // Should have SSL mounts and both original bind mounts
-        assert!(run_line.contains("--mount=type=secret,id=SSL_CERT_FILE"));
+        // Should have SSL bind mounts and both original bind mounts
+        assert!(run_line.contains("--mount=type=bind,from=__rise_internal_ssl_cert__"));
         assert!(run_line.contains("--mount=type=bind,source=pyproject.toml,target=pyproject.toml"));
         assert!(run_line.contains("--mount=type=bind,source=uv.lock,target=uv.lock"));
 
-        // export should come AFTER all mount flags
+        // All SSL environment variables should be exported
         assert!(run_line.contains("export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(run_line.contains("export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(run_line.contains("export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(run_line.contains("export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
+        assert!(run_line.contains("export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt"));
 
         // The command should be present
         assert!(run_line.contains("uv sync --locked"));

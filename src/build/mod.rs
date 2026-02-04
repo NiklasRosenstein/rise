@@ -21,6 +21,7 @@ pub(crate) use railpack::{build_with_buildctl, BuildctlFrontend, RailpackBuildOp
 pub(crate) use registry::docker_login;
 
 use anyhow::{bail, Result};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
@@ -218,7 +219,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             // Preprocess Dockerfile for SSL if cert is available
             let (_temp_dir, effective_dockerfile) = if ssl_cert_path.is_some() {
                 if original_dockerfile_path.exists() {
-                    info!("SSL_CERT_FILE detected, preprocessing Dockerfile for secret mounts");
+                    info!("SSL_CERT_FILE detected, preprocessing Dockerfile for bind mounts");
                     let (temp_dir, processed_path) =
                         dockerfile_ssl::preprocess_dockerfile_for_ssl(&original_dockerfile_path)?;
                     (Some(temp_dir), processed_path)
@@ -239,13 +240,26 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 }
             }
 
-            // Add SSL cert as a secret if available
-            if let Some(ref cert_path) = ssl_cert_path {
-                secrets.insert(
-                    "SSL_CERT_FILE".to_string(),
-                    cert_path.to_string_lossy().to_string(),
-                );
-            }
+            // Add SSL cert using named build context (bind mount)
+            // RAII cleanup via SslCertContext drop
+            let mut local_contexts = HashMap::new();
+            let _ssl_cert_context: Option<dockerfile_ssl::SslCertContext> =
+                if let Some(ref cert_path) = ssl_cert_path {
+                    // Create temp directory with cert for bind mount
+                    // Using a separate local context keeps the cert separate from the main context
+                    // and reduces risk of accidental inclusion via generic COPY commands
+                    let context = dockerfile_ssl::SslCertContext::new(cert_path)?;
+
+                    // Add to local_contexts map for buildctl --local argument
+                    local_contexts.insert(
+                        dockerfile_ssl::SSL_CERT_BUILD_CONTEXT.to_string(),
+                        context.context_path.to_string_lossy().to_string(),
+                    );
+
+                    Some(context)
+                } else {
+                    None
+                };
 
             build_with_buildctl(
                 &options.app_path,
@@ -254,8 +268,11 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 options.push,
                 buildkit_host.as_deref(),
                 &secrets,
+                &local_contexts,
                 BuildctlFrontend::Dockerfile,
             )?;
+
+            // Note: SslCertContext cleanup is automatic via RAII when it goes out of scope
         }
     }
 

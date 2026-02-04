@@ -22,6 +22,10 @@ pub(crate) const SSL_ENV_VARS: &[&str] = &[
 ];
 
 /// Embed SSL certificate into railpack plan.json
+///
+/// The certificate is injected into the first step of the plan, which is the setup step.
+/// This step is used only during the build process and is not included in the final
+/// container image, so the certificate does not persist in the deployed container.
 pub(crate) fn embed_ssl_cert_in_plan(plan_file: &Path, ssl_cert_file: &Path) -> Result<()> {
     use serde_json::Value;
 
