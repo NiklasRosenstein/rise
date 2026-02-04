@@ -202,10 +202,8 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             let (_temp_dir, effective_dockerfile) = if ssl_cert_path.is_some() {
                 if original_dockerfile_path.exists() {
                     info!("SSL_CERT_FILE detected, preprocessing Dockerfile for bind mounts");
-                    let (temp_dir, processed_path) = dockerfile_ssl::preprocess_dockerfile_for_ssl(
-                        &original_dockerfile_path,
-                        ssl_cert_path.as_ref().unwrap(),
-                    )?;
+                    let (temp_dir, processed_path) =
+                        dockerfile_ssl::preprocess_dockerfile_for_ssl(&original_dockerfile_path)?;
                     (Some(temp_dir), processed_path)
                 } else {
                     (None, original_dockerfile_path)

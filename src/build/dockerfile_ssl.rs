@@ -382,7 +382,7 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
 
 /// Preprocess a Dockerfile to inject SSL certificate mounts into RUN commands
 ///
-/// When SSL_CERT_FILE is set, this function:
+/// This function:
 /// 1. Reads the original Dockerfile
 /// 2. Injects `--mount=type=bind,from=rise-ssl-cert,source=ca-certificates.crt,target=<path>,readonly`
 ///    into each RUN command for all common SSL certificate paths
@@ -408,7 +408,6 @@ fn inject_mount_into_multiline_run(run_lines: &[&str], mount_spec: &str) -> Stri
 /// - PathBuf: Path to the processed Dockerfile
 pub(crate) fn preprocess_dockerfile_for_ssl(
     original_dockerfile: &Path,
-    _ssl_cert_file: &Path,
 ) -> Result<(TempDir, PathBuf)> {
     let content = std::fs::read_to_string(original_dockerfile).with_context(|| {
         format!(

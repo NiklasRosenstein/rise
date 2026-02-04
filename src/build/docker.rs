@@ -64,10 +64,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
 
         if original_dockerfile.exists() {
             info!("SSL_CERT_FILE detected, preprocessing Dockerfile for bind mounts");
-            let (temp_dir, processed_path) = preprocess_dockerfile_for_ssl(
-                &original_dockerfile,
-                ssl_cert_path.as_ref().unwrap(),
-            )?;
+            let (temp_dir, processed_path) = preprocess_dockerfile_for_ssl(&original_dockerfile)?;
             (Some(temp_dir), Some(processed_path))
         } else {
             (
