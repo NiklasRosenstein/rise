@@ -547,16 +547,24 @@ mod tests {
         assert!(JwtValidator::matches_wildcard_pattern("*", "anything"));
         assert!(JwtValidator::matches_wildcard_pattern("*", ""));
 
-        // Pattern ending with * (empty last part)
+        // Pattern ending with * (wildcard can match empty string)
         assert!(JwtValidator::matches_wildcard_pattern(
             "app*",
             "application"
         ));
-        assert!(JwtValidator::matches_wildcard_pattern("app*", "app"));
+        assert!(JwtValidator::matches_wildcard_pattern("app*", "app")); // * matches empty
 
-        // Pattern starting with * (empty first part)
+        // Pattern starting with * (wildcard can match empty string)
         assert!(JwtValidator::matches_wildcard_pattern("*app", "myapp"));
-        assert!(JwtValidator::matches_wildcard_pattern("*app", "app"));
+        assert!(JwtValidator::matches_wildcard_pattern("*app", "app")); // * matches empty
+
+        // Pattern with middle wildcard and required suffix
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app-*",
+            "app-staging"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern("app-*", "app-")); // * matches empty
+        assert!(!JwtValidator::matches_wildcard_pattern("app-*", "app")); // missing '-'
 
         // Multiple consecutive wildcards are implicitly treated as a single wildcard
         // because split('*') creates empty string parts that always match
