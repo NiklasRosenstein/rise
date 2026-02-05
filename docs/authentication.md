@@ -1,6 +1,14 @@
 # Authentication
 
-Rise uses JWT tokens issued by Dex OAuth2/OIDC provider for user authentication and service accounts for CI/CD workload identity.
+Rise uses JWT tokens for user authentication and service accounts for CI/CD workload identity.
+
+## Overview
+
+- **User Authentication**: Rise issues its own HS256 JWTs after validating IdP (Dex) tokens
+- **Token Flow**: IdP auth → Rise validates IdP token → Rise issues JWT → Client receives Rise JWT
+- **Service Accounts**: CI/CD systems authenticate using OIDC JWT tokens from external issuers
+
+The IdP (Dex) tokens are used internally for group synchronization but are not exposed to users. All user-facing authentication (CLI and UI) uses Rise-issued JWTs.
 
 ## User Authentication
 
