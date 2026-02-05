@@ -47,7 +47,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     }
 
     // Check for SSL certificate and determine if preprocessing is needed
-    let ssl_cert_file = std::env::var("SSL_CERT_FILE").ok();
+    let ssl_cert_file = super::env_var_non_empty("SSL_CERT_FILE");
     let ssl_cert_path = ssl_cert_file.as_ref().and_then(|p| {
         let path = Path::new(p);
         if path.exists() {

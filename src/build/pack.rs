@@ -72,7 +72,7 @@ pub(crate) fn build_image_with_buildpacks(
     // This avoids code bifurcation and allows CA certificate injection
 
     // If SSL_CERT_FILE is set, inject CA certificate into lifecycle container
-    if let Ok(ca_cert_path) = std::env::var("SSL_CERT_FILE") {
+    if let Some(ca_cert_path) = super::env_var_non_empty("SSL_CERT_FILE") {
         let cert_path = Path::new(&ca_cert_path);
 
         // Validate the file exists

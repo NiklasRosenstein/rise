@@ -153,7 +153,7 @@ impl Config {
             return enabled;
         }
         // Default to true if SSL_CERT_FILE is set, false otherwise
-        std::env::var("SSL_CERT_FILE").is_ok()
+        crate::build::env_var_non_empty("SSL_CERT_FILE").is_some()
     }
 
     /// Set whether to embed SSL certificate in Railpack builds

@@ -31,6 +31,21 @@ use method::{requires_buildkit, select_build_method};
 use pack::build_image_with_buildpacks;
 use railpack::build_image_with_railpacks;
 
+/// Read an environment variable, treating empty strings as if the variable is not set.
+///
+/// This helper ensures that empty environment variables (e.g., `SSL_CERT_FILE=""`) are
+/// handled the same as unset variables, avoiding errors when code attempts to use
+/// empty paths or values.
+pub(crate) fn env_var_non_empty(key: &str) -> Option<String> {
+    std::env::var(key).ok().and_then(|v| {
+        if v.is_empty() {
+            None
+        } else {
+            Some(v)
+        }
+    })
+}
+
 /// Main entry point for building container images
 pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
     // Resolve container CLI - use explicit value or default to "docker"
@@ -70,21 +85,21 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             // 1. Backend requires BuildKit
             // 2. SSL_CERT_FILE is set (needs injection)
             // 3. BUILDKIT_HOST is NOT set (user not managing their own)
-            std::env::var("BUILDKIT_HOST").is_err()
+            env_var_non_empty("BUILDKIT_HOST").is_none()
                 && requires_buildkit(&build_method)
-                && std::env::var("SSL_CERT_FILE").is_ok()
+                && env_var_non_empty("SSL_CERT_FILE").is_some()
         }
     };
 
     // Handle BuildKit daemon management
     let buildkit_host = if requires_buildkit(&build_method) && managed_buildkit {
         // Check if user already has BUILDKIT_HOST (even if managed_buildkit=true)
-        if let Ok(existing_host) = std::env::var("BUILDKIT_HOST") {
+        if let Some(existing_host) = env_var_non_empty("BUILDKIT_HOST") {
             info!("Using existing BUILDKIT_HOST: {}", existing_host);
             Some(existing_host)
         } else {
             // Create/manage our own buildkit daemon
-            let ssl_cert_path = std::env::var("SSL_CERT_FILE").ok().map(PathBuf::from);
+            let ssl_cert_path = env_var_non_empty("SSL_CERT_FILE").map(PathBuf::from);
             Some(ensure_managed_buildkit_daemon(
                 ssl_cert_path.as_deref(),
                 container_cli,
@@ -199,7 +214,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             }
 
             // Check for SSL certificate
-            let ssl_cert_file = std::env::var("SSL_CERT_FILE").ok();
+            let ssl_cert_file = env_var_non_empty("SSL_CERT_FILE");
             let ssl_cert_path = ssl_cert_file.as_ref().and_then(|p| {
                 let path = Path::new(p);
                 if path.exists() {
@@ -278,4 +293,47 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
 
     info!("✓ Successfully built image '{}'", options.image_tag);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_env_var_non_empty_with_empty_string() {
+        // Test that empty string is treated as unset
+        std::env::set_var("TEST_EMPTY_VAR", "");
+        assert_eq!(env_var_non_empty("TEST_EMPTY_VAR"), None);
+        std::env::remove_var("TEST_EMPTY_VAR");
+    }
+
+    #[test]
+    fn test_env_var_non_empty_with_value() {
+        // Test that non-empty value is returned
+        std::env::set_var("TEST_VALUE_VAR", "some_value");
+        assert_eq!(
+            env_var_non_empty("TEST_VALUE_VAR"),
+            Some("some_value".to_string())
+        );
+        std::env::remove_var("TEST_VALUE_VAR");
+    }
+
+    #[test]
+    fn test_env_var_non_empty_with_unset() {
+        // Test that unset variable returns None
+        std::env::remove_var("TEST_UNSET_VAR");
+        assert_eq!(env_var_non_empty("TEST_UNSET_VAR"), None);
+    }
+
+    #[test]
+    fn test_env_var_non_empty_with_whitespace() {
+        // Test that whitespace-only string is NOT treated as empty
+        // (only fully empty strings are treated as unset)
+        std::env::set_var("TEST_WHITESPACE_VAR", "   ");
+        assert_eq!(
+            env_var_non_empty("TEST_WHITESPACE_VAR"),
+            Some("   ".to_string())
+        );
+        std::env::remove_var("TEST_WHITESPACE_VAR");
+    }
 }

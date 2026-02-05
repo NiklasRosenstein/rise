@@ -20,7 +20,7 @@ pub(crate) fn read_and_transform_proxy_vars() -> HashMap<String, String> {
     let mut proxy_vars = HashMap::new();
 
     for var_name in PROXY_VAR_NAMES {
-        if let Ok(value) = std::env::var(var_name) {
+        if let Some(value) = super::env_var_non_empty(var_name) {
             // NO_PROXY and no_proxy are comma-separated lists, not URLs - don't transform
             let transformed_value = if var_name.eq_ignore_ascii_case("NO_PROXY") {
                 value

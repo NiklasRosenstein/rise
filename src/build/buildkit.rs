@@ -300,7 +300,7 @@ pub(crate) fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) ->
 
 /// Warn user about SSL certificate issues when managed BuildKit is disabled
 pub(crate) fn check_ssl_cert_and_warn(method: &BuildMethod, managed_buildkit: bool) {
-    if let Ok(_ssl_cert) = std::env::var("SSL_CERT_FILE") {
+    if super::env_var_non_empty("SSL_CERT_FILE").is_some() {
         if requires_buildkit(method) && !managed_buildkit {
             warn!(
                 "SSL_CERT_FILE is set but managed BuildKit daemon is disabled. \
