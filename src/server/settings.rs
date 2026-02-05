@@ -934,7 +934,7 @@ pub enum ExtensionProviderConfig {
         /// Prefix for SECURITY INTEGRATION names (default: "rise")
         #[serde(default = "default_integration_name_prefix")]
         integration_name_prefix: String,
-        /// Default blocked roles for OAuth (default: ["ACCOUNTADMIN", "SECURITYADMIN"])
+        /// Default blocked roles for OAuth (default: ["ACCOUNTADMIN", "ORGADMIN", "SECURITYADMIN"])
         #[serde(default = "default_blocked_roles")]
         default_blocked_roles: Vec<String>,
         /// Default OAuth scopes (default: ["refresh_token"])
@@ -973,7 +973,11 @@ fn default_integration_name_prefix() -> String {
 
 #[allow(dead_code)]
 fn default_blocked_roles() -> Vec<String> {
-    vec!["ACCOUNTADMIN".to_string(), "SECURITYADMIN".to_string()]
+    vec![
+        "ACCOUNTADMIN".to_string(),
+        "ORGADMIN".to_string(),
+        "SECURITYADMIN".to_string(),
+    ]
 }
 
 #[allow(dead_code)]
