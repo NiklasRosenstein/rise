@@ -1227,14 +1227,8 @@ async fn token_endpoint_inner(
     match req.grant_type.as_str() {
         "authorization_code" => {
             // Returns Response directly (raw passthrough)
-            handle_authorization_code_grant(
-                state.clone(),
-                project,
-                extension_name.to_string(),
-                spec,
-                req,
-            )
-            .await
+            handle_authorization_code_grant(state.clone(), project, extension_name.to_string(), req)
+                .await
         }
         "refresh_token" => {
             // Returns Json<OAuth2TokenResponse>, convert to Response
@@ -1267,7 +1261,6 @@ async fn handle_authorization_code_grant(
     state: AppState,
     project: crate::db::models::Project,
     extension_name: String,
-    _spec: OAuthExtensionSpec,
     req: TokenRequest,
 ) -> Result<Response, (StatusCode, Json<OAuth2ErrorResponse>)> {
     // SECURITY: Ensure mutual exclusivity of authentication methods
