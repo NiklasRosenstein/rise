@@ -1079,8 +1079,8 @@ function OAuthDetailView({ extension, projectName }) {
                                     <td className="py-3 px-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
                                         {extensionName.toUpperCase().replace(/-/g, '_')}_CLIENT_SECRET
                                     </td>
-                                    <td className="py-3 px-3 text-gray-900 dark:text-gray-200 break-all">
-                                        {status?.rise_client_secret || '••••••••'}
+                                    <td className="py-3 px-3 text-gray-500 dark:text-gray-500">
+                                        ••••••••
                                     </td>
                                     <td className="py-3 px-3">
                                         {status?.rise_client_secret && (
