@@ -663,6 +663,7 @@ pub async fn callback(
     let http_client = reqwest::Client::new();
     let response = http_client
         .post(&endpoints.token_endpoint)
+        .header("Accept", "application/json")
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", &req.code),

@@ -197,6 +197,7 @@ impl OAuthProvider {
         let response = self
             .http_client
             .post(&token_endpoint)
+            .header("Accept", "application/json")
             .form(&[
                 ("grant_type", "authorization_code"),
                 ("code", authorization_code),
@@ -249,6 +250,7 @@ impl OAuthProvider {
         let response = self
             .http_client
             .post(&token_endpoint)
+            .header("Accept", "application/json")
             .form(&[
                 ("grant_type", "refresh_token"),
                 ("refresh_token", refresh_token),
