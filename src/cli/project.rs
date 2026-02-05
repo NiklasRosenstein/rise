@@ -935,7 +935,11 @@ pub async fn sync_service_accounts(
                     .context("Failed to update service account")?;
 
                 if !update_response.status().is_success() {
-                    let error_text = update_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    let status = update_response.status();
+                    let error_text = update_response
+                        .text()
+                        .await
+                        .unwrap_or_else(|_| format!("Failed to read error response (status: {})", status));
                     anyhow::bail!("Failed to update service account '{}': {}", identifier, error_text);
                 }
                 
@@ -967,7 +971,11 @@ pub async fn sync_service_accounts(
                 .context("Failed to create service account")?;
 
             if !create_response.status().is_success() {
-                let error_text = create_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                let status = create_response.status();
+                let error_text = create_response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| format!("Failed to read error response (status: {})", status));
                 anyhow::bail!("Failed to create service account '{}': {}", identifier, error_text);
             }
 

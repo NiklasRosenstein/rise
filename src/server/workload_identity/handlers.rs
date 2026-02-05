@@ -149,7 +149,7 @@ pub async fn create_workload_identity(
     // Validate identifier format if provided
     if let Some(ref id) = req.identifier {
         // Validate identifier format: lowercase alphanumeric, hyphens, underscores
-        // Must start with alphanumeric
+        // Must start and end with alphanumeric
         if id.is_empty() {
             return Err((
                 StatusCode::BAD_REQUEST,
@@ -164,10 +164,17 @@ pub async fn create_workload_identity(
             ));
         }
 
-        if !id.chars().next().unwrap().is_ascii_alphanumeric() {
+        if !id.chars().next().map_or(false, |c| c.is_ascii_alphanumeric()) {
             return Err((
                 StatusCode::BAD_REQUEST,
                 "Identifier must start with a letter or digit".to_string(),
+            ));
+        }
+
+        if id.len() > 1 && !id.chars().last().map_or(false, |c| c.is_ascii_alphanumeric()) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Identifier must end with a letter or digit".to_string(),
             ));
         }
 
