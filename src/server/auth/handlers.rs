@@ -1889,9 +1889,13 @@ pub async fn openid_configuration(
     tracing::debug!("OpenID configuration endpoint called");
 
     let jwks_uri = format!("{}/api/v1/auth/jwks", state.public_url);
+    let authorization_endpoint = format!("{}/api/v1/auth/authorize", state.public_url);
+    let token_endpoint = format!("{}/api/v1/auth/code/exchange", state.public_url);
 
     let config = serde_json::json!({
         "issuer": state.public_url,
+        "authorization_endpoint": authorization_endpoint,
+        "token_endpoint": token_endpoint,
         "jwks_uri": jwks_uri,
         "response_types_supported": ["code", "token", "id_token"],
         "id_token_signing_alg_values_supported": ["RS256", "HS256"],
