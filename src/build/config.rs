@@ -38,6 +38,20 @@ pub struct ProjectConfig {
     /// Plain-text environment variables (non-secret)
     #[serde(default)]
     pub env: HashMap<String, String>,
+
+    /// Service accounts (workload identities)
+    #[serde(default)]
+    pub service_accounts: HashMap<String, ServiceAccountConfig>,
+}
+
+/// Service account configuration
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ServiceAccountConfig {
+    /// OIDC issuer URL
+    pub issuer: String,
+
+    /// Claims that must match in the JWT token
+    pub claims: HashMap<String, String>,
 }
 
 fn default_access_class() -> String {
@@ -237,5 +251,62 @@ builder = "paketobuildpacks/builder-jammy-base"
         assert!(config.project.is_some());
         assert_eq!(config.project.as_ref().unwrap().name, "clean-project");
         assert_eq!(config.project.as_ref().unwrap().access_class, "public");
+    }
+
+    #[test]
+    fn test_load_config_with_service_accounts() {
+        // Create a temporary directory for test
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rise_toml_path = temp_dir.path().join("rise.toml");
+
+        // Write a config with service accounts
+        std::fs::write(
+            &rise_toml_path,
+            r#"
+version = 1
+
+[project]
+name = "myproject"
+access_class = "public"
+
+[project.service_accounts.ci]
+issuer = "https://github.com"
+claims = { aud = "https://rise.example.com", repo = "owner/name" }
+
+[project.service_accounts.staging]
+issuer = "https://gitlab.com"
+claims = { aud = "https://rise.example.com", project_path = "group/project" }
+
+[build]
+backend = "docker"
+"#,
+        )
+        .unwrap();
+
+        // Load the config
+        let result = load_full_project_config(temp_dir.path().to_str().unwrap());
+
+        assert!(result.is_ok());
+        let config = result.unwrap();
+        assert!(config.is_some());
+
+        let config = config.unwrap();
+        assert_eq!(config.version, Some(1));
+        assert!(config.project.is_some());
+
+        let project = config.project.unwrap();
+        assert_eq!(project.name, "myproject");
+        assert_eq!(project.service_accounts.len(), 2);
+
+        // Check CI service account
+        let ci_sa = project.service_accounts.get("ci").unwrap();
+        assert_eq!(ci_sa.issuer, "https://github.com");
+        assert_eq!(ci_sa.claims.get("aud").unwrap(), "https://rise.example.com");
+        assert_eq!(ci_sa.claims.get("repo").unwrap(), "owner/name");
+
+        // Check staging service account
+        let staging_sa = project.service_accounts.get("staging").unwrap();
+        assert_eq!(staging_sa.issuer, "https://gitlab.com");
+        assert_eq!(staging_sa.claims.get("project_path").unwrap(), "group/project");
     }
 }

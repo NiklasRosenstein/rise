@@ -12,6 +12,17 @@ pub async fn create(
     issuer_url: &str,
     claims: &HashMap<String, String>,
 ) -> Result<ServiceAccount> {
+    create_with_identifier(pool, project_id, issuer_url, claims, None).await
+}
+
+/// Create a new service account with an optional identifier
+pub async fn create_with_identifier(
+    pool: &PgPool,
+    project_id: Uuid,
+    issuer_url: &str,
+    claims: &HashMap<String, String>,
+    identifier: Option<&str>,
+) -> Result<ServiceAccount> {
     let mut tx = pool.begin().await.context("Failed to begin transaction")?;
 
     // Get project for email generation
@@ -45,8 +56,12 @@ pub async fn create(
 
     let sequence = sequence.unwrap_or(1);
 
-    // Generate service account email
-    let email = format!("{}+{}@sa.rise.local", project.name, sequence);
+    // Generate service account email based on identifier or sequence
+    let email = if let Some(id) = identifier {
+        format!("{}-sa+{}@rise.local", project.name, id)
+    } else {
+        format!("{}+{}@sa.rise.local", project.name, sequence)
+    };
 
     // Check if user already exists with this email (from previously deleted SA)
     let existing_user = sqlx::query_as!(
@@ -88,16 +103,17 @@ pub async fn create(
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, project_id, user_id, issuer_url, claims, sequence,
+        INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence, identifier)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, project_id, user_id, issuer_url, claims, sequence, identifier,
                   deleted_at, created_at, updated_at
         "#,
         project_id,
         user.id,
         issuer_url,
         claims_json,
-        sequence
+        sequence,
+        identifier
     )
     .fetch_one(&mut *tx)
     .await
@@ -113,7 +129,7 @@ pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Serv
     let sas = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE project_id = $1 AND deleted_at IS NULL
@@ -128,12 +144,36 @@ pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Serv
     Ok(sas)
 }
 
+/// Find a service account by project and identifier
+pub async fn find_by_project_and_identifier(
+    pool: &PgPool,
+    project_id: Uuid,
+    identifier: &str,
+) -> Result<Option<ServiceAccount>> {
+    let sa = sqlx::query_as!(
+        ServiceAccount,
+        r#"
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
+               deleted_at, created_at, updated_at
+        FROM service_accounts
+        WHERE project_id = $1 AND identifier = $2 AND deleted_at IS NULL
+        "#,
+        project_id,
+        identifier
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to find service account by project and identifier")?;
+
+    Ok(sa)
+}
+
 /// Get a service account by ID
 pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<ServiceAccount>> {
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE id = $1
@@ -156,7 +196,7 @@ pub async fn get_claims(
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE id = $1
@@ -179,7 +219,7 @@ pub async fn find_by_issuer(pool: &PgPool, issuer_url: &str) -> Result<Vec<Servi
     let sas = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE issuer_url = $1 AND deleted_at IS NULL
@@ -202,7 +242,7 @@ pub async fn find_by_user_and_project(
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE user_id = $1 AND project_id = $2 AND deleted_at IS NULL
@@ -259,7 +299,7 @@ pub async fn update(
             claims = COALESCE($3, claims),
             updated_at = NOW()
         WHERE id = $1 AND deleted_at IS NULL
-        RETURNING id, project_id, user_id, issuer_url, claims, sequence,
+        RETURNING id, project_id, user_id, issuer_url, claims, sequence, identifier,
                   deleted_at, created_at, updated_at
         "#,
         id,

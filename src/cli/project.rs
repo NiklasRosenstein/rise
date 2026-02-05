@@ -249,6 +249,7 @@ pub async fn create_project(
             access_class: project_access_class.clone(),
             custom_domains: Vec::new(),
             env: HashMap::new(),
+            service_accounts: HashMap::new(),
         };
 
         let config_to_write = ProjectBuildConfig {

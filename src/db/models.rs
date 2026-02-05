@@ -102,6 +102,7 @@ pub struct ServiceAccount {
     pub issuer_url: String,
     pub claims: serde_json::Value, // JSONB stored as serde_json::Value
     pub sequence: i32,
+    pub identifier: Option<String>, // Optional identifier for declarative service accounts
     pub deleted_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
