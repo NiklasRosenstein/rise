@@ -921,8 +921,17 @@ function OAuthDetailView({ extension, projectName }) {
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">OAuth Configuration</h2>
                         <div className="bg-white dark:bg-gray-900 rounded p-4 space-y-3">
                             <div>
-                                <p className="text-sm text-gray-600 dark:text-gray-500">Issuer URL</p>
+                                <p className="text-sm text-gray-600 dark:text-gray-500">Upstream Issuer URL</p>
                                 <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.issuer_url || 'N/A'}</p>
+                            </div>
+                            <div>
+                                <p className="text-sm text-gray-600 dark:text-gray-500">Rise OIDC Discovery URL</p>
+                                <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">
+                                    {backendUrl}/oidc/{projectName}/{extensionName}/.well-known/openid-configuration
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
+                                    Use this URL for OIDC client configuration. Rise proxies discovery with rewritten URLs.
+                                </p>
                             </div>
                             {spec.authorization_endpoint && (
                                 <div>
