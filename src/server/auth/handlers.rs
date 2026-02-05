@@ -494,10 +494,10 @@ pub async fn code_exchange(
             )
         })?;
 
-    // Issue Rise JWT for CLI authentication
+    // Issue Rise JWT for user authentication (consumed by the CLI)
     let rise_jwt = state
         .jwt_signer
-        .sign_ui_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
+        .sign_user_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
         .await
         .map_err(|e| {
             tracing::error!("Failed to sign Rise JWT: {:#}", e);
@@ -591,10 +591,10 @@ pub async fn device_exchange(
                 }
             };
 
-            // Issue Rise JWT for CLI authentication
+            // Issue Rise JWT for user authentication (consumed by the CLI)
             let rise_jwt = match state
                 .jwt_signer
-                .sign_ui_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
+                .sign_user_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
                 .await
             {
                 Ok(jwt) => jwt,
@@ -1364,13 +1364,13 @@ pub async fn oauth_callback(
     // Sync groups after login
     sync_groups_after_login(&state, &token_info.id_token).await?;
 
-    // Issue Rise HS256 JWT for UI authentication
+    // Issue Rise HS256 JWT for user authentication (consumed by the UI)
     let rise_jwt = state
         .jwt_signer
-        .sign_ui_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
+        .sign_user_jwt(&claims, user.id, &state.db_pool, &state.public_url, None)
         .await
         .map_err(|e| {
-            tracing::error!("Failed to sign UI JWT: {:#}", e);
+            tracing::error!("Failed to sign user JWT: {:#}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Failed to create authentication token".to_string(),
