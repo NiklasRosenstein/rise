@@ -187,7 +187,14 @@ impl JwtValidator {
         Ok(keys)
     }
 
-    /// Validate custom claims (exact matching)
+    /// Validate custom claims (supports exact matching and wildcard patterns)
+    ///
+    /// Claims can use wildcard patterns with `*`:
+    /// - `app*` matches `app`, `app-mr/6`, `app-staging`, etc.
+    /// - `*-prod` matches `api-prod`, `web-prod`, etc.
+    /// - `app-*-prod` matches `app-staging-prod`, `app-test-prod`, etc.
+    ///
+    /// If no wildcard is present, exact matching is performed (backward compatible).
     fn validate_custom_claims(
         jwt_claims: &serde_json::Value,
         expected_claims: &HashMap<String, String>,
@@ -202,17 +209,81 @@ impl JwtValidator {
                 .and_then(|v| v.as_str())
                 .ok_or_else(|| anyhow!("Claim '{}' not found or not a string", key))?;
 
-            if actual_value != expected_value {
-                return Err(anyhow!(
-                    "Claim mismatch: '{}' expected '{}', got '{}'",
-                    key,
-                    expected_value,
-                    actual_value
-                ));
+            // Check if expected value contains wildcard
+            if expected_value.contains('*') {
+                // Use glob-style pattern matching
+                if !Self::matches_wildcard_pattern(expected_value, actual_value) {
+                    return Err(anyhow!(
+                        "Claim mismatch: '{}' pattern '{}' does not match '{}'",
+                        key,
+                        expected_value,
+                        actual_value
+                    ));
+                }
+            } else {
+                // Exact matching (backward compatible)
+                if actual_value != expected_value {
+                    return Err(anyhow!(
+                        "Claim mismatch: '{}' expected '{}', got '{}'",
+                        key,
+                        expected_value,
+                        actual_value
+                    ));
+                }
             }
         }
 
         Ok(())
+    }
+
+    /// Match a string against a glob-style pattern with `*` wildcards
+    ///
+    /// This implements simple glob-style pattern matching where `*` matches any
+    /// sequence of characters (including empty string). Unlike filesystem globs,
+    /// this matches across any characters, including path separators.
+    ///
+    /// Examples:
+    /// - `matches_wildcard_pattern("app*", "app-mr/6")` → true
+    /// - `matches_wildcard_pattern("app*", "webapp")` → false (doesn't start with "app")
+    /// - `matches_wildcard_pattern("*-prod", "api-prod")` → true
+    /// - `matches_wildcard_pattern("app-*-prod", "app-staging-prod")` → true
+    ///
+    /// Note: Consecutive wildcards (e.g., `app**prod`) are treated as a single wildcard
+    /// due to split() creating empty parts, which always match.
+    fn matches_wildcard_pattern(pattern: &str, text: &str) -> bool {
+        // Split pattern by '*' to get literal parts
+        let parts: Vec<&str> = pattern.split('*').collect();
+
+        // If no wildcards (shouldn't happen, but handle it)
+        if parts.len() == 1 {
+            return pattern == text;
+        }
+
+        let mut pos = 0;
+
+        for (i, part) in parts.iter().enumerate() {
+            if i == 0 {
+                // First part must match the beginning
+                if !text.starts_with(part) {
+                    return false;
+                }
+                pos = part.len();
+            } else if i == parts.len() - 1 {
+                // Last part must match the end (empty part matches any suffix when pattern ends with *)
+                if !text[pos..].ends_with(part) {
+                    return false;
+                }
+            } else {
+                // Middle parts must appear in order
+                if let Some(found_pos) = text[pos..].find(part) {
+                    pos += found_pos + part.len();
+                } else {
+                    return false;
+                }
+            }
+        }
+
+        true
     }
 
     /// Validate a JWT token against an issuer with expected claims
@@ -372,5 +443,222 @@ mod tests {
         let result = JwtValidator::validate_custom_claims(&jwt_claims, &expected);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("mismatch"));
+    }
+
+    #[test]
+    fn test_wildcard_pattern_prefix() {
+        // Pattern: app*
+        assert!(JwtValidator::matches_wildcard_pattern("app*", "app"));
+        assert!(JwtValidator::matches_wildcard_pattern("app*", "app-mr/6"));
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app*",
+            "app-staging"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app*",
+            "application"
+        ));
+
+        // Should not match
+        assert!(!JwtValidator::matches_wildcard_pattern("app*", "myapp"));
+        assert!(!JwtValidator::matches_wildcard_pattern("app*", "webapp"));
+    }
+
+    #[test]
+    fn test_wildcard_pattern_suffix() {
+        // Pattern: *-prod
+        assert!(JwtValidator::matches_wildcard_pattern("*-prod", "api-prod"));
+        assert!(JwtValidator::matches_wildcard_pattern("*-prod", "web-prod"));
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "*-prod",
+            "my-service-prod"
+        ));
+
+        // Should not match
+        assert!(!JwtValidator::matches_wildcard_pattern(
+            "*-prod",
+            "production"
+        ));
+        assert!(!JwtValidator::matches_wildcard_pattern("*-prod", "prod"));
+        assert!(!JwtValidator::matches_wildcard_pattern(
+            "*-prod",
+            "api-prod-backup"
+        ));
+    }
+
+    #[test]
+    fn test_wildcard_pattern_middle() {
+        // Pattern: app-*-prod
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app-*-prod",
+            "app-staging-prod"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app-*-prod",
+            "app-test-prod"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app-*-prod",
+            "app-mr/6-prod"
+        ));
+
+        // Should not match
+        assert!(!JwtValidator::matches_wildcard_pattern(
+            "app-*-prod",
+            "app-prod"
+        ));
+        assert!(!JwtValidator::matches_wildcard_pattern(
+            "app-*-prod",
+            "app-staging"
+        ));
+        assert!(!JwtValidator::matches_wildcard_pattern(
+            "app-*-prod",
+            "web-staging-prod"
+        ));
+    }
+
+    #[test]
+    fn test_wildcard_pattern_multiple() {
+        // Pattern with multiple wildcards: *-app-*
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "*-app-*",
+            "my-app-staging"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "*-app-*",
+            "test-app-mr/6"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "*-app-*",
+            "web-app-prod"
+        ));
+
+        // Should not match
+        assert!(!JwtValidator::matches_wildcard_pattern(
+            "*-app-*",
+            "my-application"
+        ));
+        assert!(!JwtValidator::matches_wildcard_pattern("*-app-*", "app"));
+    }
+
+    #[test]
+    fn test_wildcard_pattern_edge_cases() {
+        // Single wildcard matches everything
+        assert!(JwtValidator::matches_wildcard_pattern("*", "anything"));
+        assert!(JwtValidator::matches_wildcard_pattern("*", ""));
+
+        // Pattern ending with * (wildcard can match empty string)
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app*",
+            "application"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern("app*", "app")); // * matches empty
+
+        // Pattern starting with * (wildcard can match empty string)
+        assert!(JwtValidator::matches_wildcard_pattern("*app", "myapp"));
+        assert!(JwtValidator::matches_wildcard_pattern("*app", "app")); // * matches empty
+
+        // Pattern with middle wildcard and required suffix
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app-*",
+            "app-staging"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern("app-*", "app-")); // * matches empty
+        assert!(!JwtValidator::matches_wildcard_pattern("app-*", "app")); // missing '-'
+
+        // Multiple consecutive wildcards are implicitly treated as a single wildcard
+        // because split('*') creates empty string parts that always match
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app**prod",
+            "appprod"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app**prod",
+            "app-staging-prod"
+        ));
+        // This is equivalent to "app*prod" due to how split works
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app***prod",
+            "app-test-prod"
+        ));
+
+        // No match cases
+        assert!(!JwtValidator::matches_wildcard_pattern("app*", ""));
+        assert!(!JwtValidator::matches_wildcard_pattern("*app", "ap"));
+    }
+
+    #[test]
+    fn test_validate_custom_claims_with_wildcard() {
+        // Test wildcard in environment claim
+        let jwt_claims = serde_json::json!({
+            "aud": "my-audience",
+            "environment": "app-mr/6"
+        });
+
+        let mut expected = HashMap::new();
+        expected.insert("aud".to_string(), "my-audience".to_string());
+        expected.insert("environment".to_string(), "app*".to_string());
+
+        let result = JwtValidator::validate_custom_claims(&jwt_claims, &expected);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_custom_claims_with_wildcard_no_match() {
+        // Test wildcard that doesn't match
+        let jwt_claims = serde_json::json!({
+            "aud": "my-audience",
+            "environment": "webapp-staging"
+        });
+
+        let mut expected = HashMap::new();
+        expected.insert("aud".to_string(), "my-audience".to_string());
+        expected.insert("environment".to_string(), "app*".to_string());
+
+        let result = JwtValidator::validate_custom_claims(&jwt_claims, &expected);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("pattern"));
+    }
+
+    #[test]
+    fn test_validate_custom_claims_mixed_exact_and_wildcard() {
+        // Test mix of exact and wildcard matching
+        let jwt_claims = serde_json::json!({
+            "aud": "my-audience",
+            "project_path": "myorg/myrepo",
+            "environment": "app-mr/12"
+        });
+
+        let mut expected = HashMap::new();
+        expected.insert("aud".to_string(), "my-audience".to_string());
+        expected.insert("project_path".to_string(), "myorg/myrepo".to_string());
+        expected.insert("environment".to_string(), "app*".to_string());
+
+        let result = JwtValidator::validate_custom_claims(&jwt_claims, &expected);
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_validate_custom_claims_wildcard_backward_compat() {
+        // Ensure exact matching still works (backward compatibility)
+        let jwt_claims = serde_json::json!({
+            "aud": "my-audience",
+            "environment": "production"
+        });
+
+        let mut expected = HashMap::new();
+        expected.insert("aud".to_string(), "my-audience".to_string());
+        expected.insert("environment".to_string(), "production".to_string());
+
+        let result = JwtValidator::validate_custom_claims(&jwt_claims, &expected);
+        assert!(result.is_ok());
+
+        // Should fail with different value
+        let mut expected_wrong = HashMap::new();
+        expected_wrong.insert("aud".to_string(), "my-audience".to_string());
+        expected_wrong.insert("environment".to_string(), "staging".to_string());
+
+        let result_wrong = JwtValidator::validate_custom_claims(&jwt_claims, &expected_wrong);
+        assert!(result_wrong.is_err());
     }
 }
