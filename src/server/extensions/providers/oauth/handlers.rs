@@ -1801,7 +1801,8 @@ pub async fn oidc_jwks(
                 StatusCode::NOT_IMPLEMENTED,
                 "JWKS endpoint not available: upstream provider does not support OIDC discovery. \
                 JWKS is only available for OIDC-compliant providers (e.g., Google, Dex). \
-                Plain OAuth 2.0 providers (e.g., GitHub) do not provide public keys via JWKS.".to_string(),
+                Plain OAuth 2.0 providers (e.g., GitHub) do not provide public keys via JWKS."
+                    .to_string(),
             ))
         }
     }
