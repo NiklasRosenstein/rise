@@ -32,15 +32,6 @@ pub struct OAuthExtensionSpec {
     pub token_endpoint: Option<String>,
     /// OAuth scopes to request
     pub scopes: Vec<String>,
-    /// Rise client ID (for apps to authenticate to Rise's /token endpoint)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rise_client_id: Option<String>,
-    /// Environment variable name containing Rise client secret (e.g., "{EXT}_CLIENT_SECRET")
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rise_client_secret_ref: Option<String>,
-    /// Encrypted backup of Rise client secret in spec (for restoration)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rise_client_secret_encrypted: Option<String>,
 }
 
 /// Extension status - system-computed metadata
@@ -58,6 +49,13 @@ pub struct OAuthExtensionStatus {
     /// Configuration or validation errors
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Rise client ID (for apps to authenticate to Rise's /token endpoint)
+    /// Format: {project}-{extension}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rise_client_id: Option<String>,
+    /// Rise client secret (plaintext, not highly sensitive)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rise_client_secret: Option<String>,
 }
 
 /// OAuth state stored temporarily during authorization flow

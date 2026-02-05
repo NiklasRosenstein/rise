@@ -749,13 +749,14 @@ pub async fn callback(
     // Calculate token expiration
     let expires_at = Some(Utc::now() + Duration::seconds(token_response.expires_in));
 
-    // Update extension status
-    let status = OAuthExtensionStatus {
-        redirect_uri: Some(redirect_uri),
-        configured_at: Some(Utc::now()),
-        auth_verified: true,
-        error: None,
-    };
+    // Update extension status (preserve credentials from existing status)
+    let mut status: OAuthExtensionStatus =
+        serde_json::from_value(extension.status.clone()).unwrap_or_default();
+
+    status.redirect_uri = Some(redirect_uri);
+    status.configured_at = Some(Utc::now());
+    status.auth_verified = true;
+    status.error = None;
 
     db_extensions::update_status(
         &state.db_pool,
@@ -1064,8 +1065,15 @@ async fn token_endpoint_inner(
         )
     })?;
 
-    // Validate client_id
-    let rise_client_id = spec.rise_client_id.as_ref().ok_or_else(|| {
+    // Parse status to get Rise client credentials
+    let status: OAuthExtensionStatus =
+        serde_json::from_value(extension.status.clone()).map_err(|e| {
+            error!("Invalid extension status: {:?}", e);
+            oauth2_error("server_error", Some("Invalid extension status".to_string()))
+        })?;
+
+    // Validate client_id from status
+    let rise_client_id = status.rise_client_id.as_ref().ok_or_else(|| {
         error!("Rise client ID not configured for extension");
         oauth2_error(
             "server_error",
@@ -1119,57 +1127,14 @@ async fn token_endpoint_inner(
 
     // If client_secret provided, validate it
     if let Some(ref client_secret) = req.client_secret {
-        // Get encryption provider
-        let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
-            error!("Encryption provider not configured");
-            oauth2_error("server_error", Some("Internal server error".to_string()))
-        })?;
-
-        // Resolve stored Rise client secret (prefer encrypted in spec, fall back to env var ref)
-        let stored_secret = if let Some(ref encrypted) = spec.rise_client_secret_encrypted {
-            // Decrypt from spec
-            encryption_provider.decrypt(encrypted).await.map_err(|e| {
-                error!("Failed to decrypt Rise client secret from spec: {:?}", e);
-                oauth2_error("server_error", Some("Internal server error".to_string()))
-            })?
-        } else if let Some(ref rise_client_secret_ref) = spec.rise_client_secret_ref {
-            // Legacy: Get from env vars
-            use crate::db::env_vars as db_env_vars;
-            let env_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id)
-                .await
-                .map_err(|e| {
-                    error!("Failed to list env vars: {:?}", e);
-                    oauth2_error("server_error", Some("Internal server error".to_string()))
-                })?;
-
-            let env_var = env_vars
-                .iter()
-                .find(|v| v.key == *rise_client_secret_ref)
-                .ok_or_else(|| {
-                    error!(
-                        "Rise client secret env var not found: {}",
-                        rise_client_secret_ref
-                    );
-                    oauth2_error(
-                        "invalid_client",
-                        Some("Client credentials not configured".to_string()),
-                    )
-                })?;
-
-            encryption_provider
-                .decrypt(&env_var.value)
-                .await
-                .map_err(|e| {
-                    error!("Failed to decrypt Rise client secret from env var: {:?}", e);
-                    oauth2_error("server_error", Some("Internal server error".to_string()))
-                })?
-        } else {
-            error!("No Rise client secret configured (rise_client_secret_encrypted or rise_client_secret_ref required)");
-            return Err(oauth2_error(
+        // Get stored Rise client secret from status (plaintext)
+        let stored_secret = status.rise_client_secret.as_ref().ok_or_else(|| {
+            error!("Rise client secret not configured for extension");
+            oauth2_error(
                 "server_error",
                 Some("OAuth extension not fully configured".to_string()),
-            ));
-        };
+            )
+        })?;
 
         // Constant-time comparison
         use subtle::ConstantTimeEq;
