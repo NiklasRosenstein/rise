@@ -244,6 +244,7 @@ pub async fn auth_middleware(
 
     let user = if is_rise_issued_jwt(&issuer, &state.public_url) {
         // Rise-issued JWT (HS256 or RS256) - validate with JwtSigner
+        // This is the primary authentication path for both CLI and UI users
         tracing::debug!("Auth middleware: authenticating with Rise-issued JWT");
 
         // Verify Rise JWT (skips audience validation for now - we trust our own JWTs)
@@ -268,54 +269,8 @@ pub async fn auth_middleware(
                     "Database error".to_string(),
                 )
             })?
-    } else if issuer == state.auth_settings.issuer {
-        // User authentication via configured OIDC provider (IdP token)
-        tracing::debug!("Auth middleware: authenticating as user via configured OIDC provider");
-
-        // Build expected claims for user auth (just validate aud matches client_id)
-        let mut expected_claims = HashMap::new();
-        expected_claims.insert("aud".to_string(), state.auth_settings.client_id.clone());
-
-        tracing::debug!(
-            "Auth middleware: validating JWT with issuer='{}', expected aud='{}'",
-            state.auth_settings.issuer,
-            state.auth_settings.client_id
-        );
-
-        let claims_value = state
-            .jwt_validator
-            .validate(&token, &state.auth_settings.issuer, &expected_claims)
-            .await
-            .map_err(|e| {
-                tracing::warn!("Auth middleware: JWT validation failed: {:#}", e);
-                (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
-            })?;
-
-        tracing::debug!("Auth middleware: JWT validation successful");
-
-        // Deserialize to typed Claims to get email
-        let claims: crate::server::auth::jwt::Claims = serde_json::from_value(claims_value)
-            .map_err(|e| {
-                tracing::warn!("Failed to parse user claims: {:#}", e);
-                (
-                    StatusCode::UNAUTHORIZED,
-                    format!("Invalid token claims: {}", e),
-                )
-            })?;
-
-        tracing::debug!("JWT validated for user: {}", claims.email);
-
-        users::find_or_create(&state.db_pool, &claims.email)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to find/create user: {:#}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Database error".to_string(),
-                )
-            })?
     } else {
-        // Service account authentication (new flow)
+        // External issuer - service account authentication
         tracing::debug!("Authenticating as service account from issuer: {}", issuer);
         authenticate_service_account(&state, &token, &issuer).await?
     };
@@ -346,7 +301,7 @@ pub async fn optional_auth_middleware(
             if parts.len() == 3 {
                 if let Ok(decoded) = general_purpose::URL_SAFE_NO_PAD.decode(parts[1]) {
                     if let Ok(claims) = serde_json::from_slice::<MinimalClaims>(&decoded) {
-                        // Check if it's a Rise-issued JWT
+                        // Only accept Rise-issued JWTs for optional auth
                         if is_rise_issued_jwt(&claims.iss, &state.public_url) {
                             // Try to validate Rise JWT
                             if let Ok(rise_claims) = state.jwt_signer.verify_jwt_skip_aud(&token) {
@@ -356,29 +311,8 @@ pub async fn optional_auth_middleware(
                                     req.extensions_mut().insert(user);
                                 }
                             }
-                        } else if claims.iss == state.auth_settings.issuer {
-                            // Try to validate IdP token
-                            let mut expected_claims = HashMap::new();
-                            expected_claims
-                                .insert("aud".to_string(), state.auth_settings.client_id.clone());
-
-                            if let Ok(claims_value) = state
-                                .jwt_validator
-                                .validate(&token, &state.auth_settings.issuer, &expected_claims)
-                                .await
-                            {
-                                if let Ok(claims) = serde_json::from_value::<
-                                    crate::server::auth::jwt::Claims,
-                                >(claims_value)
-                                {
-                                    if let Ok(user) =
-                                        users::find_or_create(&state.db_pool, &claims.email).await
-                                    {
-                                        req.extensions_mut().insert(user);
-                                    }
-                                }
-                            }
                         }
+                        // Note: Service account tokens are not supported in optional auth
                     }
                 }
             }
