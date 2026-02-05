@@ -1128,7 +1128,7 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     value={blockedRoles}
                     onChange={(e) => setBlockedRoles(e.target.value)}
                     placeholder="SYSADMIN, USERADMIN"
-                    helperText="Comma-separated list of Snowflake roles to block. These will be ADDED to the backend-configured defaults (ACCOUNTADMIN, SECURITYADMIN). Users will not be able to select these roles when authenticating."
+                    helperText="Comma-separated list of Snowflake roles to block. These will be ADDED to the backend-configured defaults (ACCOUNTADMIN, ORGADMIN, SECURITYADMIN). Users will not be able to select these roles when authenticating."
                 />
 
                 <FormField
@@ -1202,7 +1202,7 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
                         <p className="text-xs text-gray-600 dark:text-gray-400">
                             Blocked roles prevent users from accessing sensitive roles.
-                            ACCOUNTADMIN and SECURITYADMIN are always blocked by default.
+                            ACCOUNTADMIN, ORGADMIN, and SECURITYADMIN are always blocked by default.
                         </p>
                     </div>
                 </section>
@@ -1402,7 +1402,7 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                     <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
                         <p className="text-xs text-yellow-800 dark:text-yellow-200">
                             <strong>Note:</strong> Additional roles and scopes are combined with backend defaults
-                            (not replaced). ACCOUNTADMIN and SECURITYADMIN are always blocked.
+                            (not replaced). ACCOUNTADMIN, ORGADMIN, and SECURITYADMIN are always blocked.
                         </p>
                     </div>
                 </section>
