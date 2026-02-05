@@ -78,6 +78,10 @@ pub struct BuildArgs {
     /// Format: name=path where path is relative to app path / rise.toml location
     #[arg(long = "build-context")]
     pub build_contexts: Vec<String>,
+
+    /// Disable build cache (equivalent to docker build --no-cache, pack build --clear-cache)
+    #[arg(long)]
+    pub no_cache: bool,
 }
 
 /// Options for building container images
@@ -106,6 +110,8 @@ pub(crate) struct BuildOptions {
     /// Format: name -> path (relative to app_path / rise.toml location)
     /// Note: These paths are resolved to absolute paths in build_image() before use.
     pub build_contexts: std::collections::HashMap<String, String>,
+    /// Disable build cache
+    pub no_cache: bool,
 }
 
 impl BuildOptions {
@@ -234,6 +240,12 @@ impl BuildOptions {
 
                 contexts
             },
+
+            no_cache: build_args.no_cache
+                || project_config
+                    .as_ref()
+                    .and_then(|c| c.no_cache)
+                    .unwrap_or(false),
 
             push: false,
         }

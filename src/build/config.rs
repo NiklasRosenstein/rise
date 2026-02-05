@@ -81,6 +81,9 @@ pub struct BuildConfig {
     /// Format: { "name" = "path" } where path is relative to the rise.toml file location
     #[serde(default)]
     pub build_contexts: Option<HashMap<String, String>>,
+
+    /// Disable build cache
+    pub no_cache: Option<bool>,
 }
 
 /// Load full project configuration from rise.toml or .rise.toml

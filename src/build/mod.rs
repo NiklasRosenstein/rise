@@ -136,6 +136,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 env: &options.env,
                 build_context: resolved_build_context.as_deref(),
                 build_contexts: &resolved_build_contexts,
+                no_cache: options.no_cache,
             })?;
         }
         BuildMethod::Pack => {
@@ -155,6 +156,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 options.builder.as_deref(),
                 &options.buildpacks,
                 &options.env,
+                options.no_cache,
             )?;
 
             // Pack doesn't support push during build, so push separately if requested
@@ -182,6 +184,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 buildkit_host: buildkit_host.as_deref(),
                 embed_ssl_cert: options.railpack_embed_ssl_cert,
                 env: &options.env,
+                no_cache: options.no_cache,
             })?;
         }
         BuildMethod::Buildctl => {
@@ -270,6 +273,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 &secrets,
                 &local_contexts,
                 BuildctlFrontend::Dockerfile,
+                options.no_cache,
             )?;
 
             // Note: SslCertContext cleanup is automatic via RAII when it goes out of scope
