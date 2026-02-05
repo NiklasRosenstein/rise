@@ -17,7 +17,7 @@ use tracing::{debug, error, info, warn};
 use url::Url;
 
 /// OIDC Discovery document (partial)
-#[derive(Debug, Clone, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
 struct OidcDiscoveryDocument {
     authorization_endpoint: Option<String>,
     token_endpoint: Option<String>,
@@ -1496,11 +1496,19 @@ pub async fn token_endpoint_options(
 ///
 /// GET /oidc/{project}/{extension}/.well-known/openid-configuration
 ///
+/// OAuth 2.0 Provider Support:
+/// This endpoint supports both OIDC-compliant providers (Google, Dex, etc.) and
+/// plain OAuth 2.0 providers (GitHub, etc.) that don't provide OIDC discovery.
+///
+/// When both authorization_endpoint and token_endpoint are manually specified,
+/// we synthesize a minimal OIDC discovery document from the spec, allowing
+/// non-OIDC providers to work seamlessly.
+///
 /// Returns the OIDC discovery document with URLs rewritten to point to Rise's OIDC proxy:
 /// - issuer -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}
 /// - authorization_endpoint -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/authorize
 /// - token_endpoint -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/token
-/// - jwks_uri -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/jwks
+/// - jwks_uri -> {RISE_PUBLIC_URL}/oidc/{project}/{extension}/jwks (only for OIDC providers)
 pub async fn oidc_discovery(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
@@ -1545,51 +1553,6 @@ pub async fn oidc_discovery(
         )
     })?;
 
-    // Use issuer_url from spec
-    let upstream_issuer = &spec.issuer_url;
-
-    // Fetch upstream discovery document
-    let discovery_url = format!(
-        "{}/.well-known/openid-configuration",
-        upstream_issuer.trim_end_matches('/')
-    );
-
-    let http_client = reqwest::Client::new();
-    let response = http_client.get(&discovery_url).send().await.map_err(|e| {
-        error!(
-            "Failed to fetch OIDC discovery from {}: {:?}",
-            discovery_url, e
-        );
-        (
-            StatusCode::BAD_GATEWAY,
-            format!("Failed to fetch OIDC discovery: {}", e),
-        )
-    })?;
-
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unable to read error response".to_string());
-        error!(
-            "OIDC discovery failed with status {}: {}",
-            status, error_text
-        );
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            format!("Upstream OIDC discovery failed: {}", status),
-        ));
-    }
-
-    let mut discovery: serde_json::Value = response.json().await.map_err(|e| {
-        error!("Failed to parse OIDC discovery response: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to parse OIDC discovery".to_string(),
-        )
-    })?;
-
     // Build Rise OIDC base URL
     let rise_oidc_base = format!(
         "{}/oidc/{}/{}",
@@ -1598,36 +1561,134 @@ pub async fn oidc_discovery(
         extension_name
     );
 
-    // Rewrite URLs to point to Rise's OIDC proxy
-    if let Some(obj) = discovery.as_object_mut() {
-        obj.insert(
-            "issuer".to_string(),
-            serde_json::Value::String(rise_oidc_base.clone()),
+    // If both endpoints are in spec, synthesize discovery document immediately
+    // This supports plain OAuth 2.0 providers (e.g., GitHub) that don't have OIDC discovery
+    if spec.authorization_endpoint.is_some() && spec.token_endpoint.is_some() {
+        debug!(
+            "Both authorization_endpoint and token_endpoint in spec - synthesizing discovery document for {}/{}",
+            project_name, extension_name
         );
-        obj.insert(
-            "authorization_endpoint".to_string(),
-            serde_json::Value::String(format!("{}/authorize", rise_oidc_base)),
+
+        let discovery = serde_json::json!({
+            "issuer": rise_oidc_base,
+            "authorization_endpoint": format!("{}/authorize", rise_oidc_base),
+            "token_endpoint": format!("{}/token", rise_oidc_base),
+            "response_types_supported": ["code"],
+            "grant_types_supported": ["authorization_code", "refresh_token"],
+            "code_challenge_methods_supported": ["S256", "plain"],
+            "token_endpoint_auth_methods_supported": ["client_secret_post", "none"]
+        });
+
+        info!(
+            "Returning synthesized OIDC discovery for {}/{} (non-OIDC OAuth 2.0 provider)",
+            project_name, extension_name
         );
-        obj.insert(
-            "token_endpoint".to_string(),
-            serde_json::Value::String(format!("{}/token", rise_oidc_base)),
-        );
-        obj.insert(
-            "jwks_uri".to_string(),
-            serde_json::Value::String(format!("{}/jwks", rise_oidc_base)),
-        );
+
+        return Ok((
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "application/json")],
+            Json(discovery),
+        ));
     }
 
-    info!(
-        "Returning OIDC discovery for {}/{} with Rise OIDC base: {}",
-        project_name, extension_name, rise_oidc_base
-    );
+    // Try to fetch upstream OIDC discovery
+    let upstream_issuer = &spec.issuer_url;
+    let discovery_result = fetch_oidc_discovery(upstream_issuer).await;
 
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/json")],
-        Json(discovery),
-    ))
+    match discovery_result {
+        Ok(upstream_discovery) => {
+            // Successfully fetched upstream discovery - rewrite URLs
+            debug!(
+                "Fetched upstream OIDC discovery for {}/{}",
+                project_name, extension_name
+            );
+
+            let mut discovery = serde_json::json!({
+                "issuer": rise_oidc_base,
+                "authorization_endpoint": format!("{}/authorize", rise_oidc_base),
+                "token_endpoint": format!("{}/token", rise_oidc_base),
+                "jwks_uri": format!("{}/jwks", rise_oidc_base),
+            });
+
+            // Copy other fields from upstream discovery
+            if let Ok(upstream_json) = serde_json::to_value(&upstream_discovery) {
+                if let Some(upstream_obj) = upstream_json.as_object() {
+                    if let Some(discovery_obj) = discovery.as_object_mut() {
+                        for (key, value) in upstream_obj {
+                            // Skip fields we're overriding
+                            if key != "issuer"
+                                && key != "authorization_endpoint"
+                                && key != "token_endpoint"
+                                && key != "jwks_uri"
+                            {
+                                discovery_obj.insert(key.clone(), value.clone());
+                            }
+                        }
+                    }
+                }
+            }
+
+            info!(
+                "Returning OIDC discovery for {}/{} with Rise OIDC base: {}",
+                project_name, extension_name, rise_oidc_base
+            );
+
+            Ok((
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json")],
+                Json(discovery),
+            ))
+        }
+        Err(e) => {
+            // OIDC discovery failed - try to synthesize from spec if authorization_endpoint exists
+            debug!(
+                "OIDC discovery failed for {}/{}: {}",
+                project_name, extension_name, e
+            );
+
+            if spec.authorization_endpoint.is_some() {
+                // Synthesize minimal discovery document from spec
+                warn!(
+                    "OIDC discovery failed for {}/{} - synthesizing from spec (fallback for non-OIDC provider)",
+                    project_name, extension_name
+                );
+
+                let discovery = serde_json::json!({
+                    "issuer": rise_oidc_base,
+                    "authorization_endpoint": format!("{}/authorize", rise_oidc_base),
+                    "token_endpoint": format!("{}/token", rise_oidc_base),
+                    "response_types_supported": ["code"],
+                    "grant_types_supported": ["authorization_code", "refresh_token"],
+                    "code_challenge_methods_supported": ["S256", "plain"],
+                    "token_endpoint_auth_methods_supported": ["client_secret_post", "none"]
+                });
+
+                info!(
+                    "Returning synthesized OIDC discovery for {}/{} (fallback)",
+                    project_name, extension_name
+                );
+
+                Ok((
+                    StatusCode::OK,
+                    [(header::CONTENT_TYPE, "application/json")],
+                    Json(discovery),
+                ))
+            } else {
+                // No authorization_endpoint in spec and OIDC discovery failed
+                error!(
+                    "OIDC discovery failed and no authorization_endpoint in spec for {}/{}",
+                    project_name, extension_name
+                );
+                Err((
+                    StatusCode::BAD_GATEWAY,
+                    format!(
+                        "OIDC discovery failed and no authorization_endpoint configured: {}",
+                        e
+                    ),
+                ))
+            }
+        }
+    }
 }
 
 /// Proxy JWKS from upstream provider
@@ -1635,6 +1696,8 @@ pub async fn oidc_discovery(
 /// GET /oidc/{project}/{extension}/jwks
 ///
 /// Fetches the JWKS from the upstream OAuth provider and returns it.
+/// For non-OIDC providers (e.g., GitHub) that don't support OIDC discovery,
+/// returns 501 Not Implemented.
 pub async fn oidc_jwks(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
@@ -1679,52 +1742,67 @@ pub async fn oidc_jwks(
         )
     })?;
 
-    // Fetch OIDC discovery to get jwks_uri
-    let discovery = fetch_oidc_discovery(&spec.issuer_url)
-        .await
-        .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
+    // Try to fetch OIDC discovery to get jwks_uri
+    let discovery_result = fetch_oidc_discovery(&spec.issuer_url).await;
 
-    // Get jwks_uri from discovery
-    let jwks_uri = discovery.jwks_uri.ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "No jwks_uri in OIDC discovery".to_string(),
-    ))?;
+    match discovery_result {
+        Ok(discovery) => {
+            // Get jwks_uri from discovery
+            let jwks_uri = discovery.jwks_uri.ok_or((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "No jwks_uri in OIDC discovery".to_string(),
+            ))?;
 
-    let http_client = reqwest::Client::new();
+            let http_client = reqwest::Client::new();
 
-    // Fetch JWKS
-    let jwks_response = http_client.get(&jwks_uri).send().await.map_err(|e| {
-        error!("Failed to fetch JWKS from {}: {:?}", jwks_uri, e);
-        (
-            StatusCode::BAD_GATEWAY,
-            format!("Failed to fetch JWKS: {}", e),
-        )
-    })?;
+            // Fetch JWKS
+            let jwks_response = http_client.get(&jwks_uri).send().await.map_err(|e| {
+                error!("Failed to fetch JWKS from {}: {:?}", jwks_uri, e);
+                (
+                    StatusCode::BAD_GATEWAY,
+                    format!("Failed to fetch JWKS: {}", e),
+                )
+            })?;
 
-    if !jwks_response.status().is_success() {
-        let status = jwks_response.status();
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            format!("Upstream JWKS fetch failed: {}", status),
-        ));
+            if !jwks_response.status().is_success() {
+                let status = jwks_response.status();
+                return Err((
+                    StatusCode::BAD_GATEWAY,
+                    format!("Upstream JWKS fetch failed: {}", status),
+                ));
+            }
+
+            let jwks: serde_json::Value = jwks_response.json().await.map_err(|e| {
+                error!("Failed to parse JWKS response: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to parse JWKS".to_string(),
+                )
+            })?;
+
+            info!(
+                "Returning JWKS for {}/{} from upstream: {}",
+                project_name, extension_name, jwks_uri
+            );
+
+            Ok((
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/json")],
+                Json(jwks),
+            ))
+        }
+        Err(e) => {
+            // For non-OIDC providers, JWKS is not available
+            warn!(
+                "JWKS not available for {}/{}: upstream OIDC discovery failed: {}",
+                project_name, extension_name, e
+            );
+            Err((
+                StatusCode::NOT_IMPLEMENTED,
+                "JWKS endpoint not available: upstream provider does not support OIDC discovery. \
+                JWKS is only available for OIDC-compliant providers (e.g., Google, Dex). \
+                Plain OAuth 2.0 providers (e.g., GitHub) do not provide public keys via JWKS.".to_string(),
+            ))
+        }
     }
-
-    let jwks: serde_json::Value = jwks_response.json().await.map_err(|e| {
-        error!("Failed to parse JWKS response: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to parse JWKS".to_string(),
-        )
-    })?;
-
-    info!(
-        "Returning JWKS for {}/{} from upstream: {}",
-        project_name, extension_name, jwks_uri
-    );
-
-    Ok((
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, "application/json")],
-        Json(jwks),
-    ))
 }
