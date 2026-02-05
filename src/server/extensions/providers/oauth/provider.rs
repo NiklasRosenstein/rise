@@ -555,14 +555,24 @@ impl Extension for OAuthProvider {
                 client_id_key, deployment_id
             ))?;
 
-            // Inject CLIENT_SECRET (plaintext - not highly sensitive)
+            // Inject CLIENT_SECRET (encrypted secret, unprotected)
+            // Encrypt the client secret for deployment storage
+            let encrypted_client_secret = self
+                .encryption_provider
+                .encrypt(rise_client_secret)
+                .await
+                .context(format!(
+                    "Failed to encrypt {} for deployment {}",
+                    client_secret_key, deployment_id
+                ))?;
+
             db_env_vars::upsert_deployment_env_var(
                 &self.db_pool,
                 deployment_id,
                 &client_secret_key,
-                rise_client_secret,
-                false, // not secret - stored in plaintext in status
-                false, // not protected - managed by extension
+                &encrypted_client_secret,
+                true,  // is_secret - encrypted, hidden from API
+                false, // is_protected false - users can modify/delete if needed
             )
             .await
             .context(format!(
