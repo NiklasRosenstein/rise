@@ -1341,7 +1341,7 @@ extensions:
     auth_type: password
     password: "${SNOWFLAKE_PASSWORD}"
     integration_name_prefix: "rise"
-    default_blocked_roles: ["ACCOUNTADMIN", "SECURITYADMIN"]
+    default_blocked_roles: ["ACCOUNTADMIN", "ORGADMIN", "SECURITYADMIN"]
     default_scopes: ["refresh_token"]
     refresh_token_validity_seconds: 7776000  # 90 days
 ```
