@@ -16,6 +16,88 @@ use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use url::Url;
 
+/// OIDC Discovery document (partial)
+#[derive(Debug, Clone, serde::Deserialize)]
+struct OidcDiscoveryDocument {
+    authorization_endpoint: Option<String>,
+    token_endpoint: Option<String>,
+    jwks_uri: Option<String>,
+}
+
+/// Resolved OAuth endpoints from spec or OIDC discovery
+#[derive(Debug, Clone)]
+struct ResolvedEndpoints {
+    authorization_endpoint: String,
+    token_endpoint: String,
+}
+
+/// Fetch OIDC discovery document from issuer URL
+async fn fetch_oidc_discovery(issuer_url: &str) -> Result<OidcDiscoveryDocument, String> {
+    let discovery_url = format!(
+        "{}/.well-known/openid-configuration",
+        issuer_url.trim_end_matches('/')
+    );
+
+    let http_client = reqwest::Client::new();
+    let response = http_client.get(&discovery_url).send().await.map_err(|e| {
+        error!(
+            "Failed to fetch OIDC discovery from {}: {:?}",
+            discovery_url, e
+        );
+        format!("Failed to fetch OIDC discovery: {}", e)
+    })?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unable to read error response".to_string());
+        error!(
+            "OIDC discovery failed with status {}: {}",
+            status, error_text
+        );
+        return Err(format!("OIDC discovery failed: {}", status));
+    }
+
+    response.json().await.map_err(|e| {
+        error!("Failed to parse OIDC discovery response: {:?}", e);
+        format!("Failed to parse OIDC discovery: {}", e)
+    })
+}
+
+/// Resolve OAuth endpoints from spec, falling back to OIDC discovery
+async fn resolve_oauth_endpoints(spec: &OAuthExtensionSpec) -> Result<ResolvedEndpoints, String> {
+    // If both endpoints are provided in spec, use them directly
+    if let (Some(auth), Some(token)) = (&spec.authorization_endpoint, &spec.token_endpoint) {
+        return Ok(ResolvedEndpoints {
+            authorization_endpoint: auth.clone(),
+            token_endpoint: token.clone(),
+        });
+    }
+
+    // Fetch OIDC discovery document
+    let discovery = fetch_oidc_discovery(&spec.issuer_url).await?;
+
+    // Use spec override if provided, otherwise use discovery
+    let authorization_endpoint = spec
+        .authorization_endpoint
+        .clone()
+        .or(discovery.authorization_endpoint)
+        .ok_or_else(|| "No authorization_endpoint in spec or OIDC discovery".to_string())?;
+
+    let token_endpoint = spec
+        .token_endpoint
+        .clone()
+        .or(discovery.token_endpoint)
+        .ok_or_else(|| "No token_endpoint in spec or OIDC discovery".to_string())?;
+
+    Ok(ResolvedEndpoints {
+        authorization_endpoint,
+        token_endpoint,
+    })
+}
+
 /// Generate a random state token for CSRF protection
 fn generate_state_token() -> String {
     use rand::Rng;
@@ -427,8 +509,16 @@ pub async fn authorize(
         )
     };
 
+    // Resolve OAuth endpoints (from spec or OIDC discovery)
+    let endpoints = resolve_oauth_endpoints(&spec).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to resolve OAuth endpoints: {}", e),
+        )
+    })?;
+
     // Build authorization URL
-    let mut auth_url = Url::parse(&spec.authorization_endpoint).map_err(|e| {
+    let mut auth_url = Url::parse(&endpoints.authorization_endpoint).map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Invalid authorization endpoint: {}", e),
@@ -561,10 +651,18 @@ pub async fn callback(
         )
     };
 
+    // Resolve OAuth endpoints (from spec or OIDC discovery)
+    let endpoints = resolve_oauth_endpoints(&spec).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to resolve OAuth endpoints: {}", e),
+        )
+    })?;
+
     // Exchange authorization code for tokens (with PKCE code verifier)
     let http_client = reqwest::Client::new();
     let response = http_client
-        .post(&spec.token_endpoint)
+        .post(&endpoints.token_endpoint)
         .form(&[
             ("grant_type", "authorization_code"),
             ("code", &req.code),
@@ -1429,30 +1527,6 @@ pub async fn token_endpoint_options(
     }
 }
 
-/// Get upstream issuer URL from spec or derive from token_endpoint
-fn get_upstream_issuer(spec: &OAuthExtensionSpec) -> Option<String> {
-    // Use spec.issuer if provided, otherwise derive from token_endpoint
-    spec.issuer.clone().or_else(|| {
-        // Try to derive issuer from token_endpoint by removing common path suffixes
-        // e.g., "http://dex:5556/dex/token" -> "http://dex:5556/dex"
-        let token_url = Url::parse(&spec.token_endpoint).ok()?;
-        let mut path = token_url.path().to_string();
-        // Remove common token endpoint suffixes
-        for suffix in ["/token", "/token-request", "/oauth/token", "/oauth2/token"] {
-            if path.ends_with(suffix) {
-                path = path.trim_end_matches(suffix).to_string();
-                break;
-            }
-        }
-        let mut issuer_url = token_url.clone();
-        issuer_url.set_path(&path);
-        // Remove query and fragment
-        issuer_url.set_query(None);
-        issuer_url.set_fragment(None);
-        Some(issuer_url.to_string().trim_end_matches('/').to_string())
-    })
-}
-
 /// Proxy OIDC discovery document from upstream provider
 ///
 /// GET /oidc/{project}/{extension}/.well-known/openid-configuration
@@ -1506,11 +1580,8 @@ pub async fn oidc_discovery(
         )
     })?;
 
-    // Get upstream issuer
-    let upstream_issuer = get_upstream_issuer(&spec).ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Unable to determine upstream OIDC issuer".to_string(),
-    ))?;
+    // Use issuer_url from spec
+    let upstream_issuer = &spec.issuer_url;
 
     // Fetch upstream discovery document
     let discovery_url = format!(
@@ -1643,53 +1714,21 @@ pub async fn oidc_jwks(
         )
     })?;
 
-    // Get upstream issuer
-    let upstream_issuer = get_upstream_issuer(&spec).ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Unable to determine upstream OIDC issuer".to_string(),
-    ))?;
-
-    // Fetch upstream discovery to get jwks_uri
-    let discovery_url = format!(
-        "{}/.well-known/openid-configuration",
-        upstream_issuer.trim_end_matches('/')
-    );
-
-    let http_client = reqwest::Client::new();
-    let discovery_response = http_client.get(&discovery_url).send().await.map_err(|e| {
-        error!(
-            "Failed to fetch OIDC discovery from {}: {:?}",
-            discovery_url, e
-        );
-        (
-            StatusCode::BAD_GATEWAY,
-            format!("Failed to fetch OIDC discovery: {}", e),
-        )
-    })?;
-
-    if !discovery_response.status().is_success() {
-        return Err((
-            StatusCode::BAD_GATEWAY,
-            "Upstream OIDC discovery failed".to_string(),
-        ));
-    }
-
-    let discovery: serde_json::Value = discovery_response.json().await.map_err(|e| {
-        error!("Failed to parse OIDC discovery response: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to parse OIDC discovery".to_string(),
-        )
-    })?;
+    // Fetch OIDC discovery to get jwks_uri
+    let discovery = fetch_oidc_discovery(&spec.issuer_url)
+        .await
+        .map_err(|e| (StatusCode::BAD_GATEWAY, e))?;
 
     // Get jwks_uri from discovery
-    let jwks_uri = discovery.get("jwks_uri").and_then(|v| v.as_str()).ok_or((
+    let jwks_uri = discovery.jwks_uri.ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
         "No jwks_uri in OIDC discovery".to_string(),
     ))?;
 
+    let http_client = reqwest::Client::new();
+
     // Fetch JWKS
-    let jwks_response = http_client.get(jwks_uri).send().await.map_err(|e| {
+    let jwks_response = http_client.get(&jwks_uri).send().await.map_err(|e| {
         error!("Failed to fetch JWKS from {}: {:?}", jwks_uri, e);
         (
             StatusCode::BAD_GATEWAY,

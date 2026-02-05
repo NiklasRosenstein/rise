@@ -193,8 +193,10 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
     const [hasExistingSecret, setHasExistingSecret] = useState(!!spec?.client_secret_encrypted);
     const [showSecret, setShowSecret] = useState(false);
     const [isEncrypting, setIsEncrypting] = useState(false);
+    const [issuerUrl, setIssuerUrl] = useState(spec?.issuer_url || '');
     const [authorizationEndpoint, setAuthorizationEndpoint] = useState(spec?.authorization_endpoint || '');
     const [tokenEndpoint, setTokenEndpoint] = useState(spec?.token_endpoint || '');
+    const [showAdvanced, setShowAdvanced] = useState(!!(spec?.authorization_endpoint || spec?.token_endpoint));
     const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
     const { showToast } = useToast();
 
@@ -246,8 +248,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
         const newSpec = {
             provider_name: providerName,
             client_id: clientId,
-            authorization_endpoint: authorizationEndpoint,
-            token_endpoint: tokenEndpoint,
+            issuer_url: issuerUrl,
             scopes: scopesArray,
         };
 
@@ -263,27 +264,43 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
             newSpec.client_secret_ref = null;
         }
 
+        // Include optional endpoint overrides if set
+        if (authorizationEndpoint && authorizationEndpoint.trim() !== '') {
+            newSpec.authorization_endpoint = authorizationEndpoint;
+        }
+        if (tokenEndpoint && tokenEndpoint.trim() !== '') {
+            newSpec.token_endpoint = tokenEndpoint;
+        }
+
         onChangeRef.current(newSpec);
-    }, [providerName, description, clientId, clientSecretEncrypted, authorizationEndpoint, tokenEndpoint, scopes]);
+    }, [providerName, description, clientId, clientSecretEncrypted, issuerUrl, authorizationEndpoint, tokenEndpoint, scopes]);
 
     // Common provider templates
+    // - OIDC-compliant providers (Google, Snowflake): use issuer_url, endpoints auto-discovered
+    // - Non-OIDC providers (GitHub): need manual endpoints
     const providerTemplates = {
         snowflake: {
             name: 'Snowflake',
+            issuerUrl: 'https://YOUR_ACCOUNT.snowflakecomputing.com',
             authEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/authorize',
             tokenEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/token-request',
+            needsEndpoints: true, // Snowflake doesn't support OIDC discovery
             scopes: 'refresh_token'
         },
         google: {
             name: 'Google',
-            authEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-            tokenEndpoint: 'https://oauth2.googleapis.com/token',
+            issuerUrl: 'https://accounts.google.com',
+            authEndpoint: '',  // Auto-discovered via OIDC
+            tokenEndpoint: '', // Auto-discovered via OIDC
+            needsEndpoints: false,
             scopes: 'openid, email, profile'
         },
         github: {
             name: 'GitHub',
+            issuerUrl: 'https://github.com',
             authEndpoint: 'https://github.com/login/oauth/authorize',
             tokenEndpoint: 'https://github.com/login/oauth/access_token',
+            needsEndpoints: true, // GitHub is not OIDC-compliant
             scopes: 'read:user, user:email'
         }
     };
@@ -292,9 +309,14 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
         const template = providerTemplates[templateKey];
         if (template) {
             setProviderName(template.name);
+            setIssuerUrl(template.issuerUrl);
             setAuthorizationEndpoint(template.authEndpoint);
             setTokenEndpoint(template.tokenEndpoint);
             setScopes(template.scopes);
+            // Show advanced settings if endpoints are needed
+            if (template.needsEndpoints) {
+                setShowAdvanced(true);
+            }
             showToast(`Applied ${template.name} template`, 'success');
         }
     };
@@ -373,23 +395,13 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                 </div>
 
                 <FormField
-                    label="Authorization Endpoint"
-                    id="oauth-authorization-endpoint"
-                    value={authorizationEndpoint}
-                    onChange={(e) => setAuthorizationEndpoint(e.target.value)}
-                    placeholder="https://provider.com/oauth/authorize"
+                    label="Issuer URL"
+                    id="oauth-issuer-url"
+                    value={issuerUrl}
+                    onChange={(e) => setIssuerUrl(e.target.value)}
+                    placeholder="https://accounts.google.com"
                     required
-                    helperText="OAuth provider's authorization URL"
-                />
-
-                <FormField
-                    label="Token Endpoint"
-                    id="oauth-token-endpoint"
-                    value={tokenEndpoint}
-                    onChange={(e) => setTokenEndpoint(e.target.value)}
-                    placeholder="https://provider.com/oauth/token"
-                    required
-                    helperText="OAuth provider's token URL"
+                    helperText="OIDC issuer URL. For OIDC-compliant providers, endpoints are auto-discovered. For non-OIDC providers (GitHub), also set endpoints below."
                 />
 
                 <FormField
@@ -401,6 +413,43 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                     required
                     helperText="Comma-separated list of OAuth scopes to request"
                 />
+
+                {/* Advanced: Manual endpoint overrides */}
+                <div className="border-t border-gray-300 dark:border-gray-700 pt-4 mt-4">
+                    <button
+                        type="button"
+                        onClick={() => setShowAdvanced(!showAdvanced)}
+                        className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400"
+                    >
+                        <span className="mr-2">{showAdvanced ? '▼' : '▶'}</span>
+                        Advanced: Manual Endpoint Overrides
+                    </button>
+                    <p className="text-xs text-gray-600 dark:text-gray-500 mt-1">
+                        Only needed for non-OIDC providers (GitHub) or if OIDC discovery fails
+                    </p>
+                </div>
+
+                {showAdvanced && (
+                    <div className="space-y-4 pl-4 border-l-2 border-gray-300 dark:border-gray-700">
+                        <FormField
+                            label="Authorization Endpoint (Optional)"
+                            id="oauth-authorization-endpoint"
+                            value={authorizationEndpoint}
+                            onChange={(e) => setAuthorizationEndpoint(e.target.value)}
+                            placeholder="https://github.com/login/oauth/authorize"
+                            helperText="Override authorization URL (leave empty to use OIDC discovery)"
+                        />
+
+                        <FormField
+                            label="Token Endpoint (Optional)"
+                            id="oauth-token-endpoint"
+                            value={tokenEndpoint}
+                            onChange={(e) => setTokenEndpoint(e.target.value)}
+                            placeholder="https://github.com/login/oauth/access_token"
+                            helperText="Override token URL (leave empty to use OIDC discovery)"
+                        />
+                    </div>
+                )}
 
                 <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
                     <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">About This Extension</h4>
@@ -869,16 +918,29 @@ function OAuthDetailView({ extension, projectName }) {
 
                     {/* Endpoints */}
                     <section>
-                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">OAuth Endpoints</h2>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">OAuth Configuration</h2>
                         <div className="bg-white dark:bg-gray-900 rounded p-4 space-y-3">
                             <div>
-                                <p className="text-sm text-gray-600 dark:text-gray-500">Authorization Endpoint</p>
-                                <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.authorization_endpoint || 'N/A'}</p>
+                                <p className="text-sm text-gray-600 dark:text-gray-500">Issuer URL</p>
+                                <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.issuer_url || 'N/A'}</p>
                             </div>
-                            <div>
-                                <p className="text-sm text-gray-600 dark:text-gray-500">Token Endpoint</p>
-                                <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.token_endpoint || 'N/A'}</p>
-                            </div>
+                            {spec.authorization_endpoint && (
+                                <div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">Authorization Endpoint <span className="text-xs text-gray-500">(override)</span></p>
+                                    <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.authorization_endpoint}</p>
+                                </div>
+                            )}
+                            {spec.token_endpoint && (
+                                <div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">Token Endpoint <span className="text-xs text-gray-500">(override)</span></p>
+                                    <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.token_endpoint}</p>
+                                </div>
+                            )}
+                            {!spec.authorization_endpoint && !spec.token_endpoint && (
+                                <p className="text-xs text-gray-500 dark:text-gray-500 italic">
+                                    Endpoints auto-discovered via OIDC discovery
+                                </p>
+                            )}
                         </div>
                     </section>
 

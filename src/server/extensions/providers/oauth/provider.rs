@@ -104,6 +104,51 @@ impl OAuthProvider {
         Ok(client_secret)
     }
 
+    /// Resolve token endpoint from spec or OIDC discovery
+    #[allow(dead_code)]
+    async fn resolve_token_endpoint(&self, spec: &OAuthExtensionSpec) -> Result<String> {
+        // If token_endpoint is provided in spec, use it
+        if let Some(ref endpoint) = spec.token_endpoint {
+            if !endpoint.is_empty() {
+                return Ok(endpoint.clone());
+            }
+        }
+
+        // Fetch from OIDC discovery
+        let discovery_url = format!(
+            "{}/.well-known/openid-configuration",
+            spec.issuer_url.trim_end_matches('/')
+        );
+
+        let response = self
+            .http_client
+            .get(&discovery_url)
+            .send()
+            .await
+            .context("Failed to fetch OIDC discovery")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "OIDC discovery failed with status {}",
+                response.status()
+            ));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct DiscoveryDoc {
+            token_endpoint: Option<String>,
+        }
+
+        let discovery: DiscoveryDoc = response
+            .json()
+            .await
+            .context("Failed to parse OIDC discovery")?;
+
+        discovery
+            .token_endpoint
+            .ok_or_else(|| anyhow!("No token_endpoint in OIDC discovery"))
+    }
+
     /// Resolve OAuth provider's client_secret from spec (prefers encrypted, falls back to ref)
     #[allow(dead_code)]
     pub async fn resolve_oauth_client_secret(
@@ -141,14 +186,17 @@ impl OAuthProvider {
         authorization_code: &str,
         redirect_uri: &str,
     ) -> Result<TokenResponse> {
+        // Resolve token endpoint from spec or OIDC discovery
+        let token_endpoint = self.resolve_token_endpoint(spec).await?;
+
         debug!(
             "Exchanging authorization code for tokens with endpoint: {}",
-            spec.token_endpoint
+            token_endpoint
         );
 
         let response = self
             .http_client
-            .post(&spec.token_endpoint)
+            .post(&token_endpoint)
             .form(&[
                 ("grant_type", "authorization_code"),
                 ("code", authorization_code),
@@ -193,11 +241,14 @@ impl OAuthProvider {
         client_secret: &str,
         refresh_token: &str,
     ) -> Result<TokenResponse> {
-        debug!("Refreshing token with endpoint: {}", spec.token_endpoint);
+        // Resolve token endpoint from spec or OIDC discovery
+        let token_endpoint = self.resolve_token_endpoint(spec).await?;
+
+        debug!("Refreshing token with endpoint: {}", token_endpoint);
 
         let response = self
             .http_client
-            .post(&spec.token_endpoint)
+            .post(&token_endpoint)
             .form(&[
                 ("grant_type", "refresh_token"),
                 ("refresh_token", refresh_token),
@@ -355,19 +406,27 @@ impl Extension for OAuthProvider {
                 "Either client_secret_encrypted or client_secret_ref must be set"
             ));
         }
-        if spec.authorization_endpoint.is_empty() {
-            return Err(anyhow!("authorization_endpoint is required"));
-        }
-        if spec.token_endpoint.is_empty() {
-            return Err(anyhow!("token_endpoint is required"));
+        if spec.issuer_url.is_empty() {
+            return Err(anyhow!("issuer_url is required"));
         }
         if spec.scopes.is_empty() {
             return Err(anyhow!("at least one scope is required"));
         }
 
-        // Validate URLs
-        Url::parse(&spec.authorization_endpoint).context("Invalid authorization_endpoint URL")?;
-        Url::parse(&spec.token_endpoint).context("Invalid token_endpoint URL")?;
+        // Validate issuer_url
+        Url::parse(&spec.issuer_url).context("Invalid issuer_url URL")?;
+
+        // Validate optional endpoint URLs if provided
+        if let Some(ref auth_endpoint) = spec.authorization_endpoint {
+            if !auth_endpoint.is_empty() {
+                Url::parse(auth_endpoint).context("Invalid authorization_endpoint URL")?;
+            }
+        }
+        if let Some(ref token_endpoint) = spec.token_endpoint {
+            if !token_endpoint.is_empty() {
+                Url::parse(token_endpoint).context("Invalid token_endpoint URL")?;
+            }
+        }
 
         Ok(())
     }
@@ -917,9 +976,7 @@ const authUrl = 'https://api.rise.dev/oidc/my-app/oauth-provider/authorize?redir
             "required": [
                 "provider_name",
                 "client_id",
-                "client_secret_ref",
-                "authorization_endpoint",
-                "token_endpoint",
+                "issuer_url",
                 "scopes"
             ],
             "properties": {
@@ -938,22 +995,33 @@ const authUrl = 'https://api.rise.dev/oidc/my-app/oauth-provider/authorize?redir
                     "description": "OAuth client ID",
                     "example": "ABC123XYZ..."
                 },
+                "client_secret_encrypted": {
+                    "type": "string",
+                    "description": "Encrypted client secret (use 'rise encrypt' to encrypt)",
+                    "example": "encrypted:..."
+                },
                 "client_secret_ref": {
                     "type": "string",
-                    "description": "Environment variable name containing the client secret",
+                    "description": "(Deprecated) Environment variable name containing the client secret",
                     "example": "OAUTH_SNOWFLAKE_CLIENT_SECRET"
+                },
+                "issuer_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "OIDC issuer URL. Endpoints are fetched via OIDC discovery. For non-OIDC providers, also set authorization_endpoint and token_endpoint.",
+                    "example": "https://accounts.google.com"
                 },
                 "authorization_endpoint": {
                     "type": "string",
                     "format": "uri",
-                    "description": "OAuth provider authorization URL",
-                    "example": "https://myorg.snowflakecomputing.com/oauth/authorize"
+                    "description": "OAuth authorization URL (optional). If not provided, fetched from OIDC discovery.",
+                    "example": "https://github.com/login/oauth/authorize"
                 },
                 "token_endpoint": {
                     "type": "string",
                     "format": "uri",
-                    "description": "OAuth provider token URL",
-                    "example": "https://myorg.snowflakecomputing.com/oauth/token-request"
+                    "description": "OAuth token URL (optional). If not provided, fetched from OIDC discovery.",
+                    "example": "https://github.com/login/oauth/access_token"
                 },
                 "scopes": {
                     "type": "array",
@@ -961,13 +1029,7 @@ const authUrl = 'https://api.rise.dev/oidc/my-app/oauth-provider/authorize?redir
                         "type": "string"
                     },
                     "description": "OAuth scopes to request",
-                    "example": ["refresh_token"]
-                },
-                "issuer": {
-                    "type": "string",
-                    "format": "uri",
-                    "description": "OIDC issuer URL for id_token validation via JWKS discovery. If not provided, derived from token_endpoint.",
-                    "example": "https://accounts.google.com"
+                    "example": ["openid", "email", "profile"]
                 }
             }
         })

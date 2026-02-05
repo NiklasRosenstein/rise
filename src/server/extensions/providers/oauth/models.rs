@@ -18,16 +18,20 @@ pub struct OAuthExtensionSpec {
     /// Encrypted client secret stored directly in spec (preferred over client_secret_ref)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_secret_encrypted: Option<String>,
-    /// OAuth provider authorization URL
-    pub authorization_endpoint: String,
-    /// OAuth provider token URL
-    pub token_endpoint: String,
+    /// OIDC issuer URL (required) - used for endpoint discovery via .well-known/openid-configuration
+    /// For OIDC-compliant providers (Google, Snowflake, Dex), endpoints are fetched automatically
+    /// For non-OIDC providers (GitHub), set authorization_endpoint and token_endpoint manually
+    pub issuer_url: String,
+    /// OAuth provider authorization URL (optional override)
+    /// If not provided, fetched from issuer_url's OIDC discovery document
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_endpoint: Option<String>,
+    /// OAuth provider token URL (optional override)
+    /// If not provided, fetched from issuer_url's OIDC discovery document
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_endpoint: Option<String>,
     /// OAuth scopes to request
     pub scopes: Vec<String>,
-    /// OIDC issuer URL (optional, for id_token validation via JWKS discovery)
-    /// If not provided, will be derived from token_endpoint base URL
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub issuer: Option<String>,
     /// Rise client ID (for apps to authenticate to Rise's /token endpoint)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rise_client_id: Option<String>,
