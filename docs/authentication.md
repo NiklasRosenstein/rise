@@ -167,7 +167,7 @@ Service account claims support glob-style wildcard patterns using `*` to match m
 - Use exact matching when no wildcard is present (backward compatible)
 
 **Important:** 
-- The wildcard `*` matches partial words. For example, `app*` will match both `app-staging` (intended) and `application` (which includes "app" at the start)
+- The wildcard `*` matches partial words. For example, `app*` will match both `app-staging` (intended) and `application` (which starts with "app")
 - Since `*` can match an empty string, `app*` will also match `app` exactly
 - Pattern `app-*` requires the dash, so it matches `app-staging` but NOT `app`
 - Design your patterns carefully to avoid unintended matches
