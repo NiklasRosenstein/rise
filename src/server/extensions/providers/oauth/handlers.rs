@@ -747,8 +747,9 @@ pub async fn callback(
         None => None,
     };
 
-    // Calculate token expiration
-    let expires_at = Some(Utc::now() + Duration::seconds(token_response.expires_in));
+    // Calculate token expiration (default to 1 hour if not provided)
+    let expires_at =
+        Some(Utc::now() + Duration::seconds(token_response.expires_in.unwrap_or(3600)));
 
     // Update extension status (preserve credentials from existing status)
     let mut status: OAuthExtensionStatus =
@@ -1411,8 +1412,8 @@ async fn handle_refresh_token_grant(
             oauth2_error("invalid_grant", Some("Failed to refresh token".to_string()))
         })?;
 
-    // Calculate expires_in
-    let expires_in = Some(token_response.expires_in);
+    // Pass through expires_in (already optional)
+    let expires_in = token_response.expires_in;
 
     // Build scope
     let scope = if spec.scopes.is_empty() {
