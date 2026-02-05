@@ -512,4 +512,177 @@ mod tests {
 
         Ok(())
     }
+
+    #[sqlx::test]
+    async fn test_create_service_account_with_identifier(pool: PgPool) -> Result<()> {
+        // Create test user and project
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "myproject",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        // Create service account with identifier
+        let mut claims = HashMap::new();
+        claims.insert("aud".to_string(), "https://rise.example.com".to_string());
+        claims.insert("repo".to_string(), "owner/name".to_string());
+
+        let sa = create_with_identifier(
+            &pool,
+            project.id,
+            "https://github.com",
+            &claims,
+            Some("ci"),
+        )
+        .await?;
+
+        assert_eq!(sa.project_id, project.id);
+        assert_eq!(sa.issuer_url, "https://github.com");
+        assert_eq!(sa.identifier, Some("ci".to_string()));
+        assert_eq!(sa.sequence, 1); // Still gets a sequence
+
+        // Verify user was created with identifier-based email
+        let sa_user = users::find_by_id(&pool, sa.user_id).await?;
+        assert!(sa_user.is_some());
+        assert_eq!(sa_user.unwrap().email, "myproject-sa+ci@rise.local");
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_find_by_project_and_identifier(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        let mut claims = HashMap::new();
+        claims.insert("aud".to_string(), "https://rise.example.com".to_string());
+        claims.insert("repo".to_string(), "owner/repo".to_string());
+
+        // Create service account with identifier
+        let sa = create_with_identifier(
+            &pool,
+            project.id,
+            "https://github.com",
+            &claims,
+            Some("staging"),
+        )
+        .await?;
+
+        // Find by identifier
+        let found = find_by_project_and_identifier(&pool, project.id, "staging").await?;
+        assert!(found.is_some());
+        let found = found.unwrap();
+        assert_eq!(found.id, sa.id);
+        assert_eq!(found.identifier, Some("staging".to_string()));
+
+        // Try finding non-existent identifier
+        let not_found = find_by_project_and_identifier(&pool, project.id, "nonexistent").await?;
+        assert!(not_found.is_none());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_identifier_uniqueness(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        let mut claims = HashMap::new();
+        claims.insert("aud".to_string(), "https://rise.example.com".to_string());
+        claims.insert("repo".to_string(), "owner/repo".to_string());
+
+        // Create first service account
+        create_with_identifier(
+            &pool,
+            project.id,
+            "https://github.com",
+            &claims,
+            Some("ci"),
+        )
+        .await?;
+
+        // Try creating another with same identifier - should fail
+        let result = create_with_identifier(
+            &pool,
+            project.id,
+            "https://gitlab.com",
+            &claims,
+            Some("ci"),
+        )
+        .await;
+
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_mixed_identifiers_and_sequences(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "myapp",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        let claims = HashMap::new();
+
+        // Create sequence-based service account
+        let sa1 = create(&pool, project.id, "https://gitlab.com", &claims).await?;
+        assert_eq!(sa1.identifier, None);
+        assert_eq!(sa1.sequence, 1);
+
+        let sa1_user = users::find_by_id(&pool, sa1.user_id).await?;
+        assert_eq!(sa1_user.unwrap().email, "myapp+1@sa.rise.local");
+
+        // Create identifier-based service account
+        let mut claims_with_aud = HashMap::new();
+        claims_with_aud.insert("aud".to_string(), "https://rise.example.com".to_string());
+        claims_with_aud.insert("repo".to_string(), "owner/repo".to_string());
+
+        let sa2 = create_with_identifier(
+            &pool,
+            project.id,
+            "https://github.com",
+            &claims_with_aud,
+            Some("ci"),
+        )
+        .await?;
+        assert_eq!(sa2.identifier, Some("ci".to_string()));
+        assert_eq!(sa2.sequence, 2);
+
+        let sa2_user = users::find_by_id(&pool, sa2.user_id).await?;
+        assert_eq!(sa2_user.unwrap().email, "myapp-sa+ci@rise.local");
+
+        // List all service accounts
+        let all_sas = list_by_project(&pool, project.id).await?;
+        assert_eq!(all_sas.len(), 2);
+
+        Ok(())
+    }
 }
