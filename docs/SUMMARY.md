@@ -7,6 +7,7 @@
 - [Setup](setup.md)
 - [Local Development](development.md)
 - [CLI Guide](cli.md)
+- [Project Configuration (rise.toml)](project-configuration.md)
 - [Authentication](authentication.md)
 - [Authentication for Applications](authentication-for-apps.md)
 - [Deployments](deployments.md)
