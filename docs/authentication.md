@@ -163,7 +163,10 @@ Service account claims support glob-style wildcard patterns using `*` to match m
 
 **Syntax:**
 - `*` matches any sequence of characters (including empty string)
+- Unlike filesystem globs, wildcards match across any characters (including `/` and `-`)
 - Use exact matching when no wildcard is present (backward compatible)
+
+**Important:** The wildcard `*` matches partial words. For example, `app*` will match both `app-staging` (intended) and `application` (which includes "app" at the start). Design your patterns carefully to avoid unintended matches.
 
 **Examples:**
 
@@ -175,7 +178,8 @@ rise sa create my-app \
   --claim project_path=myorg/myrepo \
   --claim environment=app*
 ```
-Matches: `app`, `app-mr/6`, `app-staging`, `application`, etc.
+Matches: `app`, `app-mr/6`, `app-staging`  
+Also matches: `application`, `app_test` (wildcard matches any continuation)
 
 **Match all production environments:**
 ```bash

@@ -238,11 +238,18 @@ impl JwtValidator {
 
     /// Match a string against a glob-style pattern with `*` wildcards
     ///
+    /// This implements simple glob-style pattern matching where `*` matches any
+    /// sequence of characters (including empty string). Unlike filesystem globs,
+    /// this matches across any characters, including path separators.
+    ///
     /// Examples:
     /// - `matches_wildcard_pattern("app*", "app-mr/6")` → true
-    /// - `matches_wildcard_pattern("app*", "webapp")` → false
+    /// - `matches_wildcard_pattern("app*", "webapp")` → false (doesn't start with "app")
     /// - `matches_wildcard_pattern("*-prod", "api-prod")` → true
     /// - `matches_wildcard_pattern("app-*-prod", "app-staging-prod")` → true
+    ///
+    /// Note: Consecutive wildcards (e.g., `app**prod`) are treated as a single wildcard
+    /// due to split() creating empty parts, which always match.
     fn matches_wildcard_pattern(pattern: &str, text: &str) -> bool {
         // Split pattern by '*' to get literal parts
         let parts: Vec<&str> = pattern.split('*').collect();
@@ -262,7 +269,7 @@ impl JwtValidator {
                 }
                 pos = part.len();
             } else if i == parts.len() - 1 {
-                // Last part must match the end
+                // Last part must match the end (empty part matches any suffix when pattern ends with *)
                 if !text[pos..].ends_with(part) {
                     return false;
                 }
@@ -536,11 +543,23 @@ mod tests {
 
     #[test]
     fn test_wildcard_pattern_edge_cases() {
-        // Empty pattern parts
+        // Single wildcard matches everything
         assert!(JwtValidator::matches_wildcard_pattern("*", "anything"));
         assert!(JwtValidator::matches_wildcard_pattern("*", ""));
 
-        // Multiple consecutive wildcards (treated as single wildcard)
+        // Pattern ending with * (empty last part)
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app*",
+            "application"
+        ));
+        assert!(JwtValidator::matches_wildcard_pattern("app*", "app"));
+
+        // Pattern starting with * (empty first part)
+        assert!(JwtValidator::matches_wildcard_pattern("*app", "myapp"));
+        assert!(JwtValidator::matches_wildcard_pattern("*app", "app"));
+
+        // Multiple consecutive wildcards are implicitly treated as a single wildcard
+        // because split('*') creates empty string parts that always match
         assert!(JwtValidator::matches_wildcard_pattern(
             "app**prod",
             "appprod"
@@ -548,6 +567,11 @@ mod tests {
         assert!(JwtValidator::matches_wildcard_pattern(
             "app**prod",
             "app-staging-prod"
+        ));
+        // This is equivalent to "app*prod" due to how split works
+        assert!(JwtValidator::matches_wildcard_pattern(
+            "app***prod",
+            "app-test-prod"
         ));
 
         // No match cases
