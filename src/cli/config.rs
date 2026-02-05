@@ -297,6 +297,21 @@ mod tests {
         );
         std::env::remove_var("SSL_CERT_FILE");
 
+        // Test 2b: Empty SSL_CERT_FILE should be treated as unset
+        std::env::set_var("SSL_CERT_FILE", "");
+        let config = Config {
+            token: None,
+            backend_url: None,
+            container_cli: None,
+            managed_buildkit: None,
+            railpack_embed_ssl_cert: None,
+        };
+        assert!(
+            !config.get_railpack_embed_ssl_cert(),
+            "Should default to false when SSL_CERT_FILE is empty"
+        );
+        std::env::remove_var("SSL_CERT_FILE");
+
         // Test 3: Config file value used when env vars not set
         let config = Config {
             token: None,
