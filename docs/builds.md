@@ -314,6 +314,73 @@ This is by design! CLI flags are **merged** with rise.toml values, not replaced:
 
 To completely override, don't use rise.toml for that variable.
 
+## Build Cache Control
+
+By default, build backends use caching to speed up builds by reusing layers from previous builds. You can disable caching when you need a completely fresh build.
+
+### Disabling Cache
+
+Use the `--no-cache` flag to build without using any cached layers:
+
+```bash
+# Disable cache for docker build
+rise build myapp:latest --no-cache
+
+# Disable cache for pack build (uses --clear-cache)
+rise build myapp:latest --backend pack --no-cache
+
+# Disable cache for railpack build
+rise build myapp:latest --backend railpack --no-cache
+
+# Works with all rise commands that build
+rise deploy myproject --no-cache
+rise run myapp --no-cache
+```
+
+### Backend-Specific Behavior
+
+**Docker Backend:**
+- Adds `--no-cache` flag to `docker build` or `docker buildx build` command
+- Forces rebuild of all layers, even if source files haven't changed
+- Useful when dependencies have updated but Dockerfile hasn't changed
+
+**Pack Backend:**
+- Adds `--clear-cache` flag to `pack build` command
+- Clears the buildpack layer cache
+- Forces re-detection and rebuild of all buildpack layers
+
+**Railpack Backend:**
+- Adds `--no-cache` flag to `docker buildx build` or `buildctl build` command
+- Disables BuildKit layer caching
+- Forces complete rebuild of all Railpack plan steps
+
+### Configuration File
+
+You can also enable `no_cache` in your `rise.toml` to always build without cache:
+
+```toml
+[build]
+backend = "docker"
+no_cache = true
+```
+
+**Configuration Precedence:**
+- CLI `--no-cache` flag: `true` if present
+- Project config `no_cache`: Uses value from `rise.toml`
+- Default: `false` (caching enabled)
+
+**Note:** The CLI flag `--no-cache` is a boolean flag (no value needed), but in `rise.toml` it's set as `no_cache = true` or `no_cache = false`.
+
+### When to Use --no-cache
+
+Use `--no-cache` when:
+- Dependencies have updated but your Dockerfile/source hasn't changed
+- You suspect cached layers are causing build issues
+- You need to ensure a completely fresh build (e.g., for release builds)
+- Debugging build problems that might be related to stale cached layers
+
+**Warning:** Builds without cache are significantly slower as all layers must be rebuilt from scratch.
+
 ## Project Configuration (rise.toml)
 
 You can create a `rise.toml` or `.rise.toml` file in your project directory to define default build options. This allows you to avoid repeating CLI flags for every build.
@@ -359,6 +426,7 @@ All CLI build flags can be specified in the `[build]` section:
 | `container_cli` | String | Container CLI: `docker` or `podman` |
 | `managed_buildkit` | Boolean | Enable managed BuildKit daemon |
 | `railpack_embed_ssl_cert` | Boolean | Embed SSL certificate in Railpack builds |
+| `no_cache` | Boolean | Disable build cache (equivalent to `--no-cache` flag) |
 
 ### Examples
 
