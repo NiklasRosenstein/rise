@@ -146,19 +146,63 @@ pub async fn create_workload_identity(
         ));
     }
 
+    // Validate identifier format if provided
+    if let Some(ref id) = req.identifier {
+        // Validate identifier format: lowercase alphanumeric, hyphens, underscores
+        // Must start with alphanumeric
+        if id.is_empty() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Identifier cannot be empty".to_string(),
+            ));
+        }
+
+        if !id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '_') {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Identifier must contain only lowercase letters, digits, hyphens, and underscores".to_string(),
+            ));
+        }
+
+        if !id.chars().next().unwrap().is_ascii_alphanumeric() {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                "Identifier must start with a letter or digit".to_string(),
+            ));
+        }
+
+        // Check if identifier already exists for this project
+        let existing = service_accounts::find_by_project_and_identifier(&state.db_pool, project.id, id)
+            .await
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+        if existing.is_some() {
+            return Err((
+                StatusCode::CONFLICT,
+                format!("A service account with identifier '{}' already exists for this project", id),
+            ));
+        }
+    }
+
     // Verify OIDC issuer is reachable and has valid configuration
     verify_oidc_issuer(&req.issuer_url).await?;
 
-    // Create service account
-    let sa = service_accounts::create(&state.db_pool, project.id, &req.issuer_url, &req.claims)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to create service account: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create service account: {}", e),
-            )
-        })?;
+    // Create service account with optional identifier
+    let sa = service_accounts::create_with_identifier(
+        &state.db_pool,
+        project.id,
+        &req.issuer_url,
+        &req.claims,
+        req.identifier.as_deref(),
+    )
+    .await
+    .map_err(|e| {
+        tracing::error!("Failed to create service account: {:#}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to create service account: {}", e),
+        )
+    })?;
 
     // Get user for response
     let sa_user = users::find_by_id(&state.db_pool, sa.user_id)
@@ -187,6 +231,7 @@ pub async fn create_workload_identity(
         project_name: project.name,
         issuer_url: sa.issuer_url,
         claims,
+        identifier: sa.identifier,
         created_at: sa.created_at.to_rfc3339(),
     }))
 }
@@ -245,6 +290,7 @@ pub async fn list_workload_identities(
             project_name: project.name.clone(),
             issuer_url: sa.issuer_url,
             claims,
+            identifier: sa.identifier,
             created_at: sa.created_at.to_rfc3339(),
         });
     }
@@ -328,6 +374,7 @@ pub async fn get_workload_identity(
         project_name: project.name,
         issuer_url: sa.issuer_url,
         claims,
+        identifier: sa.identifier,
         created_at: sa.created_at.to_rfc3339(),
     }))
 }
@@ -471,6 +518,7 @@ pub async fn update_workload_identity(
         project_name: project.name,
         issuer_url: updated_sa.issuer_url,
         claims,
+        identifier: updated_sa.identifier,
         created_at: updated_sa.created_at.to_rfc3339(),
     }))
 }

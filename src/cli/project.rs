@@ -6,7 +6,7 @@ use crate::config::Config;
 use anyhow::{Context, Result};
 use comfy_table::{modifiers::UTF8_ROUND_CORNERS, presets::UTF8_FULL, Attribute, Cell, Table};
 use reqwest::Client;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 // Helper function to get current user info
 async fn get_current_user(
@@ -553,6 +553,18 @@ pub async fn update_project(
             .await?;
         }
 
+        // Sync service accounts
+        if !project_config.service_accounts.is_empty() {
+            sync_service_accounts(
+                http_client,
+                backend_url,
+                &token,
+                &update_response.project.name,
+                &project_config.service_accounts,
+            )
+            .await?;
+        }
+
         return Ok(());
     }
 
@@ -835,6 +847,153 @@ pub async fn sync_env_vars(
                 key, project, key
             );
         }
+    }
+
+    Ok(())
+}
+
+/// Sync service accounts from rise.toml to backend
+pub async fn sync_service_accounts(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    desired_sa: &std::collections::HashMap<String, crate::build::config::ServiceAccountConfig>,
+) -> Result<()> {
+    use tracing::{info, warn};
+
+    // Fetch current service accounts from backend
+    let url = format!("{}/api/v1/projects/{}/workload-identities", backend_url, project);
+    let response = http_client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .context("Failed to fetch current service accounts")?;
+
+    #[derive(Deserialize)]
+    struct WorkloadIdentitiesResponse {
+        workload_identities: Vec<WorkloadIdentity>,
+    }
+
+    #[derive(Deserialize)]
+    struct WorkloadIdentity {
+        id: String,
+        identifier: Option<String>,
+        issuer_url: String,
+        claims: std::collections::HashMap<String, String>,
+    }
+
+    let current_sa_response: WorkloadIdentitiesResponse = if response.status().is_success() {
+        response.json().await.context("Failed to parse service accounts")?
+    } else {
+        WorkloadIdentitiesResponse {
+            workload_identities: Vec::new(),
+        }
+    };
+
+    // Build a map of current service accounts by identifier (only those with identifiers)
+    let mut current_sa_by_identifier: std::collections::HashMap<String, WorkloadIdentity> =
+        std::collections::HashMap::new();
+    let mut unmanaged_sa = Vec::new();
+
+    for sa in current_sa_response.workload_identities {
+        if let Some(ref identifier) = sa.identifier {
+            current_sa_by_identifier.insert(identifier.clone(), sa);
+        } else {
+            unmanaged_sa.push(sa);
+        }
+    }
+
+    // Process desired service accounts
+    for (identifier, config) in desired_sa {
+        if let Some(existing) = current_sa_by_identifier.get(identifier) {
+            // Check if update is needed (issuer_url or claims changed)
+            let needs_update = existing.issuer_url != config.issuer
+                || existing.claims != config.claims;
+
+            if needs_update {
+                info!("Updating service account '{}' from rise.toml", identifier);
+                
+                #[derive(Serialize)]
+                struct UpdateRequest {
+                    issuer_url: String,
+                    claims: std::collections::HashMap<String, String>,
+                }
+
+                let update_url = format!("{}/api/v1/projects/{}/workload-identities/{}", 
+                    backend_url, project, existing.id);
+                let update_response = http_client
+                    .put(&update_url)
+                    .bearer_auth(token)
+                    .json(&UpdateRequest {
+                        issuer_url: config.issuer.clone(),
+                        claims: config.claims.clone(),
+                    })
+                    .send()
+                    .await
+                    .context("Failed to update service account")?;
+
+                if !update_response.status().is_success() {
+                    let error_text = update_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                    anyhow::bail!("Failed to update service account '{}': {}", identifier, error_text);
+                }
+                
+                println!("✓ Updated service account '{}'", identifier);
+            } else {
+                info!("Service account '{}' is up to date", identifier);
+            }
+        } else {
+            // Create new service account
+            println!("Creating service account '{}' from rise.toml", identifier);
+
+            #[derive(Serialize)]
+            struct CreateRequest {
+                issuer_url: String,
+                claims: std::collections::HashMap<String, String>,
+                identifier: String,
+            }
+
+            let create_response = http_client
+                .post(&url)
+                .bearer_auth(token)
+                .json(&CreateRequest {
+                    issuer_url: config.issuer.clone(),
+                    claims: config.claims.clone(),
+                    identifier: identifier.clone(),
+                })
+                .send()
+                .await
+                .context("Failed to create service account")?;
+
+            if !create_response.status().is_success() {
+                let error_text = create_response.text().await.unwrap_or_else(|_| "Unknown error".to_string());
+                anyhow::bail!("Failed to create service account '{}': {}", identifier, error_text);
+            }
+
+            println!("✓ Created service account '{}'", identifier);
+        }
+    }
+
+    // Warn about service accounts in backend not in rise.toml
+    for (identifier, _) in current_sa_by_identifier.iter() {
+        if !desired_sa.contains_key(identifier) {
+            warn!(
+                "Service account '{}' exists in backend but not in rise.toml. \
+                 This service account is not managed by rise.toml. \
+                 Run 'rise service-account delete {} {}' to remove it.",
+                identifier, project, identifier
+            );
+        }
+    }
+
+    // Warn about service accounts without identifiers (created imperatively)
+    if !unmanaged_sa.is_empty() {
+        warn!(
+            "Found {} service account(s) without identifiers (created outside rise.toml). \
+             These are not managed by declarative sync.",
+            unmanaged_sa.len()
+        );
     }
 
     Ok(())

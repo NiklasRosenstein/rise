@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, project_id, user_id, issuer_url, claims, sequence,\n               deleted_at, created_at, updated_at\n        FROM service_accounts\n        WHERE user_id = $1 AND project_id = $2 AND deleted_at IS NULL\n        ",
+  "query": "\n        UPDATE service_accounts\n        SET\n            issuer_url = COALESCE($2, issuer_url),\n            claims = COALESCE($3, claims),\n            updated_at = NOW()\n        WHERE id = $1 AND deleted_at IS NULL\n        RETURNING id, project_id, user_id, issuer_url, claims, sequence, identifier,\n                  deleted_at, created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -35,16 +35,21 @@
       },
       {
         "ordinal": 6,
+        "name": "identifier",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "deleted_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -52,7 +57,8 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid"
+        "Text",
+        "Jsonb"
       ]
     },
     "nullable": [
@@ -63,9 +69,10 @@
       false,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "8b6340c1a3387b305d0d11f1b4b280b56b3410f851846ea484511be9bf4767ea"
+  "hash": "b6bd8d824cc74dabbda6f89f6672da52c255af37b7876e491b684ce40baf9246"
 }
