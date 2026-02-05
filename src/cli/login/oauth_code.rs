@@ -7,6 +7,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
+use tracing;
 
 /// Generate PKCE code_verifier and code_challenge
 fn generate_pkce_challenge() -> (String, String) {
@@ -194,7 +195,7 @@ pub async fn handle_authorization_code_flow(
     backend_url_to_save: Option<&str>,
 ) -> Result<()> {
     // Step 1: Discover OpenID endpoints
-    println!("Discovering authentication endpoints...");
+    tracing::debug!("Discovering authentication endpoints...");
     let discovery = discover_endpoints(http_client, backend_url)
         .await
         .context("Failed to discover authentication endpoints")?;
