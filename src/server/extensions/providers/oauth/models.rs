@@ -104,7 +104,7 @@ pub struct CallbackRequest {
 }
 
 /// Authorization code state for OAuth 2.0 flow
-/// Stores encrypted tokens from upstream provider for single-use exchange
+/// Stores encrypted raw token response from upstream provider for single-use exchange
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthCodeState {
     /// Project ID
@@ -122,17 +122,12 @@ pub struct OAuthCodeState {
     /// PKCE code challenge method ("S256" or "plain")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_challenge_method: Option<String>,
-    /// Encrypted access token from upstream OAuth provider
-    pub access_token_encrypted: String,
-    /// Encrypted refresh token (optional)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refresh_token_encrypted: Option<String>,
-    /// Encrypted ID token (optional, OIDC)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id_token_encrypted: Option<String>,
-    /// Token expiration time
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<DateTime<Utc>>,
+    /// Raw encrypted token response body from upstream provider (cached as-is, no parsing)
+    pub token_response_encrypted: String,
+    /// Content-Type header from upstream provider (preserved for accurate passthrough)
+    pub content_type: String,
+    /// HTTP status code from upstream provider (preserved for accurate passthrough)
+    pub status_code: u16,
 }
 
 /// OAuth authorization request parameters

@@ -1,6 +1,6 @@
 use super::models::{
     AuthorizeFlowQuery, CallbackRequest, OAuth2ErrorResponse, OAuth2TokenResponse, OAuthCodeState,
-    OAuthExtensionSpec, OAuthExtensionStatus, OAuthState, TokenRequest, TokenResponse,
+    OAuthExtensionSpec, OAuthExtensionStatus, OAuthState, TokenRequest,
 };
 use crate::db::{extensions as db_extensions, projects as db_projects};
 use crate::server::state::AppState;
@@ -11,7 +11,7 @@ use axum::{
     Json,
 };
 use base64::Engine;
-use chrono::{Duration, Utc};
+use chrono::Utc;
 use std::sync::Arc;
 use tracing::{debug, error, info, warn};
 use url::Url;
@@ -570,6 +570,22 @@ pub async fn callback(
         return Err((StatusCode::BAD_REQUEST, "State mismatch".to_string()));
     }
 
+    // Detect test vs real flow early (before expensive token parsing/encryption)
+    let final_redirect_uri = oauth_state.redirect_uri.clone().ok_or((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        "Missing redirect URI in state".to_string(),
+    ))?;
+
+    let is_test_flow = final_redirect_uri.starts_with(&state.public_url)
+        || final_redirect_uri.starts_with("http://localhost:")
+        || final_redirect_uri.starts_with("http://127.0.0.1:");
+
+    debug!(
+        "OAuth callback: flow_type={}, final_redirect_uri={}",
+        if is_test_flow { "test" } else { "real" },
+        final_redirect_uri
+    );
+
     // Get project
     let project = db_projects::find_by_name(&state.db_pool, &project_name)
         .await
@@ -682,131 +698,185 @@ pub async fn callback(
             )
         })?;
 
-    if !response.status().is_success() {
-        let status = response.status();
-        let error_text = response
-            .text()
-            .await
-            .unwrap_or_else(|_| "Unable to read error response".to_string());
-        error!(
-            "Token exchange failed with status {}: {}",
-            status, error_text
+    // Branch based on flow type: test flows skip token parsing/encryption
+    if is_test_flow {
+        // ===== TEST FLOW: Simplified path (no token parsing/encryption) =====
+        info!(
+            "Processing test OAuth flow for project {} extension {}",
+            project_name, extension_name
         );
-        return Err((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!(
+
+        // Check if token exchange was successful
+        if !response.status().is_success() {
+            let status = response.status();
+            let error_text = response
+                .text()
+                .await
+                .unwrap_or_else(|_| "Unable to read error response".to_string());
+            error!(
                 "Token exchange failed with status {}: {}",
                 status, error_text
-            ),
-        ));
-    }
+            );
 
-    let token_response: TokenResponse = response.json().await.map_err(|e| {
-        error!("Failed to parse token response: {:?}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to parse token response: {}", e),
+            // Update extension status with error
+            let mut ext_status: OAuthExtensionStatus =
+                serde_json::from_value(extension.status.clone()).unwrap_or_default();
+            ext_status.error = Some(format!(
+                "Token exchange failed with status {}: {}",
+                status, error_text
+            ));
+            ext_status.auth_verified = false;
+
+            db_extensions::update_status(
+                &state.db_pool,
+                project.id,
+                &extension_name,
+                &serde_json::to_value(&ext_status).unwrap(),
+            )
+            .await
+            .map_err(|e| {
+                warn!("Failed to update extension status: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to update status: {}", e),
+                )
+            })?;
+
+            // Clear state token from cache
+            state.oauth_state_store.invalidate(&req.state).await;
+
+            // Redirect to UI with error
+            let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Invalid redirect URI: {}", e),
+                )
+            })?;
+            redirect_url
+                .query_pairs_mut()
+                .append_pair("error", "oauth_token_exchange_failed");
+
+            return Ok(Redirect::to(redirect_url.as_str()).into_response());
+        }
+
+        // Token exchange successful - update extension status
+        let mut ext_status: OAuthExtensionStatus =
+            serde_json::from_value(extension.status.clone()).unwrap_or_default();
+        ext_status.redirect_uri = Some(redirect_uri);
+        ext_status.configured_at = Some(Utc::now());
+        ext_status.auth_verified = true;
+        ext_status.error = None;
+
+        db_extensions::update_status(
+            &state.db_pool,
+            project.id,
+            &extension_name,
+            &serde_json::to_value(&ext_status).unwrap(),
         )
-    })?;
-
-    // Encrypt tokens
-    let encryption_provider = state.encryption_provider.as_ref().ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Encryption provider not configured".to_string(),
-    ))?;
-
-    let access_token_encrypted = encryption_provider
-        .encrypt(&token_response.access_token)
         .await
         .map_err(|e| {
+            warn!("Failed to update extension status: {:?}", e);
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to encrypt access token: {}", e),
+                format!("Failed to update status: {}", e),
             )
         })?;
 
-    let refresh_token_encrypted = match &token_response.refresh_token {
-        Some(refresh_token) => Some(encryption_provider.encrypt(refresh_token).await.map_err(
-            |e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to encrypt refresh token: {}", e),
-                )
-            },
-        )?),
-        None => None,
-    };
+        // Clear state token from cache
+        state.oauth_state_store.invalidate(&req.state).await;
 
-    let id_token_encrypted = match &token_response.id_token {
-        Some(id_token) => Some(encryption_provider.encrypt(id_token).await.map_err(|e| {
+        info!(
+            "Completed test OAuth flow for project {} extension {}",
+            project_name, extension_name
+        );
+
+        // Redirect back to Rise UI
+        let redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to encrypt ID token: {}", e),
+                format!("Invalid redirect URI: {}", e),
             )
-        })?),
-        None => None,
-    };
+        })?;
 
-    // Calculate token expiration (default to 1 hour if not provided)
-    let expires_at =
-        Some(Utc::now() + Duration::seconds(token_response.expires_in.unwrap_or(3600)));
+        Ok(Redirect::to(redirect_url.as_str()).into_response())
+    } else {
+        // ===== REAL FLOW: Cache raw token response (no parsing) =====
+        info!(
+            "Processing real OAuth flow for project {} extension {}",
+            project_name, extension_name
+        );
 
-    // Update extension status (preserve credentials from existing status)
-    let mut status: OAuthExtensionStatus =
-        serde_json::from_value(extension.status.clone()).unwrap_or_default();
+        // Capture status code and Content-Type before consuming response
+        let status_code = response.status().as_u16();
+        let content_type = response
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|h| h.to_str().ok())
+            .unwrap_or("application/json")
+            .to_string();
 
-    status.redirect_uri = Some(redirect_uri);
-    status.configured_at = Some(Utc::now());
-    status.auth_verified = true;
-    status.error = None;
+        // Get raw response body (cache ALL responses - we're a passthrough proxy)
+        let response_body = response.bytes().await.map_err(|e| {
+            error!("Failed to read token response body: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to read token response".to_string(),
+            )
+        })?;
 
-    db_extensions::update_status(
-        &state.db_pool,
-        project.id,
-        &extension_name,
-        &serde_json::to_value(&status).unwrap(),
-    )
-    .await
-    .map_err(|e| {
-        warn!("Failed to update extension status: {:?}", e);
-        (
+        // Encrypt raw response body
+        let encryption_provider = state.encryption_provider.as_ref().ok_or((
             StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to update status: {}", e),
+            "Encryption provider not configured".to_string(),
+        ))?;
+
+        let token_response_encrypted = encryption_provider
+            .encrypt(&String::from_utf8_lossy(&response_body))
+            .await
+            .map_err(|e| {
+                error!("Failed to encrypt token response: {:?}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Failed to encrypt token response".to_string(),
+                )
+            })?;
+
+        debug!(
+            "Cached token response: status={}, content_type={}",
+            status_code, content_type
+        );
+
+        // Update extension status (preserve credentials from existing status)
+        let mut ext_status: OAuthExtensionStatus =
+            serde_json::from_value(extension.status.clone()).unwrap_or_default();
+
+        ext_status.redirect_uri = Some(redirect_uri);
+        ext_status.configured_at = Some(Utc::now());
+        ext_status.auth_verified = true;
+        ext_status.error = None;
+
+        db_extensions::update_status(
+            &state.db_pool,
+            project.id,
+            &extension_name,
+            &serde_json::to_value(&ext_status).unwrap(),
         )
-    })?;
+        .await
+        .map_err(|e| {
+            warn!("Failed to update extension status: {:?}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to update status: {}", e),
+            )
+        })?;
 
-    // Clear state token from cache
-    state.oauth_state_store.invalidate(&req.state).await;
+        // Clear state token from cache
+        state.oauth_state_store.invalidate(&req.state).await;
 
-    // Determine final redirect URI
-    let final_redirect_uri = oauth_state.redirect_uri.clone().ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Missing redirect URI in state".to_string(),
-    ))?;
-
-    debug!(
-        "OAuth callback: final_redirect_uri={}, oauth_state={:?}",
-        final_redirect_uri, oauth_state
-    );
-
-    // Build redirect URL with authorization code (RFC 6749)
-    let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Invalid redirect URI: {}", e),
-        )
-    })?;
-
-    // Detect if this is a test flow (redirect to Rise UI) vs real application flow
-    let is_test_flow = final_redirect_uri.starts_with(&state.public_url)
-        || final_redirect_uri.starts_with("http://localhost:")
-        || final_redirect_uri.starts_with("http://127.0.0.1:");
-
-    if !is_test_flow {
-        // Real application flow: Generate authorization code for token exchange
+        // Generate authorization code for token exchange
         let authorization_code = generate_state_token();
 
-        // Store encrypted tokens in authorization code state (5-minute TTL, single-use)
+        // Store encrypted raw token response in authorization code state (5-minute TTL, single-use)
         let code_state = OAuthCodeState {
             project_id: project.id,
             extension_name: extension_name.clone(),
@@ -814,16 +884,23 @@ pub async fn callback(
             redirect_uri: oauth_state.redirect_uri.clone(),
             code_challenge: oauth_state.client_code_challenge.clone(),
             code_challenge_method: oauth_state.client_code_challenge_method.clone(),
-            access_token_encrypted,
-            refresh_token_encrypted,
-            id_token_encrypted,
-            expires_at,
+            token_response_encrypted,
+            content_type,
+            status_code,
         };
 
         state
             .oauth_code_store
             .insert(authorization_code.clone(), code_state)
             .await;
+
+        // Build redirect URL with authorization code (RFC 6749)
+        let mut redirect_url = Url::parse(&final_redirect_uri).map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Invalid redirect URI: {}", e),
+            )
+        })?;
 
         // Add authorization code as query parameter (RFC 6749)
         redirect_url
@@ -841,20 +918,14 @@ pub async fn callback(
             "Generated authorization code for project {} extension {}",
             project_name, extension_name
         );
-    } else {
-        // Test flow: Skip code generation, just redirect back to UI
+
         info!(
-            "Completed test OAuth flow for project {} extension {} (no code generated)",
-            project_name, extension_name
+            "OAuth callback complete: redirecting to {}",
+            redirect_url.as_str()
         );
+
+        Ok(Redirect::to(redirect_url.as_str()).into_response())
     }
-
-    info!(
-        "OAuth callback complete: redirecting to {}",
-        redirect_url.as_str()
-    );
-
-    Ok(Redirect::to(redirect_url.as_str()).into_response())
 }
 
 /// Validate PKCE code_verifier against code_challenge
@@ -971,8 +1042,8 @@ pub async fn token_endpoint(
     // For error responses, always include CORS headers if Origin was provided (even if validation failed)
     // This ensures proper CORS error handling in the browser
     match result {
-        Ok(token_response) => {
-            let mut response = (StatusCode::OK, Json(token_response)).into_response();
+        Ok(mut response) => {
+            // Response is already built by grant handler, just add CORS headers
             if let Some(cors) = validated_cors_headers {
                 response.headers_mut().extend(cors);
             }
@@ -999,7 +1070,7 @@ async fn token_endpoint_inner(
     extension_name: &str,
     headers: &axum::http::HeaderMap,
     body: String,
-) -> Result<OAuth2TokenResponse, (StatusCode, Json<OAuth2ErrorResponse>)> {
+) -> Result<Response, (StatusCode, Json<OAuth2ErrorResponse>)> {
     // Parse request body (support both form-urlencoded and JSON)
     let content_type = headers
         .get(header::CONTENT_TYPE)
@@ -1152,26 +1223,38 @@ async fn token_endpoint_inner(
         }
     }
 
-    // Route to grant-specific handlers (unwrap Json wrapper for inner return)
+    // Route to grant-specific handlers
     match req.grant_type.as_str() {
-        "authorization_code" => handle_authorization_code_grant(
-            state.clone(),
-            project,
-            extension_name.to_string(),
-            spec,
-            req,
-        )
-        .await
-        .map(|Json(response)| response),
-        "refresh_token" => handle_refresh_token_grant(
-            state.clone(),
-            project,
-            extension_name.to_string(),
-            spec,
-            req,
-        )
-        .await
-        .map(|Json(response)| response),
+        "authorization_code" => {
+            // Returns Response directly (raw passthrough)
+            handle_authorization_code_grant(
+                state.clone(),
+                project,
+                extension_name.to_string(),
+                spec,
+                req,
+            )
+            .await
+        }
+        "refresh_token" => {
+            // Returns Json<OAuth2TokenResponse>, convert to Response
+            let json_response = handle_refresh_token_grant(
+                state.clone(),
+                project,
+                extension_name.to_string(),
+                spec,
+                req,
+            )
+            .await?;
+
+            use axum::body::Body;
+            let response = Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, "application/json")
+                .body(Body::from(serde_json::to_vec(&json_response.0).unwrap()))
+                .unwrap();
+            Ok(response)
+        }
         _ => Err(oauth2_error(
             "unsupported_grant_type",
             Some(format!("Unsupported grant_type: {}", req.grant_type)),
@@ -1184,9 +1267,9 @@ async fn handle_authorization_code_grant(
     state: AppState,
     project: crate::db::models::Project,
     extension_name: String,
-    spec: OAuthExtensionSpec,
+    _spec: OAuthExtensionSpec,
     req: TokenRequest,
-) -> Result<Json<OAuth2TokenResponse>, (StatusCode, Json<OAuth2ErrorResponse>)> {
+) -> Result<Response, (StatusCode, Json<OAuth2ErrorResponse>)> {
     // SECURITY: Ensure mutual exclusivity of authentication methods
     // This is defensive programming - the check should already have happened in token_endpoint_inner
     if req.client_secret.is_some() && req.code_verifier.is_some() {
@@ -1304,65 +1387,34 @@ async fn handle_authorization_code_grant(
 
     // Note: For non-PKCE flows, client_secret was already validated in token_endpoint()
 
-    // Decrypt tokens from code_state (tokens stored directly in authorization code cache)
+    // Decrypt raw token response from code_state (Rise acts as passthrough proxy)
     let encryption_provider = state.encryption_provider.as_ref().ok_or_else(|| {
         error!("Encryption provider not configured");
         oauth2_error("server_error", Some("Internal server error".to_string()))
     })?;
 
-    let access_token = encryption_provider
-        .decrypt(&code_state.access_token_encrypted)
+    let token_response_body = encryption_provider
+        .decrypt(&code_state.token_response_encrypted)
         .await
         .map_err(|e| {
-            error!("Failed to decrypt access token: {:?}", e);
+            error!("Failed to decrypt token response: {:?}", e);
             oauth2_error("server_error", Some("Internal server error".to_string()))
         })?;
-
-    let refresh_token = if let Some(ref encrypted) = code_state.refresh_token_encrypted {
-        Some(encryption_provider.decrypt(encrypted).await.map_err(|e| {
-            error!("Failed to decrypt refresh token: {:?}", e);
-            oauth2_error("server_error", Some("Internal server error".to_string()))
-        })?)
-    } else {
-        None
-    };
-
-    let id_token = if let Some(ref encrypted) = code_state.id_token_encrypted {
-        Some(encryption_provider.decrypt(encrypted).await.map_err(|e| {
-            error!("Failed to decrypt ID token: {:?}", e);
-            oauth2_error("server_error", Some("Internal server error".to_string()))
-        })?)
-    } else {
-        None
-    };
-
-    // Calculate expires_in (seconds from now)
-    let expires_in = code_state.expires_at.map(|expires_at| {
-        let now = Utc::now();
-        let duration = expires_at.signed_duration_since(now);
-        duration.num_seconds().max(0) // Don't return negative values
-    });
-
-    // Build scope from extension spec
-    let scope = if spec.scopes.is_empty() {
-        None
-    } else {
-        Some(spec.scopes.join(" "))
-    };
 
     info!(
         "Authorization code grant successful for project {} extension {}",
         project.name, extension_name
     );
 
-    Ok(Json(OAuth2TokenResponse {
-        access_token,
-        token_type: "Bearer".to_string(),
-        expires_in,
-        refresh_token,
-        scope,
-        id_token,
-    }))
+    // Return raw response with original status code and Content-Type (NO parsing)
+    use axum::body::Body;
+    let response = Response::builder()
+        .status(StatusCode::from_u16(code_state.status_code).unwrap_or(StatusCode::OK))
+        .header(header::CONTENT_TYPE, code_state.content_type)
+        .body(Body::from(token_response_body))
+        .unwrap();
+
+    Ok(response)
 }
 
 /// Handle refresh_token grant type
