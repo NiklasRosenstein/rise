@@ -356,7 +356,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
 
                 <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Client Secret {hasExistingSecret && !clientSecretPlaintext && <span className="text-gray-500 dark:text-gray-400">(configured)</span>}
+                        Client Secret <span className="text-red-500">*</span> {hasExistingSecret && !clientSecretPlaintext && <span className="text-gray-500 dark:text-gray-400">(configured)</span>}
                         {clientSecretPlaintext && <span className="text-blue-600 dark:text-blue-400">(will be updated)</span>}
                     </label>
                     <div className="flex gap-2">
@@ -451,17 +451,6 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                     </div>
                 )}
 
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">About This Extension</h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                        The Generic OAuth 2.0 extension allows your application to authenticate end users via any OAuth 2.0 provider
-                        (Snowflake, Google, GitHub, custom SSO, etc.) without managing client secrets locally.
-                    </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                        <strong>Security:</strong> Client secrets are stored encrypted and never exposed to your application.
-                        Supports PKCE flow for SPAs and RFC 6749-compliant token endpoint for backend apps.
-                    </p>
-                </div>
             </div>
 
             {/* Right column - Redirect URI and Quick Start */}
@@ -1090,10 +1079,29 @@ function OAuthDetailView({ extension, projectName }) {
                                     <td className="py-3 px-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
                                         {extensionName.toUpperCase().replace(/-/g, '_')}_CLIENT_SECRET
                                     </td>
-                                    <td className="py-3 px-3 text-gray-500 dark:text-gray-500">
-                                        ••••••••
+                                    <td className="py-3 px-3 text-gray-900 dark:text-gray-200 break-all">
+                                        {status?.rise_client_secret || '••••••••'}
                                     </td>
                                     <td className="py-3 px-3">
+                                        {status?.rise_client_secret && (
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    try {
+                                                        await copyToClipboard(status.rise_client_secret);
+                                                        showToast('Client secret copied', 'success');
+                                                    } catch (err) {
+                                                        showToast(`Failed to copy: ${err.message}`, 'error');
+                                                    }
+                                                }}
+                                                className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                                                title="Copy to clipboard"
+                                            >
+                                                <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                                </svg>
+                                            </button>
+                                        )}
                                     </td>
                                 </tr>
                                 <tr className="border-b border-gray-200 dark:border-gray-800">
