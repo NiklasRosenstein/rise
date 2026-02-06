@@ -508,10 +508,10 @@ pub async fn create_deployment(
 
     if deploy_opts.image.is_some() || deploy_opts.from_deployment.is_some() {
         // Pre-built image path or redeploy from existing deployment: Skip build/push, backend already marked as Pushed
-        if deploy_opts.from_deployment.is_some() {
+        if let Some(from_deployment) = &deploy_opts.from_deployment {
             info!(
                 "✓ Deployment created from existing deployment '{}' with {} environment variables",
-                deploy_opts.from_deployment.unwrap(),
+                from_deployment,
                 if deploy_opts.use_source_env_vars {
                     "source"
                 } else {

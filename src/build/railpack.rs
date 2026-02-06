@@ -158,7 +158,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
 
     // Embed SSL certificate if requested
     if options.embed_ssl_cert {
-        if let Ok(ssl_cert_file) = std::env::var("SSL_CERT_FILE") {
+        if let Some(ssl_cert_file) = super::env_var_non_empty("SSL_CERT_FILE") {
             let cert_path = Path::new(&ssl_cert_file);
             if cert_path.exists() {
                 embed_ssl_cert_in_plan(&plan_file, cert_path)?;

@@ -895,14 +895,15 @@ async fn main() -> Result<()> {
                 }
 
                 // For pre-built images, --http-port is required since we can't infer it
-                if args.image.is_some() && args.http_port.is_none() {
-                    eprintln!("Error: --http-port is required when using --image");
-                    eprintln!(
-                        "Example: rise deployment create {} --image {} --http-port 80",
-                        project_name,
-                        args.image.as_ref().unwrap()
-                    );
-                    std::process::exit(1);
+                if let Some(image) = &args.image {
+                    if args.http_port.is_none() {
+                        eprintln!("Error: --http-port is required when using --image");
+                        eprintln!(
+                            "Example: rise deployment create {} --image {} --http-port 80",
+                            project_name, image
+                        );
+                        std::process::exit(1);
+                    }
                 }
 
                 // Pass through the http_port option - server will resolve from:

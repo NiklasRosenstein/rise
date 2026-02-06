@@ -153,7 +153,7 @@ impl Config {
             return enabled;
         }
         // Default to true if SSL_CERT_FILE is set, false otherwise
-        std::env::var("SSL_CERT_FILE").is_ok()
+        crate::build::env_var_non_empty("SSL_CERT_FILE").is_some()
     }
 
     /// Set whether to embed SSL certificate in Railpack builds
@@ -294,6 +294,21 @@ mod tests {
         assert!(
             config.get_railpack_embed_ssl_cert(),
             "Should default to true when SSL_CERT_FILE is set"
+        );
+        std::env::remove_var("SSL_CERT_FILE");
+
+        // Test 2b: Empty SSL_CERT_FILE should be treated as unset
+        std::env::set_var("SSL_CERT_FILE", "");
+        let config = Config {
+            token: None,
+            backend_url: None,
+            container_cli: None,
+            managed_buildkit: None,
+            railpack_embed_ssl_cert: None,
+        };
+        assert!(
+            !config.get_railpack_embed_ssl_cert(),
+            "Should default to false when SSL_CERT_FILE is empty"
         );
         std::env::remove_var("SSL_CERT_FILE");
 
