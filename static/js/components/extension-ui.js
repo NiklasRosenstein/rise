@@ -276,8 +276,8 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
     }, [providerName, description, clientId, clientSecretEncrypted, issuerUrl, authorizationEndpoint, tokenEndpoint, scopes]);
 
     // Common provider templates
-    // - OIDC-compliant providers (Google, Snowflake): use issuer_url, endpoints auto-discovered
-    // - Non-OIDC providers (GitHub): need manual endpoints
+    // - OIDC-compliant providers (Google): use issuer_url, endpoints auto-discovered
+    // - Non-OIDC providers (GitHub, Snowflake): need manual endpoints
     const providerTemplates = {
         snowflake: {
             name: 'Snowflake',
