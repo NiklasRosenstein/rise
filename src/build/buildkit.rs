@@ -300,16 +300,17 @@ pub(crate) fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) ->
 
 /// Warn user about SSL certificate issues when managed BuildKit is disabled
 pub(crate) fn check_ssl_cert_and_warn(method: &BuildMethod, managed_buildkit: bool) {
-    if super::env_var_non_empty("SSL_CERT_FILE").is_some() {
-        if requires_buildkit(method) && !managed_buildkit {
-            warn!(
-                "SSL_CERT_FILE is set but managed BuildKit daemon is disabled. \
-                 Builds may fail with SSL certificate errors in corporate environments."
-            );
-            warn!("To enable automatic BuildKit daemon management:");
-            warn!("  rise build --managed-buildkit ...");
-            warn!("Or set environment variable:");
-            warn!("  export RISE_MANAGED_BUILDKIT=true");
-        }
+    if super::env_var_non_empty("SSL_CERT_FILE").is_some()
+        && requires_buildkit(method)
+        && !managed_buildkit
+    {
+        warn!(
+            "SSL_CERT_FILE is set but managed BuildKit daemon is disabled. \
+             Builds may fail with SSL certificate errors in corporate environments."
+        );
+        warn!("To enable automatic BuildKit daemon management:");
+        warn!("  rise build --managed-buildkit ...");
+        warn!("Or set environment variable:");
+        warn!("  export RISE_MANAGED_BUILDKIT=true");
     }
 }
