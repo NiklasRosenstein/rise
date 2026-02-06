@@ -317,7 +317,8 @@
                         grant_type: 'authorization_code',
                         code: code,
                         client_id: CONFIG.clientId,
-                        code_verifier: codeVerifier
+                        code_verifier: codeVerifier,
+                        redirect_uri: CONFIG.redirectUri  // RFC 6749: MUST match authorization request
                     })
                 });
 

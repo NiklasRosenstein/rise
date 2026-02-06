@@ -136,6 +136,9 @@ app.get('/oauth/callback', async (req, res) => {
       CONFIG.riseIssuer
     );
 
+    // RFC 6749: redirect_uri MUST match the authorization request
+    const redirectUri = `${req.protocol}://${req.get('host')}/oauth/callback`;
+
     const response = await fetch(tokenUrl.toString(), {
       method: 'POST',
       headers: {
@@ -146,6 +149,7 @@ app.get('/oauth/callback', async (req, res) => {
         code: code,
         client_id: CONFIG.clientId,
         client_secret: CONFIG.clientSecret,
+        redirect_uri: redirectUri,
       }),
     });
 
