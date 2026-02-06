@@ -314,6 +314,24 @@ This is by design! CLI flags are **merged** with rise.toml values, not replaced:
 
 To completely override, don't use rise.toml for that variable.
 
+## Build Cache Control
+
+Use `--no-cache` to disable build caching and force a complete rebuild:
+
+```bash
+rise build myapp:latest --no-cache
+rise deploy myproject --no-cache
+```
+
+Or set in `rise.toml`:
+
+```toml
+[build]
+no_cache = true
+```
+
+Useful when dependencies have updated but source files haven't changed, or when debugging build issues.
+
 ## Project Configuration (rise.toml)
 
 You can create a `rise.toml` or `.rise.toml` file in your project directory to define default build options. This allows you to avoid repeating CLI flags for every build.
@@ -359,6 +377,7 @@ All CLI build flags can be specified in the `[build]` section:
 | `container_cli` | String | Container CLI: `docker` or `podman` |
 | `managed_buildkit` | Boolean | Enable managed BuildKit daemon |
 | `railpack_embed_ssl_cert` | Boolean | Embed SSL certificate in Railpack builds |
+| `no_cache` | Boolean | Disable build cache (equivalent to `--no-cache` flag) |
 
 ### Examples
 

@@ -31,6 +31,7 @@ pub(crate) struct DockerBuildOptions<'a> {
     pub env: &'a [String],
     pub build_context: Option<&'a str>,
     pub build_contexts: &'a std::collections::HashMap<String, String>,
+    pub no_cache: bool,
 }
 
 /// Build image using Docker or Podman with a Dockerfile
@@ -123,6 +124,11 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     }
 
     cmd.arg("build").arg("-t").arg(options.image_tag);
+
+    // Add no-cache flag if requested
+    if options.no_cache {
+        cmd.arg("--no-cache");
+    }
 
     // Add dockerfile path if specified or preprocessed
     if let Some(ref df) = effective_dockerfile {

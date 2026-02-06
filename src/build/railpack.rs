@@ -29,6 +29,7 @@ pub(crate) struct RailpackBuildOptions<'a> {
     pub buildkit_host: Option<&'a str>,
     pub embed_ssl_cert: bool,
     pub env: &'a [String],
+    pub no_cache: bool,
 }
 
 /// Parse environment variables from CLI format to HashMap
@@ -204,6 +205,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             &all_secrets,
             &HashMap::new(), // No local contexts for Railpack
             BuildctlFrontend::Railpack,
+            options.no_cache,
         )?;
     } else {
         build_with_buildx(
@@ -214,6 +216,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             options.push,
             options.buildkit_host,
             &all_secrets,
+            options.no_cache,
         )?;
     }
 
@@ -221,6 +224,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
 }
 
 /// Build with docker buildx
+#[allow(clippy::too_many_arguments)]
 fn build_with_buildx(
     app_path: &str,
     plan_file: &Path,
@@ -229,6 +233,7 @@ fn build_with_buildx(
     push: bool,
     buildkit_host: Option<&str>,
     secrets: &HashMap<String, String>,
+    no_cache: bool,
 ) -> Result<()> {
     // Check buildx availability
     let buildx_check = Command::new(container_cli)
@@ -268,6 +273,11 @@ fn build_with_buildx(
     // Use the managed builder if available
     if let Some(builder) = builder_name {
         cmd.arg("--builder").arg(builder);
+    }
+
+    // Add no-cache flag if requested
+    if no_cache {
+        cmd.arg("--no-cache");
     }
 
     if push {
@@ -324,6 +334,7 @@ pub(crate) fn build_with_buildctl(
     secrets: &HashMap<String, String>,
     local_contexts: &HashMap<String, String>,
     frontend: BuildctlFrontend,
+    no_cache: bool,
 ) -> Result<()> {
     // Check buildctl availability
     let buildctl_check = Command::new("buildctl").arg("--version").output();
@@ -380,6 +391,11 @@ pub(crate) fn build_with_buildctl(
     // Add secrets
     for key in secrets.keys() {
         cmd.arg("--secret").arg(format!("id={},env={}", key, key));
+    }
+
+    // Add no-cache flag if requested
+    if no_cache {
+        cmd.arg("--no-cache");
     }
 
     if push {
