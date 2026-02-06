@@ -99,6 +99,8 @@ For production deployments, always use HTTPS. For local development:
 - **Standards-Compliant**: RFC 7636 PKCE flow works with any compliant OAuth provider
 - **Constant-Time Validation**: Rise uses constant-time comparison to prevent timing attacks
 
+> **Note**: This example works with both OAuth 2.0 and OIDC providers. For OAuth 2.0 providers like GitHub (which don't provide `id_token`), you'll receive only the access token and would need to call the provider's user API to get profile information.
+
 ## Testing Locally
 
 For local development without deploying:

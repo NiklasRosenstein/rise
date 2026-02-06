@@ -91,6 +91,8 @@ The app will be available at `http://localhost:8080`.
 - **CSRF protection**: State parameter validated
 - **No token leakage**: Tokens never in URL, browser history, or server logs
 
+> **Note**: This example requires an OIDC provider (like Dex, Google, Auth0) that returns an `id_token`. GitHub OAuth won't work out-of-the-box because it doesn't support OIDC - you'd need to replace the `/api/protected` endpoint's id_token validation with a call to `https://api.github.com/user`.
+
 ## Deploying to Rise
 
 To deploy this example to Rise:
