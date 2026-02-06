@@ -18,25 +18,20 @@ pub struct OAuthExtensionSpec {
     /// Encrypted client secret stored directly in spec (preferred over client_secret_ref)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub client_secret_encrypted: Option<String>,
-    /// OAuth provider authorization URL
-    pub authorization_endpoint: String,
-    /// OAuth provider token URL
-    pub token_endpoint: String,
+    /// OIDC issuer URL (required) - used for endpoint discovery via .well-known/openid-configuration
+    /// For OIDC-compliant providers (Google, Snowflake, Dex), endpoints are fetched automatically
+    /// For non-OIDC providers (GitHub), set authorization_endpoint and token_endpoint manually
+    pub issuer_url: String,
+    /// OAuth provider authorization URL (optional override)
+    /// If not provided, fetched from issuer_url's OIDC discovery document
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authorization_endpoint: Option<String>,
+    /// OAuth provider token URL (optional override)
+    /// If not provided, fetched from issuer_url's OIDC discovery document
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token_endpoint: Option<String>,
     /// OAuth scopes to request
     pub scopes: Vec<String>,
-    /// OIDC issuer URL (optional, for id_token validation via JWKS discovery)
-    /// If not provided, will be derived from token_endpoint base URL
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub issuer: Option<String>,
-    /// Rise client ID (for apps to authenticate to Rise's /token endpoint)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rise_client_id: Option<String>,
-    /// Environment variable name containing Rise client secret (e.g., "{EXT}_CLIENT_SECRET")
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rise_client_secret_ref: Option<String>,
-    /// Encrypted backup of Rise client secret in spec (for restoration)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub rise_client_secret_encrypted: Option<String>,
 }
 
 /// Extension status - system-computed metadata
@@ -54,6 +49,13 @@ pub struct OAuthExtensionStatus {
     /// Configuration or validation errors
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    /// Rise client ID (for apps to authenticate to Rise's /token endpoint)
+    /// Format: {project}-{extension}
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rise_client_id: Option<String>,
+    /// Rise client secret (plaintext, not highly sensitive)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rise_client_secret: Option<String>,
 }
 
 /// OAuth state stored temporarily during authorization flow
@@ -84,7 +86,8 @@ pub struct OAuthState {
 pub struct TokenResponse {
     pub access_token: String,
     pub token_type: String,
-    pub expires_in: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expires_in: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh_token: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -101,7 +104,7 @@ pub struct CallbackRequest {
 }
 
 /// Authorization code state for OAuth 2.0 flow
-/// Stores encrypted tokens from upstream provider for single-use exchange
+/// Stores encrypted raw token response from upstream provider for single-use exchange
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OAuthCodeState {
     /// Project ID
@@ -119,17 +122,12 @@ pub struct OAuthCodeState {
     /// PKCE code challenge method ("S256" or "plain")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub code_challenge_method: Option<String>,
-    /// Encrypted access token from upstream OAuth provider
-    pub access_token_encrypted: String,
-    /// Encrypted refresh token (optional)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub refresh_token_encrypted: Option<String>,
-    /// Encrypted ID token (optional, OIDC)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub id_token_encrypted: Option<String>,
-    /// Token expiration time
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub expires_at: Option<DateTime<Utc>>,
+    /// Raw encrypted token response body from upstream provider (cached as-is, no parsing)
+    pub token_response_encrypted: String,
+    /// Content-Type header from upstream provider (preserved for accurate passthrough)
+    pub content_type: String,
+    /// HTTP status code from upstream provider (preserved for accurate passthrough)
+    pub status_code: u16,
 }
 
 /// OAuth authorization request parameters

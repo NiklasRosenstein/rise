@@ -284,7 +284,16 @@ Obtain client credentials from your OAuth provider:
 - **Client Secret**: Secret key (never expose in frontend)
 - **Redirect URI**: Set to `https://api.{your-domain}/oidc/{project}/{extension}/callback`
 
-**2. Store Client Secret in Rise**
+**2. Determine Provider Type**
+
+Rise supports two types of OAuth providers:
+
+| Provider Type | issuer_url | Endpoints |
+|--------------|-----------|-----------|
+| **OIDC-compliant** (Google, Dex, Auth0) | Required | Auto-discovered via `{issuer_url}/.well-known/openid-configuration` |
+| **Non-OIDC** (GitHub, Snowflake) | Required | Must set `authorization_endpoint` and `token_endpoint` manually |
+
+**3. Store Client Secret in Rise**
 
 There are two ways to store the OAuth provider's client secret:
 
@@ -303,8 +312,7 @@ rise extension create oauth-provider \
     "provider_name": "My OAuth Provider",
     "client_id": "your_client_id",
     "client_secret_encrypted": "'"$ENCRYPTED"'",
-    "authorization_endpoint": "https://provider.com/oauth/authorize",
-    "token_endpoint": "https://provider.com/oauth/token",
+    "issuer_url": "https://accounts.google.com",
     "scopes": ["openid", "email", "profile"]
   }'
 
@@ -335,8 +343,7 @@ rise extension create oauth-provider -p my-app \
     "provider_name": "My OAuth Provider",
     "client_id": "your_client_id",
     "client_secret_ref": "OAUTH_GOOGLE_SECRET",
-    "authorization_endpoint": "https://provider.com/oauth/authorize",
-    "token_endpoint": "https://provider.com/oauth/token",
+    "issuer_url": "https://accounts.google.com",
     "scopes": ["openid", "email", "profile"]
   }'
 ```
@@ -349,45 +356,53 @@ rise extension create oauth-provider -p my-app \
 
 ### Creating OAuth Extension
 
-**Generic Provider (using encrypted secret):**
+**OIDC-Compliant Provider (Google, Dex, Auth0):**
+
+For OIDC-compliant providers, only `issuer_url` is needed - endpoints are auto-discovered:
 
 ```bash
 # Encrypt the client secret
 ENCRYPTED=$(rise encrypt "your_client_secret_here")
 
-# Create extension with encrypted secret
-rise extension create oauth-provider -p my-app \
+# Create extension - endpoints auto-discovered via OIDC
+rise extension create oauth-google -p my-app \
   --type oauth \
   --spec '{
-    "provider_name": "My OAuth Provider",
-    "description": "OAuth authentication for my app",
-    "client_id": "your_client_id",
+    "provider_name": "Google",
+    "description": "Sign in with Google",
+    "client_id": "123456789.apps.googleusercontent.com",
     "client_secret_encrypted": "'"$ENCRYPTED"'",
-    "authorization_endpoint": "https://provider.com/oauth/authorize",
-    "token_endpoint": "https://provider.com/oauth/token",
+    "issuer_url": "https://accounts.google.com",
     "scopes": ["openid", "email", "profile"]
+  }'
+```
+
+**Non-OIDC Provider (GitHub, Snowflake):**
+
+For non-OIDC providers, also set `authorization_endpoint` and `token_endpoint`:
+
+```bash
+# Encrypt the client secret
+ENCRYPTED=$(rise encrypt "your_client_secret_here")
+
+# Create extension with manual endpoints
+rise extension create oauth-github -p my-app \
+  --type oauth \
+  --spec '{
+    "provider_name": "GitHub",
+    "description": "Sign in with GitHub",
+    "client_id": "Iv1.abc123...",
+    "client_secret_encrypted": "'"$ENCRYPTED"'",
+    "issuer_url": "https://github.com",
+    "authorization_endpoint": "https://github.com/login/oauth/authorize",
+    "token_endpoint": "https://github.com/login/oauth/access_token",
+    "scopes": ["read:user", "user:email"]
   }'
 ```
 
 ### Provider-Specific Examples
 
-**Snowflake:**
-
-```bash
-rise extension create oauth-snowflake -p analytics \
-  --type oauth \
-  --spec '{
-    "provider_name": "Snowflake Production",
-    "description": "Snowflake OAuth for analytics",
-    "client_id": "ABC123XYZ...",
-    "client_secret_ref": "OAUTH_SNOWFLAKE_SECRET",
-    "authorization_endpoint": "https://myorg.snowflakecomputing.com/oauth/authorize",
-    "token_endpoint": "https://myorg.snowflakecomputing.com/oauth/token-request",
-    "scopes": ["refresh_token"]
-  }'
-```
-
-**Google:**
+**Google (OIDC-compliant):**
 
 ```bash
 rise extension create oauth-google -p my-app \
@@ -397,13 +412,29 @@ rise extension create oauth-google -p my-app \
     "description": "Sign in with Google",
     "client_id": "123456789.apps.googleusercontent.com",
     "client_secret_ref": "OAUTH_GOOGLE_SECRET",
-    "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
-    "token_endpoint": "https://oauth2.googleapis.com/token",
+    "issuer_url": "https://accounts.google.com",
     "scopes": ["openid", "email", "profile"]
   }'
 ```
 
-**GitHub:**
+**Snowflake (non-OIDC):**
+
+```bash
+rise extension create oauth-snowflake -p analytics \
+  --type oauth \
+  --spec '{
+    "provider_name": "Snowflake Production",
+    "description": "Snowflake OAuth for analytics",
+    "client_id": "ABC123XYZ...",
+    "client_secret_ref": "OAUTH_SNOWFLAKE_SECRET",
+    "issuer_url": "https://myorg.snowflakecomputing.com",
+    "authorization_endpoint": "https://myorg.snowflakecomputing.com/oauth/authorize",
+    "token_endpoint": "https://myorg.snowflakecomputing.com/oauth/token-request",
+    "scopes": ["refresh_token"]
+  }'
+```
+
+**GitHub (non-OIDC):**
 
 ```bash
 rise extension create oauth-github -p my-app \
@@ -413,6 +444,7 @@ rise extension create oauth-github -p my-app \
     "description": "Sign in with GitHub",
     "client_id": "Iv1.abc123...",
     "client_secret_ref": "OAUTH_GITHUB_SECRET",
+    "issuer_url": "https://github.com",
     "authorization_endpoint": "https://github.com/login/oauth/authorize",
     "token_endpoint": "https://github.com/login/oauth/access_token",
     "scopes": ["read:user", "user:email"]
@@ -535,9 +567,14 @@ Rise proxies the refresh request to the upstream OAuth provider and returns fres
 **"Environment variable 'OAUTH_XXX_SECRET' not found"**
 - Store client secret: `rise env set <project> OAUTH_XXX_SECRET "secret" --secret`
 
-**"Invalid authorization_endpoint URL"**
+**"Failed to resolve OAuth endpoints"** or **"No authorization_endpoint in spec or OIDC discovery"**
+- For OIDC-compliant providers: Ensure `issuer_url` is correct and provider supports OIDC discovery
+- For non-OIDC providers (GitHub, Snowflake): Set `authorization_endpoint` and `token_endpoint` manually
+- Test OIDC discovery: `curl {issuer_url}/.well-known/openid-configuration`
+
+**"Invalid issuer_url URL"**
 - Ensure URL is valid HTTPS endpoint
-- Check provider documentation for correct URL
+- Don't include trailing slash or paths (e.g., `https://accounts.google.com`, not `https://accounts.google.com/`)
 
 **"Token exchange failed with status 400"**
 - Verify `client_id` and `client_secret_ref` are correct

@@ -193,8 +193,10 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
     const [hasExistingSecret, setHasExistingSecret] = useState(!!spec?.client_secret_encrypted);
     const [showSecret, setShowSecret] = useState(false);
     const [isEncrypting, setIsEncrypting] = useState(false);
+    const [issuerUrl, setIssuerUrl] = useState(spec?.issuer_url || '');
     const [authorizationEndpoint, setAuthorizationEndpoint] = useState(spec?.authorization_endpoint || '');
     const [tokenEndpoint, setTokenEndpoint] = useState(spec?.token_endpoint || '');
+    const [showAdvanced, setShowAdvanced] = useState(!!(spec?.authorization_endpoint || spec?.token_endpoint));
     const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
     const { showToast } = useToast();
 
@@ -246,8 +248,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
         const newSpec = {
             provider_name: providerName,
             client_id: clientId,
-            authorization_endpoint: authorizationEndpoint,
-            token_endpoint: tokenEndpoint,
+            issuer_url: issuerUrl,
             scopes: scopesArray,
         };
 
@@ -263,27 +264,43 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
             newSpec.client_secret_ref = null;
         }
 
+        // Include optional endpoint overrides if set
+        if (authorizationEndpoint && authorizationEndpoint.trim() !== '') {
+            newSpec.authorization_endpoint = authorizationEndpoint;
+        }
+        if (tokenEndpoint && tokenEndpoint.trim() !== '') {
+            newSpec.token_endpoint = tokenEndpoint;
+        }
+
         onChangeRef.current(newSpec);
-    }, [providerName, description, clientId, clientSecretEncrypted, authorizationEndpoint, tokenEndpoint, scopes]);
+    }, [providerName, description, clientId, clientSecretEncrypted, issuerUrl, authorizationEndpoint, tokenEndpoint, scopes]);
 
     // Common provider templates
+    // - OIDC-compliant providers (Google): use issuer_url, endpoints auto-discovered
+    // - Non-OIDC providers (GitHub, Snowflake): need manual endpoints
     const providerTemplates = {
         snowflake: {
             name: 'Snowflake',
+            issuerUrl: 'https://YOUR_ACCOUNT.snowflakecomputing.com',
             authEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/authorize',
             tokenEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/token-request',
+            needsEndpoints: true, // Snowflake doesn't support OIDC discovery
             scopes: 'refresh_token'
         },
         google: {
             name: 'Google',
-            authEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
-            tokenEndpoint: 'https://oauth2.googleapis.com/token',
+            issuerUrl: 'https://accounts.google.com',
+            authEndpoint: '',  // Auto-discovered via OIDC
+            tokenEndpoint: '', // Auto-discovered via OIDC
+            needsEndpoints: false,
             scopes: 'openid, email, profile'
         },
         github: {
             name: 'GitHub',
+            issuerUrl: 'https://github.com',
             authEndpoint: 'https://github.com/login/oauth/authorize',
             tokenEndpoint: 'https://github.com/login/oauth/access_token',
+            needsEndpoints: true, // GitHub is not OIDC-compliant
             scopes: 'read:user, user:email'
         }
     };
@@ -292,9 +309,14 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
         const template = providerTemplates[templateKey];
         if (template) {
             setProviderName(template.name);
+            setIssuerUrl(template.issuerUrl);
             setAuthorizationEndpoint(template.authEndpoint);
             setTokenEndpoint(template.tokenEndpoint);
             setScopes(template.scopes);
+            // Show advanced settings if endpoints are needed
+            if (template.needsEndpoints) {
+                setShowAdvanced(true);
+            }
             showToast(`Applied ${template.name} template`, 'success');
         }
     };
@@ -334,7 +356,7 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
 
                 <div className="space-y-2">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Client Secret {hasExistingSecret && !clientSecretPlaintext && <span className="text-gray-500 dark:text-gray-400">(configured)</span>}
+                        Client Secret <span className="text-red-500">*</span> {hasExistingSecret && !clientSecretPlaintext && <span className="text-gray-500 dark:text-gray-400">(configured)</span>}
                         {clientSecretPlaintext && <span className="text-blue-600 dark:text-blue-400">(will be updated)</span>}
                     </label>
                     <div className="flex gap-2">
@@ -373,23 +395,13 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                 </div>
 
                 <FormField
-                    label="Authorization Endpoint"
-                    id="oauth-authorization-endpoint"
-                    value={authorizationEndpoint}
-                    onChange={(e) => setAuthorizationEndpoint(e.target.value)}
-                    placeholder="https://provider.com/oauth/authorize"
+                    label="Issuer URL"
+                    id="oauth-issuer-url"
+                    value={issuerUrl}
+                    onChange={(e) => setIssuerUrl(e.target.value)}
+                    placeholder="https://accounts.google.com"
                     required
-                    helperText="OAuth provider's authorization URL"
-                />
-
-                <FormField
-                    label="Token Endpoint"
-                    id="oauth-token-endpoint"
-                    value={tokenEndpoint}
-                    onChange={(e) => setTokenEndpoint(e.target.value)}
-                    placeholder="https://provider.com/oauth/token"
-                    required
-                    helperText="OAuth provider's token URL"
+                    helperText="OIDC issuer URL. For OIDC-compliant providers, endpoints are auto-discovered. For non-OIDC providers (GitHub), also set endpoints below."
                 />
 
                 <FormField
@@ -402,17 +414,43 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
                     helperText="Comma-separated list of OAuth scopes to request"
                 />
 
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">About This Extension</h4>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                        The Generic OAuth 2.0 extension allows your application to authenticate end users via any OAuth 2.0 provider
-                        (Snowflake, Google, GitHub, custom SSO, etc.) without managing client secrets locally.
-                    </p>
-                    <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                        <strong>Security:</strong> Client secrets are stored encrypted and never exposed to your application.
-                        Supports PKCE flow for SPAs and RFC 6749-compliant token endpoint for backend apps.
+                {/* Advanced: Manual endpoint overrides */}
+                <div className="border-t border-gray-300 dark:border-gray-700 pt-4 mt-4">
+                    <button
+                        type="button"
+                        onClick={() => setShowAdvanced(!showAdvanced)}
+                        className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400"
+                    >
+                        <span className="mr-2">{showAdvanced ? '▼' : '▶'}</span>
+                        Advanced: Manual Endpoint Overrides
+                    </button>
+                    <p className="text-xs text-gray-600 dark:text-gray-500 mt-1">
+                        Only needed for non-OIDC providers (GitHub) or if OIDC discovery fails
                     </p>
                 </div>
+
+                {showAdvanced && (
+                    <div className="space-y-4 pl-4 border-l-2 border-gray-300 dark:border-gray-700">
+                        <FormField
+                            label="Authorization Endpoint (Optional)"
+                            id="oauth-authorization-endpoint"
+                            value={authorizationEndpoint}
+                            onChange={(e) => setAuthorizationEndpoint(e.target.value)}
+                            placeholder="https://github.com/login/oauth/authorize"
+                            helperText="Override authorization URL (leave empty to use OIDC discovery)"
+                        />
+
+                        <FormField
+                            label="Token Endpoint (Optional)"
+                            id="oauth-token-endpoint"
+                            value={tokenEndpoint}
+                            onChange={(e) => setTokenEndpoint(e.target.value)}
+                            placeholder="https://github.com/login/oauth/access_token"
+                            helperText="Override token URL (leave empty to use OIDC discovery)"
+                        />
+                    </div>
+                )}
+
             </div>
 
             {/* Right column - Redirect URI and Quick Start */}
@@ -838,182 +876,84 @@ function OAuthDetailView({ extension, projectName }) {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 {/* Left column - Main content */}
                 <div className="lg:col-span-2 space-y-6">
-                    {/* Provider Configuration */}
+                    {/* Upstream OAuth Provider Configuration */}
                     <section>
-                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">OAuth Provider</h2>
-                        <div className="bg-white dark:bg-gray-900 rounded p-4 space-y-3">
-                            <div>
-                                <p className="text-sm text-gray-600 dark:text-gray-500">Provider Name</p>
-                                <p className="text-gray-700 dark:text-gray-300 font-semibold">{spec.provider_name || 'N/A'}</p>
-                            </div>
-                            {spec.description && (
-                                <div>
-                                    <p className="text-sm text-gray-600 dark:text-gray-500">Description</p>
-                                    <p className="text-gray-700 dark:text-gray-300">{spec.description}</p>
-                                </div>
-                            )}
-                            <div>
-                                <p className="text-sm text-gray-600 dark:text-gray-500">Client ID</p>
-                                <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">{spec.client_id || 'N/A'}</p>
-                            </div>
-                            {spec.client_secret_ref && (
-                                <div>
-                                    <p className="text-sm text-gray-600 dark:text-gray-500">
-                                        Client Secret Reference <span className="text-yellow-600 dark:text-yellow-400 text-xs">(deprecated)</span>
-                                    </p>
-                                    <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">{spec.client_secret_ref}</p>
-                                </div>
-                            )}
-                        </div>
-                    </section>
-
-                    {/* Endpoints */}
-                    <section>
-                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">OAuth Endpoints</h2>
-                        <div className="bg-white dark:bg-gray-900 rounded p-4 space-y-3">
-                            <div>
-                                <p className="text-sm text-gray-600 dark:text-gray-500">Authorization Endpoint</p>
-                                <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.authorization_endpoint || 'N/A'}</p>
-                            </div>
-                            <div>
-                                <p className="text-sm text-gray-600 dark:text-gray-500">Token Endpoint</p>
-                                <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.token_endpoint || 'N/A'}</p>
-                            </div>
-                        </div>
-                    </section>
-
-                    {/* Scopes */}
-                    <section>
-                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">
-                            OAuth Scopes ({scopesArray.length})
-                        </h2>
-                        <div className="bg-white dark:bg-gray-900 rounded p-4">
-                            {scopesArray.length === 0 ? (
-                                <p className="text-gray-600 dark:text-gray-400 text-sm">No scopes configured</p>
-                            ) : (
-                                <div className="flex flex-wrap gap-2">
-                                    {scopesArray.map((scope, idx) => (
-                                        <span
-                                            key={idx}
-                                            className="bg-indigo-600 text-white text-xs font-semibold px-3 py-1 rounded-full"
-                                        >
-                                            {scope}
-                                        </span>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-                    </section>
-
-                    {/* Rise Client Configuration (for integrating applications) */}
-                    <section>
-                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Rise Client Configuration</h2>
-                        <div className="bg-green-50 dark:bg-green-900/20 border border-green-600 dark:border-green-700 rounded p-4">
-                            <p className="text-sm text-green-800 dark:text-green-200 mb-3">
-                                Use these values in your application to integrate with this OAuth extension:
-                            </p>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Upstream OAuth Provider</h2>
+                        <div className="bg-white dark:bg-gray-900 rounded p-4 space-y-4">
+                            {/* Provider info */}
                             <div className="space-y-3">
                                 <div>
-                                    <p className="text-sm text-green-700 dark:text-green-400">Rise Client ID</p>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono">
-                                            {spec.rise_client_id || `${projectName}-${extensionName}`}
-                                        </code>
-                                        <button
-                                            type="button"
-                                            onClick={async () => {
-                                                try {
-                                                    const clientId = spec.rise_client_id || `${projectName}-${extensionName}`;
-                                                    await copyToClipboard(clientId);
-                                                    showToast('Client ID copied to clipboard', 'success');
-                                                } catch (err) {
-                                                    showToast(`Failed to copy: ${err.message}`, 'error');
-                                                }
-                                            }}
-                                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
-                                            title="Copy client ID"
-                                        >
-                                            Copy
-                                        </button>
-                                    </div>
-                                    <p className="text-xs text-green-600 dark:text-green-500 mt-1">
-                                        Format: {'{project}-{extension}'} (deterministic, safe to embed in frontend code)
-                                    </p>
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">Provider Name</p>
+                                    <p className="text-gray-700 dark:text-gray-300 font-semibold">{spec.provider_name || 'N/A'}</p>
                                 </div>
-                                {spec.rise_client_secret_ref && (
+                                {spec.description && (
                                     <div>
-                                        <p className="text-sm text-green-700 dark:text-green-400">Rise Client Secret (env var)</p>
-                                        <div className="flex items-center gap-2 mt-1">
-                                            <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono">
-                                                {spec.rise_client_secret_ref}
-                                            </code>
-                                            <button
-                                                type="button"
-                                                onClick={async () => {
-                                                    try {
-                                                        await copyToClipboard(spec.rise_client_secret_ref);
-                                                        showToast('Secret env var name copied to clipboard', 'success');
-                                                    } catch (err) {
-                                                        showToast(`Failed to copy: ${err.message}`, 'error');
-                                                    }
-                                                }}
-                                                className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
-                                                title="Copy env var name"
-                                            >
-                                                Copy
-                                            </button>
-                                        </div>
-                                        <p className="text-xs text-green-600 dark:text-green-500 mt-1">
-                                            Available in your deployed app. Use for confidential client flows (backend apps).
-                                        </p>
+                                        <p className="text-sm text-gray-600 dark:text-gray-500">Description</p>
+                                        <p className="text-gray-700 dark:text-gray-300">{spec.description}</p>
                                     </div>
                                 )}
                                 <div>
-                                    <p className="text-sm text-green-700 dark:text-green-400">Authorize URL</p>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono break-all">
-                                            {`${backendUrl}/oidc/${projectName}/${extensionName}/authorize`}
-                                        </code>
-                                        <button
-                                            type="button"
-                                            onClick={async () => {
-                                                try {
-                                                    await copyToClipboard(`${backendUrl}/oidc/${projectName}/${extensionName}/authorize`);
-                                                    showToast('Authorize URL copied to clipboard', 'success');
-                                                } catch (err) {
-                                                    showToast(`Failed to copy: ${err.message}`, 'error');
-                                                }
-                                            }}
-                                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
-                                            title="Copy authorize URL"
-                                        >
-                                            Copy
-                                        </button>
-                                    </div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">Client ID</p>
+                                    <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">{spec.client_id || 'N/A'}</p>
                                 </div>
+                                {spec.client_secret_ref && (
+                                    <div>
+                                        <p className="text-sm text-gray-600 dark:text-gray-500">
+                                            Client Secret Reference <span className="text-yellow-600 dark:text-yellow-400 text-xs">(deprecated)</span>
+                                        </p>
+                                        <p className="text-gray-700 dark:text-gray-300 font-mono text-sm">{spec.client_secret_ref}</p>
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Divider */}
+                            <div className="border-t border-gray-200 dark:border-gray-700"></div>
+
+                            {/* Endpoints */}
+                            <div className="space-y-3">
                                 <div>
-                                    <p className="text-sm text-green-700 dark:text-green-400">Token Endpoint</p>
-                                    <div className="flex items-center gap-2 mt-1">
-                                        <code className="flex-1 bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 font-mono break-all">
-                                            {`${backendUrl}/oidc/${projectName}/${extensionName}/token`}
-                                        </code>
-                                        <button
-                                            type="button"
-                                            onClick={async () => {
-                                                try {
-                                                    await copyToClipboard(`${backendUrl}/oidc/${projectName}/${extensionName}/token`);
-                                                    showToast('Token endpoint copied to clipboard', 'success');
-                                                } catch (err) {
-                                                    showToast(`Failed to copy: ${err.message}`, 'error');
-                                                }
-                                            }}
-                                            className="px-3 py-2 bg-green-600 hover:bg-green-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
-                                            title="Copy token endpoint"
-                                        >
-                                            Copy
-                                        </button>
-                                    </div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">Issuer URL</p>
+                                    <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.issuer_url || 'N/A'}</p>
                                 </div>
+                                {spec.authorization_endpoint && (
+                                    <div>
+                                        <p className="text-sm text-gray-600 dark:text-gray-500">Authorization Endpoint <span className="text-xs text-gray-500">(override)</span></p>
+                                        <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.authorization_endpoint}</p>
+                                    </div>
+                                )}
+                                {spec.token_endpoint && (
+                                    <div>
+                                        <p className="text-sm text-gray-600 dark:text-gray-500">Token Endpoint <span className="text-xs text-gray-500">(override)</span></p>
+                                        <p className="text-gray-700 dark:text-gray-300 font-mono text-xs break-all">{spec.token_endpoint}</p>
+                                    </div>
+                                )}
+                                {!spec.authorization_endpoint && !spec.token_endpoint && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-500 italic">
+                                        Endpoints auto-discovered via OIDC discovery
+                                    </p>
+                                )}
+                            </div>
+
+                            {/* Divider */}
+                            <div className="border-t border-gray-200 dark:border-gray-700"></div>
+
+                            {/* Scopes */}
+                            <div>
+                                <p className="text-sm text-gray-600 dark:text-gray-500 mb-2">Scopes ({scopesArray.length})</p>
+                                {scopesArray.length === 0 ? (
+                                    <p className="text-gray-600 dark:text-gray-400 text-sm italic">No scopes configured</p>
+                                ) : (
+                                    <div className="flex flex-wrap gap-2">
+                                        {scopesArray.map((scope, idx) => (
+                                            <span
+                                                key={idx}
+                                                className="bg-indigo-600 text-white text-xs font-semibold px-3 py-1 rounded-full"
+                                            >
+                                                {scope}
+                                            </span>
+                                        ))}
+                                    </div>
+                                )}
                             </div>
                         </div>
                     </section>
@@ -1090,6 +1030,122 @@ function OAuthDetailView({ extension, projectName }) {
                     </section>
                 </div>
             </div>
+
+            {/* Injected Environment Variables - Full width below the grid */}
+            <section className="mt-6">
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Injected Environment Variables</h2>
+                <div className="bg-white dark:bg-gray-900 rounded p-4">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
+                        These environment variables are injected into your deployed application:
+                    </p>
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-sm">
+                            <thead>
+                                <tr className="border-b border-gray-300 dark:border-gray-700">
+                                    <th className="text-left py-2 px-3 text-gray-600 dark:text-gray-400 font-medium">Variable</th>
+                                    <th className="text-left py-2 px-3 text-gray-600 dark:text-gray-400 font-medium">Value</th>
+                                    <th className="py-2 px-3 w-10"></th>
+                                </tr>
+                            </thead>
+                            <tbody className="font-mono text-xs">
+                                <tr className="border-b border-gray-200 dark:border-gray-800">
+                                    <td className="py-3 px-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                        {extensionName.toUpperCase().replace(/-/g, '_')}_CLIENT_ID
+                                    </td>
+                                    <td className="py-3 px-3 text-gray-900 dark:text-gray-200 break-all">
+                                        {status?.rise_client_id || `${projectName}-${extensionName}`}
+                                    </td>
+                                    <td className="py-3 px-3">
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await copyToClipboard(status?.rise_client_id || `${projectName}-${extensionName}`);
+                                                    showToast('Client ID copied', 'success');
+                                                } catch (err) {
+                                                    showToast(`Failed to copy: ${err.message}`, 'error');
+                                                }
+                                            }}
+                                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                                            title="Copy to clipboard"
+                                        >
+                                            <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                            </svg>
+                                        </button>
+                                    </td>
+                                </tr>
+                                <tr className="border-b border-gray-200 dark:border-gray-800">
+                                    <td className="py-3 px-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                        {extensionName.toUpperCase().replace(/-/g, '_')}_CLIENT_SECRET
+                                    </td>
+                                    <td className="py-3 px-3 text-gray-500 dark:text-gray-500">
+                                        ••••••••
+                                    </td>
+                                    <td className="py-3 px-3">
+                                        {status?.rise_client_secret && (
+                                            <button
+                                                type="button"
+                                                onClick={async () => {
+                                                    try {
+                                                        await copyToClipboard(status.rise_client_secret);
+                                                        showToast('Client secret copied', 'success');
+                                                    } catch (err) {
+                                                        showToast(`Failed to copy: ${err.message}`, 'error');
+                                                    }
+                                                }}
+                                                className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                                                title="Copy to clipboard"
+                                            >
+                                                <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                                </svg>
+                                            </button>
+                                        )}
+                                    </td>
+                                </tr>
+                                <tr className="border-b border-gray-200 dark:border-gray-800">
+                                    <td className="py-3 px-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
+                                        {extensionName.toUpperCase().replace(/-/g, '_')}_ISSUER
+                                    </td>
+                                    <td className="py-3 px-3 text-gray-900 dark:text-gray-200 break-all">
+                                        <a
+                                            href={`${backendUrl}/oidc/${projectName}/${extensionName}/.well-known/openid-configuration`}
+                                            target="_blank"
+                                            rel="noopener noreferrer"
+                                            className="text-indigo-600 dark:text-indigo-400 hover:underline"
+                                        >
+                                            {`${backendUrl}/oidc/${projectName}/${extensionName}`}
+                                        </a>
+                                    </td>
+                                    <td className="py-3 px-3">
+                                        <button
+                                            type="button"
+                                            onClick={async () => {
+                                                try {
+                                                    await copyToClipboard(`${backendUrl}/oidc/${projectName}/${extensionName}`);
+                                                    showToast('Issuer URL copied', 'success');
+                                                } catch (err) {
+                                                    showToast(`Failed to copy: ${err.message}`, 'error');
+                                                }
+                                            }}
+                                            className="p-1 hover:bg-gray-200 dark:hover:bg-gray-700 rounded transition-colors"
+                                            title="Copy to clipboard"
+                                        >
+                                            <svg className="w-4 h-4 text-gray-500 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                                            </svg>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                    <p className="text-xs text-gray-500 dark:text-gray-500 mt-3">
+                        Click the issuer URL to view the OIDC discovery document.
+                    </p>
+                </div>
+            </section>
         </>
     );
 }
