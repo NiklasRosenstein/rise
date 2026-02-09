@@ -864,40 +864,92 @@ pub async fn add_app_user(
     project: &str,
     identifier: &str,
 ) -> Result<()> {
+    use crate::api::project::{ProjectWithOwnerInfo, UpdateProjectRequest, UpdateProjectResponse};
+
     let (identifier_type, identifier_value) = parse_app_user_identifier(identifier)?;
 
-    #[derive(Serialize)]
-    #[serde(rename_all = "snake_case")]
-    enum AppUserIdentifier {
-        User(String),
-        Team(String),
-    }
-
-    #[derive(Serialize)]
-    struct AddAppUserRequest {
-        identifier: AppUserIdentifier,
-    }
-
-    let identifier_payload = if identifier_type == "user" {
-        AppUserIdentifier::User(identifier_value.clone())
-    } else {
-        AppUserIdentifier::Team(identifier_value.clone())
-    };
-
-    let request = AddAppUserRequest {
-        identifier: identifier_payload,
-    };
-
-    let url = format!("{}/api/v1/projects/{}/app-users", backend_url, project);
+    // Step 1: Fetch current project state
+    let url = format!("{}/api/v1/projects/{}", backend_url, project);
     let response = http_client
-        .post(&url)
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .context("Failed to fetch project")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to fetch project (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    let current_project: ProjectWithOwnerInfo = response
+        .json()
+        .await
+        .context("Failed to parse project response")?;
+
+    // Step 2: Build updated lists
+    let mut updated_users: Vec<String> = current_project
+        .app_users
+        .iter()
+        .map(|u| u.email.clone())
+        .collect();
+    let mut updated_teams: Vec<String> = current_project
+        .app_teams
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
+
+    if identifier_type == "user" {
+        if updated_users.contains(&identifier_value) {
+            anyhow::bail!(
+                "User '{}' is already an app user for project '{}'",
+                identifier_value,
+                project
+            );
+        }
+        updated_users.push(identifier_value.clone());
+    } else {
+        if updated_teams.contains(&identifier_value) {
+            anyhow::bail!(
+                "Team '{}' is already an app team for project '{}'",
+                identifier_value,
+                project
+            );
+        }
+        updated_teams.push(identifier_value.clone());
+    }
+
+    // Step 3: Submit updated project via PUT
+    let request = UpdateProjectRequest {
+        name: None,
+        access_class: None,
+        owner: None,
+        app_users: Some(updated_users),
+        app_teams: Some(updated_teams),
+    };
+
+    let url = format!("{}/api/v1/projects/{}", backend_url, project);
+    let response = http_client
+        .put(&url)
         .header("Authorization", format!("Bearer {}", token))
         .json(&request)
         .send()
         .await
-        .context("Failed to send add app user request")?;
+        .context("Failed to update project")?;
 
     if response.status().is_success() {
+        let _update_response: UpdateProjectResponse = response
+            .json()
+            .await
+            .context("Failed to parse update response")?;
         println!(
             "✓ Added {}:{} as app user for project '{}'",
             identifier_type, identifier_value, project
@@ -922,30 +974,95 @@ pub async fn remove_app_user(
     project: &str,
     identifier: &str,
 ) -> Result<()> {
+    use crate::api::project::{ProjectWithOwnerInfo, UpdateProjectRequest, UpdateProjectResponse};
+
     let (identifier_type, identifier_value) = parse_app_user_identifier(identifier)?;
 
-    let url = format!(
-        "{}/api/v1/projects/{}/app-users/{}/{}",
-        backend_url, project, identifier_type, identifier_value
-    );
+    // Step 1: Fetch current project state
+    let url = format!("{}/api/v1/projects/{}", backend_url, project);
     let response = http_client
-        .delete(&url)
+        .get(&url)
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
-        .context("Failed to send remove app user request")?;
+        .context("Failed to fetch project")?;
 
-    if response.status().is_success() {
-        println!(
-            "✓ Removed {}:{} from app users for project '{}'",
-            identifier_type, identifier_value, project
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to fetch project (status {}): {}",
+            status,
+            error_text
         );
-    } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+    }
+
+    let current_project: ProjectWithOwnerInfo = response
+        .json()
+        .await
+        .context("Failed to parse project response")?;
+
+    // Step 2: Build updated lists
+    let mut updated_users: Vec<String> = current_project
+        .app_users
+        .iter()
+        .map(|u| u.email.clone())
+        .collect();
+    let mut updated_teams: Vec<String> = current_project
+        .app_teams
+        .iter()
+        .map(|t| t.name.clone())
+        .collect();
+
+    let mut found = false;
+    if identifier_type == "user" {
+        if let Some(pos) = updated_users.iter().position(|u| u == &identifier_value) {
+            updated_users.remove(pos);
+            found = true;
+        }
+    } else if let Some(pos) = updated_teams.iter().position(|t| t == &identifier_value) {
+        updated_teams.remove(pos);
+        found = true;
+    }
+
+    if !found {
         anyhow::bail!(
             "App user {}:{} not found for project '{}'",
             identifier_type,
             identifier_value,
             project
+        );
+    }
+
+    // Step 3: Submit updated project via PUT
+    let request = UpdateProjectRequest {
+        name: None,
+        access_class: None,
+        owner: None,
+        app_users: Some(updated_users),
+        app_teams: Some(updated_teams),
+    };
+
+    let url = format!("{}/api/v1/projects/{}", backend_url, project);
+    let response = http_client
+        .put(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&request)
+        .send()
+        .await
+        .context("Failed to update project")?;
+
+    if response.status().is_success() {
+        let _update_response: UpdateProjectResponse = response
+            .json()
+            .await
+            .context("Failed to parse update response")?;
+        println!(
+            "✓ Removed {}:{} from app users for project '{}'",
+            identifier_type, identifier_value, project
         );
     } else {
         let status = response.status();
@@ -970,15 +1087,15 @@ pub async fn list_app_users(
     token: &str,
     project: &str,
 ) -> Result<()> {
-    use crate::api::project::ListAppUsersResponse;
+    use crate::api::project::ProjectWithOwnerInfo;
 
-    let url = format!("{}/api/v1/projects/{}/app-users", backend_url, project);
+    let url = format!("{}/api/v1/projects/{}", backend_url, project);
     let response = http_client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
-        .context("Failed to fetch app users")?;
+        .context("Failed to fetch project")?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -987,18 +1104,18 @@ pub async fn list_app_users(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!(
-            "Failed to fetch app users (status {}): {}",
+            "Failed to fetch project (status {}): {}",
             status,
             error_text
         );
     }
 
-    let app_users_response: ListAppUsersResponse = response
+    let project_info: ProjectWithOwnerInfo = response
         .json()
         .await
-        .context("Failed to parse app users response")?;
+        .context("Failed to parse project response")?;
 
-    if app_users_response.users.is_empty() && app_users_response.teams.is_empty() {
+    if project_info.app_users.is_empty() && project_info.app_teams.is_empty() {
         println!("No app users or teams configured for project '{}'", project);
         println!("\nApp users can access the deployed application at the ingress level");
         println!("but have no project management permissions.");
@@ -1014,11 +1131,11 @@ pub async fn list_app_users(
             Cell::new("IDENTIFIER").add_attribute(Attribute::Bold),
         ]);
 
-    for user in app_users_response.users {
+    for user in project_info.app_users {
         table.add_row(vec![Cell::new("user"), Cell::new(&user.email)]);
     }
 
-    for team in app_users_response.teams {
+    for team in project_info.app_teams {
         table.add_row(vec![Cell::new("team"), Cell::new(&team.name)]);
     }
 

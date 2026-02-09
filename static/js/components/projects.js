@@ -597,8 +597,11 @@ function AppUsersList({ projectName }) {
     const loadAppUsers = useCallback(async () => {
         try {
             setLoading(true);
-            const data = await api.getProjectAppUsers(projectName);
-            setAppUsers(data);
+            const project = await api.getProject(projectName);
+            setAppUsers({ 
+                users: project.app_users || [], 
+                teams: project.app_teams || [] 
+            });
             setError(null);
         } catch (err) {
             setError(err.message);
@@ -620,11 +623,36 @@ function AppUsersList({ projectName }) {
 
         try {
             setAdding(true);
-            const identifier = addType === 'user' 
-                ? { user: addValue.trim() }
-                : { team: addValue.trim() };
             
-            await api.addAppUser(projectName, identifier);
+            // Fetch current project state
+            const project = await api.getProject(projectName);
+            
+            // Build updated lists
+            const updatedUsers = [...(project.app_users || []).map(u => u.email)];
+            const updatedTeams = [...(project.app_teams || []).map(t => t.name)];
+            
+            if (addType === 'user') {
+                if (updatedUsers.includes(addValue.trim())) {
+                    showToast(`User '${addValue.trim()}' is already an app user`, 'error');
+                    setAdding(false);
+                    return;
+                }
+                updatedUsers.push(addValue.trim());
+            } else {
+                if (updatedTeams.includes(addValue.trim())) {
+                    showToast(`Team '${addValue.trim()}' is already an app team`, 'error');
+                    setAdding(false);
+                    return;
+                }
+                updatedTeams.push(addValue.trim());
+            }
+            
+            // Update project via PUT
+            await api.updateProject(projectName, {
+                app_users: updatedUsers,
+                app_teams: updatedTeams
+            });
+            
             showToast(`${addType === 'user' ? 'User' : 'Team'} added successfully`, 'success');
             setIsAddModalOpen(false);
             setAddValue('');
@@ -640,7 +668,24 @@ function AppUsersList({ projectName }) {
     const handleRemove = async (type, value) => {
         try {
             setDeleting(`${type}:${value}`);
-            await api.removeAppUser(projectName, type, value);
+            
+            // Fetch current project state
+            const project = await api.getProject(projectName);
+            
+            // Build updated lists
+            const updatedUsers = (project.app_users || [])
+                .map(u => u.email)
+                .filter(email => !(type === 'user' && email === value));
+            const updatedTeams = (project.app_teams || [])
+                .map(t => t.name)
+                .filter(name => !(type === 'team' && name === value));
+            
+            // Update project via PUT
+            await api.updateProject(projectName, {
+                app_users: updatedUsers,
+                app_teams: updatedTeams
+            });
+            
             showToast(`${type === 'user' ? 'User' : 'Team'} removed successfully`, 'success');
             await loadAppUsers();
         } catch (err) {
