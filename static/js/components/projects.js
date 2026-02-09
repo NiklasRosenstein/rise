@@ -517,6 +517,12 @@ function ProjectDetail({ projectName, initialTab }) {
                     >
                         Extensions
                     </button>
+                    <button
+                        className={`pb-4 px-2 border-b-2 transition-colors cursor-pointer ${activeTab === 'app-users' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                        onClick={() => changeTab('app-users')}
+                    >
+                        App Users
+                    </button>
                 </div>
             </div>
 
@@ -552,6 +558,11 @@ function ProjectDetail({ projectName, initialTab }) {
                         <ExtensionsList projectName={projectName} />
                     </div>
                 )}
+                {activeTab === 'app-users' && (
+                    <div>
+                        <AppUsersList projectName={projectName} />
+                    </div>
+                )}
             </div>
 
             <ConfirmDialog
@@ -567,5 +578,231 @@ function ProjectDetail({ projectName, initialTab }) {
                 loading={deleting}
             />
         </section>
+    );
+}
+
+// App Users List Component
+function AppUsersList({ projectName }) {
+    const { useState, useEffect, useCallback } = React;
+    const [appUsers, setAppUsers] = useState({ users: [], teams: [] });
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+    const [addType, setAddType] = useState('user');
+    const [addValue, setAddValue] = useState('');
+    const [adding, setAdding] = useState(false);
+    const [deleting, setDeleting] = useState(null);
+    const { showToast } = useToast();
+
+    const loadAppUsers = useCallback(async () => {
+        try {
+            setLoading(true);
+            const data = await api.getProjectAppUsers(projectName);
+            setAppUsers(data);
+            setError(null);
+        } catch (err) {
+            setError(err.message);
+            showToast(`Failed to load app users: ${err.message}`, 'error');
+        } finally {
+            setLoading(false);
+        }
+    }, [projectName, showToast]);
+
+    useEffect(() => {
+        loadAppUsers();
+    }, [loadAppUsers]);
+
+    const handleAdd = async () => {
+        if (!addValue.trim()) {
+            showToast('Please enter a value', 'error');
+            return;
+        }
+
+        try {
+            setAdding(true);
+            const identifier = addType === 'user' 
+                ? { user: addValue.trim() }
+                : { team: addValue.trim() };
+            
+            await api.addAppUser(projectName, identifier);
+            showToast(`${addType === 'user' ? 'User' : 'Team'} added successfully`, 'success');
+            setIsAddModalOpen(false);
+            setAddValue('');
+            setAddType('user');
+            await loadAppUsers();
+        } catch (err) {
+            showToast(`Failed to add ${addType}: ${err.message}`, 'error');
+        } finally {
+            setAdding(false);
+        }
+    };
+
+    const handleRemove = async (type, value) => {
+        try {
+            setDeleting(`${type}:${value}`);
+            await api.removeAppUser(projectName, type, value);
+            showToast(`${type === 'user' ? 'User' : 'Team'} removed successfully`, 'success');
+            await loadAppUsers();
+        } catch (err) {
+            showToast(`Failed to remove ${type}: ${err.message}`, 'error');
+        } finally {
+            setDeleting(null);
+        }
+    };
+
+    if (loading) {
+        return React.createElement('div', { className: 'flex justify-center items-center py-8' },
+            React.createElement(LoadingSpinner, { size: 'lg' })
+        );
+    }
+
+    if (error) {
+        return React.createElement('div', { className: 'text-red-600 dark:text-red-400 py-4' },
+            `Error: ${error}`
+        );
+    }
+
+    const hasAppUsers = appUsers.users.length > 0 || appUsers.teams.length > 0;
+
+    return React.createElement('div', null,
+        React.createElement('div', { className: 'flex justify-between items-center mb-4' },
+            React.createElement('div', null,
+                React.createElement('h3', { className: 'text-xl font-bold' }, 'App Users'),
+                React.createElement('p', { className: 'text-sm text-gray-600 dark:text-gray-400 mt-1' },
+                    'Users and teams who can access the deployed application (view-only, no project management)'
+                )
+            ),
+            React.createElement(Button, {
+                onClick: () => setIsAddModalOpen(true),
+                variant: 'primary',
+                size: 'sm'
+            }, '+ Add App User/Team')
+        ),
+        
+        !hasAppUsers ? (
+            React.createElement('div', { className: 'text-center py-8 text-gray-600 dark:text-gray-400' },
+                'No app users or teams configured'
+            )
+        ) : (
+            React.createElement('div', { className: 'space-y-4' },
+                appUsers.users.length > 0 && React.createElement('div', null,
+                    React.createElement('h4', { className: 'text-lg font-semibold mb-2' }, 'Users'),
+                    React.createElement('div', { className: 'space-y-2' },
+                        appUsers.users.map((user) =>
+                            React.createElement('div', {
+                                key: user.id,
+                                className: 'flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded'
+                            },
+                                React.createElement('div', { className: 'flex items-center gap-3' },
+                                    React.createElement('div', { className: 'text-sm' },
+                                        React.createElement('div', { className: 'font-medium text-gray-900 dark:text-gray-100' },
+                                            user.email
+                                        ),
+                                        React.createElement('div', { className: 'text-xs text-gray-500 dark:text-gray-500' },
+                                            'User'
+                                        )
+                                    )
+                                ),
+                                React.createElement(Button, {
+                                    onClick: () => handleRemove('user', user.email),
+                                    variant: 'danger',
+                                    size: 'sm',
+                                    loading: deleting === `user:${user.email}`,
+                                    disabled: deleting !== null
+                                }, 'Remove')
+                            )
+                        )
+                    )
+                ),
+                appUsers.teams.length > 0 && React.createElement('div', null,
+                    React.createElement('h4', { className: 'text-lg font-semibold mb-2' }, 'Teams'),
+                    React.createElement('div', { className: 'space-y-2' },
+                        appUsers.teams.map((team) =>
+                            React.createElement('div', {
+                                key: team.id,
+                                className: 'flex items-center justify-between p-3 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded'
+                            },
+                                React.createElement('div', { className: 'flex items-center gap-3' },
+                                    React.createElement('div', { className: 'text-sm' },
+                                        React.createElement('div', { className: 'font-medium text-gray-900 dark:text-gray-100' },
+                                            team.name
+                                        ),
+                                        React.createElement('div', { className: 'text-xs text-gray-500 dark:text-gray-500' },
+                                            'Team'
+                                        )
+                                    )
+                                ),
+                                React.createElement(Button, {
+                                    onClick: () => handleRemove('team', team.name),
+                                    variant: 'danger',
+                                    size: 'sm',
+                                    loading: deleting === `team:${team.name}`,
+                                    disabled: deleting !== null
+                                }, 'Remove')
+                            )
+                        )
+                    )
+                )
+            )
+        ),
+        
+        React.createElement(Modal, {
+            isOpen: isAddModalOpen,
+            onClose: () => {
+                setIsAddModalOpen(false);
+                setAddValue('');
+                setAddType('user');
+            },
+            title: 'Add App User or Team'
+        },
+            React.createElement('div', { className: 'space-y-4' },
+                React.createElement('div', null,
+                    React.createElement('label', { className: 'block text-sm font-medium mb-2' }, 'Type'),
+                    React.createElement('select', {
+                        value: addType,
+                        onChange: (e) => setAddType(e.target.value),
+                        className: 'w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100',
+                        disabled: adding
+                    },
+                        React.createElement('option', { value: 'user' }, 'User'),
+                        React.createElement('option', { value: 'team' }, 'Team')
+                    )
+                ),
+                React.createElement('div', null,
+                    React.createElement('label', { className: 'block text-sm font-medium mb-2' },
+                        addType === 'user' ? 'Email Address' : 'Team Name'
+                    ),
+                    React.createElement('input', {
+                        type: 'text',
+                        value: addValue,
+                        onChange: (e) => setAddValue(e.target.value),
+                        placeholder: addType === 'user' ? 'user@example.com' : 'team-name',
+                        className: 'w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100',
+                        disabled: adding,
+                        onKeyPress: (e) => {
+                            if (e.key === 'Enter' && !adding) {
+                                handleAdd();
+                            }
+                        }
+                    })
+                ),
+                React.createElement('div', { className: 'flex gap-2 justify-end pt-4' },
+                    React.createElement(Button, {
+                        onClick: () => {
+                            setIsAddModalOpen(false);
+                            setAddValue('');
+                            setAddType('user');
+                        },
+                        variant: 'secondary',
+                        disabled: adding
+                    }, 'Cancel'),
+                    React.createElement(Button, {
+                        onClick: handleAdd,
+                        variant: 'primary',
+                        loading: adding
+                    }, 'Add')
+                )
+            )
+        )
     );
 }

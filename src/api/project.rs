@@ -142,3 +142,26 @@ pub struct MeResponse {
     #[allow(dead_code)]
     pub email: String,
 }
+
+/// User info in app users context
+#[derive(Debug, Deserialize)]
+pub struct AppUserInfo {
+    #[allow(dead_code)]
+    pub id: String,
+    pub email: String,
+}
+
+/// Team info in app users context
+#[derive(Debug, Deserialize)]
+pub struct AppTeamInfo {
+    #[allow(dead_code)]
+    pub id: String,
+    pub name: String,
+}
+
+/// Response from list app users endpoint
+#[derive(Debug, Deserialize)]
+pub struct ListAppUsersResponse {
+    pub users: Vec<AppUserInfo>,
+    pub teams: Vec<AppTeamInfo>,
+}

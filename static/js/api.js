@@ -297,6 +297,24 @@ class RiseAPI {
             method: 'DELETE'
         });
     }
+
+    // App user/team endpoints (view-only access to deployed apps)
+    async getProjectAppUsers(projectName) {
+        return this.request(`/projects/${projectName}/app-users`);
+    }
+
+    async addAppUser(projectName, identifier) {
+        return this.request(`/projects/${projectName}/app-users`, {
+            method: 'POST',
+            body: JSON.stringify({ identifier })
+        });
+    }
+
+    async removeAppUser(projectName, identifierType, identifierValue) {
+        return this.request(`/projects/${projectName}/app-users/${identifierType}/${identifierValue}`, {
+            method: 'DELETE'
+        });
+    }
 }
 
 const api = new RiseAPI();

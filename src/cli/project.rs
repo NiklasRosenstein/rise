@@ -838,3 +838,193 @@ pub async fn sync_env_vars(
 
     Ok(())
 }
+
+// Parse app user identifier string (format: "user:email" or "team:name")
+fn parse_app_user_identifier(identifier: &str) -> Result<(String, String)> {
+    let parts: Vec<&str> = identifier.splitn(2, ':').collect();
+    if parts.len() != 2 {
+        anyhow::bail!("Invalid identifier format. Use 'user:email' or 'team:name'");
+    }
+
+    let identifier_type = parts[0].to_lowercase();
+    let identifier_value = parts[1].to_string();
+
+    if identifier_type != "user" && identifier_type != "team" {
+        anyhow::bail!("Identifier type must be 'user' or 'team'");
+    }
+
+    Ok((identifier_type, identifier_value))
+}
+
+/// Add a user or team as an app user (view-only access to deployed app)
+pub async fn add_app_user(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    identifier: &str,
+) -> Result<()> {
+    let (identifier_type, identifier_value) = parse_app_user_identifier(identifier)?;
+
+    #[derive(Serialize)]
+    #[serde(rename_all = "snake_case")]
+    enum AppUserIdentifier {
+        User(String),
+        Team(String),
+    }
+
+    #[derive(Serialize)]
+    struct AddAppUserRequest {
+        identifier: AppUserIdentifier,
+    }
+
+    let identifier_payload = if identifier_type == "user" {
+        AppUserIdentifier::User(identifier_value.clone())
+    } else {
+        AppUserIdentifier::Team(identifier_value.clone())
+    };
+
+    let request = AddAppUserRequest {
+        identifier: identifier_payload,
+    };
+
+    let url = format!("{}/api/v1/projects/{}/app-users", backend_url, project);
+    let response = http_client
+        .post(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .json(&request)
+        .send()
+        .await
+        .context("Failed to send add app user request")?;
+
+    if response.status().is_success() {
+        println!(
+            "✓ Added {}:{} as app user for project '{}'",
+            identifier_type, identifier_value, project
+        );
+    } else {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!("Failed to add app user (status {}): {}", status, error_text);
+    }
+
+    Ok(())
+}
+
+/// Remove a user or team from app users
+pub async fn remove_app_user(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    identifier: &str,
+) -> Result<()> {
+    let (identifier_type, identifier_value) = parse_app_user_identifier(identifier)?;
+
+    let url = format!(
+        "{}/api/v1/projects/{}/app-users/{}/{}",
+        backend_url, project, identifier_type, identifier_value
+    );
+    let response = http_client
+        .delete(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .context("Failed to send remove app user request")?;
+
+    if response.status().is_success() {
+        println!(
+            "✓ Removed {}:{} from app users for project '{}'",
+            identifier_type, identifier_value, project
+        );
+    } else if response.status() == reqwest::StatusCode::NOT_FOUND {
+        anyhow::bail!(
+            "App user {}:{} not found for project '{}'",
+            identifier_type,
+            identifier_value,
+            project
+        );
+    } else {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to remove app user (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    Ok(())
+}
+
+/// List all app users and teams for a project
+pub async fn list_app_users(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+) -> Result<()> {
+    use crate::api::project::ListAppUsersResponse;
+
+    let url = format!("{}/api/v1/projects/{}/app-users", backend_url, project);
+    let response = http_client
+        .get(&url)
+        .header("Authorization", format!("Bearer {}", token))
+        .send()
+        .await
+        .context("Failed to fetch app users")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to fetch app users (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    let app_users_response: ListAppUsersResponse = response
+        .json()
+        .await
+        .context("Failed to parse app users response")?;
+
+    if app_users_response.users.is_empty() && app_users_response.teams.is_empty() {
+        println!("No app users or teams configured for project '{}'", project);
+        println!("\nApp users can access the deployed application at the ingress level");
+        println!("but have no project management permissions.");
+        return Ok(());
+    }
+
+    let mut table = Table::new();
+    table
+        .load_preset(UTF8_FULL)
+        .apply_modifier(UTF8_ROUND_CORNERS)
+        .set_header(vec![
+            Cell::new("TYPE").add_attribute(Attribute::Bold),
+            Cell::new("IDENTIFIER").add_attribute(Attribute::Bold),
+        ]);
+
+    for user in app_users_response.users {
+        table.add_row(vec![Cell::new("user"), Cell::new(&user.email)]);
+    }
+
+    for team in app_users_response.teams {
+        table.add_row(vec![Cell::new("team"), Cell::new(&team.name)]);
+    }
+
+    println!("{}", table);
+    println!("\nProject: {}", project);
+    println!("Note: App users can access the deployed application but cannot manage the project");
+
+    Ok(())
+}
