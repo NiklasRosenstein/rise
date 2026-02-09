@@ -110,11 +110,7 @@ pub async fn list_teams(pool: &PgPool, project_id: Uuid) -> Result<Vec<Uuid>> {
 
 /// Check if a user can access the deployed application (via app users or app teams)
 /// This is for ingress auth only - it does NOT grant project management permissions
-pub async fn user_can_access_app(
-    pool: &PgPool,
-    project_id: Uuid,
-    user_id: Uuid,
-) -> Result<bool> {
+pub async fn user_can_access_app(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> Result<bool> {
     let result = sqlx::query!(
         r#"
         SELECT EXISTS(

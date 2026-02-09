@@ -1710,16 +1710,15 @@ pub async fn ingress_auth(
 
         AccessRequirement::Member => {
             // Check project membership (owner or team member)
-            let has_member_access =
-                projects::user_can_access(&state.db_pool, project.id, user.id)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!("Database error checking access: {:#}", e);
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Database error".to_string(),
-                        )
-                    })?;
+            let has_member_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+                .await
+                .map_err(|e| {
+                    tracing::error!("Database error checking access: {:#}", e);
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Database error".to_string(),
+                    )
+                })?;
 
             if has_member_access {
                 tracing::debug!(
@@ -1739,16 +1738,19 @@ pub async fn ingress_auth(
             }
 
             // Check if user is an app user (view-only access to deployed app)
-            let has_app_access =
-                crate::db::project_app_users::user_can_access_app(&state.db_pool, project.id, user.id)
-                    .await
-                    .map_err(|e| {
-                        tracing::error!("Database error checking app user access: {:#}", e);
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            "Database error".to_string(),
-                        )
-                    })?;
+            let has_app_access = crate::db::project_app_users::user_can_access_app(
+                &state.db_pool,
+                project.id,
+                user.id,
+            )
+            .await
+            .map_err(|e| {
+                tracing::error!("Database error checking app user access: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
             if has_app_access {
                 tracing::debug!(

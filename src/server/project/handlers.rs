@@ -1064,11 +1064,7 @@ pub async fn add_app_user(
                     )
                 })?;
 
-            tracing::info!(
-                "Added app user {} to project {}",
-                user_id,
-                project.name
-            );
+            tracing::info!("Added app user {} to project {}", user_id, project.name);
         }
         super::models::AppUserIdentifier::Team(team_str) => {
             // Try to parse as UUID first, otherwise treat as name
@@ -1103,11 +1099,7 @@ pub async fn add_app_user(
                     )
                 })?;
 
-            tracing::info!(
-                "Added app team {} to project {}",
-                team_id,
-                project.name
-            );
+            tracing::info!("Added app team {} to project {}", team_id, project.name);
         }
     }
 
@@ -1172,11 +1164,7 @@ pub async fn remove_app_user(
                     )
                 })?;
 
-            tracing::info!(
-                "Removed app user {} from project {}",
-                user_id,
-                project.name
-            );
+            tracing::info!("Removed app user {} from project {}", user_id, project.name);
         }
         "teams" => {
             // Try to parse as UUID first, otherwise treat as name
@@ -1211,11 +1199,7 @@ pub async fn remove_app_user(
                     )
                 })?;
 
-            tracing::info!(
-                "Removed app team {} from project {}",
-                team_id,
-                project.name
-            );
+            tracing::info!("Removed app team {} from project {}", team_id, project.name);
         }
         _ => {
             return Err((
