@@ -1710,22 +1710,52 @@ pub async fn ingress_auth(
 
         AccessRequirement::Member => {
             // Check project membership (owner or team member)
-            let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-                .await
-                .map_err(|e| {
-                    tracing::error!("Database error checking access: {:#}", e);
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Database error".to_string(),
-                    )
-                })?;
+            let has_member_access =
+                projects::user_can_access(&state.db_pool, project.id, user.id)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Database error checking access: {:#}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Database error".to_string(),
+                        )
+                    })?;
 
-            if has_access {
+            if has_member_access {
                 tracing::debug!(
                     project = %params.project,
                     user_id = %user.id,
                     user_email = %user.email,
                     "Access granted - project member"
+                );
+                return Ok((
+                    StatusCode::OK,
+                    [
+                        ("X-Auth-Request-Email", email),
+                        ("X-Auth-Request-User", user.id.to_string()),
+                    ],
+                )
+                    .into_response());
+            }
+
+            // Check if user is an app user (view-only access to deployed app)
+            let has_app_access =
+                crate::db::project_app_users::user_can_access_app(&state.db_pool, project.id, user.id)
+                    .await
+                    .map_err(|e| {
+                        tracing::error!("Database error checking app user access: {:#}", e);
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            "Database error".to_string(),
+                        )
+                    })?;
+
+            if has_app_access {
+                tracing::debug!(
+                    project = %params.project,
+                    user_id = %user.id,
+                    user_email = %user.email,
+                    "Access granted - app user"
                 );
                 Ok((
                     StatusCode::OK,
@@ -1740,7 +1770,7 @@ pub async fn ingress_auth(
                     project = %params.project,
                     user_id = %user.id,
                     user_email = %user.email,
-                    "Access denied - not a project member"
+                    "Access denied - not a project member or app user"
                 );
                 Err((
                     StatusCode::FORBIDDEN,

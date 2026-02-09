@@ -185,3 +185,30 @@ impl GetProjectParams {
         fields.contains(field)
     }
 }
+
+// App user/team identifier
+#[derive(Debug, Deserialize, Serialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub enum AppUserIdentifier {
+    User(String), // User ID or email
+    Team(String), // Team ID or name
+}
+
+// Request to add app user or team
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AddAppUserRequest {
+    pub identifier: AppUserIdentifier,
+}
+
+// Response for adding app user or team
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct AddAppUserResponse {
+    pub success: bool,
+}
+
+// Response for listing app users
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct ListAppUsersResponse {
+    pub users: Vec<UserInfo>,
+    pub teams: Vec<TeamInfo>,
+}

@@ -16,4 +16,16 @@ pub fn routes() -> Router<AppState> {
         .route("/projects/{id_or_name}", get(handlers::get_project))
         .route("/projects/{id_or_name}", put(handlers::update_project))
         .route("/projects/{id_or_name}", delete(handlers::delete_project))
+        .route(
+            "/projects/{id_or_name}/app-users",
+            get(handlers::list_app_users),
+        )
+        .route(
+            "/projects/{id_or_name}/app-users",
+            post(handlers::add_app_user),
+        )
+        .route(
+            "/projects/{id_or_name}/app-users/{identifier_type}/{identifier_value}",
+            delete(handlers::remove_app_user),
+        )
 }
