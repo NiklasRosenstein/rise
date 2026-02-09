@@ -576,9 +576,7 @@ pub async fn callback(
         "Missing redirect URI in state".to_string(),
     ))?;
 
-    let is_test_flow = final_redirect_uri.starts_with(&state.public_url)
-        || final_redirect_uri.starts_with("http://localhost:")
-        || final_redirect_uri.starts_with("http://127.0.0.1:");
+    let is_test_flow = final_redirect_uri.starts_with(&state.public_url);
 
     debug!(
         "OAuth callback: flow_type={}, final_redirect_uri={}",
