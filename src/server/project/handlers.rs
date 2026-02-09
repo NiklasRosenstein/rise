@@ -1131,7 +1131,7 @@ pub async fn remove_app_user(
 
     // Process the identifier
     match identifier_type.as_str() {
-        "users" => {
+        "user" => {
             // Try to parse as UUID first, otherwise treat as email
             let user_id = if let Ok(uuid) = Uuid::parse_str(&identifier_value) {
                 uuid
@@ -1166,7 +1166,7 @@ pub async fn remove_app_user(
 
             tracing::info!("Removed app user {} from project {}", user_id, project.name);
         }
-        "teams" => {
+        "team" => {
             // Try to parse as UUID first, otherwise treat as name
             let team_id = if let Ok(uuid) = Uuid::parse_str(&identifier_value) {
                 uuid
