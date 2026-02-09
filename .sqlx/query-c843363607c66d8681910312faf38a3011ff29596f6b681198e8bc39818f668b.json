@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE project_extensions\n        SET status = $3, updated_at = NOW()\n        WHERE project_id = $1 AND extension = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c843363607c66d8681910312faf38a3011ff29596f6b681198e8bc39818f668b"
+}
