@@ -119,6 +119,72 @@ pub async fn create_project(
         }
     })?;
 
+    // Add app users if provided
+    for user_identifier in &payload.app_users {
+        let user_id = if let Ok(uuid) = Uuid::parse_str(user_identifier) {
+            uuid
+        } else {
+            // Treat as email - look up user
+            let app_user = db_users::find_by_email(&state.db_pool, user_identifier)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to lookup user: {}", e),
+                    )
+                })?
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        format!("User not found: {}", user_identifier),
+                    )
+                })?;
+            app_user.id
+        };
+
+        crate::db::project_app_users::add_user(&state.db_pool, project.id, user_id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to add app user: {}", e),
+                )
+            })?;
+    }
+
+    // Add app teams if provided
+    for team_identifier in &payload.app_teams {
+        let team_id = if let Ok(uuid) = Uuid::parse_str(team_identifier) {
+            uuid
+        } else {
+            // Treat as name - look up team
+            let team = db_teams::find_by_name(&state.db_pool, team_identifier)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to lookup team: {}", e),
+                    )
+                })?
+                .ok_or_else(|| {
+                    (
+                        StatusCode::NOT_FOUND,
+                        format!("Team not found: {}", team_identifier),
+                    )
+                })?;
+            team.id
+        };
+
+        crate::db::project_app_users::add_team(&state.db_pool, project.id, team_id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to add app team: {}", e),
+                )
+            })?;
+    }
+
     Ok(Json(CreateProjectResponse {
         project: convert_project(project),
     }))
@@ -263,6 +329,8 @@ pub async fn list_projects(
             primary_url,
             custom_domain_urls,
             deployment_groups: None, // Not populated in list view for performance
+            app_users: vec![],       // Not populated in list view for performance
+            app_teams: vec![],       // Not populated in list view for performance
         });
     }
 
@@ -384,6 +452,21 @@ pub async fn get_project(
         } else {
             Some(deployment_groups)
         };
+
+        // Load app users and teams
+        let (app_users, app_teams) = load_app_users_for_project(&state, project.id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(ProjectErrorResponse {
+                        error: format!("Failed to load app users: {}", e),
+                        suggestions: None,
+                    }),
+                )
+            })?;
+        api_project.app_users = app_users;
+        api_project.app_teams = app_teams;
 
         Ok(Json(serde_json::to_value(api_project).unwrap()))
     }
@@ -618,6 +701,152 @@ pub async fn update_project(
                         }),
                     )
                 })?;
+    }
+
+    // Update app users if provided
+    if let Some(app_users) = payload.app_users {
+        // Remove all existing app users
+        let existing_users =
+            crate::db::project_app_users::list_users(&state.db_pool, updated_project.id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ProjectErrorResponse {
+                            error: format!("Failed to list existing app users: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+
+        for user_id in existing_users {
+            crate::db::project_app_users::remove_user(&state.db_pool, updated_project.id, user_id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ProjectErrorResponse {
+                            error: format!("Failed to remove existing app user: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+        }
+
+        // Add new app users
+        for user_identifier in &app_users {
+            let user_id = if let Ok(uuid) = Uuid::parse_str(user_identifier) {
+                uuid
+            } else {
+                // Treat as email - look up user
+                let app_user = db_users::find_by_email(&state.db_pool, user_identifier)
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ProjectErrorResponse {
+                                error: format!("Failed to lookup user: {}", e),
+                                suggestions: None,
+                            }),
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        (
+                            StatusCode::NOT_FOUND,
+                            Json(ProjectErrorResponse {
+                                error: format!("User not found: {}", user_identifier),
+                                suggestions: None,
+                            }),
+                        )
+                    })?;
+                app_user.id
+            };
+
+            crate::db::project_app_users::add_user(&state.db_pool, updated_project.id, user_id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ProjectErrorResponse {
+                            error: format!("Failed to add app user: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+        }
+    }
+
+    // Update app teams if provided
+    if let Some(app_teams) = payload.app_teams {
+        // Remove all existing app teams
+        let existing_teams =
+            crate::db::project_app_users::list_teams(&state.db_pool, updated_project.id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ProjectErrorResponse {
+                            error: format!("Failed to list existing app teams: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+
+        for team_id in existing_teams {
+            crate::db::project_app_users::remove_team(&state.db_pool, updated_project.id, team_id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ProjectErrorResponse {
+                            error: format!("Failed to remove existing app team: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+        }
+
+        // Add new app teams
+        for team_identifier in &app_teams {
+            let team_id = if let Ok(uuid) = Uuid::parse_str(team_identifier) {
+                uuid
+            } else {
+                // Treat as name - look up team
+                let team = db_teams::find_by_name(&state.db_pool, team_identifier)
+                    .await
+                    .map_err(|e| {
+                        (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(ProjectErrorResponse {
+                                error: format!("Failed to lookup team: {}", e),
+                                suggestions: None,
+                            }),
+                        )
+                    })?
+                    .ok_or_else(|| {
+                        (
+                            StatusCode::NOT_FOUND,
+                            Json(ProjectErrorResponse {
+                                error: format!("Team not found: {}", team_identifier),
+                                suggestions: None,
+                            }),
+                        )
+                    })?;
+                team.id
+            };
+
+            crate::db::project_app_users::add_team(&state.db_pool, updated_project.id, team_id)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        Json(ProjectErrorResponse {
+                            error: format!("Failed to add app team: {}", e),
+                            suggestions: None,
+                        }),
+                    )
+                })?;
+        }
     }
 
     // Update status if provided
@@ -858,6 +1087,52 @@ async fn resolve_project(
     Ok(project)
 }
 
+/// Load app users and teams for a project
+async fn load_app_users_for_project(
+    state: &AppState,
+    project_id: uuid::Uuid,
+) -> Result<(Vec<UserInfo>, Vec<TeamInfo>), String> {
+    // Get app user IDs
+    let user_ids = crate::db::project_app_users::list_users(&state.db_pool, project_id)
+        .await
+        .map_err(|e| format!("Failed to list app users: {}", e))?;
+
+    // Get app team IDs
+    let team_ids = crate::db::project_app_users::list_teams(&state.db_pool, project_id)
+        .await
+        .map_err(|e| format!("Failed to list app teams: {}", e))?;
+
+    // Fetch user details
+    let mut users = Vec::new();
+    for user_id in user_ids {
+        if let Some(u) = db_users::find_by_id(&state.db_pool, user_id)
+            .await
+            .map_err(|e| format!("Failed to fetch user: {}", e))?
+        {
+            users.push(UserInfo {
+                id: u.id.to_string(),
+                email: u.email,
+            });
+        }
+    }
+
+    // Fetch team details
+    let mut teams = Vec::new();
+    for team_id in team_ids {
+        if let Some(t) = db_teams::find_by_id(&state.db_pool, team_id)
+            .await
+            .map_err(|e| format!("Failed to fetch team: {}", e))?
+        {
+            teams.push(TeamInfo {
+                id: t.id.to_string(),
+                name: t.name,
+            });
+        }
+    }
+
+    Ok((users, teams))
+}
+
 /// Convert database Project model to API Project model
 fn convert_project(project: crate::db::models::Project) -> ApiProject {
     ApiProject {
@@ -875,6 +1150,8 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         primary_url: None,      // Will be populated by caller
         custom_domain_urls: vec![], // Will be populated by caller
         deployment_groups: None, // Will be populated by caller if needed
+        app_users: vec![],      // Will be populated by caller if needed
+        app_teams: vec![],      // Will be populated by caller if needed
     }
 }
 
@@ -915,299 +1192,4 @@ pub async fn check_write_permission(
     projects::user_can_access(&state.db_pool, project.id, user.id)
         .await
         .map_err(|e| format!("Failed to check access: {}", e))
-}
-
-// ============================================================================
-// App User/Team Management Handlers (View-Only Access)
-// ============================================================================
-
-/// List app users and teams who can access the deployed application
-pub async fn list_app_users(
-    State(state): State<AppState>,
-    Extension(user): Extension<User>,
-    Path(id_or_name): Path<String>,
-) -> Result<Json<super::models::ListAppUsersResponse>, (StatusCode, String)> {
-    // Find project by name or ID
-    let project = resolve_project(&state, &id_or_name, false)
-        .await
-        .map_err(|e| (e.0, e.1.error.clone()))?;
-
-    // Check permission (owners/team members can list app users)
-    let has_permission = check_write_permission(&state, &project, &user)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    if !has_permission {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have permission to manage this project".to_string(),
-        ));
-    }
-
-    // Get app user IDs
-    let user_ids = crate::db::project_app_users::list_users(&state.db_pool, project.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list app users: {}", e),
-            )
-        })?;
-
-    // Get app team IDs
-    let team_ids = crate::db::project_app_users::list_teams(&state.db_pool, project.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list app teams: {}", e),
-            )
-        })?;
-
-    // Fetch user details
-    let mut users = Vec::new();
-    for user_id in user_ids {
-        if let Some(u) = db_users::find_by_id(&state.db_pool, user_id)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to fetch user: {}", e),
-                )
-            })?
-        {
-            users.push(UserInfo {
-                id: u.id.to_string(),
-                email: u.email,
-            });
-        }
-    }
-
-    // Fetch team details
-    let mut teams = Vec::new();
-    for team_id in team_ids {
-        if let Some(t) = db_teams::find_by_id(&state.db_pool, team_id)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to fetch team: {}", e),
-                )
-            })?
-        {
-            teams.push(TeamInfo {
-                id: t.id.to_string(),
-                name: t.name,
-            });
-        }
-    }
-
-    Ok(Json(super::models::ListAppUsersResponse { users, teams }))
-}
-
-/// Add an app user or team to the project
-pub async fn add_app_user(
-    State(state): State<AppState>,
-    Extension(user): Extension<User>,
-    Path(id_or_name): Path<String>,
-    Json(payload): Json<super::models::AddAppUserRequest>,
-) -> Result<Json<super::models::AddAppUserResponse>, (StatusCode, String)> {
-    // Find project by name or ID
-    let project = resolve_project(&state, &id_or_name, false)
-        .await
-        .map_err(|e| (e.0, e.1.error.clone()))?;
-
-    // Check permission (owners/team members can add app users)
-    let has_permission = check_write_permission(&state, &project, &user)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    if !has_permission {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have permission to manage this project".to_string(),
-        ));
-    }
-
-    // Process the identifier
-    match payload.identifier {
-        super::models::AppUserIdentifier::User(user_str) => {
-            // Try to parse as UUID first, otherwise treat as email
-            let user_id = if let Ok(uuid) = Uuid::parse_str(&user_str) {
-                uuid
-            } else {
-                // Treat as email - look up user
-                let app_user = db_users::find_by_email(&state.db_pool, &user_str)
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Failed to lookup user: {}", e),
-                        )
-                    })?
-                    .ok_or_else(|| {
-                        (
-                            StatusCode::NOT_FOUND,
-                            format!("User not found: {}", user_str),
-                        )
-                    })?;
-                app_user.id
-            };
-
-            // Add user to app users
-            crate::db::project_app_users::add_user(&state.db_pool, project.id, user_id)
-                .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to add app user: {}", e),
-                    )
-                })?;
-
-            tracing::info!("Added app user {} to project {}", user_id, project.name);
-        }
-        super::models::AppUserIdentifier::Team(team_str) => {
-            // Try to parse as UUID first, otherwise treat as name
-            let team_id = if let Ok(uuid) = Uuid::parse_str(&team_str) {
-                uuid
-            } else {
-                // Treat as name - look up team
-                let team = db_teams::find_by_name(&state.db_pool, &team_str)
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Failed to lookup team: {}", e),
-                        )
-                    })?
-                    .ok_or_else(|| {
-                        (
-                            StatusCode::NOT_FOUND,
-                            format!("Team not found: {}", team_str),
-                        )
-                    })?;
-                team.id
-            };
-
-            // Add team to app teams
-            crate::db::project_app_users::add_team(&state.db_pool, project.id, team_id)
-                .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to add app team: {}", e),
-                    )
-                })?;
-
-            tracing::info!("Added app team {} to project {}", team_id, project.name);
-        }
-    }
-
-    Ok(Json(super::models::AddAppUserResponse { success: true }))
-}
-
-/// Remove an app user or team from the project
-pub async fn remove_app_user(
-    State(state): State<AppState>,
-    Extension(user): Extension<User>,
-    Path((id_or_name, identifier_type, identifier_value)): Path<(String, String, String)>,
-) -> Result<Json<super::models::AddAppUserResponse>, (StatusCode, String)> {
-    // Find project by name or ID
-    let project = resolve_project(&state, &id_or_name, false)
-        .await
-        .map_err(|e| (e.0, e.1.error.clone()))?;
-
-    // Check permission (owners/team members can remove app users)
-    let has_permission = check_write_permission(&state, &project, &user)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
-
-    if !has_permission {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have permission to manage this project".to_string(),
-        ));
-    }
-
-    // Process the identifier
-    match identifier_type.as_str() {
-        "user" => {
-            // Try to parse as UUID first, otherwise treat as email
-            let user_id = if let Ok(uuid) = Uuid::parse_str(&identifier_value) {
-                uuid
-            } else {
-                // Treat as email - look up user
-                let app_user = db_users::find_by_email(&state.db_pool, &identifier_value)
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Failed to lookup user: {}", e),
-                        )
-                    })?
-                    .ok_or_else(|| {
-                        (
-                            StatusCode::NOT_FOUND,
-                            format!("User not found: {}", identifier_value),
-                        )
-                    })?;
-                app_user.id
-            };
-
-            // Remove user from app users
-            crate::db::project_app_users::remove_user(&state.db_pool, project.id, user_id)
-                .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to remove app user: {}", e),
-                    )
-                })?;
-
-            tracing::info!("Removed app user {} from project {}", user_id, project.name);
-        }
-        "team" => {
-            // Try to parse as UUID first, otherwise treat as name
-            let team_id = if let Ok(uuid) = Uuid::parse_str(&identifier_value) {
-                uuid
-            } else {
-                // Treat as name - look up team
-                let team = db_teams::find_by_name(&state.db_pool, &identifier_value)
-                    .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            format!("Failed to lookup team: {}", e),
-                        )
-                    })?
-                    .ok_or_else(|| {
-                        (
-                            StatusCode::NOT_FOUND,
-                            format!("Team not found: {}", identifier_value),
-                        )
-                    })?;
-                team.id
-            };
-
-            // Remove team from app teams
-            crate::db::project_app_users::remove_team(&state.db_pool, project.id, team_id)
-                .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to remove app team: {}", e),
-                    )
-                })?;
-
-            tracing::info!("Removed app team {} from project {}", team_id, project.name);
-        }
-        _ => {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!("Invalid identifier type: {}", identifier_type),
-            ));
-        }
-    }
-
-    Ok(Json(super::models::AddAppUserResponse { success: true }))
 }
