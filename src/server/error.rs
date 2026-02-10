@@ -80,6 +80,7 @@ impl ServerError {
     }
 
     /// Create a 500 Internal Server Error
+    #[allow(dead_code)]
     pub fn internal(message: impl Into<String>) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, message)
     }
@@ -107,27 +108,24 @@ impl ServerError {
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
-        // Log server errors (5xx) with full context
+        // Log server errors (5xx) with full context using structured fields
         if self.status.is_server_error() {
-            // Build context string for logging
-            let mut context_parts = vec![
-                format!("status={}", self.status.as_u16()),
-                format!("message=\"{}\"", self.message),
-            ];
-
-            // Add custom context fields
-            for (key, value) in &self.context {
-                context_parts.push(format!("{}=\"{}\"", key, value));
-            }
-
-            let context_str = context_parts.join(" ");
-
-            // Log the error with context
+            // Log with structured fields to prevent log injection
             if let Some(source) = &self.source {
-                // Use {:#} to format with full error chain (includes "Caused by:" sections)
-                tracing::error!("{} | Error details: {:#}", context_str, source);
+                tracing::error!(
+                    status = self.status.as_u16(),
+                    message = %self.message,
+                    context = ?self.context,
+                    error = ?source,
+                    "Server error"
+                );
             } else {
-                tracing::error!("{}", context_str);
+                tracing::error!(
+                    status = self.status.as_u16(),
+                    message = %self.message,
+                    context = ?self.context,
+                    "Server error"
+                );
             }
         }
 

@@ -1,4 +1,4 @@
-use axum::{body::Body, extract::Request, http::header, middleware::Next, response::Response};
+use axum::{extract::Request, http::header, middleware::Next, response::Response};
 use uuid::Uuid;
 
 /// Request ID stored in request extensions for correlation and debugging
@@ -58,6 +58,7 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
 ///     );
 /// }
 /// ```
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct RequestMeta {
     pub request_id: Option<Uuid>,
@@ -65,9 +66,10 @@ pub struct RequestMeta {
     pub user_email: Option<String>,
 }
 
+#[allow(dead_code)]
 impl RequestMeta {
     /// Extract request metadata from an Axum request
-    pub fn from_request(request: &Request<Body>) -> Self {
+    pub fn from_request(request: &Request) -> Self {
         let request_id = request.extensions().get::<RequestId>().map(|rid| rid.0);
 
         let uri = request.uri().to_string();
