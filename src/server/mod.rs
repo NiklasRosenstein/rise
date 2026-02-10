@@ -146,22 +146,14 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
                             let request_id = request
                                 .extensions()
                                 .get::<self::middleware::RequestId>()
-                                .map(|rid| rid.0.to_string());
+                                .map(|rid| rid.0);
 
-                            if let Some(req_id) = request_id {
-                                tracing::info!(
-                                    method = %request.method(),
-                                    uri = %request.uri(),
-                                    request_id = %req_id,
-                                    "request started"
-                                );
-                            } else {
-                                tracing::info!(
-                                    method = %request.method(),
-                                    uri = %request.uri(),
-                                    "request started"
-                                );
-                            }
+                            tracing::info!(
+                                method = %request.method(),
+                                uri = %request.uri(),
+                                request_id = ?request_id,
+                                "request started"
+                            );
                         })
                         .on_response(
                             |response: &Response, latency: std::time::Duration, _span: &Span| {
@@ -176,46 +168,24 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 
                                 // Log with appropriate severity based on status
                                 if status.is_server_error() {
-                                    if let Some(req_id) = request_id {
-                                        tracing::error!(
-                                            status = %status,
-                                            latency_ms = %latency_ms,
-                                            request_id = %req_id,
-                                            "request completed with server error"
-                                        );
-                                    } else {
-                                        tracing::error!(
-                                            status = %status,
-                                            latency_ms = %latency_ms,
-                                            "request completed with server error"
-                                        );
-                                    }
-                                } else if status.is_client_error() {
-                                    if let Some(req_id) = request_id {
-                                        tracing::warn!(
-                                            status = %status,
-                                            latency_ms = %latency_ms,
-                                            request_id = %req_id,
-                                            "request completed with client error"
-                                        );
-                                    } else {
-                                        tracing::warn!(
-                                            status = %status,
-                                            latency_ms = %latency_ms,
-                                            "request completed with client error"
-                                        );
-                                    }
-                                } else if let Some(req_id) = request_id {
-                                    tracing::info!(
+                                    tracing::error!(
                                         status = %status,
                                         latency_ms = %latency_ms,
-                                        request_id = %req_id,
-                                        "request completed successfully"
+                                        request_id = ?request_id,
+                                        "request completed with server error"
+                                    );
+                                } else if status.is_client_error() {
+                                    tracing::warn!(
+                                        status = %status,
+                                        latency_ms = %latency_ms,
+                                        request_id = ?request_id,
+                                        "request completed with client error"
                                     );
                                 } else {
                                     tracing::info!(
                                         status = %status,
                                         latency_ms = %latency_ms,
+                                        request_id = ?request_id,
                                         "request completed successfully"
                                     );
                                 }
