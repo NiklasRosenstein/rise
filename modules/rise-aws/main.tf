@@ -411,19 +411,6 @@ resource "aws_iam_user_policy_attachment" "controller_assume_push" {
 }
 
 # -----------------------------------------------------------------------------
-# RDS Service-Linked Role
-# -----------------------------------------------------------------------------
-# This role is required for RDS to manage resources on your behalf.
-# It only needs to be created once per AWS account.
-
-resource "aws_iam_service_linked_role" "rds" {
-  count = var.enable_rds && var.create_rds_service_linked_role ? 1 : 0
-
-  aws_service_name = "rds.amazonaws.com"
-  description      = "Service-linked role for Amazon RDS"
-}
-
-# -----------------------------------------------------------------------------
 # RDS DB Subnet Group
 # -----------------------------------------------------------------------------
 # Subnet group defines which subnets RDS instances can be placed in
