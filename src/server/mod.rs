@@ -20,9 +20,7 @@ pub mod workload_identity;
 // Re-export error types for convenience
 
 use anyhow::Result;
-use axum::{
-    extract::Request, middleware as axum_middleware, response::Response, Router,
-};
+use axum::{extract::Request, middleware as axum_middleware, response::Response, Router};
 use state::{AppState, ControllerState};
 use std::sync::Arc;
 #[cfg(any(feature = "k8s", feature = "aws"))]
@@ -149,7 +147,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
                                 .extensions()
                                 .get::<self::middleware::RequestId>()
                                 .map(|rid| rid.0.to_string());
-                            
+
                             if let Some(req_id) = request_id {
                                 tracing::info!(
                                     method = %request.method(),
@@ -169,7 +167,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
                             |response: &Response, latency: std::time::Duration, _span: &Span| {
                                 let status = response.status();
                                 let latency_ms = latency.as_millis();
-                                
+
                                 // Extract request ID from response headers
                                 let request_id = response
                                     .headers()
@@ -207,21 +205,19 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
                                             "request completed with client error"
                                         );
                                     }
+                                } else if let Some(req_id) = request_id {
+                                    tracing::info!(
+                                        status = %status,
+                                        latency_ms = %latency_ms,
+                                        request_id = %req_id,
+                                        "request completed successfully"
+                                    );
                                 } else {
-                                    if let Some(req_id) = request_id {
-                                        tracing::info!(
-                                            status = %status,
-                                            latency_ms = %latency_ms,
-                                            request_id = %req_id,
-                                            "request completed successfully"
-                                        );
-                                    } else {
-                                        tracing::info!(
-                                            status = %status,
-                                            latency_ms = %latency_ms,
-                                            "request completed successfully"
-                                        );
-                                    }
+                                    tracing::info!(
+                                        status = %status,
+                                        latency_ms = %latency_ms,
+                                        "request completed successfully"
+                                    );
                                 }
                             },
                         )

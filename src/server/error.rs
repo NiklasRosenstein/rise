@@ -263,8 +263,10 @@ mod tests {
     #[tokio::test]
     async fn test_server_error_ext_trait() {
         // Test ServerErrorExt trait methods
-        let result: Result<(), std::io::Error> =
-            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
+        let result: Result<(), std::io::Error> = Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "file not found",
+        ));
 
         let error = result
             .server_err(StatusCode::NOT_FOUND, "File operation failed")
@@ -274,10 +276,11 @@ mod tests {
         assert_eq!(error.message, "File operation failed");
 
         // Test internal_err helper
-        let result2: Result<(), std::io::Error> =
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "io error"));
+        let result2: Result<(), std::io::Error> = Err(std::io::Error::other("io error"));
 
-        let error2 = result2.internal_err("Internal operation failed").unwrap_err();
+        let error2 = result2
+            .internal_err("Internal operation failed")
+            .unwrap_err();
 
         assert_eq!(error2.status, StatusCode::INTERNAL_SERVER_ERROR);
         assert_eq!(error2.message, "Internal operation failed");

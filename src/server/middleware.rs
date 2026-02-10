@@ -111,10 +111,7 @@ mod tests {
             .layer(axum::middleware::from_fn(request_id_middleware));
 
         // Make a request
-        let request = HttpRequest::builder()
-            .uri("/")
-            .body(Body::empty())
-            .unwrap();
+        let request = HttpRequest::builder().uri("/").body(Body::empty()).unwrap();
 
         let response = app.oneshot(request).await.unwrap();
 
@@ -144,10 +141,7 @@ mod tests {
             .route("/", get(handler_with_extension))
             .layer(axum::middleware::from_fn(request_id_middleware));
 
-        let request = HttpRequest::builder()
-            .uri("/")
-            .body(Body::empty())
-            .unwrap();
+        let request = HttpRequest::builder().uri("/").body(Body::empty()).unwrap();
 
         let response = app.oneshot(request).await.unwrap();
 
