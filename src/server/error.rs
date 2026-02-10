@@ -189,3 +189,97 @@ where
         self.map_err(|e| ServerError::internal_anyhow(e.into(), message))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+
+    #[tokio::test]
+    async fn test_server_error_response_shape() {
+        // Test that ServerError returns expected JSON response
+        let error = ServerError::bad_request("Invalid input");
+        let response = error.into_response();
+
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+
+        // Extract and verify JSON body
+        let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(body_json["error"], "Invalid input");
+    }
+
+    #[tokio::test]
+    async fn test_server_error_with_context() {
+        let error = ServerError::internal("Database error")
+            .with_context("user_id", "123")
+            .with_context("operation", "fetch_user");
+
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(body_json["error"], "Database error");
+    }
+
+    #[tokio::test]
+    async fn test_server_error_from_anyhow() {
+        let anyhow_err = anyhow::anyhow!("Something went wrong");
+        let error = ServerError::from_anyhow(
+            anyhow_err,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Operation failed",
+        );
+
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(body_json["error"], "Operation failed");
+    }
+
+    #[tokio::test]
+    async fn test_server_error_status_codes() {
+        // Test various status code helpers
+        let bad_request = ServerError::bad_request("Bad input");
+        assert_eq!(bad_request.status, StatusCode::BAD_REQUEST);
+
+        let forbidden = ServerError::forbidden("Access denied");
+        assert_eq!(forbidden.status, StatusCode::FORBIDDEN);
+
+        let not_found = ServerError::not_found("Resource missing");
+        assert_eq!(not_found.status, StatusCode::NOT_FOUND);
+
+        let internal = ServerError::internal("Server error");
+        assert_eq!(internal.status, StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[tokio::test]
+    async fn test_server_error_ext_trait() {
+        // Test ServerErrorExt trait methods
+        let result: Result<(), std::io::Error> =
+            Err(std::io::Error::new(std::io::ErrorKind::NotFound, "file not found"));
+
+        let error = result
+            .server_err(StatusCode::NOT_FOUND, "File operation failed")
+            .unwrap_err();
+
+        assert_eq!(error.status, StatusCode::NOT_FOUND);
+        assert_eq!(error.message, "File operation failed");
+
+        // Test internal_err helper
+        let result2: Result<(), std::io::Error> =
+            Err(std::io::Error::new(std::io::ErrorKind::Other, "io error"));
+
+        let error2 = result2.internal_err("Internal operation failed").unwrap_err();
+
+        assert_eq!(error2.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(error2.message, "Internal operation failed");
+    }
+}
