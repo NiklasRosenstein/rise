@@ -91,7 +91,15 @@ output "kms_key_id" {
 
 output "rise_config" {
   description = "Configuration values for the Rise backend"
+  sensitive   = true
   value = merge(
+    # IAM user credentials (if enabled)
+    var.create_iam_user ? {
+      aws_credentials = {
+        access_key_id     = aws_iam_access_key.backend[0].id
+        secret_access_key = aws_iam_access_key.backend[0].secret
+      }
+    } : {},
     # ECR configuration (if enabled)
     var.enable_ecr ? {
       ecr = {
