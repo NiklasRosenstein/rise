@@ -18,7 +18,6 @@ pub mod team;
 pub mod workload_identity;
 
 // Re-export error types for convenience
-pub use error::{ServerError, ServerErrorExt};
 
 use anyhow::Result;
 use axum::{

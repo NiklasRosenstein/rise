@@ -1,4 +1,7 @@
-use axum::{extract::{Extension, Query, State}, Json};
+use axum::{
+    extract::{Extension, Query, State},
+    Json,
+};
 
 use super::models::{GetRegistryCredsRequest, GetRegistryCredsResponse};
 use crate::db::models::User;
