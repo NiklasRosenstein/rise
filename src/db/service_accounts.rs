@@ -12,6 +12,17 @@ pub async fn create(
     issuer_url: &str,
     claims: &HashMap<String, String>,
 ) -> Result<ServiceAccount> {
+    create_with_identifier(pool, project_id, issuer_url, claims, None).await
+}
+
+/// Create a new service account with an optional identifier
+pub async fn create_with_identifier(
+    pool: &PgPool,
+    project_id: Uuid,
+    issuer_url: &str,
+    claims: &HashMap<String, String>,
+    identifier: Option<&str>,
+) -> Result<ServiceAccount> {
     let mut tx = pool.begin().await.context("Failed to begin transaction")?;
 
     // Get project for email generation
@@ -45,8 +56,12 @@ pub async fn create(
 
     let sequence = sequence.unwrap_or(1);
 
-    // Generate service account email
-    let email = format!("{}+{}@sa.rise.local", project.name, sequence);
+    // Generate service account email based on identifier or sequence
+    let email = if let Some(id) = identifier {
+        format!("{}-sa+{}@rise.local", project.name, id)
+    } else {
+        format!("{}+{}@sa.rise.local", project.name, sequence)
+    };
 
     // Check if user already exists with this email (from previously deleted SA)
     let existing_user = sqlx::query_as!(
@@ -88,16 +103,17 @@ pub async fn create(
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, project_id, user_id, issuer_url, claims, sequence,
+        INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence, identifier)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, project_id, user_id, issuer_url, claims, sequence, identifier,
                   deleted_at, created_at, updated_at
         "#,
         project_id,
         user.id,
         issuer_url,
         claims_json,
-        sequence
+        sequence,
+        identifier
     )
     .fetch_one(&mut *tx)
     .await
@@ -113,7 +129,7 @@ pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Serv
     let sas = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE project_id = $1 AND deleted_at IS NULL
@@ -128,12 +144,36 @@ pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Serv
     Ok(sas)
 }
 
+/// Find a service account by project and identifier
+pub async fn find_by_project_and_identifier(
+    pool: &PgPool,
+    project_id: Uuid,
+    identifier: &str,
+) -> Result<Option<ServiceAccount>> {
+    let sa = sqlx::query_as!(
+        ServiceAccount,
+        r#"
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
+               deleted_at, created_at, updated_at
+        FROM service_accounts
+        WHERE project_id = $1 AND identifier = $2 AND deleted_at IS NULL
+        "#,
+        project_id,
+        identifier
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to find service account by project and identifier")?;
+
+    Ok(sa)
+}
+
 /// Get a service account by ID
 pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<ServiceAccount>> {
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE id = $1
@@ -156,7 +196,7 @@ pub async fn get_claims(
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE id = $1
@@ -179,7 +219,7 @@ pub async fn find_by_issuer(pool: &PgPool, issuer_url: &str) -> Result<Vec<Servi
     let sas = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE issuer_url = $1 AND deleted_at IS NULL
@@ -202,7 +242,7 @@ pub async fn find_by_user_and_project(
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE user_id = $1 AND project_id = $2 AND deleted_at IS NULL
@@ -259,7 +299,7 @@ pub async fn update(
             claims = COALESCE($3, claims),
             updated_at = NOW()
         WHERE id = $1 AND deleted_at IS NULL
-        RETURNING id, project_id, user_id, issuer_url, claims, sequence,
+        RETURNING id, project_id, user_id, issuer_url, claims, sequence, identifier,
                   deleted_at, created_at, updated_at
         "#,
         id,
@@ -469,6 +509,179 @@ mod tests {
 
         // SA user should be a service account
         assert!(is_service_account(&pool, sa.user_id).await?);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_create_service_account_with_identifier(pool: PgPool) -> Result<()> {
+        // Create test user and project
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "myproject",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        // Create service account with identifier
+        let mut claims = HashMap::new();
+        claims.insert("aud".to_string(), "https://rise.example.com".to_string());
+        claims.insert("repo".to_string(), "owner/name".to_string());
+
+        let sa = create_with_identifier(
+            &pool,
+            project.id,
+            "https://github.com",
+            &claims,
+            Some("ci"),
+        )
+        .await?;
+
+        assert_eq!(sa.project_id, project.id);
+        assert_eq!(sa.issuer_url, "https://github.com");
+        assert_eq!(sa.identifier, Some("ci".to_string()));
+        assert_eq!(sa.sequence, 1); // Still gets a sequence
+
+        // Verify user was created with identifier-based email
+        let sa_user = users::find_by_id(&pool, sa.user_id).await?;
+        assert!(sa_user.is_some());
+        assert_eq!(sa_user.unwrap().email, "myproject-sa+ci@rise.local");
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_find_by_project_and_identifier(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        let mut claims = HashMap::new();
+        claims.insert("aud".to_string(), "https://rise.example.com".to_string());
+        claims.insert("repo".to_string(), "owner/repo".to_string());
+
+        // Create service account with identifier
+        let sa = create_with_identifier(
+            &pool,
+            project.id,
+            "https://github.com",
+            &claims,
+            Some("staging"),
+        )
+        .await?;
+
+        // Find by identifier
+        let found = find_by_project_and_identifier(&pool, project.id, "staging").await?;
+        assert!(found.is_some());
+        let found = found.unwrap();
+        assert_eq!(found.id, sa.id);
+        assert_eq!(found.identifier, Some("staging".to_string()));
+
+        // Try finding non-existent identifier
+        let not_found = find_by_project_and_identifier(&pool, project.id, "nonexistent").await?;
+        assert!(not_found.is_none());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_identifier_uniqueness(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        let mut claims = HashMap::new();
+        claims.insert("aud".to_string(), "https://rise.example.com".to_string());
+        claims.insert("repo".to_string(), "owner/repo".to_string());
+
+        // Create first service account
+        create_with_identifier(
+            &pool,
+            project.id,
+            "https://github.com",
+            &claims,
+            Some("ci"),
+        )
+        .await?;
+
+        // Try creating another with same identifier - should fail
+        let result = create_with_identifier(
+            &pool,
+            project.id,
+            "https://gitlab.com",
+            &claims,
+            Some("ci"),
+        )
+        .await;
+
+        assert!(result.is_err());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_mixed_identifiers_and_sequences(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "myapp",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        let claims = HashMap::new();
+
+        // Create sequence-based service account
+        let sa1 = create(&pool, project.id, "https://gitlab.com", &claims).await?;
+        assert_eq!(sa1.identifier, None);
+        assert_eq!(sa1.sequence, 1);
+
+        let sa1_user = users::find_by_id(&pool, sa1.user_id).await?;
+        assert_eq!(sa1_user.unwrap().email, "myapp+1@sa.rise.local");
+
+        // Create identifier-based service account
+        let mut claims_with_aud = HashMap::new();
+        claims_with_aud.insert("aud".to_string(), "https://rise.example.com".to_string());
+        claims_with_aud.insert("repo".to_string(), "owner/repo".to_string());
+
+        let sa2 = create_with_identifier(
+            &pool,
+            project.id,
+            "https://github.com",
+            &claims_with_aud,
+            Some("ci"),
+        )
+        .await?;
+        assert_eq!(sa2.identifier, Some("ci".to_string()));
+        assert_eq!(sa2.sequence, 2);
+
+        let sa2_user = users::find_by_id(&pool, sa2.user_id).await?;
+        assert_eq!(sa2_user.unwrap().email, "myapp-sa+ci@rise.local");
+
+        // List all service accounts
+        let all_sas = list_by_project(&pool, project.id).await?;
+        assert_eq!(all_sas.len(), 2);
 
         Ok(())
     }

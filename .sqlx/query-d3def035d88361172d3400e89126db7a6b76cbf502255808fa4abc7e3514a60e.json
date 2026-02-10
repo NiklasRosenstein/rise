@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence)\n        VALUES ($1, $2, $3, $4, $5)\n        RETURNING id, project_id, user_id, issuer_url, claims, sequence,\n                  deleted_at, created_at, updated_at\n        ",
+  "query": "\n        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,\n               deleted_at, created_at, updated_at\n        FROM service_accounts\n        WHERE user_id = $1 AND project_id = $2 AND deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -35,16 +35,21 @@
       },
       {
         "ordinal": 6,
+        "name": "identifier",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "deleted_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -52,10 +57,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Uuid",
-        "Text",
-        "Jsonb",
-        "Int4"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -66,9 +68,10 @@
       false,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "dd382a2eb94a3e2ce188464925b1dc68e83c2de35569f516aba39176b486eb22"
+  "hash": "d3def035d88361172d3400e89126db7a6b76cbf502255808fa4abc7e3514a60e"
 }

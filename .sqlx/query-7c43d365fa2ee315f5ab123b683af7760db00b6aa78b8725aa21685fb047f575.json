@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, project_id, user_id, issuer_url, claims, sequence,\n               deleted_at, created_at, updated_at\n        FROM service_accounts\n        WHERE issuer_url = $1 AND deleted_at IS NULL\n        ",
+  "query": "\n        SELECT id, project_id, user_id, issuer_url, claims, sequence, identifier,\n               deleted_at, created_at, updated_at\n        FROM service_accounts\n        WHERE project_id = $1 AND identifier = $2 AND deleted_at IS NULL\n        ",
   "describe": {
     "columns": [
       {
@@ -35,22 +35,28 @@
       },
       {
         "ordinal": 6,
+        "name": "identifier",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "deleted_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 8,
+        "ordinal": 9,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
+        "Uuid",
         "Text"
       ]
     },
@@ -62,9 +68,10 @@
       false,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "4d816dc567e76ce9b861bde4582819c655fa4078211c2997acc8004eb76a6a62"
+  "hash": "7c43d365fa2ee315f5ab123b683af7760db00b6aa78b8725aa21685fb047f575"
 }

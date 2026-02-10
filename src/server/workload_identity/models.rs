@@ -6,6 +6,8 @@ use std::collections::HashMap;
 pub struct CreateWorkloadIdentityRequest {
     pub issuer_url: String,
     pub claims: HashMap<String, String>,
+    /// Optional identifier for declarative service accounts (e.g., "ci", "staging")
+    pub identifier: Option<String>,
 }
 
 /// Request to update an existing service account
@@ -23,6 +25,7 @@ pub struct WorkloadIdentityResponse {
     pub project_name: String,
     pub issuer_url: String,
     pub claims: HashMap<String, String>,
+    pub identifier: Option<String>,
     pub created_at: String,
 }
 
