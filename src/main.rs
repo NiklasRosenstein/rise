@@ -457,9 +457,9 @@ enum EnvCommands {
         /// Mark as secret (encrypted at rest)
         #[arg(long)]
         secret: bool,
-        /// Mark secret as protected (cannot be decrypted via API). Default is true (protected). Use --protected=false to allow decryption.
-        #[arg(long, default_value = "true")]
-        protected: bool,
+        /// Mark secret as protected (cannot be decrypted via API). Only applies to secrets. Defaults to true for secrets, must be false for non-secrets.
+        #[arg(long)]
+        protected: Option<bool>,
     },
     /// List environment variables for a project
     #[command(visible_alias = "ls")]
@@ -1094,6 +1094,9 @@ async fn main() -> Result<()> {
                     protected,
                 } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
+                    // Protected defaults to true for secrets, false for non-secrets
+                    // Can be explicitly overridden with --protected flag
+                    let is_protected = protected.unwrap_or(*secret);
                     env::set_env(
                         &http_client,
                         &backend_url,
@@ -1102,7 +1105,7 @@ async fn main() -> Result<()> {
                         key,
                         value,
                         *secret,
-                        *protected,
+                        is_protected,
                     )
                     .await?;
                 }
