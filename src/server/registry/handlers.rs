@@ -1,12 +1,9 @@
-use axum::{
-    extract::{Extension, Query, State},
-    http::StatusCode,
-    Json,
-};
+use axum::{extract::{Extension, Query, State}, Json};
 
 use super::models::{GetRegistryCredsRequest, GetRegistryCredsResponse};
 use crate::db::models::User;
 use crate::db::{projects, teams as db_teams};
+use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::state::AppState;
 use uuid::Uuid;
 
@@ -52,27 +49,18 @@ pub async fn get_registry_credentials(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Query(params): Query<GetRegistryCredsRequest>,
-) -> Result<Json<GetRegistryCredsResponse>, (StatusCode, String)> {
+) -> Result<Json<GetRegistryCredsResponse>, ServerError> {
     // Query project by name
     let project = projects::find_by_name(&state.db_pool, &params.project)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to query project: {}", e),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", params.project),
-            )
-        })?;
+        .internal_err("Failed to query project")
+        .map_err(|e| e.with_context("project_name", &params.project))?
+        .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", params.project)))?;
 
     // Check if user has permission to deploy to this project
     check_deploy_permission(&state, &project, user.id)
         .await
-        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
+        .map_err(ServerError::forbidden)?;
 
     // Get credentials from the registry provider
     // The repository name is typically the project name
@@ -82,11 +70,10 @@ pub async fn get_registry_credentials(
         .registry_provider
         .get_credentials(&repository)
         .await
+        .internal_err("Failed to get registry credentials")
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get registry credentials: {}", e),
-            )
+            e.with_context("project_name", &params.project)
+                .with_context("repository", &repository)
         })?;
 
     Ok(Json(GetRegistryCredsResponse {

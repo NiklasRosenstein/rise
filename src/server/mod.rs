@@ -5,8 +5,10 @@ pub mod deployment;
 pub mod ecr;
 pub mod encryption;
 pub mod env_vars;
+pub mod error;
 pub mod extensions;
 pub mod frontend;
+pub mod middleware;
 pub mod oci;
 pub mod project;
 pub mod registry;
@@ -15,15 +17,20 @@ pub mod state;
 pub mod team;
 pub mod workload_identity;
 
+// Re-export error types for convenience
+pub use error::{ServerError, ServerErrorExt};
+
 use anyhow::Result;
-use axum::{middleware, Router};
+use axum::{
+    body::Body, extract::Request, middleware as axum_middleware, response::Response, Router,
+};
 use state::{AppState, ControllerState};
 use std::sync::Arc;
 #[cfg(any(feature = "k8s", feature = "aws"))]
 use std::time::Duration;
 use tower::ServiceBuilder;
-use tower_http::trace::TraceLayer;
-use tracing::info;
+use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
+use tracing::{info, Span};
 
 /// Run the HTTP server process with all enabled controllers
 pub async fn run_server(settings: settings::Settings) -> Result<()> {
@@ -110,7 +117,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(env_vars::routes::routes())
         .merge(extensions::routes::routes())
         .merge(encryption::routes::routes())
-        .route_layer(middleware::from_fn_with_state(
+        .route_layer(axum_middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,
         ));
@@ -128,7 +135,63 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(extensions::providers::oauth::routes::oauth_routes())
         .merge(frontend::routes::frontend_routes())
         .with_state(state.clone())
-        .layer(ServiceBuilder::new().layer(TraceLayer::new_for_http()));
+        .layer(
+            ServiceBuilder::new()
+                // Add request ID middleware first (before TraceLayer so it's available in logs)
+                .layer(axum_middleware::from_fn(
+                    self::middleware::request_id_middleware,
+                ))
+                // Enhanced trace layer with custom logging
+                .layer(
+                    TraceLayer::new_for_http()
+                        .on_request(|request: &Request<Body>, _span: &Span| {
+                            tracing::info!(
+                                method = %request.method(),
+                                uri = %request.uri(),
+                                "request started"
+                            );
+                        })
+                        .on_response(
+                            |response: &Response, latency: std::time::Duration, _span: &Span| {
+                                let status = response.status();
+                                let latency_ms = latency.as_millis();
+
+                                // Log with appropriate severity based on status
+                                if status.is_server_error() {
+                                    tracing::error!(
+                                        status = %status,
+                                        latency_ms = %latency_ms,
+                                        "request completed with server error"
+                                    );
+                                } else if status.is_client_error() {
+                                    tracing::warn!(
+                                        status = %status,
+                                        latency_ms = %latency_ms,
+                                        "request completed with client error"
+                                    );
+                                } else {
+                                    tracing::info!(
+                                        status = %status,
+                                        latency_ms = %latency_ms,
+                                        "request completed successfully"
+                                    );
+                                }
+                            },
+                        )
+                        .on_failure(
+                            |failure: ServerErrorsFailureClass,
+                             latency: std::time::Duration,
+                             _span: &Span| {
+                                let latency_ms = latency.as_millis();
+                                tracing::error!(
+                                    classification = ?failure,
+                                    latency_ms = %latency_ms,
+                                    "request failed unexpectedly"
+                                );
+                            },
+                        ),
+                ),
+        );
 
     let addr = format!("{}:{}", settings.server.host, settings.server.port);
     info!("HTTP server listening on http://{}", addr);

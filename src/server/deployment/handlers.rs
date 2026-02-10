@@ -17,6 +17,7 @@ use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
 use crate::db::{
     deployments as db_deployments, projects, service_accounts, teams as db_teams, users,
 };
+use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::registry::ImageTagType;
 use crate::server::state::AppState;
 
