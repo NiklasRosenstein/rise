@@ -1,0 +1,22 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        WITH group_priority AS (\n            SELECT\n                deployment_group,\n                CASE\n                    WHEN deployment_group = 'default' THEN 0\n                    WHEN EXISTS (\n                        SELECT 1 FROM deployments d2\n                        WHERE d2.project_id = $1\n                        AND d2.deployment_group = deployments.deployment_group\n                        AND d2.status = 'Healthy'\n                    ) THEN 1\n                    ELSE 2\n                END as priority\n            FROM deployments\n            WHERE project_id = $1\n            GROUP BY deployment_group\n        )\n        SELECT deployment_group\n        FROM group_priority\n        ORDER BY priority, deployment_group\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "deployment_group",
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "8a1bbc205e5458765472129d3e169e09d30441df3792cf0f0c5dc1df73801f4f"
+}
