@@ -1,6 +1,6 @@
 [package]
 name = "rise-deploy"
-version = "0.13.3"
+version = "0.13.4"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/NiklasRosenstein/rise"
@@ -27,8 +27,8 @@ cli = [
     "dep:webbrowser",
     "dep:serde_ignored",
 ]
-server = [
-    "k8s",  # Server requires a deployment backend (currently k8s is the only one)
+backend = [
+    # Server core (former "server" feature)
     "dep:config",
     "dep:oauth2",
     "dep:openssl",
@@ -49,22 +49,17 @@ server = [
     "dep:serde_ignored",
     "dep:subtle",
     "dep:serde_urlencoded",
-]
-aws = [
-    "server",  # AWS features require server (which includes k8s)
+    # Kubernetes (former "k8s" feature)
+    "dep:kube",
+    "dep:k8s-openapi",
+    "dep:rustls",
+    # AWS services (former "aws" feature)
     "dep:aws-config",
     "dep:aws-sdk-ecr",
     "dep:aws-sdk-kms",
     "dep:aws-sdk-rds",
     "dep:aws-sdk-sts",
-]
-k8s = [
-    "dep:kube",
-    "dep:k8s-openapi",
-    "dep:rustls",
-]
-snowflake = [
-    "server",  # Snowflake extension requires server (which includes k8s)
+    # Snowflake (former "snowflake" feature)
     "dep:snowflake-connector-rs",
 ]
 

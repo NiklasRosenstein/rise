@@ -171,7 +171,6 @@ This makes it easy to reference in your configuration management tool (e.g., usi
 | tags | Tags to apply to all resources | `map(string)` | `{}` | no |
 | enable_ecr | Enable ECR permissions | `bool` | `true` | no |
 | enable_rds | Enable RDS permissions | `bool` | `false` | no |
-| create_rds_service_linked_role | Create RDS service-linked role (only needed once per AWS account) | `bool` | `true` | no |
 | rds_vpc_id | VPC ID for RDS resources | `string` | `null` | no |
 | rds_subnet_ids | Subnet IDs for RDS DB subnet group | `list(string)` | `[]` | no |
 | rds_allowed_security_groups | Security groups allowed to access RDS | `list(string)` | `[]` | no |
@@ -232,8 +231,26 @@ This makes it easy to reference in your configuration management tool (e.g., usi
 - `ec2:AuthorizeSecurityGroupIngress`, `ec2:RevokeSecurityGroupIngress` - For security group rules
 - `ec2:DescribeVpcs`, `ec2:DescribeSubnets` - For VPC discovery
 
-**RDS Service-Linked Role:**
-The module creates the RDS service-linked role (`AWSServiceRoleForRDS`) if `create_rds_service_linked_role = true`. This role is required for RDS to manage resources on your behalf. It only needs to be created once per AWS account. If the role already exists, set `create_rds_service_linked_role = false`.
+**RDS Service-Linked Role (Prerequisite):**
+
+Before using this module with `enable_rds = true`, you must ensure the RDS service-linked role (`AWSServiceRoleForRDS`) exists in your AWS account. This role is required for RDS to manage resources on your behalf and only needs to be created once per AWS account.
+
+To create the service-linked role, run this AWS CLI command or use Terraform in your root module:
+
+```bash
+# Using AWS CLI
+aws iam create-service-linked-role --aws-service-name rds.amazonaws.com
+```
+
+```hcl
+# Using Terraform in your root module
+resource "aws_iam_service_linked_role" "rds" {
+  aws_service_name = "rds.amazonaws.com"
+  description      = "Service-linked role for Amazon RDS"
+}
+```
+
+**Note:** If the role already exists, the CLI command will fail with an error, which is safe to ignore. Terraform will detect the existing role and skip creation if you've already run it once.
 
 **RDS VPC Resources:**
 If `enable_rds = true`, `rds_vpc_id`, and `rds_subnet_ids` are provided, the module creates:

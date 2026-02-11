@@ -1,7 +1,7 @@
-#[cfg(feature = "k8s")]
+#[cfg(feature = "backend")]
 mod kubernetes;
 
-#[cfg(feature = "k8s")]
+#[cfg(feature = "backend")]
 pub use kubernetes::{KubernetesController, KubernetesControllerConfig};
 
 use async_trait::async_trait;

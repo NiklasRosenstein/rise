@@ -5,13 +5,13 @@ use uuid::Uuid;
 
 pub mod registry;
 
-#[cfg(feature = "server")]
+#[cfg(feature = "backend")]
 pub mod handlers;
-#[cfg(feature = "server")]
+#[cfg(feature = "backend")]
 pub mod models;
-#[cfg(feature = "server")]
+#[cfg(feature = "backend")]
 pub mod providers;
-#[cfg(feature = "server")]
+#[cfg(feature = "backend")]
 pub mod routes;
 
 /// Extension trait for project resource provisioning
