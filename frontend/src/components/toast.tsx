@@ -1,10 +1,8 @@
-// Toast notification system for Rise Dashboard
-// This file depends on React being loaded first
+import { createContext, useCallback, useContext, useState } from 'react';
 
-const { useState, useEffect, useCallback } = React;
-const ToastContext = React.createContext(null);
+const ToastContext = createContext(null);
 
-function ToastProvider({ children }) {
+export function ToastProvider({ children }) {
     const [toasts, setToasts] = useState([]);
 
     const showToast = useCallback((message, type = 'info') => {
@@ -76,8 +74,8 @@ function Toast({ toast, onClose }) {
 }
 
 // Hook to use toast from any component
-function useToast() {
-    const context = React.useContext(ToastContext);
+export function useToast() {
+    const context = useContext(ToastContext);
     if (!context) {
         throw new Error('useToast must be used within ToastProvider');
     }

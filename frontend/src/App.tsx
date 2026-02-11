@@ -1,15 +1,22 @@
-// React-based Rise Dashboard Application with Tailwind CSS
-// Main application router with Header, LoginPage, and App components
-const { useState, useEffect } = React;
-// CONFIG is already defined in auth.js which loads before this script
+// @ts-nocheck
+import { useEffect, useRef, useState } from 'react';
+import { logout, login } from './lib/auth';
+import { api } from './lib/api';
+import { CONFIG } from './lib/config';
+import { maybeMigrateLegacyHashRoute, navigate, usePathLocation } from './lib/navigation';
+import { Footer, Modal } from './components/ui';
+import { useToast } from './components/toast';
+import { DeploymentDetail } from './features/deployments';
+import { ProjectsList, ProjectDetail } from './features/projects';
+import { ExtensionDetailPage } from './features/resources';
+import { TeamDetail, TeamsList } from './features/teams';
+
 
 // Header Component
 function Header({ user, onLogout, currentView, onShowGettingStarted }) {
     const [isProfileOpen, setIsProfileOpen] = useState(false);
     const [theme, setTheme] = useState('system');
-    const profileRef = React.useRef(null);
-    const { showToast } = useToast();
-
+    const profileRef = useRef(null);
     // Determine which section is active (projects or teams)
     const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail' || currentView === 'extension-detail';
     const isTeamsActive = currentView === 'teams' || currentView === 'team-detail';
@@ -63,7 +70,7 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
             <nav className="container mx-auto px-4 py-4">
                 <div className="flex items-center justify-between">
                     <div className="flex items-center gap-4">
-                        <a href="#projects" className="flex items-center gap-2 hover:opacity-80 transition-opacity">
+                        <a href="/projects" onClick={(e) => { e.preventDefault(); navigate('/projects'); }} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
                             <div className="w-5 h-5 svg-mask" style={{
                                 maskImage: 'url(/assets/logo.svg)',
                                 WebkitMaskImage: 'url(/assets/logo.svg)'
@@ -83,13 +90,15 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
                     </div>
                     <div className="flex items-center gap-6">
                         <a
-                            href="#projects"
+                            href="/projects"
+                            onClick={(e) => { e.preventDefault(); navigate('/projects'); }}
                             className={`transition-colors ${isProjectsActive ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'}`}
                         >
                             Projects
                         </a>
                         <a
-                            href="#teams"
+                            href="/teams"
+                            onClick={(e) => { e.preventDefault(); navigate('/teams'); }}
                             className={`transition-colors ${isTeamsActive ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'}`}
                         >
                             Teams
@@ -271,15 +280,17 @@ function LoginPage() {
 }
 
 // Main App Component
-function App() {
+export function App() {
     const [user, setUser] = useState(null);
     const [authChecked, setAuthChecked] = useState(false);
     const [showGettingStarted, setShowGettingStarted] = useState(false);
     const [version, setVersion] = useState(null);
-    const hash = useHashLocation();
+    const pathname = usePathLocation();
     const { showToast } = useToast();
 
     useEffect(() => {
+        maybeMigrateLegacyHashRoute();
+
         // Check if we're handling extension OAuth callback (tokens in hash fragment)
         if (window.location.hash && (window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
             const fragment = window.location.hash.substring(1);
@@ -319,10 +330,10 @@ function App() {
 
             // Navigate back to the extension page
             if (returnPath) {
-                window.location.hash = returnPath;
+                navigate(returnPath);
             } else {
                 // Fallback to home if no return path
-                window.location.hash = '';
+                navigate('/projects');
             }
 
             // Continue with normal auth check - don't skip it!
@@ -374,12 +385,13 @@ function App() {
         return <LoginPage />;
     }
 
-    // Parse hash for routing
+    // Parse path for routing
     let view = 'projects';
     let params = {};
+    const route = pathname.replace(/^\//, '');
 
-    if (hash.startsWith('project/')) {
-        const parts = hash.split('/');
+    if (route.startsWith('project/')) {
+        const parts = route.split('/');
         // Check if this is an extension detail page
         // project/{name}/extensions - extensions tab (list view)
         // project/{name}/extensions/{type}/@new - creating new instance
@@ -422,15 +434,15 @@ function App() {
             params.projectName = parts[1];
             params.tab = parts[2] || 'overview'; // Default to overview if no tab specified
         }
-    } else if (hash.startsWith('team/')) {
+    } else if (route.startsWith('team/')) {
         view = 'team-detail';
-        params.teamName = hash.split('/')[1];
-    } else if (hash.startsWith('deployment/')) {
+        params.teamName = route.split('/')[1];
+    } else if (route.startsWith('deployment/')) {
         view = 'deployment-detail';
-        const parts = hash.split('/');
+        const parts = route.split('/');
         params.projectName = parts[1];
         params.deploymentId = parts[2];
-    } else if (hash === 'teams') {
+    } else if (route === 'teams') {
         view = 'teams';
     } else {
         view = 'projects';
@@ -462,11 +474,3 @@ function App() {
         </div>
     );
 }
-
-// Initialize the React app
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(
-    <ToastProvider>
-        <App />
-    </ToastProvider>
-);
