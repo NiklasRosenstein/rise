@@ -5,7 +5,7 @@ This example demonstrates how to decode and display the `rise_jwt` cookie that R
 ## What This Example Shows
 
 - How to read the `rise_jwt` HttpOnly cookie server-side
-- **How to validate JWT signatures using the `RISE_JWKS` environment variable**
+- **How to validate JWT signatures using OpenID Connect Discovery**
 - How to verify JWT issuer and expiration
 - How to decode a JWT token (Base64 URL decoding)
 - How to extract and display JWT claims
@@ -21,15 +21,16 @@ When you authenticate with Rise:
 1. Rise performs OAuth authentication with your identity provider (e.g., Dex, Azure AD)
 2. Rise issues its own JWT token containing user information (signed with RS256)
 3. The JWT is stored in an **HttpOnly** `rise_jwt` cookie
-4. Rise automatically injects the `RISE_JWKS` environment variable into your deployment
-5. The browser automatically sends this cookie with requests to your deployed app
-6. Your server-side code reads the cookie, validates the signature using `RISE_JWKS`, and extracts claims
+4. The browser automatically sends this cookie with requests to your deployed app
+5. Your server-side code reads the cookie, validates the signature using JWKS from the OpenID discovery endpoint, and extracts claims
 
 **Important:**
 - The `rise_jwt` cookie is HttpOnly (JavaScript cannot access it - XSS protection)
 - JWTs are signed with RS256 (asymmetric cryptography)
-- You should **always validate** the JWT signature using `RISE_JWKS` before trusting the claims
-- This example includes proper validation using the `jsonwebtoken` and `jwk-to-pem` libraries
+- You should **always validate** the JWT signature before trusting the claims
+- This example fetches JWKS from `${RISE_ISSUER}/.well-known/openid-configuration` (standard OpenID Connect Discovery)
+- The JWKS is cached for 1 hour to avoid excessive requests
+- This example includes proper validation using the `jsonwebtoken`, `jwk-to-pem`, and `node-fetch` libraries
 
 ## Deploying This Example
 

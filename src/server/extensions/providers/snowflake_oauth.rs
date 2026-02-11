@@ -554,10 +554,12 @@ impl SnowflakeOAuthProvisioner {
         let oauth_extension_name = self.generate_oauth_extension_name(extension_name);
 
         // Generate redirect URI - must match the format used by Generic OAuth extension
-        // Format: https://{domain}/api/v1/oauth/callback/{project_name}/{oauth_extension_name}
+        // Format: {RISE_PUBLIC_URL}/oidc/{project_name}/{oauth_extension_name}/callback
         let redirect_uri = format!(
-            "{}/api/v1/oauth/callback/{}/{}",
-            self.api_domain, project_name, oauth_extension_name
+            "{}/oidc/{}/{}/callback",
+            self.api_domain.trim_end_matches('/'),
+            project_name,
+            oauth_extension_name
         );
 
         // Update status
@@ -678,6 +680,7 @@ impl SnowflakeOAuthProvisioner {
   OAUTH_ISSUE_REFRESH_TOKENS = TRUE
   OAUTH_REFRESH_TOKEN_VALIDITY = {refresh_token_validity}
   OAUTH_ENFORCE_PKCE = TRUE
+  OAUTH_USE_SECONDARY_ROLES = IMPLICIT
   BLOCKED_ROLES_LIST = ({blocked_roles})"#,
             integration_name = integration_name_escaped,
             redirect_uri = redirect_uri_escaped,
@@ -867,6 +870,7 @@ impl SnowflakeOAuthProvisioner {
             &env_var_name,
             &client_secret_encrypted,
             true, // is_secret
+            true, // is_protected (system-generated secrets are protected by default)
         )
         .await
         .context("Failed to create environment variable")?;
@@ -891,15 +895,19 @@ impl SnowflakeOAuthProvisioner {
                 .as_ref()
                 .ok_or_else(|| anyhow!("Client ID not set"))?
                 .clone(),
-            client_secret_ref: env_var_name,
-            authorization_endpoint: format!(
+            client_secret_ref: Some(env_var_name),
+            client_secret_encrypted: None,
+            // Snowflake doesn't support OIDC discovery, so we set the issuer_url to the Snowflake base
+            // and explicitly provide the authorization and token endpoints
+            issuer_url: format!("https://{}.snowflakecomputing.com", self.account),
+            authorization_endpoint: Some(format!(
                 "https://{}.snowflakecomputing.com/oauth/authorize",
                 self.account
-            ),
-            token_endpoint: format!(
+            )),
+            token_endpoint: Some(format!(
                 "https://{}.snowflakecomputing.com/oauth/token-request",
                 self.account
-            ),
+            )),
             scopes: effective_config.scopes,
         };
 
@@ -1013,8 +1021,10 @@ impl SnowflakeOAuthProvisioner {
         }
 
         let expected_redirect_uri = format!(
-            "{}/api/v1/oauth/callback/{}/{}",
-            self.api_domain, project_name, oauth_extension_name
+            "{}/oidc/{}/{}/callback",
+            self.api_domain.trim_end_matches('/'),
+            project_name,
+            oauth_extension_name
         );
 
         let current_redirect_uri = status.redirect_uri.as_deref().unwrap_or("");
@@ -1328,7 +1338,7 @@ extensions:
     auth_type: password
     password: "${SNOWFLAKE_PASSWORD}"
     integration_name_prefix: "rise"
-    default_blocked_roles: ["ACCOUNTADMIN", "SECURITYADMIN"]
+    default_blocked_roles: ["ACCOUNTADMIN", "ORGADMIN", "SECURITYADMIN"]
     default_scopes: ["refresh_token"]
     refresh_token_validity_seconds: 7776000  # 90 days
 ```
@@ -1356,6 +1366,11 @@ client_secret_env_var: SNOWFLAKE_CLIENT_SECRET  # Default if not specified
 The provisioner tests the Snowflake connection before creating the integration to catch
 credential issues early. If the test fails, the extension will transition to Failed state
 with an error message.
+
+## Secondary Roles
+
+The integration is created with `OAUTH_USE_SECONDARY_ROLES = IMPLICIT`, which enables
+secondary roles for OAuth sessions. This allows users to use multiple roles in their session.
 
 Deletion removes all resources: Snowflake integration, OAuth extension, and environment variables.
 "#

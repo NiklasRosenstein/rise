@@ -161,7 +161,7 @@ fn normalize_image_reference(image: &str) -> String {
 ///
 /// # Arguments
 /// * `oci_client` - OCI client for registry interaction
-/// * `registry_provider` - Optional registry provider for credentials
+/// * `registry_provider` - Registry provider for credentials
 /// * `normalized_image` - Normalized image reference (e.g., "docker.io/library/nginx:latest")
 ///
 /// # Returns
@@ -171,31 +171,29 @@ fn normalize_image_reference(image: &str) -> String {
 /// Returns error if image doesn't exist, requires authentication, or registry is unreachable
 async fn resolve_image_digest(
     oci_client: &crate::server::oci::OciClient,
-    registry_provider: Option<&std::sync::Arc<dyn crate::server::registry::RegistryProvider>>,
+    registry_provider: &std::sync::Arc<dyn crate::server::registry::RegistryProvider>,
     normalized_image: &str,
 ) -> anyhow::Result<String> {
     // Build credentials map from registry provider
     let mut credentials = crate::server::oci::RegistryCredentialsMap::new();
 
-    if let Some(provider) = registry_provider {
-        match provider.get_pull_credentials().await {
-            Ok((user, pass)) if !user.is_empty() => {
-                debug!(
-                    "Adding credentials for registry host: {}",
-                    provider.registry_host()
-                );
-                credentials.insert(provider.registry_host().to_string(), (user, pass));
-            }
-            Ok(_) => {
-                debug!("Registry provider returned empty credentials, using anonymous auth");
-            }
-            Err(e) => {
-                error!(
-                    "Failed to get pull credentials from registry provider: {}",
-                    e
-                );
-                // Continue with anonymous auth
-            }
+    match registry_provider.get_pull_credentials().await {
+        Ok((user, pass)) if !user.is_empty() => {
+            debug!(
+                "Adding credentials for registry host: {}",
+                registry_provider.registry_host()
+            );
+            credentials.insert(registry_provider.registry_host().to_string(), (user, pass));
+        }
+        Ok(_) => {
+            debug!("Registry provider returned empty credentials, using anonymous auth");
+        }
+        Err(e) => {
+            error!(
+                "Failed to get pull credentials from registry provider: {}",
+                e
+            );
+            // Continue with anonymous auth
         }
     }
 
@@ -231,57 +229,26 @@ fn convert_status_to_db(status: DeploymentStatus) -> DbDeploymentStatus {
 /// Insert Rise-provided environment variables into a deployment
 ///
 /// This function adds the following environment variables:
-/// - RISE_JWKS: JSON Web Key Set for JWT validation
-/// - RISE_ISSUER: The Rise backend URL (issuer of JWTs)
-/// - RISE_APP_URLS: JSON array of URLs where the app can be accessed
+/// - RISE_ISSUER: Rise server URL (base URL for all Rise endpoints and JWT issuer)
+/// - RISE_APP_URL: Canonical URL where the app is accessible
+/// - RISE_APP_URLS: JSON array of all URLs where the app can be accessed
 ///
 /// These environment variables are visible in the Rise UI and allow deployed applications
-/// to validate Rise-issued JWTs and know their own URLs.
+/// to validate Rise-issued JWTs (via /.well-known/openid-configuration), call Rise APIs,
+/// and know their own URLs.
 async fn insert_rise_env_vars(
     state: &AppState,
     deployment: &crate::db::models::Deployment,
     project: &crate::db::models::Project,
 ) -> Result<(), (StatusCode, String)> {
-    // 1. Generate RISE_JWKS
-    let jwks = state.jwt_signer.generate_jwks().map_err(|e| {
-        error!("Failed to generate JWKS: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to generate JWKS: {}", e),
-        )
-    })?;
-    let jwks_json = serde_json::to_string(&jwks).map_err(|e| {
-        error!("Failed to serialize JWKS: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to serialize JWKS: {}", e),
-        )
-    })?;
-
-    // Insert RISE_JWKS
-    crate::db::env_vars::upsert_deployment_env_var(
-        &state.db_pool,
-        deployment.id,
-        "RISE_JWKS",
-        &jwks_json,
-        false, // Not a secret - public keys
-    )
-    .await
-    .map_err(|e| {
-        error!("Failed to insert RISE_JWKS env var: {}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to insert RISE_JWKS: {}", e),
-        )
-    })?;
-
-    // 2. Insert RISE_ISSUER
+    // 1. Insert RISE_ISSUER
     crate::db::env_vars::upsert_deployment_env_var(
         &state.db_pool,
         deployment.id,
         "RISE_ISSUER",
         &state.public_url,
         false, // Not a secret
+        false, // is_retrievable
     )
     .await
     .map_err(|e| {
@@ -292,7 +259,7 @@ async fn insert_rise_env_vars(
         )
     })?;
 
-    // 3. Generate RISE_APP_URL and RISE_APP_URLS
+    // 2. Generate RISE_APP_URL and RISE_APP_URLS
     let deployment_urls = state
         .deployment_backend
         .get_deployment_urls(deployment, project)
@@ -348,6 +315,7 @@ async fn insert_rise_env_vars(
         "RISE_APP_URLS",
         &app_urls_json,
         false, // Not a secret
+        false, // is_retrievable
     )
     .await
     .map_err(|e| {
@@ -365,6 +333,7 @@ async fn insert_rise_env_vars(
         "RISE_APP_URL",
         &canonical_url,
         false, // Not a secret
+        false, // is_retrievable
     )
     .await
     .map_err(|e| {
@@ -734,6 +703,7 @@ pub async fn create_deployment(
             "PORT",
             &final_http_port.to_string(),
             false, // not a secret
+            false, // is_retrievable
         )
         .await
         .map_err(|e| {
@@ -796,7 +766,7 @@ pub async fn create_deployment(
         info!("Resolving image '{}' to digest...", normalized_image);
         let image_digest = resolve_image_digest(
             &state.oci_client,
-            state.registry_provider.as_ref(),
+            &state.registry_provider,
             &normalized_image,
         )
         .await
@@ -864,6 +834,7 @@ pub async fn create_deployment(
             "PORT",
             &effective_http_port.to_string(),
             false, // not a secret
+            false, // is_retrievable
         )
         .await
         .map_err(|e| {
@@ -891,12 +862,8 @@ pub async fn create_deployment(
     } else {
         // Path 2: Build from source (current behavior)
         // Get registry credentials
-        let registry_provider = state.registry_provider.as_ref().ok_or((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "No registry configured".to_string(),
-        ))?;
-
-        let credentials = registry_provider
+        let credentials = state
+            .registry_provider
             .get_credentials(&payload.project)
             .await
             .map_err(|e| {
@@ -907,7 +874,7 @@ pub async fn create_deployment(
             })?;
 
         // Get full image tag from provider for CLI client (uses client_registry_url if configured)
-        let image_tag = registry_provider.get_image_tag(
+        let image_tag = state.registry_provider.get_image_tag(
             &payload.project,
             &deployment_id,
             ImageTagType::ClientFacing,
@@ -966,6 +933,7 @@ pub async fn create_deployment(
             "PORT",
             &effective_http_port.to_string(),
             false, // not a secret
+            false, // is_retrievable
         )
         .await
         .map_err(|e| {

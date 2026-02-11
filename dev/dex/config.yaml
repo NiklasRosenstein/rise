@@ -11,13 +11,12 @@ staticClients:
   redirectURIs:
   # Server-side OAuth callback (UI and ingress auth)
   - http://rise.local:3000/api/v1/auth/callback
-  - http://localhost:3000/api/v1/auth/callback
   # CLI Auth
   - http://localhost:8765/callback
   - http://localhost:8766/callback
   - http://localhost:8767/callback
   # OAuth extension callbacks (for examples)
-  - http://localhost:3000/api/v1/oauth/callback/oauth-demo/oauth-dex
+  - http://rise.local:3000/oidc/oauth-demo/oauth-dex/callback
   name: 'Rise Backend'
   secret: rise-backend-secret
 

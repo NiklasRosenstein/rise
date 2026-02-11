@@ -1,6 +1,14 @@
 # Authentication
 
-Rise uses JWT tokens issued by Dex OAuth2/OIDC provider for user authentication and service accounts for CI/CD workload identity.
+Rise uses JWT tokens for user authentication and service accounts for CI/CD workload identity.
+
+## Overview
+
+- **User Authentication**: Rise issues its own HS256 JWTs after validating IdP (Dex) tokens
+- **Token Flow**: IdP auth → Rise validates IdP token → Rise issues JWT → Client receives Rise JWT
+- **Service Accounts**: CI/CD systems authenticate using OIDC JWT tokens from external issuers
+
+The IdP (Dex) tokens are used internally for group synchronization but are not exposed to users. All user-facing authentication (CLI and UI) uses Rise-issued JWTs.
 
 ## User Authentication
 
@@ -148,6 +156,68 @@ rise sa create releases \
 **GitLab CI**: `project_path`, `ref`, `ref_type`, `ref_protected`, `environment`, `pipeline_source` - [Docs](https://docs.gitlab.com/ee/ci/secrets/id_token_authentication.html)
 
 **GitHub Actions**: `repository`, `ref`, `workflow`, `environment`, `actor` - [Docs](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
+
+### Wildcard Patterns in Claims
+
+Service account claims support glob-style wildcard patterns using `*` to match multiple values. This is particularly useful for monorepo CI scenarios where you deploy per-branch apps with dynamic environment names.
+
+**Syntax:**
+- `*` matches any sequence of characters (including empty string)
+- Unlike filesystem globs, wildcards match across any characters (including `/` and `-`)
+- Use exact matching when no wildcard is present (backward compatible)
+
+**Important:** 
+- The wildcard `*` matches partial words. For example, `app*` will match both `app-staging` (intended) and `application` (which starts with "app")
+- Since `*` can match an empty string, `app*` will also match `app` exactly
+- Pattern `app-*` requires the dash, so it matches `app-staging` but NOT `app`
+- Design your patterns carefully to avoid unintended matches
+
+**Examples:**
+
+**Match all environments starting with "app":**
+```bash
+rise sa create my-app \
+  --issuer https://gitlab.com \
+  --claim aud=rise-project-my-app \
+  --claim project_path=myorg/myrepo \
+  --claim environment=app*
+```
+Matches: `app` (wildcard matches empty string), `app-mr/6`, `app-staging`  
+Also matches: `application`, `app_test` (wildcard matches any continuation)
+
+**Match all production environments:**
+```bash
+rise sa create prod-services \
+  --issuer https://gitlab.com \
+  --claim aud=rise-project-prod \
+  --claim project_path=myorg/myrepo \
+  --claim environment=*-prod
+```
+Matches: `api-prod`, `web-prod`, `my-service-prod`, etc.
+
+**Match specific pattern with multiple wildcards:**
+```bash
+rise sa create test-environments \
+  --issuer https://gitlab.com \
+  --claim aud=rise-project-test \
+  --claim project_path=myorg/myrepo \
+  --claim environment=app-*-test
+```
+Matches: `app-staging-test`, `app-mr/6-test`, etc.
+
+**Common patterns for monorepo CI:**
+```bash
+# Match all merge request environments: app-mr/1, app-mr/2, etc.
+--claim environment=app-mr/*
+
+# Match all branch deployments: app-feature-*, app-hotfix-*, etc.
+--claim environment=app-*
+
+# Match specific repository branches: myorg/repo/branch-*
+--claim ref=refs/heads/feature/*
+```
+
+**Note:** You can mix exact and wildcard claims in the same service account. All claims must match for authentication to succeed.
 
 ### Managing Service Accounts
 

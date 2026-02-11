@@ -36,6 +36,7 @@ Rise simplifies container deployment by providing:
 - **OAuth2/OIDC Authentication**: Secure authentication via Dex
 - **Multi-Registry Support**: AWS ECR, Docker Registry (Harbor, Quay, etc.)
 - **Service Accounts**: Workload identity for GitHub Actions, GitLab CI
+- **Multiple Build Backends**: Docker, Buildpacks, Railpack with build-time configuration
 - **Multi-Process Architecture**: Separate controllers for deployments, projects, ECR
 - **Embedded Web Frontend**: Single-binary deployment with built-in UI
 
@@ -81,6 +82,16 @@ rise deployment create my-app --image nginx:latest
 
 # Local development
 rise run --project my-app  # Build and run locally with project env vars
+
+# Build with custom build-time variables (for build configuration)
+rise build myapp:latest -e NODE_ENV=production -e BUILD_VERSION=1.2.3
+
+# Or configure in rise.toml
+cat > rise.toml <<EOF
+[build]
+backend = "pack"
+env = ["NODE_ENV=production", "BP_NODE_VERSION=20"]
+EOF
 ```
 
 ### Install from crates.io

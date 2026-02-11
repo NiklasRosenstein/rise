@@ -3,8 +3,8 @@ use async_trait::async_trait;
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec, ReplicaSet};
 use k8s_openapi::api::core::v1::{
-    Container, ContainerPort, LocalObjectReference, Namespace, PodSpec, PodTemplateSpec, Secret,
-    Service, ServicePort, ServiceSpec,
+    Container, ContainerPort, HostAlias, LocalObjectReference, Namespace, PodSpec, PodTemplateSpec,
+    Secret, Service, ServicePort, ServiceSpec,
 };
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, Ingress, IngressBackend, IngressRule,
@@ -108,7 +108,7 @@ pub struct KubernetesControllerConfig {
     pub staging_ingress_url_template: Option<String>,
     pub ingress_port: Option<u16>,
     pub ingress_schema: String,
-    pub registry_provider: Option<Arc<dyn RegistryProvider>>,
+    pub registry_provider: Arc<dyn RegistryProvider>,
     pub auth_backend_url: String,
     pub auth_signin_url: String,
     /// Backend address for routing /.rise path prefix traffic to the Rise backend
@@ -122,10 +122,8 @@ pub struct KubernetesControllerConfig {
     pub node_selector: std::collections::HashMap<String, String>,
     pub image_pull_secret_name: Option<String>,
     pub access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
-    /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
-    pub rise_jwks_json: String,
-    /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
-    pub rise_issuer: String,
+    /// Host aliases to inject into pod specs (hostname -> IP address)
+    pub host_aliases: std::collections::HashMap<String, String>,
 }
 
 /// Kubernetes controller implementation
@@ -136,7 +134,7 @@ pub struct KubernetesController {
     staging_ingress_url_template: Option<String>,
     ingress_port: Option<u16>,
     ingress_schema: String,
-    registry_provider: Option<Arc<dyn RegistryProvider>>,
+    registry_provider: Arc<dyn RegistryProvider>,
     auth_backend_url: String,
     auth_signin_url: String,
     /// Backend address for routing /.rise path prefix traffic to the Rise backend
@@ -155,12 +153,8 @@ pub struct KubernetesController {
     /// Value: last observed resourceVersion from Kubernetes API
     /// Lost on controller restart → causes one re-apply, then cached again
     resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
-    /// JWKS JSON for RS256 JWT verification (passed to deployed applications as RISE_JWKS)
-    #[allow(dead_code)]
-    rise_jwks_json: String,
-    /// Rise backend issuer URL (passed to deployed applications as RISE_ISSUER for JWT validation)
-    #[allow(dead_code)]
-    rise_issuer: String,
+    /// Host aliases to inject into pod specs (hostname -> IP address)
+    host_aliases: std::collections::HashMap<String, String>,
 }
 
 impl KubernetesController {
@@ -191,8 +185,7 @@ impl KubernetesController {
             image_pull_secret_name: config.image_pull_secret_name,
             access_classes: config.access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            rise_jwks_json: config.rise_jwks_json,
-            rise_issuer: config.rise_issuer,
+            host_aliases: config.host_aliases,
         })
     }
 
@@ -220,16 +213,21 @@ impl KubernetesController {
     }
 
     /// Update cached resource version
+    ///
+    /// When `version` is `Some`, inserts/updates the cached version.
+    /// When `version` is `None`, removes the cache entry to force re-evaluation on next reconcile.
     fn update_version_cache(
         &self,
         deployment_id: uuid::Uuid,
         resource_type: &str,
         version: Option<String>,
     ) {
+        let key = Self::resource_cache_key(deployment_id, resource_type);
+        let mut cache = self.resource_versions.write().unwrap();
         if let Some(version) = version {
-            let key = Self::resource_cache_key(deployment_id, resource_type);
-            let mut cache = self.resource_versions.write().unwrap();
             cache.insert(key, version);
+        } else {
+            cache.remove(&key);
         }
     }
 
@@ -381,10 +379,7 @@ impl KubernetesController {
         }
 
         // Get registry provider
-        let Some(ref provider) = self.registry_provider else {
-            // No registry provider configured, skip refresh
-            return Ok(());
-        };
+        let provider = &self.registry_provider;
 
         // Find all projects that have active Kubernetes deployments
         // We'll refresh the secret for each namespace (one per project)
@@ -987,11 +982,14 @@ impl KubernetesController {
             .await?;
 
         // 2. Apply ImagePullSecret (if needed)
-        if let Some(ref registry_provider) = self.registry_provider {
-            if self.image_pull_secret_name.is_none() {
-                self.apply_image_pull_secret(deployment.id, project, &namespace, registry_provider)
-                    .await?;
-            }
+        if self.image_pull_secret_name.is_none() {
+            self.apply_image_pull_secret(
+                deployment.id,
+                project,
+                &namespace,
+                &self.registry_provider,
+            )
+            .await?;
         }
 
         // 3. Apply BackendService (if configured)
@@ -1405,7 +1403,26 @@ impl KubernetesController {
             Ok(existing_ingress) => {
                 let current_version = existing_ingress.metadata.resource_version.as_deref();
 
-                if self.needs_apply(deployment_id, "ingress", current_version) {
+                // When needs_reconcile is set (e.g., access_class changed), use replace
+                // to fully replace the resource including removing old annotations.
+                // SSA patch may not properly remove annotations when switching access classes.
+                if deployment.needs_reconcile {
+                    let mut ingress = self.create_primary_ingress(project, deployment, metadata);
+                    // Set resourceVersion for optimistic concurrency
+                    ingress.metadata.resource_version = current_version.map(String::from);
+                    let result = ingress_api
+                        .replace(&ingress_name, &PostParams::default(), &ingress)
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "ingress",
+                        result.metadata.resource_version,
+                    );
+                    info!(
+                        "Replaced primary Ingress '{}' with updated annotations (needs_reconcile)",
+                        ingress_name
+                    );
+                } else if self.needs_apply(deployment_id, "ingress", current_version) {
                     let ingress = self.create_primary_ingress(project, deployment, metadata);
                     let result = ingress_api
                         .patch(
@@ -1447,7 +1464,36 @@ impl KubernetesController {
                 Ok(existing_ingress) => {
                     let current_version = existing_ingress.metadata.resource_version.as_deref();
 
-                    if self.needs_apply(deployment_id, "ingress-custom-domains", current_version) {
+                    // When needs_reconcile is set, use replace to fully replace the resource
+                    if deployment.needs_reconcile {
+                        let mut ingress = self.create_custom_domain_ingress(
+                            project,
+                            deployment,
+                            metadata,
+                            &custom_domains,
+                        );
+                        ingress.metadata.resource_version = current_version.map(String::from);
+                        let result = ingress_api
+                            .replace(
+                                &custom_domain_ingress_name,
+                                &PostParams::default(),
+                                &ingress,
+                            )
+                            .await?;
+                        self.update_version_cache(
+                            deployment_id,
+                            "ingress-custom-domains",
+                            result.metadata.resource_version,
+                        );
+                        info!(
+                            "Replaced custom domain Ingress '{}' with updated annotations (needs_reconcile)",
+                            custom_domain_ingress_name
+                        );
+                    } else if self.needs_apply(
+                        deployment_id,
+                        "ingress-custom-domains",
+                        current_version,
+                    ) {
                         let ingress = self.create_custom_domain_ingress(
                             project,
                             deployment,
@@ -1721,8 +1767,8 @@ impl KubernetesController {
         .await?;
 
         // Format as Kubernetes EnvVar objects
-        // Note: PORT, RISE_JWKS, RISE_ISSUER, RISE_APP_URL, and RISE_APP_URLS are now
-        // persisted in deployment_env_vars and loaded from the database
+        // Note: PORT, RISE_ISSUER, RISE_APP_URL, and RISE_APP_URLS
+        // are persisted in deployment_env_vars and loaded from the database
         let k8s_env_vars: Vec<EnvVar> = env_vars
             .into_iter()
             .map(|(key, value)| EnvVar {
@@ -1779,15 +1825,11 @@ impl KubernetesController {
             };
 
             // Build-from-source: construct from registry config using the appropriate deployment_id
-            if let Some(ref registry_provider) = self.registry_provider {
-                registry_provider.get_image_tag(
-                    &project.name,
-                    &deployment_id_for_tag,
-                    crate::server::registry::ImageTagType::Internal,
-                )
-            } else {
-                format!("{}:{}", project.name, deployment_id_for_tag)
-            }
+            self.registry_provider.get_image_tag(
+                &project.name,
+                &deployment_id_for_tag,
+                crate::server::registry::ImageTagType::Internal,
+            )
         };
 
         K8sDeployment {
@@ -1823,15 +1865,10 @@ impl KubernetesController {
                     spec: Some(PodSpec {
                         image_pull_secrets: {
                             // Determine which secret to use (if any)
-                            let secret_name =
-                                self.image_pull_secret_name.as_deref().or_else(|| {
-                                    // Use default name if registry provider is configured
-                                    if self.registry_provider.is_some() {
-                                        Some(IMAGE_PULL_SECRET_NAME)
-                                    } else {
-                                        None
-                                    }
-                                });
+                            let secret_name = self
+                                .image_pull_secret_name
+                                .as_deref()
+                                .or(Some(IMAGE_PULL_SECRET_NAME));
 
                             secret_name.map(|name| {
                                 vec![LocalObjectReference {
@@ -1854,6 +1891,19 @@ impl KubernetesController {
                             None
                         } else {
                             Some(self.node_selector.clone().into_iter().collect())
+                        },
+                        host_aliases: if self.host_aliases.is_empty() {
+                            None
+                        } else {
+                            Some(
+                                self.host_aliases
+                                    .iter()
+                                    .map(|(hostname, ip)| HostAlias {
+                                        hostnames: Some(vec![hostname.clone()]),
+                                        ip: ip.clone(),
+                                    })
+                                    .collect(),
+                            )
                         },
                         ..Default::default()
                     }),
@@ -2070,11 +2120,9 @@ impl KubernetesController {
                 name: Some(Self::ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
-                annotations: if !annotations.is_empty() {
-                    Some(annotations)
-                } else {
-                    None
-                },
+                // Always include annotations (even if empty) so SSA removes old keys
+                // when access_class changes from authenticated to public
+                annotations: Some(annotations),
                 ..Default::default()
             },
             spec: Some(IngressSpec {
@@ -2126,11 +2174,9 @@ impl KubernetesController {
                 name: Some(Self::custom_domain_ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
                 labels: Some(Self::common_labels(project)),
-                annotations: if !annotations.is_empty() {
-                    Some(annotations)
-                } else {
-                    None
-                },
+                // Always include annotations (even if empty) so SSA removes old keys
+                // when access_class changes from authenticated to public
+                annotations: Some(annotations),
                 ..Default::default()
             },
             spec: Some(IngressSpec {
@@ -2458,47 +2504,43 @@ impl DeploymentBackend for KubernetesController {
                     }
 
                     // Using registry provider - create/update secret dynamically
-                    if let Some(ref provider) = self.registry_provider {
-                        let (username, password) = provider.get_pull_credentials().await?;
-                        let secret_api: Api<Secret> =
-                            Api::namespaced(self.kube_client.clone(), namespace);
+                    let provider = &self.registry_provider;
+                    let (username, password) = provider.get_pull_credentials().await?;
+                    let secret_api: Api<Secret> =
+                        Api::namespaced(self.kube_client.clone(), namespace);
 
-                        let secret = self.create_dockerconfigjson_secret(
+                    let secret = self.create_dockerconfigjson_secret(
+                        IMAGE_PULL_SECRET_NAME,
+                        provider.registry_host(),
+                        &username,
+                        &password,
+                    )?;
+
+                    // Use server-side apply to upsert the secret (creates or updates as needed)
+                    match secret_api
+                        .patch(
                             IMAGE_PULL_SECRET_NAME,
-                            provider.registry_host(),
-                            &username,
-                            &password,
-                        )?;
-
-                        // Use server-side apply to upsert the secret (creates or updates as needed)
-                        match secret_api
-                            .patch(
-                                IMAGE_PULL_SECRET_NAME,
-                                &PatchParams::apply("rise-controller").force(),
-                                &Patch::Apply(&secret),
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                info!(
-                                    project = project.name,
-                                    namespace = namespace,
-                                    "ImagePullSecret applied (created or updated)"
-                                );
-                            }
-                            Err(e) if is_namespace_not_found_error(&e) => {
-                                warn!(
+                            &PatchParams::apply("rise-controller").force(),
+                            &Patch::Apply(&secret),
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            info!(
+                                project = project.name,
+                                namespace = namespace,
+                                "ImagePullSecret applied (created or updated)"
+                            );
+                        }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!(
                                     "Namespace missing during ImagePullSecret apply, resetting to CreatingNamespace"
                                 );
-                                metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
-                                metadata.namespace = None;
-                                continue;
-                            }
-                            Err(e) => return Err(e.into()),
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
                         }
-                    } else {
-                        // No registry provider and no external secret - skip secret creation
-                        debug!("No registry provider or external secret configured, skipping image pull secret creation");
+                        Err(e) => return Err(e.into()),
                     }
 
                     metadata.reconcile_phase = ReconcilePhase::CreatingBackendService;
@@ -3725,6 +3767,45 @@ mod tests {
     // Test database URL for mock controllers
     const TEST_DATABASE_URL: &str = "postgres://localhost/test";
 
+    /// Mock registry provider for unit tests
+    struct MockRegistryProvider;
+
+    #[async_trait::async_trait]
+    impl crate::server::registry::RegistryProvider for MockRegistryProvider {
+        async fn get_credentials(
+            &self,
+            _repository: &str,
+        ) -> anyhow::Result<crate::server::registry::models::RegistryCredentials> {
+            Ok(crate::server::registry::models::RegistryCredentials {
+                username: "test".to_string(),
+                password: "test".to_string(),
+                registry_url: "localhost:5000".to_string(),
+                expires_in: None,
+            })
+        }
+
+        async fn get_pull_credentials(&self) -> anyhow::Result<(String, String)> {
+            Ok(("test".to_string(), "test".to_string()))
+        }
+
+        fn registry_host(&self) -> &str {
+            "localhost:5000"
+        }
+
+        fn registry_url(&self) -> &str {
+            "localhost:5000"
+        }
+
+        fn get_image_tag(
+            &self,
+            repository: &str,
+            tag: &str,
+            _tag_type: crate::server::registry::ImageTagType,
+        ) -> String {
+            format!("localhost:5000/{repository}:{tag}")
+        }
+    }
+
     fn create_test_deployment(
         name: &str,
         replicas: i32,
@@ -3868,7 +3949,7 @@ mod tests {
             staging_ingress_url_template: None,
             ingress_port: None,
             ingress_schema: "https".to_string(),
-            registry_provider: None,
+            registry_provider: Arc::new(MockRegistryProvider),
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
             backend_address: None,
@@ -3882,8 +3963,7 @@ mod tests {
             image_pull_secret_name: None,
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            rise_jwks_json: r#"{"keys":[]}"#.to_string(),
-            rise_issuer: "http://localhost:3000".to_string(),
+            host_aliases: std::collections::HashMap::new(),
         }
     }
 
@@ -4338,7 +4418,7 @@ mod tests {
             staging_ingress_url_template: None,
             ingress_port: None,
             ingress_schema: "https".to_string(),
-            registry_provider: None,
+            registry_provider: Arc::new(MockRegistryProvider),
             auth_backend_url: "http://localhost:3000".to_string(),
             auth_signin_url: "http://localhost:3000".to_string(),
             backend_address: None,
@@ -4352,8 +4432,7 @@ mod tests {
             image_pull_secret_name: None,
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
-            rise_jwks_json: r#"{"keys":[]}"#.to_string(),
-            rise_issuer: "http://localhost:3000".to_string(),
+            host_aliases: std::collections::HashMap::new(),
         }
     }
 }

@@ -14,6 +14,7 @@ pub(crate) fn build_image_with_buildpacks(
     builder: Option<&str>,
     buildpacks: &[String],
     env: &[String],
+    no_cache: bool,
 ) -> Result<()> {
     // Check if pack CLI is available
     let pack_check = Command::new("pack").arg("version").output();
@@ -42,6 +43,11 @@ pub(crate) fn build_image_with_buildpacks(
         .arg(builder_image)
         .arg("--platform")
         .arg("linux/amd64");
+
+    // Add clear-cache flag if requested
+    if no_cache {
+        cmd.arg("--clear-cache");
+    }
 
     // Add buildpacks if specified
     if !buildpacks.is_empty() {
@@ -72,7 +78,7 @@ pub(crate) fn build_image_with_buildpacks(
     // This avoids code bifurcation and allows CA certificate injection
 
     // If SSL_CERT_FILE is set, inject CA certificate into lifecycle container
-    if let Ok(ca_cert_path) = std::env::var("SSL_CERT_FILE") {
+    if let Some(ca_cert_path) = super::env_var_non_empty("SSL_CERT_FILE") {
         let cert_path = Path::new(&ca_cert_path);
 
         // Validate the file exists

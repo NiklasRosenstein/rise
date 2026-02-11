@@ -36,9 +36,20 @@ pub struct BuildArgs {
     #[arg(long = "buildpack", short = 'b')]
     pub buildpacks: Vec<String>,
 
-    /// Environment variables to pass to the build. Can be specified multiple times.
-    /// Format: KEY=VALUE or KEY (to pass from environment)
-    #[arg(long = "env", short = 'e')]
+    /// Build-time environment variables (for build configuration only).
+    /// Format: KEY=VALUE (with explicit value) or KEY (reads from current environment).
+    ///
+    /// Examples:
+    ///   -e NODE_ENV=production -e API_VERSION=1.2.3
+    ///   -e DATABASE_URL  (reads DATABASE_URL from current environment)
+    ///
+    /// Can also be configured in rise.toml under [build] section.
+    /// CLI values are merged with rise.toml values.
+    ///
+    /// WARNING: Build-time variables are for build configuration (compiler flags,
+    /// tool versions, feature toggles), NOT runtime secrets. For runtime secrets,
+    /// use 'rise env set --secret' instead.
+    #[arg(long = "env", short = 'e', value_name = "KEY=VALUE")]
     pub env: Vec<String>,
 
     /// Container CLI to use (docker or podman)
@@ -53,19 +64,24 @@ pub struct BuildArgs {
     #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
     pub railpack_embed_ssl_cert: Option<bool>,
 
-    /// Path to Dockerfile (relative to app path). Defaults to "Dockerfile" or "Containerfile"
+    /// Path to Dockerfile (relative to app path / rise.toml location). Defaults to "Dockerfile" or "Containerfile"
     #[arg(long)]
     pub dockerfile: Option<String>,
 
     /// Default build context (docker/podman only) - the context directory for the build.
     /// This is the path argument to `docker build <path>`. Defaults to app path.
+    /// Path is relative to the app path / rise.toml location.
     #[arg(long = "context")]
     pub build_context: Option<String>,
 
     /// Build contexts for multi-stage builds (docker/podman only). Can be specified multiple times.
-    /// Format: name=path where path is relative to app directory
+    /// Format: name=path where path is relative to app path / rise.toml location
     #[arg(long = "build-context")]
     pub build_contexts: Vec<String>,
+
+    /// Disable build cache (equivalent to docker build --no-cache, pack build --clear-cache)
+    #[arg(long)]
+    pub no_cache: bool,
 }
 
 /// Options for building container images
@@ -78,17 +94,24 @@ pub(crate) struct BuildOptions {
     pub buildpacks: Vec<String>,
     pub env: Vec<String>,
     pub container_cli: Option<String>,
-    pub managed_buildkit: bool,
+    /// None = auto-detect based on SSL_CERT_FILE and BUILDKIT_HOST
+    /// Some(true) = explicitly enable managed buildkit
+    /// Some(false) = explicitly disable managed buildkit
+    pub managed_buildkit: Option<bool>,
     pub railpack_embed_ssl_cert: bool,
     pub push: bool,
-    /// Path to Dockerfile (relative to app path)
+    /// Path to Dockerfile (relative to app_path / rise.toml location)
     pub dockerfile: Option<String>,
-    /// Default build context (relative to app path)
+    /// Default build context (relative to app_path / rise.toml location)
     /// This is the path argument to `docker build <path>`. Defaults to app_path if None.
+    /// Note: This value is resolved to an absolute path in build_image() before use.
     pub build_context: Option<String>,
     /// Build contexts for multi-stage builds (docker/podman only)
-    /// Format: name -> path (relative to app_path)
+    /// Format: name -> path (relative to app_path / rise.toml location)
+    /// Note: These paths are resolved to absolute paths in build_image() before use.
     pub build_contexts: std::collections::HashMap<String, String>,
+    /// Disable build cache
+    pub no_cache: bool,
 }
 
 impl BuildOptions {
@@ -165,12 +188,17 @@ impl BuildOptions {
                 env
             },
 
-            // Boolean options - use Option chaining with Config getters as final fallback
+            // Boolean options - preserve None if not set anywhere for auto-detection
             managed_buildkit: build_args
                 .managed_buildkit
                 .or_else(|| project_config.as_ref().and_then(|c| c.managed_buildkit))
-                .unwrap_or_else(|| config.get_managed_buildkit()),
-
+                .or_else(|| {
+                    std::env::var("RISE_MANAGED_BUILDKIT")
+                        .ok()
+                        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+                })
+                .or(config.managed_buildkit),
+            // Don't unwrap_or here - keep as None if not set anywhere
             railpack_embed_ssl_cert: build_args
                 .railpack_embed_ssl_cert
                 .or_else(|| {
@@ -213,6 +241,12 @@ impl BuildOptions {
                 contexts
             },
 
+            no_cache: build_args.no_cache
+                || project_config
+                    .as_ref()
+                    .and_then(|c| c.no_cache)
+                    .unwrap_or(false),
+
             push: false,
         }
     }
@@ -250,6 +284,7 @@ pub(crate) fn select_build_method(
     app_path: &str,
     backend: Option<&str>,
     dockerfile: Option<&str>,
+    container_cli: &str,
 ) -> Result<(BuildMethod, Option<String>)> {
     // Determine dockerfile path
     let (dockerfile_path, dockerfile_relative) = if let Some(df) = dockerfile {
@@ -277,17 +312,28 @@ pub(crate) fn select_build_method(
     } else {
         // Auto-detect based on dockerfile presence
         if dockerfile_path.exists() && dockerfile_path.is_file() {
-            info!(
-                "Detected {}, using docker backend",
-                dockerfile_relative.as_deref().unwrap_or("Dockerfile")
-            );
-            Ok((
-                BuildMethod::Docker { use_buildx: false },
-                dockerfile_relative,
-            ))
+            // Check if buildx is available
+            let use_buildx = super::docker::is_buildx_available(container_cli);
+            if use_buildx {
+                info!(
+                    "Detected {}, using docker:buildx backend",
+                    dockerfile_relative.as_deref().unwrap_or("Dockerfile")
+                );
+            } else {
+                info!(
+                    "Detected {}, using docker backend",
+                    dockerfile_relative.as_deref().unwrap_or("Dockerfile")
+                );
+            }
+            Ok((BuildMethod::Docker { use_buildx }, dockerfile_relative))
         } else {
-            info!("No Dockerfile found, using pack backend");
-            Ok((BuildMethod::Pack, None))
+            info!("No Dockerfile found, using railpack backend");
+            Ok((
+                BuildMethod::Railpack {
+                    use_buildctl: false,
+                },
+                None,
+            ))
         }
     }
 }

@@ -16,14 +16,14 @@ Simple static and dynamic applications to get started with Rise.
 
 Demonstrate the OAuth 2.0 extension for end-user authentication.
 
-- **[oauth-fragment-flow](./oauth-fragment-flow/)** - Fragment-based OAuth flow for SPAs
-  - Tokens delivered in URL fragment (`#access_token=...`)
+- **[oauth-pkce-flow](./oauth-pkce-flow/)** - PKCE OAuth flow for SPAs
+  - Uses PKCE (Proof Key for Code Exchange) for enhanced security
   - Best for: React, Vue, Angular, vanilla JavaScript
-  - Security: Tokens never sent to server, no logs/referer leaks
+  - Security: No client secrets needed, prevents code interception
   - Stack: nginx serving static HTML/JS (port 8080)
 
-- **[oauth-exchange-flow](./oauth-exchange-flow/)** - Exchange token flow for backend apps
-  - Temporary token exchanged server-side
+- **[oauth-exchange-flow](./oauth-exchange-flow/)** - RFC 6749-compliant token endpoint flow for backend apps
+  - Authorization code exchanged server-side via `/token` endpoint
   - Best for: Rails, Django, Express, server-rendered apps
   - Security: HttpOnly cookies, XSS-safe, tokens never exposed to browser
   - Stack: Node.js/Express (port 8080)
@@ -85,12 +85,12 @@ The OAuth examples require additional setup to create the OAuth extension:
 
 3. **Deploy the example**:
    ```bash
-   cd example/oauth-fragment-flow  # or oauth-exchange-flow
+   cd example/oauth-pkce-flow  # or oauth-exchange-flow
    rise deployment create oauth-demo
    ```
 
 4. **Test locally** (optional):
-   - Fragment flow: Open `public/index.html` in browser with local server
+   - PKCE flow: `rise deployment create oauth-demo` and visit the deployed URL
    - Exchange flow: Run `npm install && npm start` and visit `http://localhost:8080`
 
 ## Default Dex Credentials

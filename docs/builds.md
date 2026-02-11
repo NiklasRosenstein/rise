@@ -169,7 +169,7 @@ COPY --from=mylib /package.json /app/lib/package.json
 
 **Notes:**
 - Build contexts are only supported by Docker and Podman backends
-- Paths are relative to the project directory
+- Paths are relative to the `rise.toml` file location (typically the project root directory)
 - Available with all Docker-based backends: `docker`, `docker:buildx`, `buildctl`
 
 ## Build-Time Environment Variables
@@ -215,6 +215,123 @@ rise build myapp:latest --backend railpack -e CUSTOM_VAR=value
 - Available in all build steps defined in the Railpack plan
 - Railpack frontend exposes them as environment variables during build
 
+### Security Considerations
+
+**IMPORTANT: Build-time variables are for build configuration only!**
+
+Build-time environment variables are used during the image build process and should only contain build-related configuration (compiler versions, build flags, feature toggles, etc.). They should NEVER contain runtime secrets.
+
+**❌ Bad - Runtime secrets as build-time variables:**
+```toml
+[build]
+# NEVER do this - these are runtime secrets!
+env = ["DATABASE_PASSWORD=hunter2", "API_KEY=secret123"]
+```
+
+```bash
+# NEVER do this - runtime secrets don't belong in builds!
+rise build myapp:latest -e DATABASE_PASSWORD=secret123
+```
+
+**✅ Good - Build configuration only:**
+```toml
+[build]
+# These configure the build process, not the running application
+env = ["NODE_ENV=production", "BUILD_VERSION=1.2.3", "BP_NODE_VERSION=20"]
+```
+
+```bash
+# Build-time configuration that affects compilation/packaging
+rise build myapp:latest -e NODE_ENV=production -e OPTIMIZATION_LEVEL=2
+```
+
+**Build-Time vs Runtime Variables:**
+
+| Aspect | Build-Time Variables | Runtime Variables |
+|--------|---------------------|-------------------|
+| **Purpose** | Configure build process (compiler flags, tool versions) | Configure running application (DB credentials, API keys) |
+| **Set via** | `build.env` in `rise.toml`, `-e` flag | `rise env set` command |
+| **Used during** | Image building only | Container runtime |
+| **Storage** | Not stored (ephemeral, config files) | Database (encrypted for secrets) |
+| **Examples** | `NODE_ENV`, `BUILD_VERSION`, `BP_PYTHON_VERSION` | `DATABASE_URL`, `API_KEY`, `JWT_SECRET` |
+
+**For runtime secrets**, always use `rise env set --secret`:
+```bash
+# Runtime secrets - injected into running containers
+rise env set my-app DATABASE_PASSWORD hunter2 --secret
+rise env set my-app API_KEY abc123xyz --secret
+
+# Non-secret runtime config
+rise env set my-app LOG_LEVEL info
+```
+
+**Reading from environment (build-time only):**
+You can reference environment variables without hardcoding values in `rise.toml`:
+```toml
+[build]
+env = ["BUILD_VERSION"]  # Reads BUILD_VERSION from your shell environment
+```
+
+This is useful for CI/CD where you want to inject build metadata (git commit SHA, build number) without hardcoding it in config files.
+
+### Troubleshooting Build-Time Variables
+
+**Problem: Environment variable not available in Dockerfile**
+
+Docker backend requires explicit `ARG` declarations:
+```dockerfile
+ARG NODE_ENV
+ARG BUILD_VERSION
+RUN echo "Building version $BUILD_VERSION"
+```
+
+Then pass via CLI or rise.toml:
+```bash
+rise build myapp:latest -e NODE_ENV=production -e BUILD_VERSION=1.0.0
+```
+
+**Problem: Variable contains secret but needs to be in rise.toml**
+
+Don't put the secret value in rise.toml. Instead, use the `KEY` format (without `=VALUE`) to read from your environment:
+
+```toml
+[build]
+env = ["API_KEY"]  # Will read from environment
+```
+
+Then set in your shell before building:
+```bash
+export API_KEY=secret123
+rise build myapp:latest
+```
+
+**Problem: CLI -e flags are overriding rise.toml values**
+
+This is by design! CLI flags are **merged** with rise.toml values, not replaced:
+- All `env` values from rise.toml are included
+- CLI `-e` flags are appended
+- Result: rise.toml env + CLI env
+
+To completely override, don't use rise.toml for that variable.
+
+## Build Cache Control
+
+Use `--no-cache` to disable build caching and force a complete rebuild:
+
+```bash
+rise build myapp:latest --no-cache
+rise deploy myproject --no-cache
+```
+
+Or set in `rise.toml`:
+
+```toml
+[build]
+no_cache = true
+```
+
+Useful when dependencies have updated but source files haven't changed, or when debugging build issues.
+
 ## Project Configuration (rise.toml)
 
 You can create a `rise.toml` or `.rise.toml` file in your project directory to define default build options. This allows you to avoid repeating CLI flags for every build.
@@ -251,15 +368,16 @@ All CLI build flags can be specified in the `[build]` section:
 | Field | Type | Description |
 |-------|------|-------------|
 | `backend` | String | Build backend: `docker`, `docker:build`, `docker:buildx`, `buildctl`, `pack`, `railpack`, `railpack:buildctl` |
-| `dockerfile` | String | Path to Dockerfile (relative to project root). Defaults to `Dockerfile` or `Containerfile` |
-| `build_context` | String | Default build context (docker/podman only). The path argument to `docker build <path>`. Defaults to project root. |
-| `build_contexts` | Object | Named build contexts for multi-stage builds (docker/podman only). Format: `{ "name" = "path" }` |
+| `dockerfile` | String | Path to Dockerfile (relative to `rise.toml` location). Defaults to `Dockerfile` or `Containerfile` |
+| `build_context` | String | Default build context (docker/podman only). The path argument to `docker build <path>`. Defaults to `rise.toml` location. Path is relative to `rise.toml` location. |
+| `build_contexts` | Object | Named build contexts for multi-stage builds (docker/podman only). Format: `{ "name" = "path" }`. Paths are relative to `rise.toml` location. |
 | `builder` | String | Buildpack builder image (pack only) |
 | `buildpacks` | Array | List of buildpacks to use (pack only) |
 | `env` | Array | Environment variables for build (format: `KEY=VALUE` or `KEY`) |
 | `container_cli` | String | Container CLI: `docker` or `podman` |
 | `managed_buildkit` | Boolean | Enable managed BuildKit daemon |
 | `railpack_embed_ssl_cert` | Boolean | Embed SSL certificate in Railpack builds |
+| `no_cache` | Boolean | Disable build cache (equivalent to `--no-cache` flag) |
 
 ### Examples
 
@@ -470,13 +588,16 @@ rise build myapp:latest --backend railpack
 
 ## Build-Time SSL Certificate Injection (Docker/Buildctl)
 
-When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise automatically injects SSL certificates into your Dockerfile's RUN commands using BuildKit secrets.
+When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise automatically injects SSL certificates into your Dockerfile's RUN commands using BuildKit bind mounts.
 
 **How it works:**
-1. Rise preprocesses your Dockerfile to add `--mount=type=secret,id=SSL_CERT_FILE,target=<path>` to each RUN command
-2. The secret mount makes the certificate available at multiple standard system paths during RUN commands
-3. The certificate is passed to BuildKit via `--secret id=SSL_CERT_FILE,src=<path>`
-4. Certificates are NOT embedded in the final image (only available during build)
+1. Rise creates a temporary directory containing only the certificate file
+2. The temp directory is passed as an internal named build context (`rise-internal-ssl-cert`)
+3. Rise preprocesses your Dockerfile to add `--mount=type=bind,from=rise-internal-ssl-cert,source=ca-certificates.crt,target=<path>,readonly` to each RUN command
+4. The bind mount makes the certificate available at multiple standard system paths during RUN commands
+5. All SSL-related environment variables are exported for cross-ecosystem compatibility
+6. The temp directory is automatically cleaned up after the build
+7. Certificates are NOT embedded in the final image (only available during build)
 
 **Supported certificate paths:**
 - `/etc/ssl/certs/ca-certificates.crt` (Debian, Ubuntu, Arch)
@@ -484,6 +605,15 @@ When using `docker:buildx` or `buildctl` backends with `SSL_CERT_FILE` set, Rise
 - `/etc/ssl/ca-bundle.pem` (OpenSUSE, SLES)
 - `/etc/ssl/cert.pem` (Alpine Linux)
 - `/usr/lib/ssl/cert.pem` (OpenSSL default)
+
+**Exported SSL environment variables:**
+- `SSL_CERT_FILE` - Standard (curl, wget, Git)
+- `NIX_SSL_CERT_FILE` - Nix package manager
+- `NODE_EXTRA_CA_CERTS` - Node.js and npm
+- `REQUESTS_CA_BUNDLE` - Python requests library
+- `AWS_CA_BUNDLE` - AWS SDK/CLI
+
+All variables are set to `/etc/ssl/certs/ca-certificates.crt` during RUN commands, ensuring compatibility with various build tools and ecosystems.
 
 **Example:**
 ```bash
@@ -507,11 +637,23 @@ RUN pip install -r requirements.txt
 
 Processed (internal):
 ```dockerfile
-RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... apt-get update && apt-get install -y curl
-RUN --mount=type=secret,id=SSL_CERT_FILE,target=/etc/ssl/certs/ca-certificates.crt --mount=type=secret,id=SSL_CERT_FILE,target=/etc/pki/tls/certs/ca-bundle.crt ... pip install -r requirements.txt
+RUN --mount=type=bind,from=rise-internal-ssl-cert,source=ca-certificates.crt,target=/etc/ssl/certs/ca-certificates.crt,readonly --mount=type=bind,from=rise-internal-ssl-cert,source=ca-certificates.crt,target=/etc/pki/tls/certs/ca-bundle.crt,readonly ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && apt-get update && apt-get install -y curl
+RUN --mount=type=bind,from=rise-internal-ssl-cert,source=ca-certificates.crt,target=/etc/ssl/certs/ca-certificates.crt,readonly --mount=type=bind,from=rise-internal-ssl-cert,source=ca-certificates.crt,target=/etc/pki/tls/certs/ca-bundle.crt,readonly ... export SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NIX_SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt && export NODE_EXTRA_CA_CERTS=/etc/ssl/certs/ca-certificates.crt && export REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && export AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt && pip install -r requirements.txt
 ```
 
-**Note:** The `docker:build` backend does not support BuildKit secrets. If SSL_CERT_FILE is set, you'll see a warning recommending `docker:buildx` instead.
+### Security and Named Build Context
+
+Rise uses a **named build context** approach for SSL certificates, which provides important security benefits:
+
+- The certificate is kept in a **separate temporary directory**, not in your main build context
+- The temp directory is passed as an internal named build context (`rise-internal-ssl-cert`)
+- The certificate reduces risk of accidental inclusion via `COPY . .` or similar commands (though advanced users can still reference it explicitly via `COPY --from=rise-internal-ssl-cert` if needed)
+- Rise automatically injects the certificate into `RUN` commands as readonly bind mounts
+- The temp directory is automatically cleaned up after the build
+
+This approach works seamlessly with any certificate size, avoiding BuildKit's 500KiB secret size limit while maintaining security.
+
+**Note:** The `docker:build` backend does not support BuildKit features required for SSL certificate bind mounts. If SSL_CERT_FILE is set, you'll see a warning recommending `docker:buildx` instead.
 
 ## Proxy Support
 

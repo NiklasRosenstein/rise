@@ -3468,7 +3468,7 @@ dependencies = [
 
 [[package]]
 name = "rise-deploy"
-version = "0.11.2"
+version = "0.13.4"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -3507,9 +3507,11 @@ dependencies = [
  "serde",
  "serde_ignored",
  "serde_json",
+ "serde_urlencoded",
  "sha2",
  "snowflake-connector-rs",
  "sqlx",
+ "subtle",
  "tempfile",
  "tera",
  "thiserror 2.0.17",

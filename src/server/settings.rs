@@ -401,6 +401,13 @@ pub enum DeploymentControllerSettings {
         /// Value: access class configuration (display info, ingress settings)
         /// Use `null` in YAML to remove an inherited access class from parent configs
         access_classes: std::collections::HashMap<String, Option<AccessClass>>,
+
+        /// Host aliases to inject into pod specs (hostname -> IP address)
+        /// Maps hostnames to IP addresses, injected as Kubernetes hostAliases.
+        /// Useful for local development where pods need to resolve custom hostnames.
+        /// Example: {"rise.local": "192.168.49.1"}
+        #[serde(default)]
+        host_aliases: std::collections::HashMap<String, String>,
     },
 }
 
@@ -927,7 +934,7 @@ pub enum ExtensionProviderConfig {
         /// Prefix for SECURITY INTEGRATION names (default: "rise")
         #[serde(default = "default_integration_name_prefix")]
         integration_name_prefix: String,
-        /// Default blocked roles for OAuth (default: ["ACCOUNTADMIN", "SECURITYADMIN"])
+        /// Default blocked roles for OAuth (default: ["ACCOUNTADMIN", "ORGADMIN", "SECURITYADMIN"])
         #[serde(default = "default_blocked_roles")]
         default_blocked_roles: Vec<String>,
         /// Default OAuth scopes (default: ["refresh_token"])
@@ -966,7 +973,11 @@ fn default_integration_name_prefix() -> String {
 
 #[allow(dead_code)]
 fn default_blocked_roles() -> Vec<String> {
-    vec!["ACCOUNTADMIN".to_string(), "SECURITYADMIN".to_string()]
+    vec![
+        "ACCOUNTADMIN".to_string(),
+        "ORGADMIN".to_string(),
+        "SECURITYADMIN".to_string(),
+    ]
 }
 
 #[allow(dead_code)]

@@ -106,6 +106,11 @@ enum Commands {
     #[command(subcommand)]
     #[command(visible_alias = "dom")]
     Domain(DomainCommands),
+    /// Encrypt a secret for use in extension specs
+    Encrypt {
+        /// Secret to encrypt (or read from stdin if not provided)
+        plaintext: Option<String>,
+    },
     /// Environment variable management commands
     #[command(subcommand)]
     #[command(visible_alias = "e")]
@@ -135,6 +140,9 @@ enum Commands {
         /// Project name (optional, used to load environment variables)
         #[arg(long, short)]
         project: Option<String>,
+        /// Load environment variables from the associated Rise project (non-secret only). Defaults to true.
+        #[arg(long, default_value = "true", action = clap::ArgAction::Set)]
+        use_project_env: bool,
         /// Path to the directory containing the application
         #[arg(default_value = ".")]
         path: String,
@@ -160,14 +168,26 @@ enum Commands {
     Team(TeamCommands),
 }
 
+/// Project creation mode
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum ProjectMode {
+    /// Create/update project on backend only
+    Remote,
+    /// Create/update rise.toml only (no backend interaction)
+    Local,
+    /// Create project on backend AND create rise.toml
+    #[value(name = "remote+local")]
+    RemoteLocal,
+}
+
 #[derive(Subcommand, Debug)]
 enum ProjectCommands {
     /// Create a new project
     #[command(visible_alias = "c")]
     #[command(visible_alias = "new")]
     Create {
-        /// Project name
-        name: String,
+        /// Project name (required for remote and remote+local modes, optional for local mode)
+        name: Option<String>,
         /// Access class (e.g., public, private)
         #[arg(long, default_value = "public")]
         access_class: String,
@@ -177,6 +197,10 @@ enum ProjectCommands {
         /// Path where to create rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
+        /// Mode: remote (backend only), local (rise.toml only), remote+local (both).
+        /// If unset: remote if rise.toml exists, remote+local otherwise
+        #[arg(long, value_enum)]
+        mode: Option<ProjectMode>,
     },
     /// List all projects
     #[command(visible_alias = "ls")]
@@ -433,6 +457,9 @@ enum EnvCommands {
         /// Mark as secret (encrypted at rest)
         #[arg(long)]
         secret: bool,
+        /// Mark secret as protected (cannot be decrypted via API). Only applies to secrets. Defaults to true for secrets, must be false for non-secrets.
+        #[arg(long)]
+        protected: Option<bool>,
     },
     /// List environment variables for a project
     #[command(visible_alias = "ls")]
@@ -444,6 +471,18 @@ enum EnvCommands {
         /// Path to rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
+    },
+    /// Get the value of a specific environment variable
+    #[command(visible_alias = "g")]
+    Get {
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// Variable name
+        key: String,
     },
     /// Delete an environment variable from a project
     #[command(visible_alias = "unset")]
@@ -638,7 +677,7 @@ async fn main() -> Result<()> {
         .with(tracing_subscriber::EnvFilter::new(
             std::env::var("RUST_LOG").unwrap_or_else(|_| "info".into()),
         ))
-        .with(tracing_subscriber::fmt::layer())
+        .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
         .init();
 
     let cli = Cli::parse();
@@ -695,12 +734,16 @@ async fn main() -> Result<()> {
             // Already handled above before config loading
             unreachable!("Backend commands should have been handled earlier")
         }
+        Commands::Encrypt { plaintext } => {
+            cli::encrypt::encrypt_command(&config, plaintext.clone()).await?;
+        }
         Commands::Project(project_cmd) => match project_cmd {
             ProjectCommands::Create {
                 name,
                 access_class,
                 owner,
                 path,
+                mode,
             } => {
                 project::create_project(
                     &http_client,
@@ -710,6 +753,7 @@ async fn main() -> Result<()> {
                     access_class,
                     owner.clone(),
                     path,
+                    mode,
                 )
                 .await?;
             }
@@ -851,14 +895,15 @@ async fn main() -> Result<()> {
                 }
 
                 // For pre-built images, --http-port is required since we can't infer it
-                if args.image.is_some() && args.http_port.is_none() {
-                    eprintln!("Error: --http-port is required when using --image");
-                    eprintln!(
-                        "Example: rise deployment create {} --image {} --http-port 80",
-                        project_name,
-                        args.image.as_ref().unwrap()
-                    );
-                    std::process::exit(1);
+                if let Some(image) = &args.image {
+                    if args.http_port.is_none() {
+                        eprintln!("Error: --http-port is required when using --image");
+                        eprintln!(
+                            "Example: rise deployment create {} --image {} --http-port 80",
+                            project_name, image
+                        );
+                        std::process::exit(1);
+                    }
                 }
 
                 // Pass through the http_port option - server will resolve from:
@@ -1046,8 +1091,12 @@ async fn main() -> Result<()> {
                     key,
                     value,
                     secret,
+                    protected,
                 } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
+                    // Protected defaults to true for secrets, false for non-secrets
+                    // Can be explicitly overridden with --protected flag
+                    let is_protected = protected.unwrap_or(*secret);
                     env::set_env(
                         &http_client,
                         &backend_url,
@@ -1056,12 +1105,17 @@ async fn main() -> Result<()> {
                         key,
                         value,
                         *secret,
+                        is_protected,
                     )
                     .await?;
                 }
                 EnvCommands::List { project, path } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
                     env::list_env(&http_client, &backend_url, &token, &project_name).await?;
+                }
+                EnvCommands::Get { project, path, key } => {
+                    let project_name = resolve_project_name(project.clone(), path)?;
+                    env::get_env(&http_client, &backend_url, &token, &project_name, key).await?;
                 }
                 EnvCommands::Delete { project, path, key } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
@@ -1210,6 +1264,7 @@ async fn main() -> Result<()> {
         }
         Commands::Run {
             project,
+            use_project_env,
             path,
             http_port,
             expose,
@@ -1223,6 +1278,7 @@ async fn main() -> Result<()> {
                 &config,
                 cli::run::RunOptions {
                     project_name: project.as_deref(),
+                    use_project_env: *use_project_env,
                     path,
                     http_port: *http_port,
                     expose: expose_port,

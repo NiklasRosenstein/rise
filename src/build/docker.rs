@@ -5,8 +5,19 @@ use std::path::Path;
 use std::process::Command;
 use tracing::{debug, info, warn};
 
-use super::dockerfile_ssl::preprocess_dockerfile_for_ssl;
+use super::dockerfile_ssl::{
+    preprocess_dockerfile_for_ssl, SslCertContext, SSL_CERT_BUILD_CONTEXT,
+};
 use super::registry::docker_push;
+
+/// Check if buildx is available for the given container CLI
+pub(crate) fn is_buildx_available(container_cli: &str) -> bool {
+    Command::new(container_cli)
+        .args(["buildx", "version"])
+        .output()
+        .map(|o| o.status.success())
+        .unwrap_or(false)
+}
 
 /// Options for building with Docker/Podman
 pub(crate) struct DockerBuildOptions<'a> {
@@ -20,6 +31,7 @@ pub(crate) struct DockerBuildOptions<'a> {
     pub env: &'a [String],
     pub build_context: Option<&'a str>,
     pub build_contexts: &'a std::collections::HashMap<String, String>,
+    pub no_cache: bool,
 }
 
 /// Build image using Docker or Podman with a Dockerfile
@@ -36,7 +48,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     }
 
     // Check for SSL certificate and determine if preprocessing is needed
-    let ssl_cert_file = std::env::var("SSL_CERT_FILE").ok();
+    let ssl_cert_file = super::env_var_non_empty("SSL_CERT_FILE");
     let ssl_cert_path = ssl_cert_file.as_ref().and_then(|p| {
         let path = Path::new(p);
         if path.exists() {
@@ -50,8 +62,9 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     // Warn if SSL cert is set but buildx is not being used
     if ssl_cert_path.is_some() && !options.use_buildx {
         warn!(
-            "SSL_CERT_FILE is set but docker:build does not support BuildKit secrets. \
-             Use 'docker:buildx' backend for SSL certificate support during builds."
+            "SSL_CERT_FILE is set but docker:build does not support BuildKit features \
+             required for SSL certificate bind mounts. Use 'docker:buildx' backend for \
+             SSL certificate support during builds."
         );
     }
 
@@ -63,7 +76,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
             .unwrap_or_else(|| Path::new(options.app_path).join("Dockerfile"));
 
         if original_dockerfile.exists() {
-            info!("SSL_CERT_FILE detected, preprocessing Dockerfile for secret mounts");
+            info!("SSL_CERT_FILE detected, preprocessing Dockerfile for bind mounts");
             let (temp_dir, processed_path) = preprocess_dockerfile_for_ssl(&original_dockerfile)?;
             (Some(temp_dir), Some(processed_path))
         } else {
@@ -91,10 +104,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
 
     if options.use_buildx {
         // Check buildx availability
-        let buildx_check = Command::new(options.container_cli)
-            .args(["buildx", "version"])
-            .output();
-        if buildx_check.is_err() {
+        if !is_buildx_available(options.container_cli) {
             bail!(
                 "{} buildx not available. Install it or use docker:build backend instead.",
                 options.container_cli
@@ -115,6 +125,11 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
 
     cmd.arg("build").arg("-t").arg(options.image_tag);
 
+    // Add no-cache flag if requested
+    if options.no_cache {
+        cmd.arg("--no-cache");
+    }
+
     // Add dockerfile path if specified or preprocessed
     if let Some(ref df) = effective_dockerfile {
         cmd.arg("-f").arg(df);
@@ -123,13 +138,30 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     // Add platform flag for consistent architecture
     cmd.arg("--platform").arg("linux/amd64");
 
-    // Add SSL certificate secret if using buildx and cert is available
-    if options.use_buildx {
+    // Add SSL certificate using named build context (bind mount)
+    // RAII cleanup via SslCertContext drop
+    let _ssl_cert_context: Option<SslCertContext> = if options.use_buildx {
         if let Some(ref cert_path) = ssl_cert_path {
-            cmd.arg("--secret")
-                .arg(format!("id=SSL_CERT_FILE,src={}", cert_path.display()));
+            // Create temp directory with cert for bind mount
+            // Using a named build context keeps the cert separate from the main context,
+            // reducing risk of accidental inclusion via generic COPY commands (though it
+            // can still be referenced explicitly via COPY --from={SSL_CERT_BUILD_CONTEXT}).
+            let context = SslCertContext::new(cert_path)?;
+
+            // Add named build context for SSL certificate
+            cmd.arg("--build-context").arg(format!(
+                "{}={}",
+                SSL_CERT_BUILD_CONTEXT,
+                context.context_path.display()
+            ));
+
+            Some(context)
+        } else {
+            None
         }
-    }
+    } else {
+        None
+    };
 
     // Add proxy build arguments
     let proxy_vars = super::proxy::read_and_transform_proxy_vars();
@@ -181,6 +213,8 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     let status = cmd
         .status()
         .with_context(|| format!("Failed to execute {} build", options.container_cli))?;
+
+    // Note: SslCertContext cleanup is automatic via RAII when it goes out of scope
 
     if !status.success() {
         bail!(

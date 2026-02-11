@@ -39,6 +39,16 @@ impl Clone for OAuthProvider {
     }
 }
 
+/// Generate a secure random token for Rise client secret (32 bytes, base64url encoded)
+fn generate_rise_client_secret() -> String {
+    use base64::Engine;
+    use rand::Rng;
+
+    let mut rng = rand::thread_rng();
+    let bytes: Vec<u8> = (0..32).map(|_| rng.gen()).collect();
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(bytes)
+}
+
 impl OAuthProvider {
     pub fn new(config: OAuthProviderConfig) -> Self {
         Self {
@@ -53,8 +63,10 @@ impl OAuthProvider {
     #[allow(dead_code)]
     pub fn compute_redirect_uri(&self, project_name: &str, extension_name: &str) -> String {
         format!(
-            "{}/api/v1/oauth/callback/{}/{}",
-            self.api_domain, project_name, extension_name
+            "{}/oidc/{}/{}/callback",
+            self.api_domain.trim_end_matches('/'),
+            project_name,
+            extension_name
         )
     }
 
@@ -92,6 +104,79 @@ impl OAuthProvider {
         Ok(client_secret)
     }
 
+    /// Resolve token endpoint from spec or OIDC discovery
+    #[allow(dead_code)]
+    async fn resolve_token_endpoint(&self, spec: &OAuthExtensionSpec) -> Result<String> {
+        // If token_endpoint is provided in spec, use it
+        if let Some(ref endpoint) = spec.token_endpoint {
+            if !endpoint.is_empty() {
+                return Ok(endpoint.clone());
+            }
+        }
+
+        // Fetch from OIDC discovery
+        let discovery_url = format!(
+            "{}/.well-known/openid-configuration",
+            spec.issuer_url.trim_end_matches('/')
+        );
+
+        let response = self
+            .http_client
+            .get(&discovery_url)
+            .send()
+            .await
+            .context("Failed to fetch OIDC discovery")?;
+
+        if !response.status().is_success() {
+            return Err(anyhow!(
+                "OIDC discovery failed with status {}",
+                response.status()
+            ));
+        }
+
+        #[derive(serde::Deserialize)]
+        struct DiscoveryDoc {
+            token_endpoint: Option<String>,
+        }
+
+        let discovery: DiscoveryDoc = response
+            .json()
+            .await
+            .context("Failed to parse OIDC discovery")?;
+
+        discovery
+            .token_endpoint
+            .ok_or_else(|| anyhow!("No token_endpoint in OIDC discovery"))
+    }
+
+    /// Resolve OAuth provider's client_secret from spec (prefers encrypted, falls back to ref)
+    #[allow(dead_code)]
+    pub async fn resolve_oauth_client_secret(
+        &self,
+        project_id: Uuid,
+        spec: &OAuthExtensionSpec,
+    ) -> Result<String> {
+        // Prefer client_secret_encrypted if set
+        if let Some(ref encrypted) = spec.client_secret_encrypted {
+            return self
+                .encryption_provider
+                .decrypt(encrypted)
+                .await
+                .context("Failed to decrypt OAuth client secret from spec");
+        }
+
+        // Fall back to client_secret_ref (legacy env var pattern)
+        if let Some(ref client_secret_ref) = spec.client_secret_ref {
+            return self
+                .resolve_client_secret(project_id, client_secret_ref)
+                .await;
+        }
+
+        Err(anyhow!(
+            "No client secret configured (set client_secret_encrypted or client_secret_ref)"
+        ))
+    }
+
     /// Exchange authorization code for tokens
     #[allow(dead_code)]
     pub async fn exchange_code_for_tokens(
@@ -101,14 +186,18 @@ impl OAuthProvider {
         authorization_code: &str,
         redirect_uri: &str,
     ) -> Result<TokenResponse> {
+        // Resolve token endpoint from spec or OIDC discovery
+        let token_endpoint = self.resolve_token_endpoint(spec).await?;
+
         debug!(
             "Exchanging authorization code for tokens with endpoint: {}",
-            spec.token_endpoint
+            token_endpoint
         );
 
         let response = self
             .http_client
-            .post(&spec.token_endpoint)
+            .post(&token_endpoint)
+            .header("Accept", "application/json")
             .form(&[
                 ("grant_type", "authorization_code"),
                 ("code", authorization_code),
@@ -153,11 +242,15 @@ impl OAuthProvider {
         client_secret: &str,
         refresh_token: &str,
     ) -> Result<TokenResponse> {
-        debug!("Refreshing token with endpoint: {}", spec.token_endpoint);
+        // Resolve token endpoint from spec or OIDC discovery
+        let token_endpoint = self.resolve_token_endpoint(spec).await?;
+
+        debug!("Refreshing token with endpoint: {}", token_endpoint);
 
         let response = self
             .http_client
-            .post(&spec.token_endpoint)
+            .post(&token_endpoint)
+            .header("Accept", "application/json")
             .form(&[
                 ("grant_type", "refresh_token"),
                 ("refresh_token", refresh_token),
@@ -195,37 +288,12 @@ impl OAuthProvider {
 
     /// Handle deletion of an OAuth extension
     async fn reconcile_deletion(&self, ext: crate::db::models::ProjectExtension) -> Result<()> {
-        use crate::db::{env_vars as db_env_vars, extensions as db_extensions};
+        use crate::db::extensions as db_extensions;
 
         info!(
             "Reconciling deletion for OAuth extension: project_id={}, extension={}",
             ext.project_id, ext.extension
         );
-
-        // Parse spec to get client_secret_ref
-        let spec: OAuthExtensionSpec =
-            serde_json::from_value(ext.spec).context("Failed to parse OAuth extension spec")?;
-
-        // Delete associated environment variable (client secret)
-        if !spec.client_secret_ref.is_empty() {
-            if let Err(e) = db_env_vars::delete_project_env_var(
-                &self.db_pool,
-                ext.project_id,
-                &spec.client_secret_ref,
-            )
-            .await
-            {
-                warn!(
-                    "Failed to delete environment variable {} for OAuth extension: {:?}",
-                    spec.client_secret_ref, e
-                );
-            } else {
-                info!(
-                    "Deleted environment variable {} for OAuth extension",
-                    spec.client_secret_ref
-                );
-            }
-        }
 
         // Permanently delete the extension
         db_extensions::delete_permanently(&self.db_pool, ext.project_id, &ext.extension)
@@ -260,22 +328,32 @@ impl Extension for OAuthProvider {
         if spec.client_id.is_empty() {
             return Err(anyhow!("client_id is required"));
         }
-        if spec.client_secret_ref.is_empty() {
-            return Err(anyhow!("client_secret_ref is required"));
+        if spec.client_secret_encrypted.is_none() && spec.client_secret_ref.is_none() {
+            return Err(anyhow!(
+                "Either client_secret_encrypted or client_secret_ref must be set"
+            ));
         }
-        if spec.authorization_endpoint.is_empty() {
-            return Err(anyhow!("authorization_endpoint is required"));
-        }
-        if spec.token_endpoint.is_empty() {
-            return Err(anyhow!("token_endpoint is required"));
+        if spec.issuer_url.is_empty() {
+            return Err(anyhow!("issuer_url is required"));
         }
         if spec.scopes.is_empty() {
             return Err(anyhow!("at least one scope is required"));
         }
 
-        // Validate URLs
-        Url::parse(&spec.authorization_endpoint).context("Invalid authorization_endpoint URL")?;
-        Url::parse(&spec.token_endpoint).context("Invalid token_endpoint URL")?;
+        // Validate issuer_url
+        Url::parse(&spec.issuer_url).context("Invalid issuer_url URL")?;
+
+        // Validate optional endpoint URLs if provided
+        if let Some(ref auth_endpoint) = spec.authorization_endpoint {
+            if !auth_endpoint.is_empty() {
+                Url::parse(auth_endpoint).context("Invalid authorization_endpoint URL")?;
+            }
+        }
+        if let Some(ref token_endpoint) = spec.token_endpoint {
+            if !token_endpoint.is_empty() {
+                Url::parse(token_endpoint).context("Invalid token_endpoint URL")?;
+            }
+        }
 
         Ok(())
     }
@@ -305,6 +383,27 @@ impl Extension for OAuthProvider {
         let mut status: OAuthExtensionStatus =
             serde_json::from_value(ext.status).unwrap_or_default();
 
+        // Generate Rise client credentials if they don't exist in status
+        if status.rise_client_id.is_none() || status.rise_client_secret.is_none() {
+            info!(
+                "Generating Rise client credentials for OAuth extension {}/{}",
+                project_id, extension_name
+            );
+
+            // Generate credentials with deterministic client ID: {project_name}-{extension_name}
+            let rise_client_id = format!("{}-{}", project.name, extension_name);
+            let rise_client_secret = generate_rise_client_secret();
+
+            // Store credentials in status (plaintext)
+            status.rise_client_id = Some(rise_client_id);
+            status.rise_client_secret = Some(rise_client_secret);
+
+            info!(
+                "Generated Rise client credentials for OAuth extension {}/{}",
+                project_id, extension_name
+            );
+        }
+
         // Always ensure redirect_uri is set/updated
         let redirect_uri = self.compute_redirect_uri(&project.name, extension_name);
         status.redirect_uri = Some(redirect_uri);
@@ -317,7 +416,7 @@ impl Extension for OAuthProvider {
         // Check if auth-sensitive fields changed
         let auth_sensitive_fields = [
             "client_id",
-            "client_secret_ref",
+            "client_secret_encrypted",
             "authorization_endpoint",
             "token_endpoint",
             "scopes",
@@ -331,26 +430,13 @@ impl Extension for OAuthProvider {
             }
         }
 
-        // Reset auth_verified and invalidate cached tokens when critical fields change
+        // Reset auth_verified when critical fields change
         if auth_changed {
             debug!(
-                "OAuth spec changed for {}/{}, resetting auth_verified and invalidating cached tokens",
+                "OAuth spec changed for {}/{}, resetting auth_verified",
                 project_id, extension_name
             );
             status.auth_verified = false;
-
-            // Delete all cached user OAuth tokens for this extension
-            // Tokens were obtained with old credentials and are no longer valid
-            use crate::db::user_oauth_tokens;
-            let deleted_count =
-                user_oauth_tokens::delete_by_extension(db_pool, project_id, extension_name).await?;
-
-            if deleted_count > 0 {
-                info!(
-                    "Invalidated {} cached OAuth token(s) for {}/{}",
-                    deleted_count, project_id, extension_name
-                );
-            }
         }
 
         // Save updated status
@@ -397,12 +483,126 @@ impl Extension for OAuthProvider {
 
     async fn before_deployment(
         &self,
-        _deployment_id: Uuid,
-        _project_id: Uuid,
+        deployment_id: Uuid,
+        project_id: Uuid,
         _deployment_group: &str,
     ) -> Result<()> {
-        // OAuth extension doesn't inject deployment-specific environment variables
-        // The OAuth flow is handled at runtime, not at deployment time
+        use crate::db::{extensions as db_extensions, projects as db_projects};
+
+        // Find all OAuth extensions for this project
+        let extensions = db_extensions::list_by_extension_type(&self.db_pool, "oauth")
+            .await?
+            .into_iter()
+            .filter(|e| e.project_id == project_id && e.deleted_at.is_none())
+            .collect::<Vec<_>>();
+
+        if extensions.is_empty() {
+            debug!(
+                "No OAuth extensions found for project {}, skipping before_deployment hook",
+                project_id
+            );
+            return Ok(());
+        }
+
+        // Get project info
+        let project = db_projects::find_by_id(&self.db_pool, project_id)
+            .await?
+            .ok_or_else(|| anyhow!("Project not found"))?;
+
+        // Inject env vars for each OAuth extension
+        for ext in extensions {
+            // Parse status to get credentials
+            let status: OAuthExtensionStatus =
+                serde_json::from_value(ext.status.clone()).unwrap_or_default();
+
+            // Skip if credentials are not yet generated
+            if status.rise_client_id.is_none() || status.rise_client_secret.is_none() {
+                warn!(
+                    "OAuth extension {} for project {} missing credentials, skipping env var injection",
+                    ext.extension, project.name
+                );
+                continue;
+            }
+
+            let rise_client_id = status.rise_client_id.as_ref().unwrap();
+            let rise_client_secret = status.rise_client_secret.as_ref().unwrap();
+
+            // Normalize extension name for env var (uppercase, replace hyphens with underscores)
+            // Pattern: {EXT_NAME}_{KEY} (e.g., OAUTH_DEX_CLIENT_ID)
+            let normalized_name = ext.extension.to_uppercase().replace('-', "_");
+            let client_id_key = format!("{}_CLIENT_ID", normalized_name);
+            let client_secret_key = format!("{}_CLIENT_SECRET", normalized_name);
+            let issuer_key = format!("{}_ISSUER", normalized_name);
+
+            // Compute Rise issuer URL (OIDC proxy)
+            let rise_issuer = format!(
+                "{}/oidc/{}/{}",
+                self.api_domain.trim_end_matches('/'),
+                project.name,
+                ext.extension
+            );
+
+            // Inject CLIENT_ID (plaintext)
+            db_env_vars::upsert_deployment_env_var(
+                &self.db_pool,
+                deployment_id,
+                &client_id_key,
+                rise_client_id,
+                false, // not secret - client ID is public
+                false, // not protected - managed by extension
+            )
+            .await
+            .context(format!(
+                "Failed to inject {} for deployment {}",
+                client_id_key, deployment_id
+            ))?;
+
+            // Inject CLIENT_SECRET (encrypted secret, unprotected)
+            // Encrypt the client secret for deployment storage
+            let encrypted_client_secret = self
+                .encryption_provider
+                .encrypt(rise_client_secret)
+                .await
+                .context(format!(
+                    "Failed to encrypt {} for deployment {}",
+                    client_secret_key, deployment_id
+                ))?;
+
+            db_env_vars::upsert_deployment_env_var(
+                &self.db_pool,
+                deployment_id,
+                &client_secret_key,
+                &encrypted_client_secret,
+                true,  // is_secret - encrypted, hidden from API
+                false, // is_protected false - users can modify/delete if needed
+            )
+            .await
+            .context(format!(
+                "Failed to inject {} for deployment {}",
+                client_secret_key, deployment_id
+            ))?;
+
+            // Inject ISSUER (plaintext)
+            db_env_vars::upsert_deployment_env_var(
+                &self.db_pool,
+                deployment_id,
+                &issuer_key,
+                &rise_issuer,
+                false, // not secret
+                false, // not protected - managed by extension
+            )
+            .await
+            .context(format!(
+                "Failed to inject {} for deployment {}",
+                issuer_key, deployment_id
+            ))?;
+
+            info!(
+                "Injected OAuth env vars for extension {} into deployment {} ({}, {}, {})",
+                ext.extension, deployment_id, client_id_key, client_secret_key, issuer_key
+            );
+        }
+
         Ok(())
     }
 
@@ -527,91 +727,113 @@ rise extension create my-app oauth-github \
 
 ## OAuth Flows
 
-The extension supports two OAuth flows:
+The extension supports RFC 6749-compliant OAuth flows with PKCE support:
 
-### Fragment Flow (Default - Recommended for SPAs)
+### PKCE Flow (Recommended for SPAs)
 
-Tokens are returned in the URL fragment (`#access_token=...`), which never reaches the server.
-This is the most secure option for single-page applications.
+For single-page applications, use PKCE (RFC 7636) to securely exchange authorization codes
+for tokens. This prevents authorization code interception attacks.
 
-**Frontend Integration:**
+**Frontend Integration (using oauth4webapi):**
 
-```javascript
-// Initiate OAuth login (fragment flow is default)
-function login() {
-  window.location.href = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize';
-}
-
-// Extract tokens from URL fragment after redirect
-function extractTokens() {
-  const fragment = window.location.hash.substring(1);
-  const params = new URLSearchParams(fragment);
-  const accessToken = params.get('access_token');
-  const idToken = params.get('id_token');
-  const expiresAt = params.get('expires_at');
-
-  // Store in sessionStorage or localStorage
-  sessionStorage.setItem('access_token', accessToken);
-
-  return { accessToken, idToken, expiresAt };
-}
+```bash
+npm install oauth4webapi
 ```
 
-### Exchange Token Flow (For Backend Apps)
-
-For server-rendered applications, use the exchange flow. The callback receives a temporary
-exchange token as a query parameter, which your backend exchanges for the actual OAuth tokens.
-
-**Backend Integration (Node.js/Express example):**
-
 ```javascript
-// Initiate OAuth login with exchange flow
-app.get('/login', (req, res) => {
-  const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?flow=exchange';
-  res.redirect(authUrl);
-});
+import * as oauth from 'oauth4webapi';
 
-// Handle OAuth callback
-app.get('/oauth/callback', async (req, res) => {
-  const exchangeToken = req.query.exchange_token;
+// 1. Initiate OAuth login with PKCE
+async function login() {
+  const codeVerifier = oauth.generateRandomCodeVerifier();
+  const codeChallenge = await oauth.calculatePKCECodeChallenge(codeVerifier);
+  sessionStorage.setItem('pkce_verifier', codeVerifier);
 
-  // Exchange the temporary token for actual OAuth tokens
-  const response = await fetch(
-    `https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/exchange?exchange_token=${exchangeToken}`
+  const authUrl = new URL(
+    `https://api.rise.dev/oidc/my-app/oauth-provider/authorize`
   );
+  authUrl.searchParams.set('code_challenge', codeChallenge);
+  authUrl.searchParams.set('code_challenge_method', 'S256');
 
-  const tokens = await response.json();
+  window.location.href = authUrl;
+}
 
-  // Store tokens in session (HttpOnly cookie recommended)
-  req.session.accessToken = tokens.access_token;
-  req.session.idToken = tokens.id_token;
+// 2. Handle callback and exchange code for tokens
+async function handleCallback() {
+  const code = new URLSearchParams(window.location.search).get('code');
+  const codeVerifier = sessionStorage.getItem('pkce_verifier');
 
-  res.redirect('/dashboard');
+  const tokens = await fetch(
+    'https://api.rise.dev/oidc/my-app/oauth-provider/token',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: CONFIG.riseClientId,  // From build-time config
+        code_verifier: codeVerifier
+      })
+    }
+  ).then(r => r.json());
+
+  sessionStorage.setItem('tokens', JSON.stringify(tokens));
+  return tokens;
+}
+```
+
+### Token Endpoint Flow (For Backend Apps)
+
+For server-rendered applications, use the RFC 6749-compliant token endpoint with client credentials.
+Rise auto-generates client credentials for each OAuth extension.
+
+**Backend Integration (TypeScript/Express):**
+
+```typescript
+app.get('/oauth/callback', async (req, res) => {
+  const { code } = req.query;
+
+  const tokens = await fetch(
+    'https://api.rise.dev/oidc/my-app/oauth-provider/token',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code as string,
+        client_id: process.env.OAUTH_PROVIDER_CLIENT_ID!,
+        client_secret: process.env.OAUTH_PROVIDER_CLIENT_SECRET!
+      })
+    }
+  ).then(r => r.json());
+
+  req.session.tokens = tokens;
+  res.redirect('/');
 });
 ```
 
-### Local Development
+## Local Development
 
-For local development, override the redirect URI:
+For local development, add `redirect_uri` parameter:
 
 ```javascript
-// Fragment flow
-const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?redirect_uri=http://localhost:3000/callback';
+// PKCE flow
+authUrl.searchParams.set('redirect_uri', 'http://localhost:3000/callback');
 
-// Exchange flow
-const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-provider/oauth/authorize?flow=exchange&redirect_uri=http://localhost:3000/oauth/callback';
+// Backend flow
+const authUrl = 'https://api.rise.dev/oidc/my-app/oauth-provider/authorize?redirect_uri=http://localhost:3000/oauth/callback';
 ```
 
 ## Security Features
 
 - Client secrets stored encrypted in database
-- Fragment flow: Tokens in URL fragments (never sent to server)
-- Exchange flow: Temporary single-use tokens with 5-minute TTL
+- PKCE (RFC 7636): Prevents authorization code interception for public clients
+- Rise client credentials: Auto-generated per extension for token endpoint authentication
+- Temporary single-use authorization codes with 5-minute TTL
 - Redirect URI validation (localhost or project domains only)
 - CSRF protection via state tokens
-- User token caching with automatic refresh
-- Session-based token storage with encrypted credentials
-- Configurable token retention policies
+- Constant-time comparison for client secret and PKCE validation
+- Stateless OAuth proxy: clients own their tokens after exchange
 "#
     }
 
@@ -621,9 +843,7 @@ const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-pr
             "required": [
                 "provider_name",
                 "client_id",
-                "client_secret_ref",
-                "authorization_endpoint",
-                "token_endpoint",
+                "issuer_url",
                 "scopes"
             ],
             "properties": {
@@ -642,22 +862,33 @@ const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-pr
                     "description": "OAuth client ID",
                     "example": "ABC123XYZ..."
                 },
+                "client_secret_encrypted": {
+                    "type": "string",
+                    "description": "Encrypted client secret (use 'rise encrypt' to encrypt)",
+                    "example": "encrypted:..."
+                },
                 "client_secret_ref": {
                     "type": "string",
-                    "description": "Environment variable name containing the client secret",
+                    "description": "(Deprecated) Environment variable name containing the client secret",
                     "example": "OAUTH_SNOWFLAKE_CLIENT_SECRET"
+                },
+                "issuer_url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "OIDC issuer URL. Endpoints are fetched via OIDC discovery. For non-OIDC providers, also set authorization_endpoint and token_endpoint.",
+                    "example": "https://accounts.google.com"
                 },
                 "authorization_endpoint": {
                     "type": "string",
                     "format": "uri",
-                    "description": "OAuth provider authorization URL",
-                    "example": "https://myorg.snowflakecomputing.com/oauth/authorize"
+                    "description": "OAuth authorization URL (optional). If not provided, fetched from OIDC discovery.",
+                    "example": "https://github.com/login/oauth/authorize"
                 },
                 "token_endpoint": {
                     "type": "string",
                     "format": "uri",
-                    "description": "OAuth provider token URL",
-                    "example": "https://myorg.snowflakecomputing.com/oauth/token-request"
+                    "description": "OAuth token URL (optional). If not provided, fetched from OIDC discovery.",
+                    "example": "https://github.com/login/oauth/access_token"
                 },
                 "scopes": {
                     "type": "array",
@@ -665,7 +896,7 @@ const authUrl = 'https://api.rise.dev/api/v1/projects/my-app/extensions/oauth-pr
                         "type": "string"
                     },
                     "description": "OAuth scopes to request",
-                    "example": ["refresh_token"]
+                    "example": ["openid", "email", "profile"]
                 }
             }
         })

@@ -12,6 +12,7 @@ use crate::config::Config;
 /// Options for running a container locally
 pub struct RunOptions<'a> {
     pub project_name: Option<&'a str>,
+    pub use_project_env: bool,
     pub path: &'a str,
     pub http_port: u16,
     pub expose: u16,
@@ -71,43 +72,106 @@ pub async fn run_locally(
 
     cmd.arg("--add-host=host.docker.internal:host-gateway");
 
-    // Fetch and set project environment variables if project is specified
-    if let Some(project_name) = options.project_name {
-        if let Some(token) = config.get_token() {
-            match env::fetch_non_secret_env_vars(http_client, &backend_url, &token, project_name)
-                .await
-            {
-                Ok(env_vars) => {
-                    if !env_vars.is_empty() {
-                        info!(
-                            "Loading {} non-secret environment variables from project '{}'",
-                            env_vars.len(),
-                            project_name
-                        );
-                        for (key, value) in env_vars {
-                            cmd.arg("-e").arg(format!("{}={}", key, value));
-                        }
-                    }
-                }
-                Err(e) => {
-                    warn!(
-                        "Failed to fetch environment variables from project '{}': {}",
-                        project_name, e
-                    );
-                    warn!("Continuing without project environment variables");
+    // Always try to resolve project name from rise.toml or explicit argument
+    let project_name = if let Some(name) = options.project_name {
+        // Explicit project name takes precedence
+        Some(name.to_string())
+    } else {
+        // Try to load from rise.toml
+        match build::config::load_full_project_config(options.path) {
+            Ok(Some(config)) => {
+                if let Some(project_config) = config.project {
+                    Some(project_config.name)
+                } else {
+                    None
                 }
             }
-        } else {
-            warn!("Not logged in - skipping project environment variables");
-            warn!("Run 'rise login' to load environment variables from the project");
+            Ok(None) => None,
+            Err(e) => {
+                warn!("Failed to load rise.toml: {}", e);
+                None
+            }
+        }
+    };
+
+    // Load project environment variables if enabled and we have a project name
+    if options.use_project_env {
+        if let Some(project_name) = &project_name {
+            if let Some(token) = config.get_token() {
+                match env::fetch_env_vars_with_secret_list(
+                    http_client,
+                    &backend_url,
+                    &token,
+                    project_name,
+                )
+                .await
+                {
+                    Ok((non_secret_vars, unprotected_secrets, protected_keys)) => {
+                        // Set non-secret environment variables
+                        if !non_secret_vars.is_empty() {
+                            info!(
+                                "Loading {} non-secret environment variable{} from project '{}'",
+                                non_secret_vars.len(),
+                                if non_secret_vars.len() == 1 { "" } else { "s" },
+                                project_name
+                            );
+                            for (key, value) in non_secret_vars {
+                                cmd.arg("-e").arg(format!("{}={}", key, value));
+                            }
+                        }
+
+                        // Load unprotected secrets
+                        if !unprotected_secrets.is_empty() {
+                            info!(
+                                "Loading {} unprotected secret{} from project '{}'",
+                                unprotected_secrets.len(),
+                                if unprotected_secrets.len() == 1 {
+                                    ""
+                                } else {
+                                    "s"
+                                },
+                                project_name
+                            );
+                            for (key, value) in unprotected_secrets {
+                                cmd.arg("-e").arg(format!("{}={}", key, value));
+                            }
+                        }
+
+                        // Warn about protected secret variables that cannot be loaded
+                        if !protected_keys.is_empty() {
+                            warn!(
+                                "Project '{}' has {} protected secret{} that cannot be loaded automatically:",
+                                project_name,
+                                protected_keys.len(),
+                                if protected_keys.len() == 1 { "" } else { "s" }
+                            );
+                            for key in &protected_keys {
+                                warn!("  - {}", key);
+                            }
+                            warn!("Mark secrets as unprotected with --protected=false if needed for local development");
+                        }
+                    }
+                    Err(e) => {
+                        warn!(
+                            "Failed to fetch environment variables from project '{}': {}",
+                            project_name, e
+                        );
+                        warn!("Continuing without project environment variables");
+                    }
+                }
+            } else {
+                warn!("Not logged in - cannot load project environment variables");
+                warn!("Run 'rise login' to authenticate");
+            }
         }
     }
 
-    // Add user-specified runtime environment variables
+    // Add user-specified runtime environment variables (these take precedence)
     if !options.run_env.is_empty() {
         info!(
-            "Setting {} runtime environment variables",
-            options.run_env.len()
+            "Setting {} runtime environment variable{}",
+            options.run_env.len(),
+            if options.run_env.len() == 1 { "" } else { "s" }
         );
         for (key, value) in options.run_env {
             cmd.arg("-e").arg(format!("{}={}", key, value));
@@ -126,7 +190,7 @@ pub async fn run_locally(
         "Running container: {} (port {}:{}, PORT={})",
         image_tag, options.expose, options.http_port, options.http_port
     );
-    if options.project_name.is_some() {
+    if options.use_project_env && project_name.is_some() {
         info!("Project environment variables loaded (non-secret only)");
     }
     info!(

@@ -1,16 +1,33 @@
 const express = require('express');
 const session = require('express-session');
 const fetch = require('node-fetch');
+const jose = require('jose');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
 
-// Configuration - adjust for your setup
+// Helper to get required env var (fails fast if missing)
+function requireEnv(name, description) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`Missing required environment variable: ${name}${description ? ` (${description})` : ''}`);
+  }
+  return value;
+}
+
+// Configuration - adjust for your setup.
 const CONFIG = {
-  riseApiUrl: process.env.RISE_API_URL || 'http://localhost:3000',
+  // RISE_ISSUER: Rise server URL (base URL for all Rise endpoints)
+  riseIssuer: process.env.RISE_ISSUER || 'http://localhost:3000',
   projectName: process.env.PROJECT_NAME || 'oauth-demo',
-  extensionName: process.env.EXTENSION_NAME || 'oauth-dex',
+  extensionName: 'oauth-dex',
   sessionSecret: process.env.SESSION_SECRET || 'change-this-in-production',
+  // OAuth credentials injected by Rise as {EXT}_CLIENT_ID, {EXT}_CLIENT_SECRET, {EXT}_ISSUER
+  // These are REQUIRED - fail fast if not set
+  clientId: requireEnv(`OAUTH_DEX_CLIENT_ID`, 'Rise OAuth client ID'),
+  clientSecret: requireEnv(`OAUTH_DEX_CLIENT_SECRET`, 'Rise OAuth client secret'),
+  // OIDC issuer for id_token validation via JWKS discovery
+  oidcIssuer: requireEnv(`OAUTH_DEX_ISSUER`, 'OIDC issuer URL'),
 };
 
 // Session middleware for storing OAuth tokens
@@ -28,6 +45,44 @@ app.use(session({
 // Serve static files
 app.use(express.static('public'));
 
+// JWKS cache for id_token validation
+let cachedJwks = null;
+let jwksExpiry = 0;
+
+async function getJwks() {
+  if (cachedJwks && Date.now() < jwksExpiry) {
+    return cachedJwks;
+  }
+
+  // Fetch OIDC discovery document (standard: {issuer}/.well-known/openid-configuration)
+  const discoveryUrl = `${CONFIG.oidcIssuer}/.well-known/openid-configuration`;
+  const discoveryRes = await fetch(discoveryUrl);
+  if (!discoveryRes.ok) {
+    throw new Error(`Failed to fetch OIDC discovery from ${discoveryUrl}: ${discoveryRes.status}`);
+  }
+  const discovery = await discoveryRes.json();
+
+  // Fetch JWKS from jwks_uri
+  const jwksRes = await fetch(discovery.jwks_uri);
+  if (!jwksRes.ok) {
+    throw new Error(`Failed to fetch JWKS: ${jwksRes.status}`);
+  }
+  cachedJwks = await jwksRes.json();
+  jwksExpiry = Date.now() + 3600000; // Cache for 1 hour
+
+  return cachedJwks;
+}
+
+async function validateIdToken(idToken) {
+  const jwks = await getJwks();
+  const JWKS = jose.createLocalJWKSet(jwks);
+
+  // Verify signature and decode
+  const { payload } = await jose.jwtVerify(idToken, JWKS);
+
+  return payload;
+}
+
 // Home page - check if user is logged in
 app.get('/', (req, res) => {
   if (req.session.oauth) {
@@ -41,14 +96,11 @@ app.get('/', (req, res) => {
 
 // Initiate OAuth flow
 app.get('/login', (req, res) => {
-  // Build the OAuth authorization URL with exchange flow
+  // Build the OAuth authorization URL (uses RISE_ISSUER for browser redirect)
   const authUrl = new URL(
-    `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/authorize`,
-    CONFIG.riseApiUrl
+    `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`,
+    CONFIG.riseIssuer
   );
-
-  // Specify exchange flow (not fragment)
-  authUrl.searchParams.set('flow', 'exchange');
 
   // Set redirect URI to our callback
   const redirectUri = `${req.protocol}://${req.get('host')}/oauth/callback`;
@@ -66,7 +118,7 @@ app.get('/login', (req, res) => {
 // OAuth callback handler
 app.get('/oauth/callback', async (req, res) => {
   try {
-    const { exchange_token, state } = req.query;
+    const { code, state } = req.query;
 
     // Verify state (CSRF protection)
     if (req.session.oauthState && req.session.oauthState !== state) {
@@ -74,34 +126,50 @@ app.get('/oauth/callback', async (req, res) => {
     }
     delete req.session.oauthState;
 
-    if (!exchange_token) {
-      return res.status(400).send(renderErrorPage('No exchange token received'));
+    if (!code) {
+      return res.status(400).send(renderErrorPage('No authorization code received'));
     }
 
-    // Exchange the temporary token for real OAuth credentials
-    const exchangeUrl = new URL(
-      `/api/v1/projects/${CONFIG.projectName}/extensions/${CONFIG.extensionName}/oauth/exchange`,
-      CONFIG.riseApiUrl
+    // Exchange the authorization code for OAuth tokens (uses RISE_ISSUER for backend call)
+    const tokenUrl = new URL(
+      `/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`,
+      CONFIG.riseIssuer
     );
-    exchangeUrl.searchParams.set('exchange_token', exchange_token);
 
-    const response = await fetch(exchangeUrl.toString());
+    // RFC 6749: redirect_uri MUST match the authorization request
+    const redirectUri = `${req.protocol}://${req.get('host')}/oauth/callback`;
+
+    const response = await fetch(tokenUrl.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/x-www-form-urlencoded',
+      },
+      body: new URLSearchParams({
+        grant_type: 'authorization_code',
+        code: code,
+        client_id: CONFIG.clientId,
+        client_secret: CONFIG.clientSecret,
+        redirect_uri: redirectUri,
+      }),
+    });
 
     if (!response.ok) {
-      const errorText = await response.text();
+      const error = await response.json();
       return res.status(response.status).send(
-        renderErrorPage(`Token exchange failed: ${errorText}`)
+        renderErrorPage(`Token exchange failed: ${error.error} - ${error.error_description || ''}`)
       );
     }
 
-    const credentials = await response.json();
+    const tokens = await response.json();
 
     // Store credentials in session (HttpOnly cookie)
     req.session.oauth = {
-      accessToken: credentials.access_token,
-      tokenType: credentials.token_type,
-      expiresAt: credentials.expires_at,
-      refreshToken: credentials.refresh_token,
+      accessToken: tokens.access_token,
+      idToken: tokens.id_token,
+      tokenType: tokens.token_type,
+      expiresIn: tokens.expires_in,
+      refreshToken: tokens.refresh_token,
+      scope: tokens.scope,
       retrievedAt: new Date().toISOString()
     };
 
@@ -123,18 +191,28 @@ app.get('/logout', (req, res) => {
   });
 });
 
-// API endpoint that uses the OAuth token (example)
-app.get('/api/protected', (req, res) => {
-  if (!req.session.oauth) {
+// API endpoint that validates the id_token and returns user claims
+app.get('/api/protected', async (req, res) => {
+  if (!req.session.oauth?.idToken) {
     return res.status(401).json({ error: 'Not authenticated' });
   }
 
-  // In a real app, you would use the access token to call protected APIs
-  res.json({
-    message: 'This is a protected endpoint',
-    tokenType: req.session.oauth.tokenType,
-    expiresAt: req.session.oauth.expiresAt
-  });
+  try {
+    // Validate id_token signature and decode claims
+    const claims = await validateIdToken(req.session.oauth.idToken);
+
+    res.json({
+      message: 'Token validated successfully',
+      sub: claims.sub,
+      email: claims.email,
+      name: claims.name,
+      exp: claims.exp,
+      iss: claims.iss,
+    });
+  } catch (error) {
+    console.error('Token validation failed:', error);
+    return res.status(401).json({ error: 'Invalid token', details: error.message });
+  }
 });
 
 // HTML rendering functions
@@ -145,17 +223,17 @@ function renderLoginPage() {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>OAuth Exchange Flow - Login</title>
+        <title>OAuth Token Endpoint Flow - Login</title>
         <style>${getStyles()}</style>
     </head>
     <body>
         <div class="container">
-            <h1>OAuth Exchange Flow Example</h1>
-            <div class="badge">Exchange Flow (Backend Apps)</div>
+            <h1>OAuth Token Endpoint Flow Example</h1>
+            <div class="badge">Token Endpoint Flow (Backend Apps)</div>
 
             <p>
-                This example demonstrates the <strong>exchange token flow</strong> for server-rendered applications.
-                The backend securely exchanges a temporary token for real OAuth credentials.
+                This example demonstrates the <strong>RFC 6749-compliant token endpoint flow</strong> for server-rendered applications.
+                The backend securely exchanges an authorization code for OAuth credentials using client credentials.
             </p>
 
             <button onclick="window.location.href='/login'">Login with OAuth</button>
@@ -164,8 +242,8 @@ function renderLoginPage() {
                 <strong>How it works:</strong><br>
                 1. Click login → redirect to Rise OAuth endpoint<br>
                 2. Rise redirects to Dex for authentication<br>
-                3. After auth, redirect with exchange token (5-min TTL)<br>
-                4. Backend exchanges token for real credentials<br>
+                3. After auth, redirect with authorization code (5-min TTL)<br>
+                4. Backend exchanges code for tokens via /oauth/token<br>
                 5. Store in session (HttpOnly cookie, XSS-safe)
             </div>
         </div>
@@ -181,33 +259,37 @@ function renderProfilePage(oauth) {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>OAuth Exchange Flow - Profile</title>
+        <title>OAuth Token Endpoint Flow - Profile</title>
         <style>${getStyles()}</style>
     </head>
     <body>
         <div class="container">
-            <h1>OAuth Exchange Flow Example</h1>
-            <div class="badge">Exchange Flow (Backend Apps)</div>
+            <h1>OAuth Token Endpoint Flow Example</h1>
+            <div class="badge">Token Endpoint Flow (Backend Apps)</div>
 
             <div class="status success">
-                ✓ Successfully authenticated! Credentials stored in session.
+                ✓ Successfully authenticated! OAuth tokens stored in session.
             </div>
 
             <div class="info">
                 <h2>Session Information</h2>
                 <p><strong>Token Type:</strong> ${oauth.tokenType}</p>
-                <p><strong>Expires At:</strong> ${oauth.expiresAt}</p>
+                <p><strong>Expires In:</strong> ${oauth.expiresIn} seconds</p>
                 <p><strong>Retrieved At:</strong> ${oauth.retrievedAt}</p>
+                <p><strong>Has ID Token:</strong> ${oauth.idToken ? 'Yes' : 'No'}</p>
                 <p><strong>Has Refresh Token:</strong> ${oauth.refreshToken ? 'Yes' : 'No'}</p>
+                <p><strong>Scopes:</strong> ${oauth.scope || 'N/A'}</p>
             </div>
 
             <div class="info">
                 <h2>Security Benefits</h2>
                 <ul>
                     <li>✓ Tokens stored in HttpOnly cookie (XSS-safe)</li>
-                    <li>✓ Exchange token was single-use (5-min TTL)</li>
-                    <li>✓ Real credentials never exposed to browser</li>
+                    <li>✓ Authorization code was single-use (5-min TTL)</li>
+                    <li>✓ Client authenticated with client_secret</li>
+                    <li>✓ OAuth tokens never exposed to browser</li>
                     <li>✓ CSRF protection via state parameter</li>
+                    <li>✓ id_token validated via JWKS signature verification</li>
                 </ul>
             </div>
 
@@ -254,12 +336,12 @@ function renderErrorPage(message) {
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>OAuth Exchange Flow - Error</title>
+        <title>OAuth Token Endpoint Flow - Error</title>
         <style>${getStyles()}</style>
     </head>
     <body>
         <div class="container">
-            <h1>OAuth Exchange Flow Example</h1>
+            <h1>OAuth Token Endpoint Flow Example</h1>
             <div class="status error">
                 ✗ Error: ${escapeHtml(message)}
             </div>
@@ -445,10 +527,11 @@ function escapeHtml(text) {
 
 // Start server
 app.listen(PORT, () => {
-  console.log(`OAuth Exchange Flow Example running on http://localhost:${PORT}`);
+  console.log(`OAuth Token Endpoint Flow Example running on http://localhost:${PORT}`);
   console.log('Configuration:', {
-    riseApiUrl: CONFIG.riseApiUrl,
+    riseIssuer: CONFIG.riseIssuer,
     projectName: CONFIG.projectName,
-    extensionName: CONFIG.extensionName
+    extensionName: CONFIG.extensionName,
+    oidcIssuer: CONFIG.oidcIssuer,
   });
 });

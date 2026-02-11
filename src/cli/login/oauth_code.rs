@@ -7,6 +7,7 @@ use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use tokio::sync::oneshot;
+use tracing;
 
 /// Generate PKCE code_verifier and code_challenge
 fn generate_pkce_challenge() -> (String, String) {
@@ -148,6 +149,44 @@ struct CodeExchangeResponse {
     token: String,
 }
 
+/// OpenID Connect Discovery document (subset of fields we need)
+#[derive(Debug, Deserialize)]
+struct OpenIdDiscovery {
+    authorization_endpoint: String,
+    token_endpoint: String,
+}
+
+/// Discover OpenID endpoints from the server's .well-known/openid-configuration
+async fn discover_endpoints(http_client: &Client, backend_url: &str) -> Result<OpenIdDiscovery> {
+    let discovery_url = format!("{}/.well-known/openid-configuration", backend_url);
+
+    let response = http_client
+        .get(&discovery_url)
+        .send()
+        .await
+        .context("Failed to fetch OpenID discovery document")?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        anyhow::bail!(
+            "Failed to fetch OpenID discovery (status {}): {}",
+            status,
+            error_text
+        );
+    }
+
+    let discovery: OpenIdDiscovery = response
+        .json()
+        .await
+        .context("Failed to parse OpenID discovery document")?;
+
+    Ok(discovery)
+}
+
 /// Handle OAuth2 authorization code flow with PKCE
 pub async fn handle_authorization_code_flow(
     http_client: &Client,
@@ -155,15 +194,21 @@ pub async fn handle_authorization_code_flow(
     config: &mut Config,
     backend_url_to_save: Option<&str>,
 ) -> Result<()> {
-    // Step 1: Generate PKCE codes
+    // Step 1: Discover OpenID endpoints
+    tracing::debug!("Discovering authentication endpoints...");
+    let discovery = discover_endpoints(http_client, backend_url)
+        .await
+        .context("Failed to discover authentication endpoints")?;
+
+    // Step 2: Generate PKCE codes
     let (code_verifier, code_challenge) = generate_pkce_challenge();
 
-    // Step 2: Start local callback server
+    // Step 3: Start local callback server
     let (redirect_uri, code_receiver) = start_callback_server(backend_url)
         .await
         .context("Failed to start local callback server")?;
 
-    // Step 3: Request authorization URL from backend
+    // Step 4: Request authorization URL from backend
     println!("Requesting authorization URL from backend...");
 
     let authorize_request = AuthorizeRequest {
@@ -173,10 +218,8 @@ pub async fn handle_authorization_code_flow(
         code_challenge_method: Some("S256".to_string()),
     };
 
-    let authorize_url = format!("{}/api/v1/auth/authorize", backend_url);
-
     let response = http_client
-        .post(&authorize_url)
+        .post(&discovery.authorization_endpoint)
         .json(&authorize_request)
         .send()
         .await
@@ -234,10 +277,8 @@ pub async fn handle_authorization_code_flow(
         redirect_uri,
     };
 
-    let exchange_url = format!("{}/api/v1/auth/code/exchange", backend_url);
-
     let response = http_client
-        .post(&exchange_url)
+        .post(&discovery.token_endpoint)
         .json(&exchange_request)
         .send()
         .await

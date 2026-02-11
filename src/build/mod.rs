@@ -21,6 +21,7 @@ pub(crate) use railpack::{build_with_buildctl, BuildctlFrontend, RailpackBuildOp
 pub(crate) use registry::docker_login;
 
 use anyhow::{bail, Result};
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info, warn};
 
@@ -29,6 +30,17 @@ use docker::{build_image_with_dockerfile, DockerBuildOptions};
 use method::{requires_buildkit, select_build_method};
 use pack::build_image_with_buildpacks;
 use railpack::build_image_with_railpacks;
+
+/// Read an environment variable, treating empty strings as if the variable is not set.
+///
+/// This helper ensures that empty environment variables (e.g., `SSL_CERT_FILE=""`) are
+/// handled the same as unset variables, avoiding errors when code attempts to use
+/// empty paths or values.
+pub(crate) fn env_var_non_empty(key: &str) -> Option<String> {
+    std::env::var(key)
+        .ok()
+        .and_then(|v| if v.is_empty() { None } else { Some(v) })
+}
 
 /// Main entry point for building container images
 pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
@@ -55,28 +67,61 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
         &options.app_path,
         options.backend.as_deref(),
         options.dockerfile.as_deref(),
+        container_cli,
     )?;
 
+    // Determine if we should use managed buildkit
+    let managed_buildkit = match options.managed_buildkit {
+        Some(value) => {
+            // Explicitly set by user (CLI flag, config, or env var)
+            value
+        }
+        None => {
+            // Auto-detect: enable if all conditions met:
+            // 1. Backend requires BuildKit
+            // 2. SSL_CERT_FILE is set (needs injection)
+            // 3. BUILDKIT_HOST is NOT set (user not managing their own)
+            env_var_non_empty("BUILDKIT_HOST").is_none()
+                && requires_buildkit(&build_method)
+                && env_var_non_empty("SSL_CERT_FILE").is_some()
+        }
+    };
+
     // Handle BuildKit daemon management
-    let buildkit_host = if requires_buildkit(&build_method) && options.managed_buildkit {
-        // Priority 1: Use existing BUILDKIT_HOST if set
-        if let Ok(existing_host) = std::env::var("BUILDKIT_HOST") {
+    let buildkit_host = if requires_buildkit(&build_method) && managed_buildkit {
+        // Check if user already has BUILDKIT_HOST (even if managed_buildkit=true)
+        if let Some(existing_host) = env_var_non_empty("BUILDKIT_HOST") {
             info!("Using existing BUILDKIT_HOST: {}", existing_host);
             Some(existing_host)
         } else {
-            // Priority 2: Create/manage our own buildkit daemon
-            let ssl_cert_path = std::env::var("SSL_CERT_FILE").ok().map(PathBuf::from);
-
+            // Create/manage our own buildkit daemon
+            let ssl_cert_path = env_var_non_empty("SSL_CERT_FILE").map(PathBuf::from);
             Some(ensure_managed_buildkit_daemon(
                 ssl_cert_path.as_deref(),
                 container_cli,
             )?)
         }
     } else {
-        // Managed buildkit not enabled, warn if SSL cert is set
-        check_ssl_cert_and_warn(&build_method, options.managed_buildkit);
+        // Check for SSL cert warnings if managed buildkit disabled
+        check_ssl_cert_and_warn(&build_method, managed_buildkit);
         None
     };
+
+    // Resolve build_context relative to app_path
+    let resolved_build_context = options.build_context.as_ref().map(|ctx| {
+        let resolved = app_path.join(ctx);
+        resolved.to_string_lossy().to_string()
+    });
+
+    // Resolve build_contexts paths relative to app_path
+    let resolved_build_contexts: std::collections::HashMap<String, String> = options
+        .build_contexts
+        .iter()
+        .map(|(name, path)| {
+            let resolved = app_path.join(path);
+            (name.clone(), resolved.to_string_lossy().to_string())
+        })
+        .collect();
 
     // Execute build based on selected method
     match build_method {
@@ -100,15 +145,16 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 push: options.push,
                 buildkit_host: buildkit_host.as_deref(),
                 env: &options.env,
-                build_context: options.build_context.as_deref(),
-                build_contexts: &options.build_contexts,
+                build_context: resolved_build_context.as_deref(),
+                build_contexts: &resolved_build_contexts,
+                no_cache: options.no_cache,
             })?;
         }
         BuildMethod::Pack => {
             if options.container_cli.is_some() {
                 warn!("--container-cli flag is ignored when using pack build method");
             }
-            if options.managed_buildkit {
+            if options.managed_buildkit.is_some() {
                 warn!("--managed-buildkit flag is ignored when using pack build method");
             }
             if options.railpack_embed_ssl_cert {
@@ -121,6 +167,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 options.builder.as_deref(),
                 &options.buildpacks,
                 &options.env,
+                options.no_cache,
             )?;
 
             // Pack doesn't support push during build, so push separately if requested
@@ -148,6 +195,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 buildkit_host: buildkit_host.as_deref(),
                 embed_ssl_cert: options.railpack_embed_ssl_cert,
                 env: &options.env,
+                no_cache: options.no_cache,
             })?;
         }
         BuildMethod::Buildctl => {
@@ -165,7 +213,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             }
 
             // Check for SSL certificate
-            let ssl_cert_file = std::env::var("SSL_CERT_FILE").ok();
+            let ssl_cert_file = env_var_non_empty("SSL_CERT_FILE");
             let ssl_cert_path = ssl_cert_file.as_ref().and_then(|p| {
                 let path = Path::new(p);
                 if path.exists() {
@@ -185,7 +233,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             // Preprocess Dockerfile for SSL if cert is available
             let (_temp_dir, effective_dockerfile) = if ssl_cert_path.is_some() {
                 if original_dockerfile_path.exists() {
-                    info!("SSL_CERT_FILE detected, preprocessing Dockerfile for secret mounts");
+                    info!("SSL_CERT_FILE detected, preprocessing Dockerfile for bind mounts");
                     let (temp_dir, processed_path) =
                         dockerfile_ssl::preprocess_dockerfile_for_ssl(&original_dockerfile_path)?;
                     (Some(temp_dir), processed_path)
@@ -206,13 +254,26 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 }
             }
 
-            // Add SSL cert as a secret if available
-            if let Some(ref cert_path) = ssl_cert_path {
-                secrets.insert(
-                    "SSL_CERT_FILE".to_string(),
-                    cert_path.to_string_lossy().to_string(),
-                );
-            }
+            // Add SSL cert using named build context (bind mount)
+            // RAII cleanup via SslCertContext drop
+            let mut local_contexts = HashMap::new();
+            let _ssl_cert_context: Option<dockerfile_ssl::SslCertContext> =
+                if let Some(ref cert_path) = ssl_cert_path {
+                    // Create temp directory with cert for bind mount
+                    // Using a separate local context keeps the cert separate from the main context
+                    // and reduces risk of accidental inclusion via generic COPY commands
+                    let context = dockerfile_ssl::SslCertContext::new(cert_path)?;
+
+                    // Add to local_contexts map for buildctl --local argument
+                    local_contexts.insert(
+                        dockerfile_ssl::SSL_CERT_BUILD_CONTEXT.to_string(),
+                        context.context_path.to_string_lossy().to_string(),
+                    );
+
+                    Some(context)
+                } else {
+                    None
+                };
 
             build_with_buildctl(
                 &options.app_path,
@@ -221,11 +282,58 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 options.push,
                 buildkit_host.as_deref(),
                 &secrets,
+                &local_contexts,
                 BuildctlFrontend::Dockerfile,
+                options.no_cache,
             )?;
+
+            // Note: SslCertContext cleanup is automatic via RAII when it goes out of scope
         }
     }
 
     info!("✓ Successfully built image '{}'", options.image_tag);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_env_var_non_empty_with_empty_string() {
+        // Test that empty string is treated as unset
+        std::env::set_var("TEST_EMPTY_VAR", "");
+        assert_eq!(env_var_non_empty("TEST_EMPTY_VAR"), None);
+        std::env::remove_var("TEST_EMPTY_VAR");
+    }
+
+    #[test]
+    fn test_env_var_non_empty_with_value() {
+        // Test that non-empty value is returned
+        std::env::set_var("TEST_VALUE_VAR", "some_value");
+        assert_eq!(
+            env_var_non_empty("TEST_VALUE_VAR"),
+            Some("some_value".to_string())
+        );
+        std::env::remove_var("TEST_VALUE_VAR");
+    }
+
+    #[test]
+    fn test_env_var_non_empty_with_unset() {
+        // Test that unset variable returns None
+        std::env::remove_var("TEST_UNSET_VAR");
+        assert_eq!(env_var_non_empty("TEST_UNSET_VAR"), None);
+    }
+
+    #[test]
+    fn test_env_var_non_empty_with_whitespace() {
+        // Test that whitespace-only string is NOT treated as empty
+        // (only fully empty strings are treated as unset)
+        std::env::set_var("TEST_WHITESPACE_VAR", "   ");
+        assert_eq!(
+            env_var_non_empty("TEST_WHITESPACE_VAR"),
+            Some("   ".to_string())
+        );
+        std::env::remove_var("TEST_WHITESPACE_VAR");
+    }
 }

@@ -36,12 +36,12 @@ pub struct RiseClaims {
 
 /// JWT signer supporting both HS256 (symmetric) and RS256 (asymmetric) algorithms
 ///
-/// - HS256 is used for UI authentication (aud = Rise public URL)
+/// - HS256 is used for user authentication (aud = Rise public URL)
 /// - RS256 is used for project ingress authentication (aud = project URL)
 ///
 /// The RS256 keys can be exposed via JWKS for deployed apps to validate tokens.
 pub struct JwtSigner {
-    // HS256 symmetric key for UI authentication
+    // HS256 symmetric key for user authentication
     hs256_encoding_key: EncodingKey,
     hs256_decoding_key: DecodingKey,
 
@@ -52,7 +52,7 @@ pub struct JwtSigner {
     rs256_key_id: String,
 
     issuer: String,
-    default_expiry_seconds: u64,
+    pub(crate) default_expiry_seconds: u64,
     claims_to_include: Vec<String>,
 }
 
@@ -241,9 +241,9 @@ impl JwtSigner {
         }))
     }
 
-    /// Sign a new Rise JWT for UI authentication (HS256)
+    /// Sign a new Rise JWT for user authentication (HS256)
     ///
-    /// This JWT is used for authenticating to the Rise UI itself.
+    /// This JWT is used for authenticating users to Rise (both UI and CLI).
     /// Uses HS256 symmetric encryption and sets aud to the Rise public URL.
     ///
     /// # Arguments
@@ -252,7 +252,7 @@ impl JwtSigner {
     /// * `db_pool` - Database connection pool (for fetching team memberships)
     /// * `rise_public_url` - The Rise public URL (used as aud claim)
     /// * `expiry_override` - Optional expiry timestamp (if None, uses default_expiry_seconds)
-    pub async fn sign_ui_jwt(
+    pub async fn sign_user_jwt(
         &self,
         idp_claims: &serde_json::Value,
         user_id: uuid::Uuid,

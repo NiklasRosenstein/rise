@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)\n        SELECT $1, key, value, is_secret, is_protected\n        FROM project_env_vars\n        WHERE project_id = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "894008ca6f2e67a06ab35a65b362b2369e220b451cb8b9b226d654381243bdab"
+}

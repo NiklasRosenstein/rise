@@ -243,6 +243,7 @@ impl OAuthClient {
         let response = self
             .http_client
             .post(token_url)
+            .header("Accept", "application/json")
             .basic_auth(&self.client_id, Some(&self.client_secret))
             .form(&params)
             .send()
@@ -305,6 +306,7 @@ impl OAuthClient {
         let response = self
             .http_client
             .post(token_url)
+            .header("Accept", "application/json")
             .basic_auth(&self.client_id, Some(&self.client_secret))
             .form(&params)
             .send()
