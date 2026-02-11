@@ -29,7 +29,7 @@ helm lint helm/rise
 [tasks.fmt]
 run = """
 SQLX_OFFLINE=true cargo all-features clippy --all-targets --allow-dirty --fix -- -D warnings
-cargo fmt --all -- --check
+cargo fmt --all
 """
 
 [tasks."docs:serve"]
