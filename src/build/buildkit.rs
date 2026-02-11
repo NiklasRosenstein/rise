@@ -18,6 +18,62 @@ pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
     Ok(format!("{:x}", result))
 }
 
+/// Compute SHA256 hash of a string
+fn compute_string_hash(content: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(content.as_bytes());
+    let result = hasher.finalize();
+    format!("{:x}", result)
+}
+
+/// Generate buildkitd.toml configuration for insecure registries
+/// Returns (config_content, config_hash) or None if no insecure registries configured
+fn generate_buildkit_config() -> Option<(String, String)> {
+    let insecure_registries =
+        super::env_var_non_empty("RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES")?;
+
+    let registries: Vec<&str> = insecure_registries
+        .split(',')
+        .map(|s| s.trim())
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if registries.is_empty() {
+        return None;
+    }
+
+    let mut config = String::new();
+    for registry in registries {
+        config.push_str(&format!(
+            "[registry.\"{}\"]\n  http = true\n  insecure = true\n\n",
+            registry
+        ));
+    }
+
+    let hash = compute_string_hash(&config);
+    Some((config, hash))
+}
+
+/// Write buildkitd.toml config to a file and return the path
+/// Returns None if no config needed
+fn write_buildkit_config() -> Result<Option<std::path::PathBuf>> {
+    let Some((config_content, _hash)) = generate_buildkit_config() else {
+        return Ok(None);
+    };
+
+    // Use ~/.rise/buildkitd.toml for the config file
+    let home_dir = dirs::home_dir().context("Failed to determine home directory")?;
+    let rise_dir = home_dir.join(".rise");
+
+    // Create .rise directory if it doesn't exist
+    fs::create_dir_all(&rise_dir).context("Failed to create .rise directory")?;
+
+    let config_path = rise_dir.join("buildkitd.toml");
+    fs::write(&config_path, config_content).context("Failed to write buildkitd.toml")?;
+
+    Ok(Some(config_path))
+}
+
 /// Check if a Docker network exists
 fn network_exists(container_cli: &str, network_name: &str) -> bool {
     let output = Command::new(container_cli)
@@ -97,13 +153,35 @@ fn get_network_label_from_container(container_cli: &str, daemon_name: &str) -> O
     None
 }
 
-/// Represents the SSL certificate state of a BuildKit daemon
+/// Get config hash label from container
+fn get_config_hash_label_from_container(container_cli: &str, daemon_name: &str) -> Option<String> {
+    let output = Command::new(container_cli)
+        .args([
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"rise.config_hash\"}}",
+            daemon_name,
+        ])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let label_value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !label_value.is_empty() && label_value != "<no value>" {
+            return Some(label_value);
+        }
+    }
+
+    None
+}
+
+/// Represents the state of a BuildKit daemon
 #[derive(Debug, PartialEq)]
 enum DaemonState {
-    /// Daemon has an SSL certificate with the given hash and optional network
-    HasCert(String, Option<String>),
-    /// Daemon was intentionally created without an SSL certificate, with optional network
-    NoCert(Option<String>),
+    /// Daemon has an SSL certificate with the given hash, optional network, and optional config hash
+    HasCert(String, Option<String>, Option<String>),
+    /// Daemon was created without an SSL certificate, with optional network and optional config hash
+    NoCert(Option<String>, Option<String>),
     /// Daemon does not exist
     NotFound,
 }
@@ -126,6 +204,9 @@ fn get_daemon_state(container_cli: &str, daemon_name: &str) -> DaemonState {
     // Get network label if present
     let network_name = get_network_label_from_container(container_cli, daemon_name);
 
+    // Get config hash label if present
+    let config_hash = get_config_hash_label_from_container(container_cli, daemon_name);
+
     // Daemon exists, check for no_ssl_cert label
     let no_cert_output = Command::new(container_cli)
         .args([
@@ -140,7 +221,7 @@ fn get_daemon_state(container_cli: &str, daemon_name: &str) -> DaemonState {
         if output.status.success() {
             let label_value = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if label_value == "true" {
-                return DaemonState::NoCert(network_name);
+                return DaemonState::NoCert(network_name, config_hash);
             }
         }
     }
@@ -159,14 +240,14 @@ fn get_daemon_state(container_cli: &str, daemon_name: &str) -> DaemonState {
         if output.status.success() {
             let cert_hash = String::from_utf8_lossy(&output.stdout).trim().to_string();
             if !cert_hash.is_empty() {
-                return DaemonState::HasCert(cert_hash, network_name);
+                return DaemonState::HasCert(cert_hash, network_name, config_hash);
             }
         }
     }
 
     // Daemon exists but has no labels (old daemon or created externally)
     // Treat as NoCert to avoid assuming anything
-    DaemonState::NoCert(network_name)
+    DaemonState::NoCert(network_name, config_hash)
 }
 
 /// Stop BuildKit daemon
@@ -264,6 +345,27 @@ fn create_buildkit_daemon(
             .arg(format!("rise.network_name={}", network));
     }
 
+    // Write and mount buildkitd.toml config if insecure registries are configured
+    if let Some((_config_content, config_hash)) = generate_buildkit_config() {
+        let config_path = write_buildkit_config()?;
+
+        if let Some(config_file) = config_path {
+            let config_str = config_file
+                .to_str()
+                .context("Config file path contains invalid UTF-8")?;
+
+            info!(
+                "Mounting BuildKit config with insecure registries: {}",
+                config_str
+            );
+
+            cmd.arg("--label")
+                .arg(format!("rise.config_hash={}", config_hash))
+                .arg("--volume")
+                .arg(format!("{}:/etc/buildkit/buildkitd.toml:ro", config_str));
+        }
+    }
+
     cmd.arg("moby/buildkit");
 
     let status = cmd.status().context("Failed to start BuildKit daemon")?;
@@ -284,7 +386,7 @@ fn create_buildkit_daemon(
     Ok(format!("docker-container://{}", daemon_name))
 }
 
-/// Ensure managed BuildKit daemon is running with correct SSL certificate and network
+/// Ensure managed BuildKit daemon is running with correct SSL certificate, network, and config
 /// Returns the BUILDKIT_HOST value to be used with this daemon
 pub(crate) fn ensure_managed_buildkit_daemon(
     ssl_cert_file: Option<&Path>,
@@ -295,12 +397,15 @@ pub(crate) fn ensure_managed_buildkit_daemon(
     // Read network configuration from environment
     let network_name = super::env_var_non_empty("RISE_MANAGED_BUILDKIT_NETWORK_NAME");
 
+    // Get expected config hash (None if no insecure registries configured)
+    let expected_config_hash = generate_buildkit_config().map(|(_, hash)| hash);
+
     // Get current daemon state
     let current_state = get_daemon_state(container_cli, daemon_name);
 
     match (ssl_cert_file, &current_state) {
         // Certificate provided, daemon has matching cert
-        (Some(cert_path), DaemonState::HasCert(current_hash, current_network)) => {
+        (Some(cert_path), DaemonState::HasCert(current_hash, current_network, current_config)) => {
             // Verify hash matches
             let cert_path_abs = cert_path
                 .canonicalize()
@@ -310,8 +415,13 @@ pub(crate) fn ensure_managed_buildkit_daemon(
             // Check if network has changed
             let network_changed = &network_name != current_network;
 
-            if current_hash == &expected_hash && !network_changed {
-                debug!("BuildKit daemon is up-to-date with current SSL_CERT_FILE and network");
+            // Check if config has changed
+            let config_changed = &expected_config_hash != current_config;
+
+            if current_hash == &expected_hash && !network_changed && !config_changed {
+                debug!(
+                    "BuildKit daemon is up-to-date with current SSL_CERT_FILE, network, and config"
+                );
                 return Ok(format!("docker-container://{}", daemon_name));
             }
 
@@ -319,17 +429,24 @@ pub(crate) fn ensure_managed_buildkit_daemon(
                 info!("SSL certificate has changed (hash mismatch), recreating daemon");
             } else if network_changed {
                 info!("Network configuration has changed, recreating daemon");
+            } else if config_changed {
+                info!("BuildKit config has changed (insecure registries), recreating daemon");
             }
             stop_buildkit_daemon(container_cli, daemon_name)?;
         }
 
         // Certificate provided, but daemon has no cert label
-        (Some(_), DaemonState::NoCert(current_network)) => {
+        (Some(_), DaemonState::NoCert(current_network, current_config)) => {
             // Check if network has changed
             let network_changed = &network_name != current_network;
 
+            // Check if config has changed
+            let config_changed = &expected_config_hash != current_config;
+
             if network_changed {
                 info!("Network configuration has changed, recreating daemon");
+            } else if config_changed {
+                info!("BuildKit config has changed, recreating daemon");
             } else {
                 info!("SSL certificate now available, recreating daemon with certificate");
             }
@@ -337,26 +454,40 @@ pub(crate) fn ensure_managed_buildkit_daemon(
         }
 
         // No certificate, daemon has no cert label (matches)
-        (None, DaemonState::NoCert(current_network)) => {
+        (None, DaemonState::NoCert(current_network, current_config)) => {
             // Check if network has changed
             let network_changed = &network_name != current_network;
 
-            if !network_changed {
+            // Check if config has changed
+            let config_changed = &expected_config_hash != current_config;
+
+            if !network_changed && !config_changed {
                 debug!("BuildKit daemon is up-to-date (no SSL certificate)");
                 return Ok(format!("docker-container://{}", daemon_name));
             }
 
-            info!("Network configuration has changed, recreating daemon");
+            if network_changed {
+                info!("Network configuration has changed, recreating daemon");
+            } else if config_changed {
+                info!("BuildKit config has changed (insecure registries), recreating daemon");
+            }
             stop_buildkit_daemon(container_cli, daemon_name)?;
         }
 
         // No certificate, but daemon has cert (mismatch)
-        (None, DaemonState::HasCert(_, current_network)) => {
+        (None, DaemonState::HasCert(_, current_network, current_config)) => {
             // Check if network has changed
             let network_changed = &network_name != current_network;
 
-            if network_changed {
+            // Check if config has changed
+            let config_changed = &expected_config_hash != current_config;
+
+            if network_changed && config_changed {
+                info!("SSL certificate removed, network and config changed, recreating daemon");
+            } else if network_changed {
                 info!("SSL certificate removed and network changed, recreating daemon");
+            } else if config_changed {
+                info!("SSL certificate removed and config changed, recreating daemon");
             } else {
                 info!("SSL certificate removed, recreating daemon without certificate");
             }

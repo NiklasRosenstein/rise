@@ -572,6 +572,48 @@ docker inspect rise-buildkit --format '{{range $net := .NetworkSettings.Networks
 
 For comprehensive setup instructions, see the [Local Development Networking Guide](local-development.md).
 
+### Insecure Registries (Local Development)
+
+When using the managed BuildKit daemon with local registries over HTTP (like `rise-registry:5000`), you need to configure BuildKit to allow insecure connections.
+
+**The problem:**
+BuildKit refuses to pull from or push to registries without TLS, causing errors like:
+```
+http: server gave HTTP response to HTTPS client
+```
+
+**The solution:**
+Set the `RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES` environment variable with a comma-separated list of insecure registries:
+
+```bash
+# Configure insecure registries for BuildKit
+export RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES="rise-registry:5000,localhost:5000,127.0.0.1:5000"
+
+# BuildKit will automatically configure insecure access on next build
+rise build myapp:latest --managed-buildkit
+```
+
+**How it works:**
+1. Rise reads the `RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES` environment variable
+2. Generates a `buildkitd.toml` config file at `~/.rise/buildkitd.toml` with registry configurations
+3. Mounts the config file into the `rise-buildkit` container at `/etc/buildkit/buildkitd.toml`
+4. Tracks the config hash in container labels
+5. Automatically recreates the daemon if the insecure registries list changes
+
+**Example generated config:**
+```toml
+[registry."rise-registry:5000"]
+  http = true
+  insecure = true
+
+[registry."localhost:5000"]
+  http = true
+  insecure = true
+```
+
+**Security note:**
+This configuration should only be used for local development. Never use insecure registries in production environments.
+
 ## Build-Time SSL Certificate Embedding (Railpack)
 
 The `--railpack-embed-ssl-cert` flag embeds SSL certificates directly into the Railpack build plan for use during RUN commands. This complements `--managed-buildkit` by handling build-time SSL requirements.
