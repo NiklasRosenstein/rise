@@ -20,9 +20,7 @@ pub mod workload_identity;
 // Re-export error types for convenience
 
 use anyhow::Result;
-use axum::{
-    body::Body, extract::Request, middleware as axum_middleware, response::Response, Router,
-};
+use axum::{extract::Request, middleware as axum_middleware, response::Response, Router};
 use state::{AppState, ControllerState};
 use std::sync::Arc;
 #[cfg(any(feature = "k8s", feature = "aws"))]
@@ -143,10 +141,17 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
                 // Enhanced trace layer with custom logging
                 .layer(
                     TraceLayer::new_for_http()
-                        .on_request(|request: &Request<Body>, _span: &Span| {
+                        .on_request(|request: &Request, _span: &Span| {
+                            // Extract request ID if available
+                            let request_id = request
+                                .extensions()
+                                .get::<self::middleware::RequestId>()
+                                .map(|rid| rid.0);
+
                             tracing::info!(
                                 method = %request.method(),
                                 uri = %request.uri(),
+                                request_id = ?request_id,
                                 "request started"
                             );
                         })
@@ -155,23 +160,32 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
                                 let status = response.status();
                                 let latency_ms = latency.as_millis();
 
+                                // Extract request ID from response headers
+                                let request_id = response
+                                    .headers()
+                                    .get("x-request-id")
+                                    .and_then(|h| h.to_str().ok());
+
                                 // Log with appropriate severity based on status
                                 if status.is_server_error() {
                                     tracing::error!(
                                         status = %status,
                                         latency_ms = %latency_ms,
+                                        request_id = ?request_id,
                                         "request completed with server error"
                                     );
                                 } else if status.is_client_error() {
                                     tracing::warn!(
                                         status = %status,
                                         latency_ms = %latency_ms,
+                                        request_id = ?request_id,
                                         "request completed with client error"
                                     );
                                 } else {
                                     tracing::info!(
                                         status = %status,
                                         latency_ms = %latency_ms,
+                                        request_id = ?request_id,
                                         "request completed successfully"
                                     );
                                 }

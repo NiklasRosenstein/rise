@@ -1,4 +1,4 @@
-use axum::{body::Body, extract::Request, http::header, middleware::Next, response::Response};
+use axum::{extract::Request, http::header, middleware::Next, response::Response};
 use uuid::Uuid;
 
 /// Request ID stored in request extensions for correlation and debugging
@@ -58,6 +58,7 @@ pub async fn request_id_middleware(mut request: Request, next: Next) -> Response
 ///     );
 /// }
 /// ```
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct RequestMeta {
     pub request_id: Option<Uuid>,
@@ -65,9 +66,10 @@ pub struct RequestMeta {
     pub user_email: Option<String>,
 }
 
+#[allow(dead_code)]
 impl RequestMeta {
     /// Extract request metadata from an Axum request
-    pub fn from_request(request: &Request<Body>) -> Self {
+    pub fn from_request(request: &Request) -> Self {
         let request_id = request.extensions().get::<RequestId>().map(|rid| rid.0);
 
         let uri = request.uri().to_string();
@@ -83,5 +85,86 @@ impl RequestMeta {
             uri,
             user_email,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::Body,
+        http::{Request as HttpRequest, StatusCode},
+        routing::get,
+        Router,
+    };
+    use tower::ServiceExt; // for `oneshot`
+
+    async fn test_handler() -> &'static str {
+        "Hello, World!"
+    }
+
+    #[tokio::test]
+    async fn test_request_id_middleware_adds_header() {
+        // Create a simple app with request ID middleware
+        let app = Router::new()
+            .route("/", get(test_handler))
+            .layer(axum::middleware::from_fn(request_id_middleware));
+
+        // Make a request
+        let request = HttpRequest::builder().uri("/").body(Body::empty()).unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        // Check that x-request-id header is present
+        assert!(response.headers().contains_key("x-request-id"));
+
+        let request_id_header = response.headers().get("x-request-id").unwrap();
+        let request_id_str = request_id_header.to_str().unwrap();
+
+        // Verify it's a valid UUID
+        assert!(uuid::Uuid::parse_str(request_id_str).is_ok());
+
+        // Verify response is successful
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_request_id_stored_in_extensions() {
+        use axum::extract::Extension;
+
+        // Handler that extracts request ID from extensions
+        async fn handler_with_extension(Extension(request_id): Extension<RequestId>) -> String {
+            request_id.0.to_string()
+        }
+
+        let app = Router::new()
+            .route("/", get(handler_with_extension))
+            .layer(axum::middleware::from_fn(request_id_middleware));
+
+        let request = HttpRequest::builder().uri("/").body(Body::empty()).unwrap();
+
+        let response = app.oneshot(request).await.unwrap();
+
+        // Verify the extension was set by checking that handler didn't panic
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn test_request_meta_from_request() {
+        // Create a request with RequestId extension
+        let request_id = RequestId(Uuid::new_v4());
+        let mut request = HttpRequest::builder()
+            .uri("/test/path")
+            .body(Body::empty())
+            .unwrap();
+
+        request.extensions_mut().insert(request_id.clone());
+
+        // Extract metadata
+        let meta = RequestMeta::from_request(&request);
+
+        assert_eq!(meta.request_id, Some(request_id.0));
+        assert_eq!(meta.uri, "/test/path");
+        assert_eq!(meta.user_email, None);
     }
 }
