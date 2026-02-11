@@ -71,10 +71,10 @@ pub async fn set_project_env_var(
     }
 
     // Validate: is_protected requires is_secret (non-secrets cannot be "protected")
-    if !payload.is_protected && !payload.is_secret {
+    if payload.is_protected && !payload.is_secret {
         return Err((
             StatusCode::BAD_REQUEST,
-            "Cannot disable protection for non-secret variables. Only secrets can be unprotected."
+            "Non-secret variables cannot be protected. Protection only applies to secrets."
                 .to_string(),
         ));
     }

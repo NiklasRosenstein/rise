@@ -17,17 +17,12 @@ struct EnvVarsResponse {
     env_vars: Vec<EnvVarResponse>,
 }
 
-#[allow(dead_code)]
-fn default_protected() -> bool {
-    true
-}
-
 #[derive(Debug, Serialize)]
 struct SetEnvVarRequest {
     value: String,
     #[serde(default)]
     is_secret: bool,
-    #[serde(default = "default_protected")]
+    #[serde(default)]
     is_protected: bool,
 }
 
@@ -447,6 +442,8 @@ pub async fn import_env(
         }
 
         // Set the variable
+        // Protected defaults to true for secrets, false for non-secrets
+        let is_protected = is_secret;
         match set_env(
             http_client,
             backend_url,
@@ -455,7 +452,7 @@ pub async fn import_env(
             key,
             value,
             is_secret,
-            true, // is_protected (protected by default, bulk import doesn't support customization)
+            is_protected,
         )
         .await
         {
