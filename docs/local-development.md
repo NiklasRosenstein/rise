@@ -437,13 +437,13 @@ minikube start \
 
 ```bash
 # Build the backend (server features)
-cargo build --features server,k8s,aws
+cargo build --features backend
 
 # Run migrations
 mise sqlx:migrate
 
 # Start the backend
-cargo run --features server,k8s,aws
+cargo run --features backend
 ```
 
 In a new terminal:
