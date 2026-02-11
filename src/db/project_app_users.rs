@@ -3,7 +3,10 @@ use sqlx::PgPool;
 use uuid::Uuid;
 
 /// Add a user to project's app users (view-only access to deployed app)
-pub async fn add_user(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> Result<()> {
+pub async fn add_user<'a, E>(executor: E, project_id: Uuid, user_id: Uuid) -> Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     sqlx::query!(
         r#"
         INSERT INTO project_app_users (project_id, user_id)
@@ -13,7 +16,7 @@ pub async fn add_user(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> Result<
         project_id,
         user_id
     )
-    .execute(pool)
+    .execute(executor)
     .await
     .context("Failed to add app user to project")?;
 
@@ -21,7 +24,10 @@ pub async fn add_user(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> Result<
 }
 
 /// Remove a user from project's app users
-pub async fn remove_user(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> Result<()> {
+pub async fn remove_user<'a, E>(executor: E, project_id: Uuid, user_id: Uuid) -> Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     sqlx::query!(
         r#"
         DELETE FROM project_app_users
@@ -30,7 +36,7 @@ pub async fn remove_user(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> Resu
         project_id,
         user_id
     )
-    .execute(pool)
+    .execute(executor)
     .await
     .context("Failed to remove app user from project")?;
 
@@ -38,7 +44,10 @@ pub async fn remove_user(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> Resu
 }
 
 /// Add a team to project's app teams (view-only access to deployed app)
-pub async fn add_team(pool: &PgPool, project_id: Uuid, team_id: Uuid) -> Result<()> {
+pub async fn add_team<'a, E>(executor: E, project_id: Uuid, team_id: Uuid) -> Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     sqlx::query!(
         r#"
         INSERT INTO project_app_teams (project_id, team_id)
@@ -48,7 +57,7 @@ pub async fn add_team(pool: &PgPool, project_id: Uuid, team_id: Uuid) -> Result<
         project_id,
         team_id
     )
-    .execute(pool)
+    .execute(executor)
     .await
     .context("Failed to add app team to project")?;
 
@@ -56,7 +65,10 @@ pub async fn add_team(pool: &PgPool, project_id: Uuid, team_id: Uuid) -> Result<
 }
 
 /// Remove a team from project's app teams
-pub async fn remove_team(pool: &PgPool, project_id: Uuid, team_id: Uuid) -> Result<()> {
+pub async fn remove_team<'a, E>(executor: E, project_id: Uuid, team_id: Uuid) -> Result<()>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     sqlx::query!(
         r#"
         DELETE FROM project_app_teams
@@ -65,7 +77,7 @@ pub async fn remove_team(pool: &PgPool, project_id: Uuid, team_id: Uuid) -> Resu
         project_id,
         team_id
     )
-    .execute(pool)
+    .execute(executor)
     .await
     .context("Failed to remove app team from project")?;
 
@@ -73,7 +85,10 @@ pub async fn remove_team(pool: &PgPool, project_id: Uuid, team_id: Uuid) -> Resu
 }
 
 /// List user IDs who are app users for a project
-pub async fn list_users(pool: &PgPool, project_id: Uuid) -> Result<Vec<Uuid>> {
+pub async fn list_users<'a, E>(executor: E, project_id: Uuid) -> Result<Vec<Uuid>>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     let records = sqlx::query!(
         r#"
         SELECT user_id
@@ -83,7 +98,7 @@ pub async fn list_users(pool: &PgPool, project_id: Uuid) -> Result<Vec<Uuid>> {
         "#,
         project_id
     )
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .context("Failed to list app users")?;
 
@@ -91,7 +106,10 @@ pub async fn list_users(pool: &PgPool, project_id: Uuid) -> Result<Vec<Uuid>> {
 }
 
 /// List team IDs that are app teams for a project
-pub async fn list_teams(pool: &PgPool, project_id: Uuid) -> Result<Vec<Uuid>> {
+pub async fn list_teams<'a, E>(executor: E, project_id: Uuid) -> Result<Vec<Uuid>>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     let records = sqlx::query!(
         r#"
         SELECT team_id
@@ -101,7 +119,7 @@ pub async fn list_teams(pool: &PgPool, project_id: Uuid) -> Result<Vec<Uuid>> {
         "#,
         project_id
     )
-    .fetch_all(pool)
+    .fetch_all(executor)
     .await
     .context("Failed to list app teams")?;
 
