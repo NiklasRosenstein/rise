@@ -592,6 +592,8 @@ function AppUsersList({ projectName }) {
     const [addValue, setAddValue] = useState('');
     const [adding, setAdding] = useState(false);
     const [deleting, setDeleting] = useState(null);
+    const [availableTeams, setAvailableTeams] = useState([]);
+    const [loadingTeams, setLoadingTeams] = useState(false);
     const { showToast } = useToast();
 
     const loadAppUsers = useCallback(async () => {
@@ -614,6 +616,24 @@ function AppUsersList({ projectName }) {
     useEffect(() => {
         loadAppUsers();
     }, [loadAppUsers]);
+
+    // Load available teams when modal opens and type is 'team'
+    useEffect(() => {
+        if (isAddModalOpen && addType === 'team' && availableTeams.length === 0) {
+            const loadTeams = async () => {
+                try {
+                    setLoadingTeams(true);
+                    const teams = await api.getTeams();
+                    setAvailableTeams(teams.map(t => t.name));
+                } catch (err) {
+                    console.error('Failed to load teams:', err);
+                } finally {
+                    setLoadingTeams(false);
+                }
+            };
+            loadTeams();
+        }
+    }, [isAddModalOpen, addType, availableTeams.length]);
 
     const handleAdd = async () => {
         if (!addValue.trim()) {
@@ -817,19 +837,30 @@ function AppUsersList({ projectName }) {
                     React.createElement('label', { className: 'block text-sm font-medium mb-2' },
                         addType === 'user' ? 'Email Address' : 'Team Name'
                     ),
-                    React.createElement('input', {
-                        type: 'text',
-                        value: addValue,
-                        onChange: (e) => setAddValue(e.target.value),
-                        placeholder: addType === 'user' ? 'user@example.com' : 'team-name',
-                        className: 'w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100',
-                        disabled: adding,
-                        onKeyPress: (e) => {
-                            if (e.key === 'Enter' && !adding) {
-                                handleAdd();
+                    addType === 'team' ? (
+                        React.createElement(Combobox, {
+                            value: addValue,
+                            onChange: setAddValue,
+                            options: availableTeams,
+                            placeholder: 'Select or type team name',
+                            disabled: adding,
+                            loading: loadingTeams
+                        })
+                    ) : (
+                        React.createElement('input', {
+                            type: 'text',
+                            value: addValue,
+                            onChange: (e) => setAddValue(e.target.value),
+                            placeholder: 'user@example.com',
+                            className: 'w-full px-3 py-2 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100',
+                            disabled: adding,
+                            onKeyPress: (e) => {
+                                if (e.key === 'Enter' && !adding) {
+                                    handleAdd();
+                                }
                             }
-                        }
-                    })
+                        })
+                    )
                 ),
                 React.createElement('div', { className: 'flex gap-2 justify-end pt-4' },
                     React.createElement(Button, {
