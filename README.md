@@ -60,8 +60,15 @@ mise backend:run
 
 Services will be available at:
 - **Backend API**: http://localhost:3000
-- **Web UI**: http://localhost:3000
+- **Web UI (production-style)**: http://localhost:3000
+- **Web UI (development, proxied to Vite)**: http://rise.local:3000
 - **PostgreSQL**: localhost:5432
+
+For local UI development, add this host mapping if missing:
+
+```text
+127.0.0.1 rise.local
+```
 
 **Default credentials**:
 - Email: `admin@example.com` or `test@example.com`
@@ -72,6 +79,9 @@ Services will be available at:
 ```bash
 # Build the CLI from source
 cargo build --bin rise
+
+# Build frontend bundle for embedding in the backend
+mise frontend:build
 
 # The CLI is now available as 'rise' (if using direnv)
 # Or use the full path: ./target/debug/rise

@@ -449,6 +449,12 @@ impl AppState {
 
         let public_url = settings.server.public_url.clone();
         tracing::info!("Public URL: {}", public_url);
+        if let Some(frontend_proxy_url) = &settings.server.frontend_dev_proxy_url {
+            tracing::info!(
+                "Frontend dev proxy enabled: backend will proxy UI requests to {}",
+                frontend_proxy_url
+            );
+        }
 
         // Initialize encryption provider
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;

@@ -22,6 +22,16 @@ RUN mkdir -p src && \
 
 RUN cargo chef prepare --recipe-path recipe.json
 
+# Stage 2.5: Build frontend assets
+FROM node:20-alpine AS frontend-builder
+WORKDIR /usr/src/frontend
+
+COPY frontend/package.json ./
+RUN npm install
+
+COPY frontend/ ./
+RUN npm run build
+
 # Stage 3: Build dependencies (cached separately from source code)
 FROM chef AS builder
 
@@ -35,6 +45,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY static ./static
+COPY --from=frontend-builder /usr/src/frontend/dist ./static/ui
 COPY .sqlx ./.sqlx
 
 # Build the application with server features

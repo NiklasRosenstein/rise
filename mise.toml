@@ -52,6 +52,14 @@ depends = ["backend:deps", "db:migrate"]
 run = "cargo run --features server,k8s,aws,snowflake -- backend server"
 alias = "br"
 
+[tasks."frontend:dev"]
+description = "Run the Vite frontend development server."
+run = "cd frontend && npm install && npm run dev"
+
+[tasks."frontend:build"]
+description = "Build the frontend bundle for embedding in the backend binary."
+run = "cd frontend && npm install && npm run build && rm -rf ../static/ui && mkdir -p ../static/ui && cp -r dist/* ../static/ui/"
+
 [tasks."minikube:launch"]
 description = "Start minikube, preconfigured with access to the local Docker registry (rise-registry)."
 run = """
