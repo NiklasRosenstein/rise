@@ -1,7 +1,28 @@
-// Resource management components for Rise Dashboard (Service Accounts, Domains, Environment Variables)
-// This file depends on React, utils.js, components/ui.js, and components/toast.js being loaded first
+// @ts-nocheck
+import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
+import { marked } from 'marked';
+import { api } from '../lib/api';
+import { CONFIG } from '../lib/config';
+import { navigate } from '../lib/navigation';
+import { copyToClipboard, formatDate } from '../lib/utils';
+import { useToast } from '../components/toast';
+import { Button, ConfirmDialog, FormField, Modal } from '../components/ui';
+import {
+  AwsRdsDetailView,
+  AwsRdsExtensionUI,
+  OAuthDetailView,
+  OAuthExtensionUI,
+  SnowflakeOAuthDetailView,
+  SnowflakeOAuthExtensionUI,
+  getExtensionDetailView,
+  getExtensionIcon,
+  getExtensionStatusBadge,
+  getExtensionUI,
+  getExtensionUIAPI,
+  hasExtensionDetailView,
+  hasExtensionUI,
+} from './extension-ui';
 
-const { useState, useEffect, useCallback } = React;
 
 // Helper function to normalize JSON for comparison (sorts keys recursively)
 function normalizeJSON(jsonString) {
@@ -27,7 +48,7 @@ function sortObjectKeys(obj) {
 }
 
 // Service Accounts Component
-function ServiceAccountsList({ projectName }) {
+export function ServiceAccountsList({ projectName }) {
     const [serviceAccounts, setServiceAccounts] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -278,7 +299,7 @@ function ServiceAccountsList({ projectName }) {
 }
 
 // Custom Domains Component
-function DomainsList({ projectName }) {
+export function DomainsList({ projectName }) {
     const [domains, setDomains] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -506,7 +527,7 @@ function DomainsList({ projectName }) {
 }
 
 // Environment Variables Component
-function EnvVarsList({ projectName, deploymentId }) {
+export function EnvVarsList({ projectName, deploymentId }) {
     const [envVars, setEnvVars] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -802,7 +823,7 @@ function EnvVarsList({ projectName, deploymentId }) {
 }
 
 // Extensions Component
-function ExtensionsList({ projectName }) {
+export function ExtensionsList({ projectName }) {
     const [availableExtensions, setAvailableExtensions] = useState([]);
     const [enabledExtensions, setEnabledExtensions] = useState([]);
     const [loading, setLoading] = useState(true);
@@ -966,7 +987,7 @@ function ExtensionsList({ projectName }) {
                                         <button
                                             key={extType.extension_type}
                                             onClick={() => {
-                                                window.location.hash = `#project/${projectName}/extensions/${extType.extension_type}/@new`;
+                                                navigate(`/project/${projectName}/extensions/${extType.extension_type}/@new`);
                                             }}
                                             className="w-8 h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-700 hover:border-indigo-500 rounded-sm transition-all"
                                             title={`Add ${extType.display_name}`}
@@ -1020,7 +1041,7 @@ function ExtensionsList({ projectName }) {
                                                 className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors cursor-pointer"
                                                 onClick={() => {
                                                     // Navigate to the specific extension instance
-                                                    window.location.hash = `#project/${projectName}/extensions/${ext.extension_type}/${ext.extension}`;
+                                                    navigate(`/project/${projectName}/extensions/${ext.extension_type}/${ext.extension}`);
                                                 }}
                                             >
                                                 <td className="px-3 py-4">
@@ -1116,7 +1137,7 @@ function ExtensionsList({ projectName }) {
                             {/* Tab Content */}
                             {modalTab === 'ui' && hasExtensionUI(selectedExtension.extension_type) && (
                                 <div className="space-y-4">
-                                    {React.createElement(getExtensionUI(selectedExtension.extension_type), {
+                                    {createElement(getExtensionUI(selectedExtension.extension_type), {
                                         spec: uiSpec,
                                         schema: selectedExtension.spec_schema,
                                         onChange: handleUiSpecChange
@@ -1360,7 +1381,7 @@ function GenericExtensionDetailView({ extension }) {
 }
 
 // Extension Detail Page Component
-function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, extensionInstance }) {
+export function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, extensionInstance }) {
     // Helper to get a user-friendly default name for an extension type
     const getDefaultExtensionName = (extensionType) => {
         if (!extensionType) return '';
@@ -1394,7 +1415,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
     const hasUnsavedChanges = normalizeJSON(formData.spec) !== normalizeJSON(originalSpec);
 
     // Memoize the extension UI API
-    const extensionAPI = React.useMemo(() => {
+    const extensionAPI = useMemo(() => {
         return extensionType ? getExtensionUIAPI(extensionType.extension_type) : null;
     }, [extensionType]);
 
@@ -1552,7 +1573,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
         try {
             await api.deleteExtension(projectName, enabledExtension.extension);
             showToast(`Extension ${enabledExtension.extension} deleted successfully`, 'success');
-            window.location.hash = `#project/${projectName}/extensions`;
+            navigate(`/project/${projectName}/extensions`);
         } catch (err) {
             showToast(`Failed to delete extension: ${err.message}`, 'error');
         } finally {
@@ -1573,7 +1594,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
             <div className="max-w-7xl mx-auto">
                 <div className="mb-6">
                     <button
-                        onClick={() => window.location.hash = `#project/${projectName}/extensions`}
+                        onClick={() => navigate(`/project/${projectName}/extensions`)}
                         className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-2"
                     >
                         <div className="w-5 h-5 svg-mask" style={{
@@ -1597,7 +1618,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
         <div className="max-w-7xl mx-auto">
             <div className="mb-6 flex items-center justify-between">
                 <button
-                    onClick={() => window.location.hash = `#project/${projectName}/extensions`}
+                    onClick={() => navigate(`/project/${projectName}/extensions`)}
                     className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-2"
                 >
                     <div className="w-5 h-5 svg-mask" style={{
@@ -1607,7 +1628,7 @@ function ExtensionDetailPage({ projectName, extensionType: extensionTypeProp, ex
                     Back to Extensions
                 </button>
                 <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <a href={`#project/${projectName}`} className="hover:text-indigo-600 dark:text-indigo-400 transition-colors">
+                    <a href={`/project/${projectName}`} className="hover:text-indigo-600 dark:text-indigo-400 transition-colors">
                         {projectName}
                     </a>
                     <span>/</span>

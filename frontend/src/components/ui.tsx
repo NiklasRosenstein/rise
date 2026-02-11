@@ -1,10 +1,8 @@
-// Reusable UI components for Rise Dashboard
-// This file depends on React being loaded first
+import { useEffect, useState } from 'react';
 
-const { useState, useEffect } = React;
 
 // Status Badge Component
-function StatusBadge({ status }) {
+export function StatusBadge({ status }) {
     const statusColors = {
         'Healthy': 'bg-green-600',
         'Running': 'bg-green-600',
@@ -32,7 +30,7 @@ function StatusBadge({ status }) {
 }
 
 // Button Component
-function Button({
+export function Button({
     children,
     onClick,
     variant = 'primary',
@@ -72,7 +70,7 @@ function Button({
 }
 
 // Modal Component
-function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
+export function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
     useEffect(() => {
         const handleEscape = (e) => {
             if (e.key === 'Escape' && isOpen) {
@@ -118,7 +116,7 @@ function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
 }
 
 // FormField Component
-function FormField({
+export function FormField({
     label,
     id,
     type = 'text',
@@ -199,7 +197,7 @@ function FormField({
 }
 
 // ConfirmDialog Component
-function ConfirmDialog({
+export function ConfirmDialog({
     isOpen,
     onClose,
     onConfirm,
@@ -395,7 +393,7 @@ function Combobox({
 }
 
 // Footer Component
-function Footer({ version }) {
+export function Footer({ version }) {
     return (
         <footer className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 mt-auto">
             <div className="container mx-auto px-4 py-4">

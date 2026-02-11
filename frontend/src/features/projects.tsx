@@ -1,7 +1,13 @@
-// Project-related components for Rise Dashboard
-// This file depends on React, utils.js, components/ui.js, and components/toast.js being loaded first
+// @ts-nocheck
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '../lib/api';
+import { navigate } from '../lib/navigation';
+import { formatDate } from '../lib/utils';
+import { useToast } from '../components/toast';
+import { Button, ConfirmDialog, FormField, Modal, StatusBadge } from '../components/ui';
+import { ActiveDeploymentsSummary, DeploymentDetail, DeploymentsList } from './deployments';
+import { DomainsList, EnvVarsList, ExtensionDetailPage, ExtensionsList, ServiceAccountsList } from './resources';
 
-const { useState, useEffect, useCallback } = React;
 
 // Access Class Badge Component
 function AccessClassBadge({ accessClass }) {
@@ -13,7 +19,7 @@ function AccessClassBadge({ accessClass }) {
 }
 
 // Projects List Component
-function ProjectsList() {
+export function ProjectsList() {
     const [projects, setProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -156,7 +162,7 @@ function ProjectsList() {
                             return (
                                 <tr
                                     key={p.id}
-                                    onClick={() => window.location.hash = `project/${p.name}`}
+                                    onClick={() => navigate(`/project/${p.name}`)}
                                     className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
                                 >
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">{p.name}</td>
@@ -259,7 +265,7 @@ function ProjectsList() {
 }
 
 // Project Detail Component
-function ProjectDetail({ projectName, initialTab }) {
+export function ProjectDetail({ projectName, initialTab }) {
     const [project, setProject] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -308,7 +314,7 @@ function ProjectDetail({ projectName, initialTab }) {
     // Helper function to change tab and update URL
     const changeTab = (tab) => {
         setActiveTab(tab);
-        window.location.hash = `project/${projectName}/${tab}`;
+        navigate(`/project/${projectName}/${tab}`);
     };
 
     const handleDeleteClick = () => {
@@ -324,7 +330,7 @@ function ProjectDetail({ projectName, initialTab }) {
             showToast(`Project ${project.name} deleted successfully`, 'success');
             setConfirmDialogOpen(false);
             // Redirect to projects list
-            window.location.hash = 'projects';
+            navigate('/projects');
         } catch (err) {
             showToast(`Failed to delete project: ${err.message}`, 'error');
         } finally {
@@ -370,7 +376,7 @@ function ProjectDetail({ projectName, initialTab }) {
 
     return (
         <section>
-            <a href="#projects" className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
+            <a href="/projects" onClick={(e) => { e.preventDefault(); navigate('/projects'); }} className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
                 ← Back to Projects
             </a>
 

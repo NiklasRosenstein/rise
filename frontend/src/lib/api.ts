@@ -1,3 +1,4 @@
+// @ts-nocheck
 // API client for Rise backend
 
 class RiseAPI {
@@ -299,4 +300,4 @@ class RiseAPI {
     }
 }
 
-const api = new RiseAPI();
+export const api = new RiseAPI();

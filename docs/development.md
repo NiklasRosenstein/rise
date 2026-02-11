@@ -90,6 +90,22 @@ Server config in `config/default.toml`.
 mise backend:reload  # or: mise br
 ```
 
+**Frontend (React + Vite):**
+```bash
+# Terminal 1
+mise backend:run
+
+# Terminal 2
+mise frontend:dev
+```
+
+Open the app at `http://rise.local:3000` during development. The backend proxies frontend routes to Vite (`http://localhost:5173`) when `server.frontend_dev_proxy_url` is configured.
+Add `rise.local` to `/etc/hosts` if needed:
+
+```text
+127.0.0.1 rise.local
+```
+
 **CLI:**
 ```bash
 cargo build --bin rise

@@ -24,6 +24,10 @@ pub struct ServerSettings {
     pub host: String,
     pub port: u16,
     pub public_url: String,
+    /// Development-only frontend proxy target (for Vite), e.g. "http://localhost:5173"
+    /// When set, non-API frontend routes are proxied to this URL instead of serving embedded assets.
+    #[serde(default)]
+    pub frontend_dev_proxy_url: Option<String>,
 
     /// Cookie domain for session cookies (e.g., ".rise.dev" for all subdomains, "" for current host only)
     #[serde(default)]

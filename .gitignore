@@ -11,6 +11,11 @@ pb_data
 
 # Example app dependencies
 example/**/node_modules
+frontend/node_modules
+frontend/dist
+static/ui/assets/*.js
+static/ui/assets/*.css
+static/ui/index.html
 
 # Helm packages
 .helm-packages/

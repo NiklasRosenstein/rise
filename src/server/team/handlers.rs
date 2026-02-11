@@ -83,23 +83,17 @@ pub async fn create_team(
             })?;
     }
 
-    // Add members
+    // Add members.
+    // A user can intentionally be both owner and member (dual roles are supported by schema).
     for member_id in member_ids {
-        // Skip if already added as owner
-        if !payload
-            .owners
-            .iter()
-            .any(|id| Uuid::parse_str(id).ok() == Some(member_id))
-        {
-            db_teams::add_member(&state.db_pool, team.id, member_id, TeamRole::Member)
-                .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to add member: {}", e),
-                    )
-                })?;
-        }
+        db_teams::add_member(&state.db_pool, team.id, member_id, TeamRole::Member)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to add member: {}", e),
+                )
+            })?;
     }
 
     Ok(Json(CreateTeamResponse {
