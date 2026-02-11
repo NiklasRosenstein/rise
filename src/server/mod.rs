@@ -1,7 +1,7 @@
 pub mod auth;
 pub mod custom_domains;
 pub mod deployment;
-#[cfg(feature = "aws")]
+#[cfg(feature = "backend")]
 pub mod ecr;
 pub mod encryption;
 pub mod env_vars;
@@ -19,7 +19,7 @@ use anyhow::Result;
 use axum::{middleware, Router};
 use state::{AppState, ControllerState};
 use std::sync::Arc;
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::trace::TraceLayer;
@@ -45,7 +45,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let controller_state_clone = controller_state.clone();
     let registry_provider = state.registry_provider.clone();
     let handle = tokio::spawn(async move {
-        #[cfg(feature = "k8s")]
+        #[cfg(feature = "backend")]
         {
             if let Err(e) = run_kubernetes_controller_loop(
                 controller_state_clone,
@@ -57,11 +57,11 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
                 tracing::error!("Deployment controller error: {:#}", e);
             }
         }
-        #[cfg(not(feature = "k8s"))]
+        #[cfg(not(feature = "backend"))]
         {
             tracing::error!(
-                "Kubernetes deployment controller is required but the 'k8s' feature is not enabled. \
-                 Please rebuild with --features server,k8s"
+                "Kubernetes deployment controller is required but the 'backend' feature is not enabled. \
+                 Please rebuild with --features backend"
             );
         }
     });
@@ -79,7 +79,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     controller_handles.push(handle);
 
     // Start ECR controller if ECR registry is configured (requires aws feature)
-    #[cfg(feature = "aws")]
+    #[cfg(feature = "backend")]
     if let Some(settings::RegistrySettings::Ecr { .. }) = &settings.registry {
         info!("Starting ECR controller");
         let settings_clone = settings.clone();
@@ -169,7 +169,7 @@ async fn run_project_controller_loop(
 /// Manages ECR repository lifecycle:
 /// - Creates repositories for new projects
 /// - Cleans up repositories when projects are deleted
-#[cfg(feature = "aws")]
+#[cfg(feature = "backend")]
 async fn run_ecr_controller_loop(
     controller_state: ControllerState,
     settings: settings::Settings,
@@ -213,7 +213,7 @@ async fn run_ecr_controller_loop(
 }
 
 /// Run the Kubernetes deployment controller loop (for embedding in server process)
-#[cfg(feature = "k8s")]
+#[cfg(feature = "backend")]
 async fn run_kubernetes_controller_loop(
     controller_state: ControllerState,
     registry_provider: Arc<dyn crate::server::registry::RegistryProvider>,
