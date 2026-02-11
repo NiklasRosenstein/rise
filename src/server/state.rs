@@ -10,7 +10,7 @@ use crate::server::registry::{
     models::OciClientAuthConfig, providers::OciClientAuthProvider, RegistryProvider,
 };
 
-#[cfg(feature = "aws")]
+#[cfg(feature = "backend")]
 use crate::server::registry::{models::EcrConfig, providers::EcrProvider};
 use crate::server::settings::{
     AuthSettings, EncryptionSettings, RegistrySettings, ServerSettings, Settings,
@@ -21,7 +21,7 @@ use sqlx::PgPool;
 use std::sync::Arc;
 use std::time::Duration;
 
-#[cfg(feature = "k8s")]
+#[cfg(feature = "backend")]
 use crate::server::deployment::controller::{
     DeploymentBackend, KubernetesController, KubernetesControllerConfig,
 };
@@ -85,7 +85,7 @@ async fn init_encryption_provider(
 
                 Ok(Some(Arc::new(provider)))
             }
-            #[cfg(feature = "aws")]
+            #[cfg(feature = "backend")]
             EncryptionSettings::AwsKms {
                 region,
                 key_id,
@@ -118,11 +118,11 @@ async fn init_encryption_provider(
 
                 Ok(Some(Arc::new(provider)))
             }
-            #[cfg(not(feature = "aws"))]
+            #[cfg(not(feature = "backend"))]
             EncryptionSettings::AwsKms { key_id, .. } => {
                 anyhow::bail!(
-                    "AWS KMS encryption is configured (key: {}) but the 'aws' feature is not enabled. \
-                     Please rebuild with --features aws or use a pre-built binary with AWS support.",
+                    "AWS KMS encryption is configured (key: {}) but the 'backend' feature is not enabled. \
+                     Please rebuild with --features backend or use a pre-built binary with AWS support.",
                     key_id
                 )
             }
@@ -155,7 +155,7 @@ async fn test_encryption_provider(provider: &dyn EncryptionProvider) -> Result<(
 }
 
 /// Initialize Kubernetes deployment backend from settings
-#[cfg(feature = "k8s")]
+#[cfg(feature = "backend")]
 async fn init_kubernetes_backend(
     settings: &Settings,
     controller_state: Arc<ControllerState>,
@@ -351,7 +351,7 @@ impl AppState {
         ) = settings.registry
         {
             match registry_config {
-                #[cfg(feature = "aws")]
+                #[cfg(feature = "backend")]
                 RegistrySettings::Ecr {
                     region,
                     account_id,
@@ -381,11 +381,11 @@ impl AppState {
                         }
                     }
                 }
-                #[cfg(not(feature = "aws"))]
+                #[cfg(not(feature = "backend"))]
                 RegistrySettings::Ecr { account_id, .. } => {
                     tracing::error!(
-                            "AWS ECR registry is configured (account: {}) but the 'aws' feature is not enabled. \
-                             Please rebuild with --features aws or use a pre-built binary with AWS support.",
+                            "AWS ECR registry is configured (account: {}) but the 'backend' feature is not enabled. \
+                             Please rebuild with --features backend or use a pre-built binary with AWS support.",
                             account_id
                         );
                     None
@@ -465,7 +465,7 @@ impl AppState {
 
         // Validate cookie configuration at startup
         if !cookie_settings.domain.is_empty() {
-            #[cfg(feature = "k8s")]
+            #[cfg(feature = "backend")]
             if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
                 auth_signin_url: signin_url,
                 ..
@@ -509,12 +509,12 @@ impl AppState {
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
 
         // Initialize deployment backend
-        #[cfg(not(feature = "k8s"))]
+        #[cfg(not(feature = "backend"))]
         compile_error!(
-            "At least one deployment backend must be enabled. Please build with --features k8s"
+            "At least one deployment backend must be enabled. Please build with --features backend"
         );
 
-        #[cfg(feature = "k8s")]
+        #[cfg(feature = "backend")]
         let deployment_backend = {
             let controller_state = Arc::new(ControllerState {
                 db_pool: db_pool.clone(),
@@ -538,7 +538,7 @@ impl AppState {
             #[allow(clippy::never_loop)]
             for provider_config in &extensions_config.providers {
                 match provider_config {
-                    #[cfg(feature = "aws")]
+                    #[cfg(feature = "backend")]
                     crate::server::settings::ExtensionProviderConfig::AwsRdsProvisioner {
                         region,
                         instance_size,
@@ -646,7 +646,7 @@ impl AppState {
         tracing::info!("OAuth extension provider initialized and started");
 
         // Register Snowflake OAuth provisioner (if configured)
-        #[cfg(feature = "snowflake")]
+        #[cfg(feature = "backend")]
         if let Some(ref extensions_config) = settings.extensions {
             for provider_config in &extensions_config.providers {
                 #[allow(irrefutable_let_patterns)]
@@ -789,7 +789,7 @@ impl AppState {
         ) = settings.registry
         {
             match registry_config {
-                #[cfg(feature = "aws")]
+                #[cfg(feature = "backend")]
                 RegistrySettings::Ecr {
                     region,
                     account_id,
@@ -819,11 +819,11 @@ impl AppState {
                         }
                     }
                 }
-                #[cfg(not(feature = "aws"))]
+                #[cfg(not(feature = "backend"))]
                 RegistrySettings::Ecr { account_id, .. } => {
                     tracing::error!(
-                            "AWS ECR registry is configured (account: {}) but the 'aws' feature is not enabled. \
-                             Please rebuild with --features aws or use a pre-built binary with AWS support.",
+                            "AWS ECR registry is configured (account: {}) but the 'backend' feature is not enabled. \
+                             Please rebuild with --features backend or use a pre-built binary with AWS support.",
                             account_id
                         );
                     None
@@ -909,12 +909,12 @@ impl AppState {
         let encryption_provider = init_encryption_provider(settings.encryption.as_ref()).await?;
 
         // Initialize deployment backend
-        #[cfg(not(feature = "k8s"))]
+        #[cfg(not(feature = "backend"))]
         compile_error!(
-            "At least one deployment backend must be enabled. Please build with --features k8s"
+            "At least one deployment backend must be enabled. Please build with --features backend"
         );
 
-        #[cfg(feature = "k8s")]
+        #[cfg(feature = "backend")]
         let deployment_backend = {
             let controller_state = Arc::new(ControllerState {
                 db_pool: db_pool.clone(),

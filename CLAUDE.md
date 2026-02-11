@@ -66,7 +66,7 @@ The codebase is organized into functional modules:
    - **Team Management** (`team/`): Team and membership management
    - **Container Registry** (`registry/`): Temporary credentials for ECR registries
    - **Deployment Module** (`deployment/`): Kubernetes controller for deployments
-   - **ECR Integration** (`ecr/`): AWS ECR repository management (feature: `aws`)
+   - **ECR Integration** (`ecr/`): AWS ECR repository management
    - **Encryption** (`encryption/`): Local AES-GCM and AWS KMS providers
    - **OCI Client** (`oci/`): OCI registry interaction
    - **Frontend** (`frontend/`): Static web UI assets
@@ -81,18 +81,20 @@ The codebase is organized into functional modules:
 
 ### Feature Flags
 
-The crate uses granular Cargo features for modular compilation:
+The crate uses Cargo features for modular compilation:
 
 - **`cli`** (default): CLI commands and client-side functionality
-- **`server`**: HTTP server, controllers, and backend logic
-- **`aws`**: AWS ECR registry and KMS encryption (requires `server`)
-- **`k8s`**: Kubernetes deployment controller (requires `server`)
+- **`backend`**: All server-side functionality including:
+  - HTTP server, controllers, and backend logic
+  - Kubernetes deployment controller
+  - AWS ECR registry and KMS encryption
+  - Snowflake OAuth provisioner
 
 Examples:
 ```bash
-cargo build                           # CLI-only build (smallest binary)
-cargo build --features server,k8s     # Server with Kubernetes backend
-cargo build --all-features            # Full build with all capabilities
+cargo build                    # CLI-only build (smallest binary)
+cargo build --features backend # Server with all backend capabilities
+cargo build --all-features     # Full build with CLI + backend
 ```
 
 ## Implementation Steps
@@ -102,21 +104,21 @@ cargo build --all-features            # Full build with all capabilities
 ### Completed Implementation
 
 1. **Core Infrastructure** ✅
-   - [x] Single consolidated crate with feature flags (`cli`, `server`, `aws`, `k8s`)
+   - [x] Single consolidated crate with feature flags (`cli`, `backend`)
    - [x] PostgreSQL database with SQLX (compile-time verified queries and migrations)
    - [x] Dex OAuth2/OIDC integration for authentication
    - [x] Docker Compose setup for local development (PostgreSQL, Dex, Registry)
 
-2. **Server Implementation** (`--features server`) ✅
+2. **Server Implementation** (`--features backend`) ✅
    - [x] Axum-based HTTP API with RESTful endpoints
    - [x] Authentication: OAuth2/OIDC with Dex, JWT validation, PKCE flow
    - [x] Project management: CRUD operations, ownership, visibility
    - [x] Team management: Team creation, membership, role-based access
    - [x] Deployment controller:
-     - [x] Kubernetes controller (`--features k8s`) - K8s deployments with Ingress
+     - [x] Kubernetes controller - K8s deployments with Ingress
    - [x] Container registry integration:
-     - [x] AWS ECR provider (`--features aws`) with repository lifecycle management
-   - [x] Encryption providers: Local AES-GCM and AWS KMS (`--features aws`)
+     - [x] AWS ECR provider with repository lifecycle management
+   - [x] Encryption providers: Local AES-GCM and AWS KMS
    - [x] OCI client for image digest resolution
    - [x] Frontend static web UI
    - [x] Extensions system:
@@ -129,6 +131,7 @@ cargo build --all-features            # Full build with all capabilities
        - [x] Support for any OAuth 2.0 provider (Snowflake, Google, GitHub, custom SSO)
        - [x] Client secret stored as encrypted environment variables
      - [x] AWS RDS extension for database provisioning
+     - [x] Snowflake OAuth provisioner for Snowflake security integrations
 
 3. **CLI Implementation** (`--features cli`, default) ✅
    - [x] OAuth2 authorization code flow with PKCE (browser-based, default)

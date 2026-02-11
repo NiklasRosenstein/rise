@@ -11,9 +11,9 @@ mod build;
 #[cfg(feature = "cli")]
 mod cli;
 
-#[cfg(feature = "server")]
+#[cfg(feature = "backend")]
 mod db;
-#[cfg(feature = "server")]
+#[cfg(feature = "backend")]
 mod server;
 
 // Re-export for convenience (CLI modules)

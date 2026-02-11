@@ -14,7 +14,7 @@ use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
-#[cfg(feature = "snowflake")]
+#[cfg(feature = "backend")]
 use snowflake_connector_rs::{SnowflakeAuthMethod, SnowflakeClient, SnowflakeClientConfig};
 
 /// User-facing extension spec - minimal configuration
@@ -319,7 +319,7 @@ impl SnowflakeOAuthProvisioner {
     }
 
     /// Create Snowflake client using configured credentials
-    #[cfg(feature = "snowflake")]
+    #[cfg(feature = "backend")]
     fn create_snowflake_client(&self) -> Result<SnowflakeClient> {
         let auth_method = match &self.auth {
             SnowflakeAuth::Password { password } => SnowflakeAuthMethod::Password(password.clone()),
@@ -436,7 +436,7 @@ impl SnowflakeOAuthProvisioner {
     }
 
     /// Execute SQL statement on Snowflake
-    #[cfg(feature = "snowflake")]
+    #[cfg(feature = "backend")]
     async fn execute_sql(&self, sql: &str) -> Result<Vec<Value>> {
         let client = self.create_snowflake_client()?;
         let session = client
@@ -522,7 +522,7 @@ impl SnowflakeOAuthProvisioner {
     }
 
     /// Stub for when snowflake feature is not enabled
-    #[cfg(not(feature = "snowflake"))]
+    #[cfg(not(feature = "backend"))]
     async fn execute_sql(&self, _sql: &str) -> Result<Vec<Value>> {
         Err(anyhow!(
             "Snowflake feature not enabled. Rebuild with --features snowflake"

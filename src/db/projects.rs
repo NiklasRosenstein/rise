@@ -485,7 +485,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
 // ==================== Finalizer Operations ====================
 
 /// Add a finalizer to a project (idempotent - won't add if already exists)
-#[cfg(any(feature = "k8s", feature = "aws", feature = "snowflake"))]
+#[cfg(feature = "backend")]
 pub async fn add_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<()> {
     sqlx::query!(
         r#"
@@ -507,7 +507,7 @@ pub async fn add_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<(
 }
 
 /// Remove a finalizer from a project
-#[cfg(any(feature = "k8s", feature = "aws", feature = "snowflake"))]
+#[cfg(feature = "backend")]
 pub async fn remove_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Result<()> {
     sqlx::query!(
         r#"
@@ -526,7 +526,7 @@ pub async fn remove_finalizer(pool: &PgPool, id: Uuid, finalizer: &str) -> Resul
 }
 
 /// Find projects in Deleting status that have a specific finalizer
-#[cfg(any(feature = "k8s", feature = "aws", feature = "snowflake"))]
+#[cfg(feature = "backend")]
 pub async fn find_deleting_with_finalizer(
     pool: &PgPool,
     finalizer: &str,
@@ -575,7 +575,7 @@ pub async fn has_finalizers(pool: &PgPool, id: Uuid) -> Result<bool> {
 }
 
 /// List all active projects (not in Deleting or Terminated status)
-#[cfg(feature = "aws")]
+#[cfg(feature = "backend")]
 pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
     let projects = sqlx::query_as!(
         Project,

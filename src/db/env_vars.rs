@@ -182,7 +182,7 @@ pub async fn upsert_deployment_env_var(
 ///
 /// Returns a vector of (key, value) tuples that can be formatted by the caller
 /// as needed (e.g., KEY=VALUE for Docker, EnvVar objects for Kubernetes).
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn load_deployment_env_vars_decrypted(
     pool: &PgPool,
     deployment_id: Uuid,
