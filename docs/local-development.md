@@ -423,14 +423,10 @@ export RISE_MANAGED_BUILDKIT_NETWORK_NAME=$NETWORK_NAME
 # Add to your shell profile for persistence
 echo "export RISE_MANAGED_BUILDKIT_NETWORK_NAME=$NETWORK_NAME" >> ~/.bashrc
 
-# Configure insecure registries for BuildKit (optional, for local development)
+# Configure insecure registries for BuildKit (allows HTTP connections to local registry)
 export RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES="rise-registry:5000,localhost:5000,127.0.0.1:5000"
-
-# Add to your shell profile for persistence
 echo "export RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES=\"rise-registry:5000,localhost:5000,127.0.0.1:5000\"" >> ~/.bashrc
 ```
-
-**Note**: The `RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES` environment variable configures the managed BuildKit daemon to allow insecure (HTTP) connections to the specified registries. This is useful for local development with the local registry but should not be used in production.
 
 ### 6. Start Minikube
 
