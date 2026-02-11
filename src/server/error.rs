@@ -24,8 +24,8 @@ use serde_json::json;
 /// // Error from anyhow with context
 /// let result: Result<_, anyhow::Error> = fetch_user();
 /// let user = result
-///     .internal_err("Failed to fetch user")?
-///     .with_context("user_id", user_id.to_string());
+///     .internal_err("Failed to fetch user")
+///     .map_err(|e| e.with_context("user_id", user_id.to_string()))?;
 ///
 /// // Error with full context
 /// let err = ServerError::from_anyhow(

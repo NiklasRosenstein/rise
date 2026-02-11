@@ -17,7 +17,6 @@ pub mod state;
 pub mod team;
 pub mod workload_identity;
 
-// Re-export error types for convenience
 
 use anyhow::Result;
 use axum::{extract::Request, middleware as axum_middleware, response::Response, Router};
@@ -148,9 +147,11 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
                                 .get::<self::middleware::RequestId>()
                                 .map(|rid| rid.0);
 
+                            let path = request.uri().path();
+
                             tracing::info!(
                                 method = %request.method(),
-                                uri = %request.uri(),
+                                path = %path,
                                 request_id = ?request_id,
                                 "request started"
                             );
