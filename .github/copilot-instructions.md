@@ -8,7 +8,7 @@ This repository contains **Rise**, a Rust-based platform for deploying container
 - **Architecture**: Multi-process architecture with HTTP API server, deployment controllers, and CLI
 - **Database**: PostgreSQL with SQLx (compile-time verified queries)
 - **Authentication**: OAuth2/OIDC via Dex
-- **Build System**: Cargo with feature flags (`cli`, `server`, `aws`, `k8s`, `snowflake`)
+- **Build System**: Cargo with feature flags (`cli`, `backend`)
 - **Task Runner**: mise (see `mise.toml`)
 - **Testing**: Unit tests, integration tests with test database
 
@@ -32,8 +32,8 @@ mise backend:run
 cargo build --bin rise
 
 # Build with specific features
-cargo build --features server,k8s,aws
-cargo build --all-features
+cargo build --features backend  # Backend with all server-side capabilities
+cargo build --all-features      # CLI + backend
 ```
 
 ### Key Commands
@@ -79,12 +79,12 @@ rise/
 │   ├── build/               # Container image build orchestration (feature: cli)
 │   ├── cli/                 # CLI command handlers (feature: cli)
 │   ├── db/                  # Database access layer (SQLX helpers)
-│   └── server/              # Backend server implementation (feature: server)
+│   └── server/              # Backend server implementation (feature: backend)
 │       ├── auth/            # OAuth2/OIDC authentication
 │       ├── project/         # Project management
 │       ├── team/            # Team management
-│       ├── deployment/      # Kubernetes deployment controller (feature: k8s)
-│       ├── ecr/             # AWS ECR integration (feature: aws)
+│       ├── deployment/      # Kubernetes deployment controller
+│       ├── ecr/             # AWS ECR integration
 │       ├── encryption/      # AES-GCM and AWS KMS encryption
 │       ├── oci/             # OCI registry client
 │       └── frontend/        # Embedded web UI
@@ -100,16 +100,15 @@ rise/
 ### Feature Flags
 The crate uses Cargo feature flags for modular compilation:
 - **`cli`** (default): CLI commands and client-side functionality
-- **`server`**: HTTP server, controllers, and backend logic
-- **`aws`**: AWS ECR registry and KMS encryption (requires `server`)
-- **`k8s`**: Kubernetes deployment controller (requires `server`)
-- **`snowflake`**: Snowflake extension (requires `server`)
+- **`backend`**: All server-side functionality including:
+  - HTTP server, controllers, and backend logic
+  - Kubernetes deployment controller
+  - AWS ECR registry and KMS encryption
+  - Snowflake OAuth provisioner
 
 When adding code:
 - CLI-only code goes in `src/cli/`, `src/api/`, or `src/build/` and should be feature-gated with `#[cfg(feature = "cli")]`
-- Server-only code goes in `src/server/` and should be feature-gated with `#[cfg(feature = "server")]`
-- AWS-specific code should be feature-gated with `#[cfg(feature = "aws")]`
-- K8s-specific code should be feature-gated with `#[cfg(feature = "k8s")]`
+- Server-only code goes in `src/server/` and should be feature-gated with `#[cfg(feature = "backend")]`
 
 ### Database and SQLX Guidelines
 - **All SQLX queries must be wrapped in helper functions** in the `src/db/` module

@@ -4,14 +4,14 @@
 //! They are always available regardless of feature flags.
 
 // Re-export from server deployment models when server feature is enabled
-#[cfg(feature = "server")]
+#[cfg(feature = "backend")]
 pub use crate::server::deployment::models::*;
 
 // When server feature is NOT enabled, define the types here for CLI use
-#[cfg(not(feature = "server"))]
+#[cfg(not(feature = "backend"))]
 pub use self::client_models::*;
 
-#[cfg(not(feature = "server"))]
+#[cfg(not(feature = "backend"))]
 mod client_models {
     use serde::{Deserialize, Serialize};
 

@@ -290,7 +290,7 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
 
 /// Find deployments in non-terminal states for reconciliation
 /// Excludes terminal states using is_terminal() PostgreSQL function
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(
         Deployment,
@@ -320,7 +320,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
 }
 
 /// Find all deployments with a specific status
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<Vec<Deployment>> {
     let status_str = status.to_string();
 
@@ -351,7 +351,7 @@ pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<V
 }
 
 /// Update controller metadata
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn update_controller_metadata(
     pool: &PgPool,
     id: Uuid,
@@ -395,7 +395,7 @@ pub async fn find_by_project_and_deployment_id(
 }
 
 /// Mark deployment as cancelled
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn mark_cancelled(pool: &PgPool, id: Uuid) -> Result<Deployment> {
     let deployment = sqlx::query_as!(
         Deployment,
@@ -428,7 +428,7 @@ pub async fn mark_cancelled(pool: &PgPool, id: Uuid) -> Result<Deployment> {
 }
 
 /// Mark deployment as stopped (user-initiated termination)
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn mark_stopped(pool: &PgPool, id: Uuid) -> Result<Deployment> {
     let deployment = sqlx::query_as!(
         Deployment,
@@ -461,7 +461,7 @@ pub async fn mark_stopped(pool: &PgPool, id: Uuid) -> Result<Deployment> {
 }
 
 /// Mark deployment as superseded (replaced by newer deployment)
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn mark_superseded(pool: &PgPool, id: Uuid) -> Result<Deployment> {
     let deployment = sqlx::query_as!(
         Deployment,
@@ -494,7 +494,7 @@ pub async fn mark_superseded(pool: &PgPool, id: Uuid) -> Result<Deployment> {
 }
 
 /// Mark a deployment as expired (terminal state for deployments that timed out)
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn mark_expired(pool: &PgPool, id: Uuid) -> Result<Deployment> {
     let deployment = sqlx::query_as!(
         Deployment,
@@ -527,7 +527,7 @@ pub async fn mark_expired(pool: &PgPool, id: Uuid) -> Result<Deployment> {
 }
 
 /// Mark deployment as healthy
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn mark_healthy(pool: &PgPool, id: Uuid) -> Result<Deployment> {
     let deployment = sqlx::query_as!(
         Deployment,
@@ -559,7 +559,7 @@ pub async fn mark_healthy(pool: &PgPool, id: Uuid) -> Result<Deployment> {
 }
 
 /// Mark deployment as unhealthy with reason
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn mark_unhealthy(pool: &PgPool, id: Uuid, reason: String) -> Result<Deployment> {
     let deployment = sqlx::query_as!(
         Deployment,
@@ -723,7 +723,7 @@ pub async fn find_needing_reconcile(pool: &PgPool, limit: i64) -> Result<Vec<Dep
 
 /// Find active deployment for a project in a specific group
 /// Active = most recent Healthy deployment in the group
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn find_active_for_project_and_group(
     pool: &PgPool,
     project_id: Uuid,
@@ -867,7 +867,7 @@ pub async fn find_last_for_project_and_group(
 }
 
 /// Find expired deployments that need cleanup
-#[cfg(any(feature = "k8s", feature = "aws"))]
+#[cfg(feature = "backend")]
 pub async fn find_expired(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(
         Deployment,
