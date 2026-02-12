@@ -260,15 +260,20 @@ pub async fn auth_middleware(
 
         tracing::debug!("Rise JWT validated for user: {}", email);
 
-        users::find_or_create(&state.db_pool, email)
-            .await
-            .map_err(|e| {
-                tracing::error!("Failed to find/create user: {:#}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Database error".to_string(),
-                )
-            })?
+        users::find_or_create(
+            &state.db_pool,
+            email,
+            &state.auth_settings.platform_access,
+            &state.admin_users,
+        )
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find/create user: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?
     } else {
         // External issuer - service account authentication
         tracing::debug!("Authenticating as service account from issuer: {}", issuer);
@@ -306,7 +311,13 @@ pub async fn optional_auth_middleware(
                             // Try to validate Rise JWT
                             if let Ok(rise_claims) = state.jwt_signer.verify_jwt_skip_aud(&token) {
                                 let email = &rise_claims.email;
-                                if let Ok(user) = users::find_or_create(&state.db_pool, email).await
+                                if let Ok(user) = users::find_or_create(
+                                    &state.db_pool,
+                                    email,
+                                    &state.auth_settings.platform_access,
+                                    &state.admin_users,
+                                )
+                                .await
                                 {
                                     req.extensions_mut().insert(user);
                                 }
@@ -321,6 +332,44 @@ pub async fn optional_auth_middleware(
 
     // Continue regardless of authentication status
     next.run(req).await
+}
+
+/// Platform access middleware - blocks non-platform users from API endpoints
+///
+/// Applied AFTER auth_middleware (which validates JWT and injects User).
+/// Only applies to protected API routes - does NOT apply to ingress auth endpoint.
+pub async fn platform_access_middleware(
+    State(_state): State<AppState>,
+    req: Request,
+    next: Next,
+) -> Result<Response, (StatusCode, String)> {
+    // Extract user from extensions (injected by auth_middleware)
+    let user = req.extensions().get::<User>().ok_or_else(|| {
+        tracing::error!("platform_access_middleware called without user in extensions");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Authentication error".to_string(),
+        )
+    })?;
+
+    // Check platform access
+    if !user.is_platform_user {
+        tracing::warn!(
+            user_id = %user.id,
+            user_email = %user.email,
+            path = %req.uri().path(),
+            "Platform access denied for non-platform user"
+        );
+        return Err((
+            StatusCode::FORBIDDEN,
+            "You do not have access to Rise platform features. \
+             Your account is configured for application access only. \
+             Please contact your administrator if you need platform access."
+                .to_string(),
+        ));
+    }
+
+    Ok(next.run(req).await)
 }
 
 #[cfg(test)]

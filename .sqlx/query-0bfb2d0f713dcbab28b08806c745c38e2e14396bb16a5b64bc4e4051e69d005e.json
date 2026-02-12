@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT u.id, u.email, u.created_at, u.updated_at\n        FROM users u\n        INNER JOIN team_members tm ON u.id = tm.user_id\n        WHERE tm.team_id = $1 AND tm.role = 'member'\n        ORDER BY u.email\n        ",
+  "query": "\n        SELECT id, email, is_platform_user, created_at, updated_at\n        FROM users\n        WHERE email = $1\n        ",
   "describe": {
     "columns": [
       {
@@ -15,26 +15,32 @@
       },
       {
         "ordinal": 2,
+        "name": "is_platform_user",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "3e7c56cad0b7d213cf4b90d4a87b0d04ace91d21420ca80f85cdea6794ad08ff"
+  "hash": "0bfb2d0f713dcbab28b08806c745c38e2e14396bb16a5b64bc4e4051e69d005e"
 }

@@ -100,7 +100,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .route("/version", axum::routing::get(version_info))
         .merge(auth::routes::public_routes());
 
-    // Protected routes (require authentication)
+    // Protected routes (require authentication AND platform access)
     let protected_routes = Router::new()
         .merge(auth::routes::protected_routes())
         .merge(custom_domains::routes())
@@ -112,6 +112,12 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(env_vars::routes::routes())
         .merge(extensions::routes::routes())
         .merge(encryption::routes::routes())
+        // Apply platform access middleware (runs second, after auth)
+        .route_layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::platform_access_middleware,
+        ))
+        // Apply auth middleware (runs first)
         .route_layer(axum_middleware::from_fn_with_state(
             state.clone(),
             auth::middleware::auth_middleware,

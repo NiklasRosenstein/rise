@@ -20,10 +20,18 @@ use crate::db::{models::TeamRole, teams};
 /// * `pool` - Database connection pool
 /// * `user_id` - UUID of the user logging in
 /// * `idp_groups` - List of group names from the IdP's "groups" claim
+/// * `platform_access_config` - Platform access control configuration
+/// * `admin_users` - List of admin user emails
 ///
 /// # Errors
 /// Returns an error if database operations fail. The transaction will be rolled back.
-pub async fn sync_user_groups(pool: &PgPool, user_id: Uuid, idp_groups: &[String]) -> Result<()> {
+pub async fn sync_user_groups(
+    pool: &PgPool,
+    user_id: Uuid,
+    idp_groups: &[String],
+    platform_access_config: &crate::server::settings::PlatformAccessConfig,
+    admin_users: &[String],
+) -> Result<()> {
     // Start transaction for atomicity - all operations succeed or all fail
     let mut tx = pool.begin().await.context("Failed to start transaction")?;
 
@@ -128,6 +136,33 @@ pub async fn sync_user_groups(pool: &PgPool, user_id: Uuid, idp_groups: &[String
                     .context("Failed to remove user from team")?;
             }
         }
+    }
+
+    // Re-evaluate platform access based on IdP groups
+    let user = crate::db::users::find_by_id(&mut *tx, user_id)
+        .await
+        .context("Failed to find user")?
+        .ok_or_else(|| anyhow::anyhow!("User not found during group sync"))?;
+
+    let should_have_access = crate::db::users::should_grant_platform_access(
+        &user.email,
+        Some(idp_groups),
+        platform_access_config,
+        admin_users,
+    );
+
+    if user.is_platform_user != should_have_access {
+        tracing::info!(
+            user_id = %user_id,
+            email = %user.email,
+            old_access = %user.is_platform_user,
+            new_access = %should_have_access,
+            "Updating platform access based on IdP groups"
+        );
+
+        crate::db::users::update_platform_access(&mut *tx, user_id, should_have_access)
+            .await
+            .context("Failed to update platform access")?;
     }
 
     // Commit transaction - all changes are applied atomically

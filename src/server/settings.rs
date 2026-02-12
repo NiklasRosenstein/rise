@@ -154,6 +154,9 @@ pub struct AuthSettings {
     /// List of admin user emails (have full permissions)
     #[serde(default)]
     pub admin_users: Vec<String>,
+    /// Platform access control configuration
+    #[serde(default)]
+    pub platform_access: PlatformAccessConfig,
     /// Optional custom authorize endpoint URL
     /// If not set, will be discovered from issuer's .well-known/openid-configuration
     /// or default to {issuer}/authorize
@@ -992,4 +995,42 @@ fn default_scopes() -> Vec<String> {
 #[allow(dead_code)]
 fn default_refresh_token_validity_seconds() -> i64 {
     7776000 // 90 days
+}
+
+/// Platform access control configuration
+#[derive(Debug, Deserialize, Clone)]
+pub struct PlatformAccessConfig {
+    /// Policy: "allow_all" (default) or "restrictive"
+    #[serde(default = "default_platform_access_policy")]
+    pub policy: PlatformAccessPolicy,
+
+    /// User emails explicitly granted platform access
+    #[serde(default)]
+    pub allowed_user_emails: Vec<String>,
+
+    /// IdP groups whose members get platform access
+    #[serde(default)]
+    pub allowed_idp_groups: Vec<String>,
+}
+
+/// Platform access policy enum
+#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum PlatformAccessPolicy {
+    AllowAll,    // Default: all authenticated users can use platform
+    Restrictive, // Only allowlist matches can use platform
+}
+
+impl Default for PlatformAccessConfig {
+    fn default() -> Self {
+        Self {
+            policy: PlatformAccessPolicy::AllowAll,
+            allowed_user_emails: vec![],
+            allowed_idp_groups: vec![],
+        }
+    }
+}
+
+fn default_platform_access_policy() -> PlatformAccessPolicy {
+    PlatformAccessPolicy::AllowAll
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, email, created_at, updated_at\n        FROM users\n        WHERE id = $1\n        ",
+  "query": "\n            INSERT INTO users (email, is_platform_user)\n            VALUES ($1, true)\n            RETURNING id, email, is_platform_user, created_at, updated_at\n            ",
   "describe": {
     "columns": [
       {
@@ -15,26 +15,32 @@
       },
       {
         "ordinal": 2,
+        "name": "is_platform_user",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 3,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 3,
+        "ordinal": 4,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "1e5666de344f56d1abd78dda96dc9e4998859637e4b476722777693993c2fb72"
+  "hash": "add8e5db831b09156dc09b95d8ee5326c6fbd5bad024d53a4d261fb9b1715736"
 }

@@ -52,7 +52,7 @@ pub async fn create(
     let existing_user = sqlx::query_as!(
         User,
         r#"
-        SELECT id, email, created_at, updated_at
+        SELECT id, email, is_platform_user, created_at, updated_at
         FROM users
         WHERE email = $1
         "#,
@@ -70,9 +70,9 @@ pub async fn create(
         sqlx::query_as!(
             User,
             r#"
-            INSERT INTO users (email)
-            VALUES ($1)
-            RETURNING id, email, created_at, updated_at
+            INSERT INTO users (email, is_platform_user)
+            VALUES ($1, true)
+            RETURNING id, email, is_platform_user, created_at, updated_at
             "#,
             email
         )
@@ -298,7 +298,7 @@ mod tests {
     #[sqlx::test]
     async fn test_create_service_account(pool: PgPool) -> Result<()> {
         // Create test user and project
-        let user = users::create(&pool, "owner@example.com").await?;
+        let user = users::create(&pool, "owner@example.com", true).await?;
         let project = projects::create(
             &pool,
             "test-project",
@@ -331,7 +331,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_sequence_increment(pool: PgPool) -> Result<()> {
-        let user = users::create(&pool, "owner@example.com").await?;
+        let user = users::create(&pool, "owner@example.com", true).await?;
         let project = projects::create(
             &pool,
             "test-project",
@@ -357,7 +357,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_list_by_project(pool: PgPool) -> Result<()> {
-        let user = users::create(&pool, "owner@example.com").await?;
+        let user = users::create(&pool, "owner@example.com", true).await?;
         let project = projects::create(
             &pool,
             "test-project",
@@ -383,7 +383,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_find_by_issuer(pool: PgPool) -> Result<()> {
-        let user = users::create(&pool, "owner@example.com").await?;
+        let user = users::create(&pool, "owner@example.com", true).await?;
         let project1 = projects::create(
             &pool,
             "project1",
@@ -419,7 +419,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_soft_delete(pool: PgPool) -> Result<()> {
-        let user = users::create(&pool, "owner@example.com").await?;
+        let user = users::create(&pool, "owner@example.com", true).await?;
         let project = projects::create(
             &pool,
             "test-project",
@@ -450,7 +450,7 @@ mod tests {
 
     #[sqlx::test]
     async fn test_is_service_account(pool: PgPool) -> Result<()> {
-        let regular_user = users::create(&pool, "regular@example.com").await?;
+        let regular_user = users::create(&pool, "regular@example.com", true).await?;
         let project = projects::create(
             &pool,
             "test-project",
