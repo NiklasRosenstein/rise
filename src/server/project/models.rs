@@ -85,6 +85,10 @@ pub struct Project {
     pub custom_domain_urls: Vec<String>, // Additional custom domain URLs
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_groups: Option<Vec<String>>, // Active deployment groups
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub app_users: Vec<UserInfo>, // Users who can access the deployed app
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub app_teams: Vec<TeamInfo>, // Teams whose members can access the deployed app
     // Timestamps
     #[serde(default)]
     pub created: String,
@@ -97,6 +101,10 @@ pub struct CreateProjectRequest {
     pub name: String,
     pub access_class: String,
     pub owner: ProjectOwner,
+    #[serde(default)]
+    pub app_users: Vec<String>, // User emails or IDs
+    #[serde(default)]
+    pub app_teams: Vec<String>, // Team names or IDs
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -110,6 +118,8 @@ pub struct UpdateProjectRequest {
     pub access_class: Option<String>,
     pub status: Option<ProjectStatus>,
     pub owner: Option<ProjectOwner>,
+    pub app_users: Option<Vec<String>>, // User emails or IDs
+    pub app_teams: Option<Vec<String>>, // Team names or IDs
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]

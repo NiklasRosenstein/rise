@@ -5,10 +5,10 @@ use crate::dev_oidc_issuer;
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum BackendCommands {
     /// Start the HTTP server with all controllers
-    #[cfg(feature = "server")]
+    #[cfg(feature = "backend")]
     Server,
     /// Check backend configuration for errors and unused options
-    #[cfg(feature = "server")]
+    #[cfg(feature = "backend")]
     CheckConfig,
     /// Run a local OIDC issuer for testing service accounts
     DevOidcIssuer {
@@ -23,12 +23,12 @@ pub enum BackendCommands {
 
 pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
     match cmd {
-        #[cfg(feature = "server")]
+        #[cfg(feature = "backend")]
         BackendCommands::Server => {
             let settings = crate::server::settings::Settings::new()?;
             crate::server::run_server(settings).await
         }
-        #[cfg(feature = "server")]
+        #[cfg(feature = "backend")]
         BackendCommands::CheckConfig => {
             println!("Checking backend configuration...");
             match crate::server::settings::Settings::new() {

@@ -533,6 +533,56 @@ rise build myapp:latest --backend railpack
 
 For more details, see [Issue #18](https://github.com/NiklasRosenstein/rise/issues/18).
 
+### BuildKit Network Connectivity
+
+When using the managed BuildKit daemon, you may need to connect it to a custom Docker network to allow BuildKit to access other containers in your Docker Compose setup (like a local registry).
+
+**The challenge:**
+- The managed BuildKit daemon (`rise-buildkit`) runs in isolation
+- It can't access Docker Compose services like `rise-registry` by default
+- The `host.docker.internal` mapping only provides host access, not container-to-container networking
+
+**The solution:**
+Set the `RISE_MANAGED_BUILDKIT_NETWORK_NAME` environment variable to connect BuildKit to your Docker Compose network:
+
+```bash
+# Find your Docker Compose network name (usually <directory>_default)
+docker network ls | grep rise
+
+# Set the environment variable
+export RISE_MANAGED_BUILDKIT_NETWORK_NAME=rise_default
+
+# BuildKit will automatically connect to this network on next build
+rise build myapp:latest --managed-buildkit
+```
+
+**How it works:**
+1. Rise reads the `RISE_MANAGED_BUILDKIT_NETWORK_NAME` environment variable
+2. Creates the network if it doesn't exist
+3. Connects the `rise-buildkit` container to that network
+4. Tracks the network name in container labels
+5. Automatically recreates the daemon if the network name changes
+
+**Verify connectivity:**
+```bash
+# Check BuildKit is connected to the network
+docker inspect rise-buildkit --format '{{range $net := .NetworkSettings.Networks}}{{$net}} {{end}}'
+# Should show: bridge rise_default
+```
+
+For comprehensive setup instructions, see the [Local Development Networking Guide](local-development.md).
+
+### Insecure Registries (Local Development)
+
+For local HTTP registries, configure BuildKit to allow insecure connections:
+
+```bash
+export RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES="rise-registry:5000,localhost:5000"
+rise build myapp:latest --managed-buildkit
+```
+
+Rise generates a `buildkitd.toml` config at `~/.rise/buildkitd.toml`, mounts it into the BuildKit container, and automatically recreates the daemon when the registry list changes. **Local development only** - never use in production.
+
 ## Build-Time SSL Certificate Embedding (Railpack)
 
 The `--railpack-embed-ssl-cert` flag embeds SSL certificates directly into the Railpack build plan for use during RUN commands. This complements `--managed-buildkit` by handling build-time SSL requirements.

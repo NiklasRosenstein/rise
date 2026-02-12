@@ -11,9 +11,9 @@ mod build;
 #[cfg(feature = "cli")]
 mod cli;
 
-#[cfg(feature = "server")]
+#[cfg(feature = "backend")]
 mod db;
-#[cfg(feature = "server")]
+#[cfg(feature = "backend")]
 mod server;
 
 // Re-export for convenience (CLI modules)
@@ -240,6 +240,46 @@ enum ProjectCommands {
     Delete {
         /// Project name
         project: String,
+    },
+    /// Manage app users/teams (view-only access to deployed apps)
+    #[command(subcommand)]
+    AppUser(AppUserCommands),
+}
+
+#[derive(Subcommand, Debug)]
+enum AppUserCommands {
+    /// Add a user or team as an app user (view-only access to deployed app)
+    #[command(visible_alias = "a")]
+    Add {
+        /// Project name (optional if rise.toml contains [project] section)
+        project: Option<String>,
+        /// User or team identifier (format: "user:email" or "team:name")
+        identifier: String,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+    },
+    /// Remove a user or team from app users
+    #[command(visible_alias = "rm")]
+    #[command(visible_alias = "del")]
+    Remove {
+        /// Project name (optional if rise.toml contains [project] section)
+        project: Option<String>,
+        /// User or team identifier (format: "user:email" or "team:name")
+        identifier: String,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+    },
+    /// List all app users and teams
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
+    List {
+        /// Project name (optional if rise.toml contains [project] section)
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
     },
 }
 
@@ -786,6 +826,53 @@ async fn main() -> Result<()> {
             }
             ProjectCommands::Delete { project } => {
                 project::delete_project(&http_client, &backend_url, &config, project).await?;
+            }
+            ProjectCommands::AppUser(app_user_cmd) => {
+                let token = config.get_token().ok_or_else(|| {
+                    anyhow::anyhow!("Not authenticated. Please run 'rise login' first")
+                })?;
+                match app_user_cmd {
+                    AppUserCommands::Add {
+                        project,
+                        identifier,
+                        path,
+                    } => {
+                        let project_name = resolve_project_name(project.clone(), path)?;
+                        cli::project::add_app_user(
+                            &http_client,
+                            &backend_url,
+                            &token,
+                            &project_name,
+                            identifier,
+                        )
+                        .await?;
+                    }
+                    AppUserCommands::Remove {
+                        project,
+                        identifier,
+                        path,
+                    } => {
+                        let project_name = resolve_project_name(project.clone(), path)?;
+                        cli::project::remove_app_user(
+                            &http_client,
+                            &backend_url,
+                            &token,
+                            &project_name,
+                            identifier,
+                        )
+                        .await?;
+                    }
+                    AppUserCommands::List { project, path } => {
+                        let project_name = resolve_project_name(project.clone(), path)?;
+                        cli::project::list_app_users(
+                            &http_client,
+                            &backend_url,
+                            &token,
+                            &project_name,
+                        )
+                        .await?;
+                    }
+                }
             }
         },
         Commands::Team(team_cmd) => match team_cmd {

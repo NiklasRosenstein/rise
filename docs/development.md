@@ -22,6 +22,17 @@
 
 Single process running HTTP API server + controllers (deployment, project, ECR) as concurrent tokio tasks. Controllers enabled automatically based on config.
 
+### Networking Setup
+
+For comprehensive networking setup including Docker registry configuration, BuildKit network connectivity, Minikube configuration, and troubleshooting, see the **[Local Development Networking Guide](local-development.md)**.
+
+Key topics covered:
+- Name resolution (/etc/hosts configuration)
+- Docker registry insecure access
+- BuildKit network connectivity (`RISE_MANAGED_BUILDKIT_NETWORK_NAME`)
+- Minikube host aliases and registry access
+- Common networking issues and solutions
+
 ### Mise Tasks
 
 - `mise docs:serve` - Serve docs (port 3001)
