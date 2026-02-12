@@ -295,8 +295,11 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install cargo-dist
-        run: cargo install cargo-dist --locked
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+          tools: cargo:cargo-dist
 
       - name: Build distributable artifacts
         run: cargo dist build --target ${{ matrix.target }}
@@ -378,8 +381,11 @@ jobs:
       - name: Rust cache
         uses: Swatinem/rust-cache@v2
 
-      - name: Install cargo-dist
-        run: cargo install cargo-dist --locked
+      - name: Setup mise
+        uses: jdx/mise-action@v2
+        with:
+          cache: true
+          tools: cargo:cargo-dist
 
       - name: Build distributable artifacts
         run: cargo dist build --target ${{ matrix.target }}
