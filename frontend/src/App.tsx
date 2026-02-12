@@ -411,7 +411,7 @@ export function App() {
     }
 
     if (platformAccessDenied) {
-        return <PlatformAccessDenied userEmail={user.email} />;
+        return <PlatformAccessDenied userEmail={user.email} onLogout={handleLogout} />;
     }
 
     let view = 'projects';

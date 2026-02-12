@@ -43,10 +43,10 @@ export function EmptyState({
     );
 }
 
-export function PlatformAccessDenied({ userEmail }: { userEmail: string }) {
+export function PlatformAccessDenied({ userEmail, onLogout }: { userEmail: string; onLogout: () => void }) {
     return (
         <div className="mono-login-wrap">
-            <div className="mono-login-card">
+            <div className="mono-login-card" style={{ maxWidth: '48rem' }}>
                 <div className="text-center mb-8">
                     <div
                         className="mono-login-logo svg-mask mx-auto mb-4"
@@ -73,9 +73,15 @@ export function PlatformAccessDenied({ userEmail }: { userEmail: string }) {
                     {userEmail}
                 </div>
 
-                <p className="text-gray-500 text-sm text-center">
+                <p className="text-gray-500 text-sm text-center mb-6">
                     If you believe this is an error, please contact your administrator.
                 </p>
+
+                <div className="text-center">
+                    <Button variant="secondary" onClick={onLogout}>
+                        Logout
+                    </Button>
+                </div>
             </div>
         </div>
     );
