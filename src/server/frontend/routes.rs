@@ -7,7 +7,7 @@ use axum::{
     Router,
 };
 use serde_json::json;
-use std::path::{Component, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use tera::Tera;
 
 use crate::server::state::AppState;
@@ -97,7 +97,7 @@ async fn load_docs_content_from_filesystem(rel: &str) -> Option<(Vec<u8>, &'stat
         }
     }
 
-    let fs_path = if rel_buf == PathBuf::from("README.md") {
+    let fs_path = if rel_buf == Path::new("README.md") {
         PathBuf::from("README.md")
     } else {
         PathBuf::from("docs").join(rel_buf)
