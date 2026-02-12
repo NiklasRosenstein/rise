@@ -100,9 +100,18 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .route("/version", axum::routing::get(version_info))
         .merge(auth::routes::public_routes());
 
-    // Protected routes (require authentication AND platform access)
-    let protected_routes = Router::new()
-        .merge(auth::routes::protected_routes())
+    // Auth-only routes (require authentication but NOT platform access)
+    let auth_only_routes = Router::new()
+        .merge(auth::routes::auth_only_routes())
+        // Apply auth middleware only
+        .route_layer(axum_middleware::from_fn_with_state(
+            state.clone(),
+            auth::middleware::auth_middleware,
+        ));
+
+    // Platform routes (require authentication AND platform access)
+    let platform_routes = Router::new()
+        .merge(auth::routes::platform_routes())
         .merge(custom_domains::routes())
         .merge(project::routes::routes())
         .merge(team::routes::team_routes())
@@ -124,7 +133,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         ));
 
     // Nest all API routes under /api/v1
-    let api_routes = public_routes.merge(protected_routes);
+    let api_routes = public_routes.merge(auth_only_routes).merge(platform_routes);
 
     let app = Router::new()
         .nest("/api/v1", api_routes)
