@@ -96,6 +96,24 @@ rise project create hello-world
 rise deploy
 ```
 
+## Releasing
+
+**Prerequisites:**
+- [GitHub CLI (`gh`)](https://cli.github.com/) - authenticated via `gh auth login`
+- [Claude CLI](https://github.com/anthropics/anthropic-tools) - for AI-generated release notes (optional)
+
+**Create a new release:**
+
+```bash
+# Preview release notes
+./scripts/tag-version.sh --dry-run 0.14.0
+
+# Create and publish release
+./scripts/tag-version.sh 0.14.0
+```
+
+The script validates prerequisites, generates release notes, shows a plan, and after confirmation performs all git operations (commit, tag, push) and creates a GitHub release. CI then publishes to crates.io and builds Docker images.
+
 ## License
 
 Licensed under either of
