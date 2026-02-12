@@ -3,55 +3,113 @@ import { useEffect, useRef, useState } from 'react';
 import { logout, login } from './lib/auth';
 import { api } from './lib/api';
 import { CONFIG } from './lib/config';
+import { parseDocsSummary, titleFromSlug } from './lib/docs';
 import { maybeMigrateLegacyHashRoute, navigate, usePathLocation } from './lib/navigation';
-import { Footer, Modal } from './components/ui';
+import { Footer } from './components/ui';
 import { useToast } from './components/toast';
 import { DeploymentDetail } from './features/deployments';
+import { DocsPage } from './features/docs';
+import { HomePage } from './features/home';
 import { ProjectsList, ProjectDetail } from './features/projects';
 import { ExtensionDetailPage } from './features/resources';
 import { TeamDetail, TeamsList } from './features/teams';
+import { CommandPalette } from './components/command-palette';
 
-
-// Header Component
-function Header({ user, onLogout, currentView, onShowGettingStarted }) {
-    const [isProfileOpen, setIsProfileOpen] = useState(false);
-    const [theme, setTheme] = useState('system');
-    const profileRef = useRef(null);
-    // Determine which section is active (projects or teams)
+function Sidebar({ currentView, docsItems = [], currentDocSlug = '', docsDefaultSlug = '' }) {
+    const isHomeActive = currentView === 'home';
     const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail' || currentView === 'extension-detail';
     const isTeamsActive = currentView === 'teams' || currentView === 'team-detail';
+    const isDocsActive = currentView === 'docs';
 
-    // Initialize theme from localStorage or default to system
-    useEffect(() => {
-        const savedTheme = localStorage.getItem('rise_theme') || 'system';
-        setTheme(savedTheme);
-        applyTheme(savedTheme);
-    }, []);
+    return (
+        <aside className="mono-sidebar">
+            <div className="mono-brand" onClick={() => navigate('/projects')}>
+                <div
+                    className="mono-brand-logo svg-mask"
+                    aria-hidden="true"
+                    style={{
+                        maskImage: 'url(/assets/logo.svg)',
+                        WebkitMaskImage: 'url(/assets/logo.svg)',
+                    }}
+                ></div>
+                <div>
+                    <strong>RISE</strong>
+                    <p>OPS TERMINAL</p>
+                </div>
+            </div>
 
-    // Apply theme to document
-    const applyTheme = (selectedTheme) => {
-        const root = document.documentElement;
+            <nav className="mono-nav" aria-label="Main">
+                <a
+                    href="/home"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        navigate('/home');
+                    }}
+                    className={isHomeActive ? 'active' : ''}
+                >
+                    Home
+                </a>
+                <a
+                    href={docsDefaultSlug ? `/docs/${docsDefaultSlug}` : '/docs'}
+                    onClick={(e) => {
+                        e.preventDefault();
+                        navigate(docsDefaultSlug ? `/docs/${docsDefaultSlug}` : '/docs');
+                    }}
+                    className={isDocsActive ? 'active' : ''}
+                >
+                    Docs
+                </a>
+                {isDocsActive && docsItems.length > 0 && (
+                    <div className="mono-subnav" aria-label="Documentation pages">
+                        {docsItems.map((item) => (
+                            <a
+                                key={item.slug}
+                                href={`/docs/${item.slug}`}
+                                onClick={(e) => {
+                                    e.preventDefault();
+                                    navigate(`/docs/${item.slug}`);
+                                }}
+                                className={`${currentDocSlug === item.slug ? 'active' : ''} depth-${Math.min(item.depth || 0, 3)}`.trim()}
+                            >
+                                {item.title}
+                            </a>
+                        ))}
+                    </div>
+                )}
+                <a
+                    href="/projects"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        navigate('/projects');
+                    }}
+                    className={isProjectsActive ? 'active' : ''}
+                >
+                    Projects
+                </a>
+                <a
+                    href="/teams"
+                    onClick={(e) => {
+                        e.preventDefault();
+                        navigate('/teams');
+                    }}
+                    className={isTeamsActive ? 'active' : ''}
+                >
+                    Teams
+                </a>
+            </nav>
 
-        if (selectedTheme === 'system') {
-            // Use system preference
-            const systemPrefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
-            root.classList.toggle('dark', systemPrefersDark);
-        } else if (selectedTheme === 'dark') {
-            root.classList.add('dark');
-        } else {
-            root.classList.remove('dark');
-        }
-    };
+            <div className="mono-shortcut-hint" aria-label="Command palette shortcut">
+                <span>Command palette</span>
+                <code>Ctrl/Cmd + K</code>
+            </div>
+        </aside>
+    );
+}
 
-    // Handle theme change
-    const handleThemeChange = (newTheme) => {
-        setTheme(newTheme);
-        localStorage.setItem('rise_theme', newTheme);
-        applyTheme(newTheme);
-        setIsProfileOpen(false);
-    };
+function TopBar({ user, onLogout, breadcrumbs = [] }) {
+    const [isProfileOpen, setIsProfileOpen] = useState(false);
+    const profileRef = useRef(null);
 
-    // Close dropdown when clicking outside
     useEffect(() => {
         function handleClickOutside(event) {
             if (profileRef.current && !profileRef.current.contains(event.target)) {
@@ -66,167 +124,79 @@ function Header({ user, onLogout, currentView, onShowGettingStarted }) {
     }, [isProfileOpen]);
 
     return (
-        <header className="bg-white dark:bg-gray-900 border-b border-gray-200 dark:border-gray-800">
-            <nav className="container mx-auto px-4 py-4">
-                <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-4">
-                        <a href="/projects" onClick={(e) => { e.preventDefault(); navigate('/projects'); }} className="flex items-center gap-2 hover:opacity-80 transition-opacity">
-                            <div className="w-5 h-5 svg-mask" style={{
-                                maskImage: 'url(/assets/logo.svg)',
-                                WebkitMaskImage: 'url(/assets/logo.svg)'
-                            }}></div>
-                            <strong className="text-lg font-bold">Rise Dashboard</strong>
-                        </a>
-                        <button
-                            onClick={onShowGettingStarted}
-                            className="flex items-center gap-2 px-3 py-1.5 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-md transition-colors"
-                        >
-                            <div className="w-4 h-4 svg-mask" style={{
-                                maskImage: 'url(/assets/lightning.svg)',
-                                WebkitMaskImage: 'url(/assets/lightning.svg)'
-                            }}></div>
-                            Getting Started
-                        </button>
-                    </div>
-                    <div className="flex items-center gap-6">
-                        <a
-                            href="/projects"
-                            onClick={(e) => { e.preventDefault(); navigate('/projects'); }}
-                            className={`transition-colors ${isProjectsActive ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'}`}
-                        >
-                            Projects
-                        </a>
-                        <a
-                            href="/teams"
-                            onClick={(e) => { e.preventDefault(); navigate('/teams'); }}
-                            className={`transition-colors ${isTeamsActive ? 'text-indigo-600 dark:text-indigo-400 font-semibold' : 'text-gray-700 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'}`}
-                        >
-                            Teams
-                        </a>
-
-                        {/* User Profile Dropdown */}
-                        <div className="relative" ref={profileRef}>
-                            <button
-                                onClick={() => setIsProfileOpen(!isProfileOpen)}
-                                className="flex items-center gap-2 hover:opacity-80 transition-opacity"
-                            >
-                                <div className="w-8 h-8 rounded-full bg-indigo-600 flex items-center justify-center border-2 border-indigo-500">
-                                    <div className="w-5 h-5 svg-mask text-white" style={{
-                                        maskImage: 'url(/assets/user.svg)',
-                                        WebkitMaskImage: 'url(/assets/user.svg)'
-                                    }}></div>
-                                </div>
-                            </button>
-
-                            {isProfileOpen && (
-                                <div className="absolute right-0 mt-2 w-64 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl z-50">
-                                    <div className="p-4 border-b border-gray-200 dark:border-gray-700">
-                                        <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Signed in as</p>
-                                        <p className="text-gray-900 dark:text-white font-medium break-all">{user?.email}</p>
-                                    </div>
-                                    <div className="p-2 border-t border-gray-200 dark:border-gray-700">
-                                        <div className="px-3 py-2">
-                                            <p className="text-xs text-gray-600 dark:text-gray-400 mb-2">Theme</p>
-                                            <div className="space-y-1">
-                                                <button
-                                                    onClick={() => handleThemeChange('system')}
-                                                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm rounded transition-colors ${
-                                                        theme === 'system' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                                    }`}
-                                                >
-                                                    <div className="w-4 h-4 svg-mask" style={{
-                                                        maskImage: 'url(/assets/theme-system.svg)',
-                                                        WebkitMaskImage: 'url(/assets/theme-system.svg)'
-                                                    }}></div>
-                                                    System
-                                                </button>
-                                                <button
-                                                    onClick={() => handleThemeChange('light')}
-                                                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm rounded transition-colors ${
-                                                        theme === 'light' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                                    }`}
-                                                >
-                                                    <div className="w-4 h-4 svg-mask" style={{
-                                                        maskImage: 'url(/assets/theme-light.svg)',
-                                                        WebkitMaskImage: 'url(/assets/theme-light.svg)'
-                                                    }}></div>
-                                                    Light
-                                                </button>
-                                                <button
-                                                    onClick={() => handleThemeChange('dark')}
-                                                    className={`w-full flex items-center gap-2 px-2 py-1.5 text-left text-sm rounded transition-colors ${
-                                                        theme === 'dark' ? 'bg-indigo-600 text-white' : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700'
-                                                    }`}
-                                                >
-                                                    <div className="w-4 h-4 svg-mask" style={{
-                                                        maskImage: 'url(/assets/theme-dark.svg)',
-                                                        WebkitMaskImage: 'url(/assets/theme-dark.svg)'
-                                                    }}></div>
-                                                    Dark
-                                                </button>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div className="p-2 border-t border-gray-200 dark:border-gray-700">
-                                        <button
-                                            onClick={() => { setIsProfileOpen(false); onLogout(); }}
-                                            className="w-full flex items-center gap-2 px-3 py-2 text-left text-red-600 dark:text-red-400 hover:bg-gray-100 dark:hover:bg-gray-700 rounded transition-colors"
-                                        >
-                                            <div className="w-4 h-4 svg-mask" style={{
-                                                maskImage: 'url(/assets/logout.svg)',
-                                                WebkitMaskImage: 'url(/assets/logout.svg)'
-                                            }}></div>
-                                            Logout
-                                        </button>
-                                    </div>
-                                </div>
-                            )}
-                        </div>
-                    </div>
+        <header className="mono-topbar">
+            <div>
+                <p className="mono-kicker">context</p>
+                <div className="mono-breadcrumbs">
+                    {breadcrumbs.map((crumb, idx) => {
+                        const isLast = idx === breadcrumbs.length - 1;
+                        return (
+                            <span key={`${crumb.label}-${idx}`} className="mono-breadcrumb-item">
+                                {crumb.href && !isLast ? (
+                                    <a
+                                        href={crumb.href}
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            navigate(crumb.href);
+                                        }}
+                                    >
+                                        {crumb.label}
+                                    </a>
+                                ) : (
+                                    <strong>{crumb.label}</strong>
+                                )}
+                                {!isLast && <span className="mono-breadcrumb-sep">/</span>}
+                            </span>
+                        );
+                    })}
                 </div>
-            </nav>
+            </div>
+            <div className="mono-topbar-actions">
+                <div className="mono-profile" ref={profileRef}>
+                    <button
+                        onClick={() => setIsProfileOpen(!isProfileOpen)}
+                        className="mono-ghost-button"
+                        aria-label="Account"
+                        title="Account"
+                    >
+                        <span
+                            className="w-4 h-4 svg-mask inline-block"
+                            aria-hidden="true"
+                            style={{
+                                maskImage: 'url(/assets/user.svg)',
+                                WebkitMaskImage: 'url(/assets/user.svg)',
+                            }}
+                        ></span>
+                    </button>
+                    {isProfileOpen && (
+                        <div className="mono-popover">
+                            <p>{user?.email}</p>
+                            <button
+                                onClick={() => {
+                                    setIsProfileOpen(false);
+                                    onLogout();
+                                }}
+                            >
+                                <span className="inline-flex items-center gap-2">
+                                    <span
+                                        className="w-4 h-4 svg-mask inline-block"
+                                        aria-hidden="true"
+                                        style={{
+                                            maskImage: 'url(/assets/logout.svg)',
+                                            WebkitMaskImage: 'url(/assets/logout.svg)',
+                                        }}
+                                    ></span>
+                                    Logout
+                                </span>
+                            </button>
+                        </div>
+                    )}
+                </div>
+            </div>
         </header>
     );
 }
 
-// Getting Started Modal Component
-function GettingStartedModal({ isOpen, onClose, publicUrl, version }) {
-    const installCommand = version ? `cargo install rise-deploy@${version}` : 'cargo install rise-deploy';
-
-    return (
-        <Modal isOpen={isOpen} onClose={onClose} title="Getting Started" maxWidth="max-w-3xl">
-            <div className="space-y-4 text-gray-700 dark:text-gray-300">
-                <p>This is how you get started with your first Rise project:</p>
-
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4 space-y-4">
-                    <div>
-                        <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2"># Install the Rise CLI and log-in</h4>
-                        <pre className="text-sm text-indigo-300 overflow-x-auto whitespace-pre-wrap">$ {installCommand}{'\n'}$ rise login --url {publicUrl || window.location.origin}</pre>
-                    </div>
-
-                    <div>
-                        <h4 className="text-sm font-semibold text-gray-600 dark:text-gray-400 mb-2"># Deploy a sample project</h4>
-                        <pre className="text-sm text-indigo-300 overflow-x-auto whitespace-pre-wrap">$ git clone https://github.com/GoogleCloudPlatform/buildpack-samples{'\n'}$ rise project create my-project # Pick a unique project name{'\n'}$ rise deployment create my-project buildpack-samples/sample-python/</pre>
-                    </div>
-                </div>
-
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-4">
-                    For more information, visit the{' '}
-                    <a
-                        href="https://github.com/NiklasRosenstein/rise"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 underline"
-                    >
-                        Rise documentation on GitHub
-                    </a>.
-                </p>
-            </div>
-        </Modal>
-    );
-}
-
-// Login Page Component
 function LoginPage() {
     const [status, setStatus] = useState('');
     const [loading, setLoading] = useState(false);
@@ -243,35 +213,32 @@ function LoginPage() {
     };
 
     return (
-        <div className="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-50 via-gray-100 to-gray-200 dark:from-gray-900 dark:via-gray-950 dark:to-black">
-            <div className="w-full max-w-md p-8 bg-white dark:bg-gray-900 rounded-lg border border-gray-200 dark:border-gray-800 shadow-2xl">
+        <div className="mono-login-wrap">
+            <div className="mono-login-card">
                 <div className="text-center mb-8">
-                    <div className="flex justify-center mb-4">
-                        <div className="w-16 h-16 svg-mask text-indigo-500" style={{
+                    <div
+                        className="mono-login-logo svg-mask mx-auto mb-4"
+                        aria-hidden="true"
+                        style={{
                             maskImage: 'url(/assets/logo.svg)',
-                            WebkitMaskImage: 'url(/assets/logo.svg)'
-                        }}></div>
-                    </div>
-                    <h1 className="text-3xl font-bold text-gray-900 dark:text-white mb-2">Rise</h1>
-                    <p className="text-gray-600 dark:text-gray-400">Container Deployment Platform</p>
+                            WebkitMaskImage: 'url(/assets/logo.svg)',
+                        }}
+                    ></div>
+                    <h1 className="mono-login-title">RISE</h1>
+                    <p className="mono-login-subtitle">Container deployment platform</p>
                 </div>
 
                 {loading ? (
                     <div className="flex flex-col items-center gap-4 py-8">
-                        <div className="w-12 h-12 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
-                        <p className="text-gray-700 dark:text-gray-300">{status}</p>
+                        <div className="w-12 h-12 border-2 border-gray-300 border-t-transparent rounded-full animate-spin"></div>
+                        <p className="text-gray-300">{status}</p>
                     </div>
                 ) : (
                     <>
-                        <button
-                            onClick={handleLogin}
-                            className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors mb-4"
-                        >
-                            Login with OAuth
+                        <button onClick={handleLogin} className="mono-login-button">
+                            login_with_oauth
                         </button>
-                        {status && (
-                            <p className="text-center text-sm text-red-600 dark:text-red-400">{status}</p>
-                        )}
+                        {status && <p className="text-center text-sm text-red-300 mt-3">{status}</p>}
                     </>
                 )}
             </div>
@@ -279,24 +246,24 @@ function LoginPage() {
     );
 }
 
-// Main App Component
 export function App() {
     const [user, setUser] = useState(null);
     const [authChecked, setAuthChecked] = useState(false);
-    const [showGettingStarted, setShowGettingStarted] = useState(false);
     const [version, setVersion] = useState(null);
+    const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+    const [paletteProjects, setPaletteProjects] = useState([]);
+    const [paletteTeams, setPaletteTeams] = useState([]);
+    const [docsItems, setDocsItems] = useState([]);
     const pathname = usePathLocation();
     const { showToast } = useToast();
+    const defaultDocSlug = docsItems[0]?.slug || '';
 
     useEffect(() => {
         maybeMigrateLegacyHashRoute();
 
-        // Check if we're handling extension OAuth callback (tokens in hash fragment)
         if (window.location.hash && (window.location.hash.includes('access_token=') || window.location.hash.includes('error='))) {
             const fragment = window.location.hash.substring(1);
             const params = new URLSearchParams(fragment);
-
-            // Restore the original page location from sessionStorage
             const returnPath = sessionStorage.getItem('oauth_return_path');
 
             const error = params.get('error');
@@ -304,15 +271,12 @@ export function App() {
             const accessToken = params.get('access_token');
 
             if (error) {
-                // OAuth flow failed
                 const message = errorDescription || `OAuth flow failed: ${error}`;
                 showToast(message, 'error');
             } else if (accessToken) {
-                // OAuth flow succeeded
                 const expiresIn = params.get('expires_in');
                 const expiresAt = params.get('expires_at');
 
-                // Calculate expiration time
                 let expiresAtDate;
                 if (expiresAt) {
                     expiresAtDate = new Date(expiresAt);
@@ -320,24 +284,17 @@ export function App() {
                     expiresAtDate = new Date(Date.now() + parseInt(expiresIn) * 1000);
                 }
 
-                // Show success toast
                 const message = `OAuth flow successful! Token expires ${expiresAtDate ? expiresAtDate.toLocaleString() : 'soon'}`;
                 showToast(message, 'success');
             }
 
-            // Clean up sessionStorage
             sessionStorage.removeItem('oauth_return_path');
 
-            // Navigate back to the extension page
             if (returnPath) {
                 navigate(returnPath);
             } else {
-                // Fallback to home if no return path
                 navigate('/projects');
             }
-
-            // Continue with normal auth check - don't skip it!
-            // This ensures the user stays logged in after OAuth extension callback
         }
 
         async function loadUser() {
@@ -345,8 +302,6 @@ export function App() {
                 const userData = await api.getMe();
                 setUser(userData);
             } catch (err) {
-                // If getMe fails with 401, user is not authenticated
-                // For other errors, also show login as we can't proceed without user data
                 console.error('Failed to load user:', err);
                 setUser(null);
             } finally {
@@ -355,6 +310,49 @@ export function App() {
         }
         loadUser();
     }, []);
+
+    useEffect(() => {
+        const handler = (e) => {
+            const isModifierK = (e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k';
+            if (!isModifierK) return;
+
+            const target = e.target;
+            const isTypingTarget =
+                target instanceof HTMLInputElement ||
+                target instanceof HTMLTextAreaElement ||
+                target?.isContentEditable;
+            const modalOpen = Boolean(document.querySelector('.modal-backdrop'));
+
+            if (isTypingTarget && !modalOpen) return;
+
+            e.preventDefault();
+            setCommandPaletteOpen(true);
+        };
+
+        window.addEventListener('keydown', handler);
+        return () => window.removeEventListener('keydown', handler);
+    }, []);
+
+    useEffect(() => {
+        async function loadDocsSummary() {
+            try {
+                const response = await fetch('/static/docs/SUMMARY.md');
+                if (!response.ok) return;
+                const summary = await response.text();
+                setDocsItems(parseDocsSummary(summary));
+            } catch (err) {
+                console.error('Failed to load docs summary:', err);
+            }
+        }
+        loadDocsSummary();
+    }, []);
+
+    useEffect(() => {
+        if (pathname === '/docs' && docsItems.length > 0) {
+            window.history.replaceState({}, '', `/docs/${docsItems[0].slug}`);
+            window.dispatchEvent(new Event('rise:navigate'));
+        }
+    }, [pathname, docsItems]);
 
     useEffect(() => {
         async function fetchVersion() {
@@ -369,14 +367,34 @@ export function App() {
         fetchVersion();
     }, []);
 
+    useEffect(() => {
+        if (!user) {
+            setPaletteProjects([]);
+            setPaletteTeams([]);
+            return;
+        }
+
+        async function loadPaletteTargets() {
+            try {
+                const [projects, teams] = await Promise.all([api.getProjects(), api.getTeams()]);
+                setPaletteProjects(projects || []);
+                setPaletteTeams(teams || []);
+            } catch (err) {
+                console.error('Failed to load command palette targets:', err);
+            }
+        }
+
+        loadPaletteTargets();
+    }, [user?.id]);
+
     const handleLogout = () => {
         logout();
     };
 
     if (!authChecked) {
         return (
-            <div className="flex items-center justify-center min-h-screen">
-                <div className="w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+            <div className="mono-login-wrap">
+                <div className="w-8 h-8 border-2 border-gray-300 border-t-transparent rounded-full animate-spin"></div>
             </div>
         );
     }
@@ -385,36 +403,27 @@ export function App() {
         return <LoginPage />;
     }
 
-    // Parse path for routing
     let view = 'projects';
     let params = {};
     const route = pathname.replace(/^\//, '');
 
     if (route.startsWith('project/')) {
         const parts = route.split('/');
-        // Check if this is an extension detail page
-        // project/{name}/extensions - extensions tab (list view)
-        // project/{name}/extensions/{type}/@new - creating new instance
-        // project/{name}/extensions/{type}/{instance} - viewing existing instance
         if (parts[2] === 'extensions') {
             if (parts.length === 3) {
-                // Just the extensions tab: project/{name}/extensions
                 view = 'project-detail';
                 params.projectName = parts[1];
                 params.tab = 'extensions';
             } else if (parts.length === 4 && parts[3] === '@new') {
-                // Creating new instance: project/{name}/extensions/@new
                 view = 'extension-create';
                 params.projectName = parts[1];
-                params.extensionType = null; // Will show list to choose from
+                params.extensionType = null;
             } else if (parts.length === 5 && parts[3]) {
-                // Creating new instance of specific type: project/{name}/extensions/{type}/@new
-                // or viewing instance: project/{name}/extensions/{type}/{instance}
                 if (parts[4] === '@new') {
                     view = 'extension-detail';
                     params.projectName = parts[1];
                     params.extensionType = parts[3];
-                    params.extensionInstance = null; // Signal this is create mode
+                    params.extensionInstance = null;
                 } else {
                     view = 'extension-detail';
                     params.projectName = parts[1];
@@ -422,8 +431,6 @@ export function App() {
                     params.extensionInstance = parts[4];
                 }
             } else if (parts.length === 4 && parts[3]) {
-                // Legacy fallback: project/{name}/extensions/{type-or-instance}
-                // Try to determine if it's a type or instance
                 view = 'extension-detail';
                 params.projectName = parts[1];
                 params.extensionType = parts[3];
@@ -432,7 +439,7 @@ export function App() {
         } else {
             view = 'project-detail';
             params.projectName = parts[1];
-            params.tab = parts[2] || 'overview'; // Default to overview if no tab specified
+            params.tab = parts[2] || 'overview';
         }
     } else if (route.startsWith('team/')) {
         view = 'team-detail';
@@ -442,34 +449,168 @@ export function App() {
         const parts = route.split('/');
         params.projectName = parts[1];
         params.deploymentId = parts[2];
+    } else if (route.startsWith('docs')) {
+        view = 'docs';
+        const parts = route.split('/');
+        params.docSlug = parts.slice(1).join('/') || '';
+    } else if (route === 'home') {
+        view = 'home';
     } else if (route === 'teams') {
         view = 'teams';
     } else {
         view = 'projects';
     }
 
+    const projectTabLabelMap = {
+        deployments: 'Deployments',
+        'service-accounts': 'Service Accounts',
+        'env-vars': 'Environment Variables',
+        domains: 'Domains',
+        extensions: 'Extensions',
+    };
+    const breadcrumbs =
+        view === 'home'
+            ? [{ label: 'Home' }]
+            : view === 'projects'
+            ? [{ label: 'Projects' }]
+            : view === 'teams'
+            ? [{ label: 'Teams' }]
+            : view === 'docs'
+            ? [
+                  { label: 'Docs', href: defaultDocSlug ? `/docs/${defaultDocSlug}` : '/docs' },
+                  ...(params.docSlug
+                      ? [{ label: docsItems.find((item) => item.slug === params.docSlug)?.title || titleFromSlug(params.docSlug) }]
+                      : defaultDocSlug
+                      ? [{ label: docsItems.find((item) => item.slug === defaultDocSlug)?.title || titleFromSlug(defaultDocSlug) }]
+                      : []),
+              ]
+            : view === 'project-detail'
+            ? [
+                  { label: 'Projects', href: '/projects' },
+                  { label: `Project: ${params.projectName}` },
+                  ...(params.tab && params.tab !== 'overview'
+                      ? [{ label: projectTabLabelMap[params.tab] || params.tab }]
+                      : []),
+              ]
+            : view === 'team-detail'
+            ? [
+                  { label: 'Teams', href: '/teams' },
+                  { label: `Team: ${params.teamName}` },
+              ]
+            : view === 'deployment-detail'
+            ? [
+                  { label: 'Projects', href: '/projects' },
+                  { label: `Project: ${params.projectName}`, href: `/project/${params.projectName}` },
+                  { label: `Deployment: ${params.deploymentId}` },
+              ]
+            : view === 'extension-detail' || view === 'extension-create'
+            ? [
+                  { label: 'Projects', href: '/projects' },
+                  { label: `Project: ${params.projectName}`, href: `/project/${params.projectName}` },
+                  { label: 'Extensions', href: `/project/${params.projectName}/extensions` },
+                  {
+                      label: params.extensionInstance
+                          ? `Extension: ${params.extensionInstance}`
+                          : params.extensionType
+                          ? `Extension: ${params.extensionType}`
+                          : 'Extension',
+                  },
+              ]
+            : [{ label: 'Projects' }];
+
+    const commandItems = [
+        {
+            id: 'go-projects',
+            label: 'Navigate: Projects',
+            keywords: ['projects', 'navigation', 'list'],
+            run: () => navigate('/projects'),
+        },
+        {
+            id: 'go-home',
+            label: 'Navigate: Home',
+            keywords: ['home', 'welcome', 'getting started'],
+            run: () => navigate('/home'),
+        },
+        {
+            id: 'go-teams',
+            label: 'Navigate: Teams',
+            keywords: ['teams', 'navigation', 'list'],
+            run: () => navigate('/teams'),
+        },
+        {
+            id: 'create-project',
+            label: 'Action: Create project',
+            keywords: ['project', 'create', 'new'],
+            run: () => navigate('/projects?create=project'),
+        },
+        {
+            id: 'create-team',
+            label: 'Action: Create team',
+            keywords: ['team', 'create', 'new'],
+            run: () => navigate('/teams?create=team'),
+        },
+        {
+            id: 'open-docs',
+            label: 'Open: Docs',
+            keywords: ['help', 'docs', 'onboarding'],
+            run: () => navigate(defaultDocSlug ? `/docs/${defaultDocSlug}` : '/docs'),
+        },
+    ];
+
+    if (view === 'project-detail' && params?.projectName) {
+        commandItems.unshift({
+            id: 'go-project-overview',
+            label: `Navigate: Project ${params.projectName}`,
+            keywords: ['project', 'detail', params.projectName],
+            run: () => navigate(`/project/${params.projectName}`),
+        });
+    }
+
+    const projectCommands = paletteProjects.map((project) => ({
+        id: `project-${project.id || project.name}`,
+        label: `Project: ${project.name}`,
+        keywords: ['project', project.name, project.owner_team_name, project.owner_user_email].filter(Boolean),
+        run: () => navigate(`/project/${project.name}`),
+    }));
+
+    const teamCommands = paletteTeams.map((team) => ({
+        id: `team-${team.id || team.name}`,
+        label: `Team: ${team.name}`,
+        keywords: ['team', team.name],
+        run: () => navigate(`/team/${team.name}`),
+    }));
+
+    commandItems.push(...projectCommands, ...teamCommands);
+
+    const createIntent = new URLSearchParams(window.location.search).get('create');
+
     return (
-        <div className="min-h-screen flex flex-col bg-gray-50 dark:bg-gray-950">
-            <Header
-                user={user}
-                onLogout={handleLogout}
-                currentView={view}
-                onShowGettingStarted={() => setShowGettingStarted(true)}
-            />
-            <main className="container mx-auto px-4 py-8 flex-1">
-                {view === 'projects' && <ProjectsList />}
-                {view === 'teams' && <TeamsList currentUser={user} />}
-                {view === 'project-detail' && <ProjectDetail projectName={params.projectName} initialTab={params.tab} />}
-                {view === 'team-detail' && <TeamDetail teamName={params.teamName} currentUser={user} />}
-                {view === 'deployment-detail' && <DeploymentDetail projectName={params.projectName} deploymentId={params.deploymentId} />}
-                {view === 'extension-detail' && <ExtensionDetailPage projectName={params.projectName} extensionType={params.extensionType} extensionInstance={params.extensionInstance} />}
-            </main>
-            <Footer version={version} />
-            <GettingStartedModal
-                isOpen={showGettingStarted}
-                onClose={() => setShowGettingStarted(false)}
-                publicUrl={CONFIG?.backendUrl}
-                version={version?.version}
+        <div className="mono-app">
+            <div className="mono-shell">
+                <Sidebar currentView={view} docsItems={docsItems} currentDocSlug={params.docSlug || ''} docsDefaultSlug={defaultDocSlug} />
+                <div className="mono-main-shell">
+                    <TopBar
+                        user={user}
+                        onLogout={handleLogout}
+                        breadcrumbs={breadcrumbs}
+                    />
+                    <main className="mono-main">
+                        {view === 'home' && <HomePage publicUrl={CONFIG?.backendUrl} version={version?.version} />}
+                        {view === 'projects' && <ProjectsList openCreate={createIntent === 'project'} />}
+                        {view === 'teams' && <TeamsList currentUser={user} openCreate={createIntent === 'team'} />}
+                        {view === 'docs' && <DocsPage initialSlug={params.docSlug} />}
+                        {view === 'project-detail' && <ProjectDetail projectName={params.projectName} initialTab={params.tab} />}
+                        {view === 'team-detail' && <TeamDetail teamName={params.teamName} currentUser={user} />}
+                        {view === 'deployment-detail' && <DeploymentDetail projectName={params.projectName} deploymentId={params.deploymentId} />}
+                        {view === 'extension-detail' && <ExtensionDetailPage projectName={params.projectName} extensionType={params.extensionType} extensionInstance={params.extensionInstance} />}
+                    </main>
+                    <Footer version={version} />
+                </div>
+            </div>
+            <CommandPalette
+                isOpen={commandPaletteOpen}
+                onClose={() => setCommandPaletteOpen(false)}
+                items={commandItems}
             />
         </div>
     );

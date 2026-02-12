@@ -7,30 +7,112 @@
     <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        :root {
+            --bg: #111111;
+            --panel: #141414;
+            --line: #3a3a3a;
+            --text: #ececec;
+            --muted: #b8b8b8;
+            --ok: #b7ffce;
+            --bad: #ffc0c0;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "IBM Plex Mono", ui-monospace, monospace;
+            color: var(--text);
+            background: radial-gradient(circle at 0 0, #202020 0%, #101010 40%), var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .card {
+            width: 100%;
+            max-width: 32rem;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            padding: 1.2rem;
+            text-align: center;
+        }
+        .logo {
+            width: 2rem;
+            height: 2rem;
+            margin: 0 auto 0.75rem;
+            background-color: currentColor;
+            mask-size: contain;
+            mask-repeat: no-repeat;
+            mask-position: center;
+            -webkit-mask-size: contain;
+            -webkit-mask-repeat: no-repeat;
+            -webkit-mask-position: center;
+            mask-image: url(/assets/logo.svg);
+            -webkit-mask-image: url(/assets/logo.svg);
+        }
+        .state-ok { color: var(--ok); font-size: 2rem; margin-bottom: 0.5rem; }
+        .state-bad { color: var(--bad); font-size: 2rem; margin-bottom: 0.5rem; }
+        h2 { margin: 0 0 0.8rem; font-size: 1.2rem; }
+        p { color: var(--muted); }
+        .mono-code {
+            color: var(--text);
+            background: #1a1a1a;
+            border: 1px solid var(--line);
+            padding: 0.1rem 0.35rem;
+        }
+        .progress {
+            width: 100%;
+            background: #1a1a1a;
+            border: 1px solid var(--line);
+            height: 8px;
+            margin: 1rem 0;
+        }
+        .progress > div {
+            background: #d6d6d6;
+            height: 100%;
+            width: 0%;
+            transition: width 1000ms;
+        }
+        .btn {
+            display: inline-block;
+            border: 1px solid var(--line);
+            background: #1a1a1a;
+            color: var(--text);
+            text-decoration: none;
+            padding: 0.55rem 0.75rem;
+        }
+        .errbox {
+            border: 1px solid #7d4b4b;
+            color: var(--bad);
+            background: #1a1212;
+            padding: 0.6rem;
+            margin: 0.9rem 0;
+        }
+    </style>
 </head>
-<body class="bg-gray-950 text-gray-100">
-    <div class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-black">
-        <div class="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl text-center">
+<body>
+    <div class="card">
             {% if success %}
             <div>
-                <div class="text-6xl text-green-500 mb-4">✓</div>
-                <h2 class="text-2xl font-bold text-white mb-4">Authentication Successful</h2>
+                <div class="logo" aria-hidden="true"></div>
+                <div class="state-ok">[ok]</div>
+                <h2>Authentication Successful</h2>
 
-                <p class="text-gray-300 mb-4">
+                <p>
                     Signing you in to project
-                    <strong class="font-mono text-white bg-gray-800 px-2 py-1 rounded">{{ project_name }}</strong>...
+                    <strong class="mono-code">{{ project_name }}</strong>...
                 </p>
 
-                <div class="w-full bg-gray-800 rounded-full h-2 mb-4">
-                    <div class="bg-indigo-600 h-2 rounded-full transition-all duration-1000" id="progress-bar" style="width: 0%"></div>
+                <div class="progress">
+                    <div id="progress-bar"></div>
                 </div>
 
-                <p class="text-xs text-gray-500 mb-4">
+                <p>
                     <small>You will be redirected shortly.</small>
                 </p>
 
-                <a href="{{ redirect_url }}" class="text-sm text-indigo-400 hover:text-indigo-300">Click here if not redirected automatically</a>
+                <a href="{{ redirect_url }}" class="btn">Click here if not redirected automatically</a>
             </div>
 
             <script>
@@ -47,27 +129,27 @@
             </script>
             {% else %}
             <div>
-                <div class="text-6xl text-red-500 mb-4">✗</div>
-                <h2 class="text-2xl font-bold text-white mb-4">Authentication Failed</h2>
+                <div class="logo" aria-hidden="true"></div>
+                <div class="state-bad">[error]</div>
+                <h2>Authentication Failed</h2>
 
-                <p class="text-gray-300 mb-4">
+                <p>
                     Failed to authenticate for project
-                    <strong class="font-mono text-white bg-gray-800 px-2 py-1 rounded">{{ project_name }}</strong>.
+                    <strong class="mono-code">{{ project_name }}</strong>.
                 </p>
 
                 {% if error_message %}
-                <p class="bg-red-900/50 border border-red-500 text-red-200 px-4 py-2 rounded mb-4">
+                <p class="errbox">
                     {{ error_message }}
                 </p>
                 {% endif %}
 
                 <a href="/api/v1/auth/signin?project={{ project_name }}{% if redirect_url %}&redirect={{ redirect_url | urlencode }}{% endif %}"
-                   class="inline-block bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-6 rounded-lg transition-colors">
+                   class="btn">
                     Try Again
                 </a>
             </div>
             {% endif %}
-        </div>
     </div>
 </body>
 </html>

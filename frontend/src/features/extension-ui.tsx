@@ -4,7 +4,8 @@ import { api } from '../lib/api';
 import { CONFIG } from '../lib/config';
 import { copyToClipboard, formatDate } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, FormField, Modal } from '../components/ui';
+import { Button, FormField, Modal, ModalTabs } from '../components/ui';
+import { MonoTable, MonoTableBody, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 
 
 // AWS RDS Extension UI Component
@@ -598,36 +599,17 @@ const OAuthExtensionAPI = {
 function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) {
     const [activeTab, setActiveTab] = useState('fragment');
 
-    if (!isOpen) return null;
-
     const backendUrl = CONFIG.backendUrl.replace(/\/$/, '');
     const authorizeUrl = `${backendUrl}/oidc/${projectName}/${extensionName}/authorize`;
     const callbackUrl = `${backendUrl}/oidc/${projectName}/${extensionName}/callback`;
     const tokenUrl = `${backendUrl}/oidc/${projectName}/${extensionName}/token`;
 
     return (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50" onClick={onClose}>
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg max-w-4xl w-full max-h-[90vh] overflow-hidden" onClick={(e) => e.stopPropagation()}>
-                {/* Modal Header */}
-                <div className="flex items-center justify-between p-6 border-b border-gray-300 dark:border-gray-700">
-                    <h2 className="text-xl font-bold text-gray-900 dark:text-white">Integration Guide</h2>
-                    <button
-                        onClick={onClose}
-                        className="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
-                        title="Close"
-                    >
-                        <div className="w-6 h-6 svg-mask" style={{
-                            maskImage: 'url(/assets/close-x.svg)',
-                            WebkitMaskImage: 'url(/assets/close-x.svg)'
-                        }}></div>
-                    </button>
-                </div>
-
-                {/* Tabs */}
-                <div className="flex border-b border-gray-300 dark:border-gray-700 bg-white dark:bg-gray-900 px-6">
+        <Modal isOpen={isOpen} onClose={onClose} title="Integration Guide" maxWidth="max-w-4xl" bodyClassName="mono-modal-body--flush">
+                <ModalTabs className="px-6">
                     <button
                         onClick={() => setActiveTab('fragment')}
-                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 mr-2 ${
                             activeTab === 'fragment'
                                 ? 'border-indigo-500 text-indigo-400'
                                 : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
@@ -637,7 +619,7 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
                     </button>
                     <button
                         onClick={() => setActiveTab('backend')}
-                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
+                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 mr-2 ${
                             activeTab === 'backend'
                                 ? 'border-indigo-500 text-indigo-400'
                                 : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
@@ -655,7 +637,7 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
                     >
                         Local Development
                     </button>
-                </div>
+                </ModalTabs>
 
                 {/* Modal Content */}
                 <div className="p-6 overflow-y-auto max-h-[calc(90vh-140px)]">
@@ -842,8 +824,7 @@ app.get('/oauth/callback', async (req, res) => {
                         </div>
                     )}
                 </div>
-            </div>
-        </div>
+        </Modal>
     );
 }
 
@@ -967,7 +948,7 @@ export function OAuthDetailView({ extension, projectName }) {
                     {/* Configuration Status */}
                     <section>
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Status</h2>
-                        <div className="bg-white dark:bg-gray-900 rounded p-4">
+                        <div className="mono-table-wrap p-4">
                             {status.error ? (
                                 <div className="p-3 bg-red-900/20 border border-red-700 rounded">
                                     <p className="text-sm text-red-300">
@@ -1037,20 +1018,20 @@ export function OAuthDetailView({ extension, projectName }) {
             {/* Injected Environment Variables - Full width below the grid */}
             <section className="mt-6">
                 <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Injected Environment Variables</h2>
-                <div className="bg-white dark:bg-gray-900 rounded p-4">
+                <div className="mono-table-wrap p-4">
                     <p className="text-sm text-gray-600 dark:text-gray-400 mb-3">
                         These environment variables are injected into your deployed application:
                     </p>
                     <div className="overflow-x-auto">
-                        <table className="w-full text-sm">
-                            <thead>
+                        <MonoTable className="text-sm">
+                            <MonoTableHead>
                                 <tr className="border-b border-gray-300 dark:border-gray-700">
                                     <th className="text-left py-2 px-3 text-gray-600 dark:text-gray-400 font-medium">Variable</th>
                                     <th className="text-left py-2 px-3 text-gray-600 dark:text-gray-400 font-medium">Value</th>
                                     <th className="py-2 px-3 w-10"></th>
                                 </tr>
-                            </thead>
-                            <tbody className="font-mono text-xs">
+                            </MonoTableHead>
+                            <MonoTableBody className="font-mono text-xs">
                                 <tr className="border-b border-gray-200 dark:border-gray-800">
                                     <td className="py-3 px-3 text-gray-700 dark:text-gray-300 whitespace-nowrap">
                                         {extensionName.toUpperCase().replace(/-/g, '_')}_CLIENT_ID
@@ -1141,8 +1122,8 @@ export function OAuthDetailView({ extension, projectName }) {
                                         </button>
                                     </td>
                                 </tr>
-                            </tbody>
-                        </table>
+                            </MonoTableBody>
+                        </MonoTable>
                     </div>
                     <p className="text-xs text-gray-500 dark:text-gray-500 mt-3">
                         Click the issuer URL to view the OIDC discovery document.

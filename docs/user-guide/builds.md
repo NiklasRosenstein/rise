@@ -21,11 +21,11 @@ rise build myapp:latest --backend buildctl
 ```
 
 **Backend comparison:**
-| Backend | Build Tool | SSL Secrets | Push During Build |
-|---------|------------|-------------|-------------------|
-| `docker` / `docker:build` | docker build | No | No (separate push) |
-| `docker:buildx` | docker buildx build | Yes | Yes (`--push`) |
-| `buildctl` | buildctl | Yes | Yes |
+| Backend | Build Tool | SSL Secrets | Best For |
+|---------|------------|-------------|----------|
+| `docker` / `docker:build` | docker build | No | Simple local builds and maximum compatibility |
+| `docker:buildx` | docker buildx build | Yes | BuildKit features (secrets, advanced caching, multi-platform) |
+| `buildctl` | buildctl | Yes | BuildKit-first CI environments without Docker daemon dependencies |
 
 **When to use each:**
 - `docker:build` - Simple builds, maximum compatibility

@@ -57,4 +57,4 @@ mise backend:run
 - **Learn CLI commands**: See [CLI Guide](cli.md)
 - **Understand deployments**: See [Deployments](deployments.md)
 - **Build images**: See [Building Images](builds.md)
-- **Set up production**: See [Production Deployment](production.md)
+- **Set up production**: See [Production Deployment](../production.md)

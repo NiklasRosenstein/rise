@@ -6,7 +6,8 @@ import { CONFIG } from '../lib/config';
 import { navigate } from '../lib/navigation';
 import { copyToClipboard, formatDate } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, ConfirmDialog, FormField, Modal } from '../components/ui';
+import { Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, ModalTabs, SegmentedRadioGroup } from '../components/ui';
+import { MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import {
   AwsRdsDetailView,
   AwsRdsExtensionUI,
@@ -173,36 +174,32 @@ export function ServiceAccountsList({ projectName }) {
                     Create Service Account
                 </Button>
             </div>
-            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
-                <table className="w-full">
-                    <thead className="bg-gray-100 dark:bg-gray-800">
+            <MonoTableFrame>
+                <MonoTable>
+                    <MonoTableHead>
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Email</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Issuer URL</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Claims</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                            <MonoTh className="px-6 py-3 text-left">Email</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Issuer URL</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Claims</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Created</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Actions</MonoTh>
                         </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                    </MonoTableHead>
+                    <MonoTableBody>
                         {serviceAccounts.length === 0 ? (
-                            <tr>
-                                <td colSpan="5" className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
-                                    No service accounts found.
-                                </td>
-                            </tr>
+                            <MonoTableEmptyRow colSpan={5}>No service accounts found.</MonoTableEmptyRow>
                         ) : (
                             serviceAccounts.map(sa => (
-                            <tr key={sa.id} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
-                                <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{sa.email}</td>
-                                <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 break-all max-w-xs">{sa.issuer_url}</td>
-                                <td className="px-6 py-4 text-xs font-mono text-gray-700 dark:text-gray-300">
+                            <MonoTableRow key={sa.id} interactive className="transition-colors">
+                                <MonoTd className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{sa.email}</MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300 break-all max-w-xs">{sa.issuer_url}</MonoTd>
+                                <MonoTd className="px-6 py-4 text-xs font-mono text-gray-700 dark:text-gray-300">
                                     {Object.entries(sa.claims || {})
                                         .map(([key, value]) => `${key}=${value}`)
                                         .join(', ')}
-                                </td>
-                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(sa.created_at)}</td>
-                                <td className="px-6 py-4 text-sm">
+                                </MonoTd>
+                                <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(sa.created_at)}</MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm">
                                     <div className="flex gap-2">
                                         <Button
                                             variant="secondary"
@@ -219,20 +216,20 @@ export function ServiceAccountsList({ projectName }) {
                                             Delete
                                         </Button>
                                     </div>
-                                </td>
-                            </tr>
+                                </MonoTd>
+                            </MonoTableRow>
                         ))
                         )}
-                    </tbody>
-                </table>
-            </div>
+                    </MonoTableBody>
+                </MonoTable>
+            </MonoTableFrame>
 
             <Modal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 title={editingSA ? 'Edit Service Account' : 'Create Service Account'}
             >
-                <div className="space-y-4">
+                <ModalSection>
                     <FormField
                         label="Issuer URL"
                         id="sa-issuer-url"
@@ -262,7 +259,7 @@ export function ServiceAccountsList({ projectName }) {
                         <strong>Note:</strong> Additional claims should be provided as a JSON object. The <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">aud</code> claim is configured separately above.
                     </p>
 
-                    <div className="flex justify-end gap-3 pt-4">
+                    <ModalActions>
                         <Button
                             variant="secondary"
                             onClick={() => setIsModalOpen(false)}
@@ -277,8 +274,8 @@ export function ServiceAccountsList({ projectName }) {
                         >
                             {editingSA ? 'Update' : 'Create'}
                         </Button>
-                    </div>
-                </div>
+                    </ModalActions>
+                </ModalSection>
             </Modal>
 
             <ConfirmDialog
@@ -403,35 +400,31 @@ export function DomainsList({ projectName }) {
                     Add Domain
                 </Button>
             </div>
-            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
-                <table className="w-full">
-                    <thead className="bg-gray-100 dark:bg-gray-800">
+            <MonoTableFrame>
+                <MonoTable>
+                    <MonoTableHead>
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Domain</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Primary</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                            <MonoTh className="px-6 py-3 text-left">Domain</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Primary</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Created</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Actions</MonoTh>
                         </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                    </MonoTableHead>
+                    <MonoTableBody>
                         {domains.length === 0 ? (
-                            <tr>
-                                <td colSpan="4" className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
-                                    No custom domains configured.
-                                </td>
-                            </tr>
+                            <MonoTableEmptyRow colSpan={4}>No custom domains configured.</MonoTableEmptyRow>
                         ) : (
                             domains.map(domain => (
-                            <tr key={domain.id} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
-                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
+                            <MonoTableRow key={domain.id} interactive className="transition-colors">
+                                <MonoTd className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
                                     {domain.domain}
                                     {domain.is_primary && (
                                         <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
                                             Primary
                                         </span>
                                     )}
-                                </td>
-                                <td className="px-6 py-4 text-sm">
+                                </MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm">
                                     <button
                                         onClick={() => handleTogglePrimary(domain)}
                                         disabled={updatingPrimaryDomain === domain.domain}
@@ -453,9 +446,9 @@ export function DomainsList({ projectName }) {
                                             </svg>
                                         )}
                                     </button>
-                                </td>
-                                <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{formatDate(domain.created_at)}</td>
-                                <td className="px-6 py-4 text-sm">
+                                </MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{formatDate(domain.created_at)}</MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm">
                                     <Button
                                         variant="danger"
                                         size="sm"
@@ -463,20 +456,20 @@ export function DomainsList({ projectName }) {
                                     >
                                         Delete
                                     </Button>
-                                </td>
-                            </tr>
+                                </MonoTd>
+                            </MonoTableRow>
                         ))
                         )}
-                    </tbody>
-                </table>
-            </div>
+                    </MonoTableBody>
+                </MonoTable>
+            </MonoTableFrame>
 
             <Modal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 title="Add Custom Domain"
             >
-                <div className="space-y-4">
+                <ModalSection>
                     <FormField
                         label="Domain"
                         id="domain-name"
@@ -490,7 +483,7 @@ export function DomainsList({ projectName }) {
                         The domain will be added to the ingress for the default deployment group only.
                     </p>
 
-                    <div className="flex justify-end gap-3 pt-4">
+                    <ModalActions>
                         <Button
                             variant="secondary"
                             onClick={() => setIsModalOpen(false)}
@@ -505,8 +498,8 @@ export function DomainsList({ projectName }) {
                         >
                             Add Domain
                         </Button>
-                    </div>
-                </div>
+                    </ModalActions>
+                </ModalSection>
             </Modal>
 
             <ConfirmDialog
@@ -539,6 +532,18 @@ export function EnvVarsList({ projectName, deploymentId }) {
     const [deleting, setDeleting] = useState(false);
     const [saving, setSaving] = useState(false);
     const { showToast } = useToast();
+    const getVarType = (isSecret, isProtected) => {
+        if (!isSecret) return 'plain';
+        return isProtected ? 'protected' : 'secret';
+    };
+
+    const setVarType = (type) => {
+        setFormData((prev) => ({
+            ...prev,
+            is_secret: type !== 'plain',
+            is_protected: type === 'protected',
+        }));
+    };
 
     const loadEnvVars = useCallback(async () => {
         try {
@@ -612,6 +617,7 @@ export function EnvVarsList({ projectName, deploymentId }) {
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-600 dark:text-red-400">Error loading environment variables: {error}</p>;
+    const selectedVarType = getVarType(formData.is_secret, formData.is_protected);
 
     return (
         <div>
@@ -622,30 +628,26 @@ export function EnvVarsList({ projectName, deploymentId }) {
                     </Button>
                 </div>
             )}
-            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
-                <table className="w-full">
-                    <thead className="bg-gray-100 dark:bg-gray-800">
+            <MonoTableFrame>
+                <MonoTable>
+                    <MonoTableHead>
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Key</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Value</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Type</th>
+                            <MonoTh className="px-6 py-3 text-left">Key</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Value</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Type</MonoTh>
                             {!deploymentId && (
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                                <MonoTh className="px-6 py-3 text-left">Actions</MonoTh>
                             )}
                         </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                    </MonoTableHead>
+                    <MonoTableBody>
                         {envVars.length === 0 ? (
-                            <tr>
-                                <td colSpan={deploymentId ? "3" : "4"} className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
-                                    No environment variables configured.
-                                </td>
-                            </tr>
+                            <MonoTableEmptyRow colSpan={deploymentId ? 3 : 4}>No environment variables configured.</MonoTableEmptyRow>
                         ) : (
                             envVars.map(env => (
-                            <tr key={env.key} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
-                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{env.key}</td>
-                                <td className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
+                            <MonoTableRow key={env.key} interactive className="transition-colors">
+                                <MonoTd className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{env.key}</MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
                                     <div className="flex items-center gap-2">
                                         <span>{env.value}</span>
                                         {env.is_secret && !env.is_protected && (
@@ -680,8 +682,8 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                             </button>
                                         )}
                                     </div>
-                                </td>
-                                <td className="px-6 py-4 text-sm">
+                                </MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm">
                                     {env.is_secret ? (
                                         <div className="flex gap-1">
                                             <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
@@ -697,9 +699,9 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                     ) : (
                                         <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">plain</span>
                                     )}
-                                </td>
+                                </MonoTd>
                                 {!deploymentId && (
-                                    <td className="px-6 py-4 text-sm">
+                                    <MonoTd className="px-6 py-4 text-sm">
                                         <div className="flex gap-2">
                                             <Button
                                                 variant="secondary"
@@ -716,14 +718,14 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                                 Delete
                                             </Button>
                                         </div>
-                                    </td>
+                                    </MonoTd>
                                 )}
-                            </tr>
+                            </MonoTableRow>
                         ))
                         )}
-                    </tbody>
-                </table>
-            </div>
+                    </MonoTableBody>
+                </MonoTable>
+            </MonoTableFrame>
             {deploymentId ? (
                 <p className="mt-4 text-sm text-gray-600 dark:text-gray-500">
                     <strong>Note:</strong> Environment variables are read-only snapshots taken at deployment time.
@@ -742,7 +744,7 @@ export function EnvVarsList({ projectName, deploymentId }) {
                 onClose={() => setIsModalOpen(false)}
                 title={editingEnvVar ? 'Edit Environment Variable' : 'Add Environment Variable'}
             >
-                <div className="space-y-4">
+                <ModalSection>
                     <FormField
                         label="Key"
                         id="env-key"
@@ -762,31 +764,23 @@ export function EnvVarsList({ projectName, deploymentId }) {
                         required
                         rows={3}
                     />
-                    <FormField
-                        label=""
-                        id="env-is-secret"
-                        type="checkbox"
-                        value={formData.is_secret}
-                        onChange={(e) => setFormData({ ...formData, is_secret: e.target.checked, is_protected: e.target.checked ? formData.is_protected : true })}
-                        placeholder="Mark as secret (value will be encrypted)"
+                    <SegmentedRadioGroup
+                        label="Type"
+                        name="env-var-type"
+                        value={selectedVarType}
+                        onChange={setVarType}
+                        ariaLabel="Variable type"
+                        options={[
+                            { value: 'plain', label: 'PLAIN' },
+                            { value: 'secret', label: 'SECRET' },
+                            { value: 'protected', label: 'PROTECTED' },
+                        ]}
                     />
-                    {formData.is_secret && (
-                        <>
-                            <FormField
-                                label=""
-                                id="env-is-protected"
-                                type="checkbox"
-                                value={formData.is_protected}
-                                onChange={(e) => setFormData({ ...formData, is_protected: e.target.checked })}
-                                placeholder="Protected (value cannot be retrieved again)"
-                            />
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 ml-6">
-                                Protected secrets are write-only and cannot be read back. Uncheck to allow retrieval for development/CI use.
-                            </p>
-                        </>
-                    )}
+                    <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+                        Protected secrets are write-only and cannot be read back. Secret values can be retrieved for development and CI.
+                    </p>
 
-                    <div className="flex justify-end gap-3 pt-4">
+                    <ModalActions>
                         <Button
                             variant="secondary"
                             onClick={() => setIsModalOpen(false)}
@@ -801,8 +795,8 @@ export function EnvVarsList({ projectName, deploymentId }) {
                         >
                             {editingEnvVar ? 'Update' : 'Add'}
                         </Button>
-                    </div>
-                </div>
+                    </ModalActions>
+                </ModalSection>
             </Modal>
 
             <ConfirmDialog
@@ -964,12 +958,9 @@ export function ExtensionsList({ projectName }) {
         <div className="space-y-6">
             {/* Enabled Extensions - Table with Add Icons */}
             <div>
-                <div className="flex items-center gap-3 mb-3">
-                    <h3 className="text-sm font-semibold text-gray-600 dark:text-gray-400 uppercase tracking-wider">
-                        Enabled Extensions
-                    </h3>
+                <div className="flex items-center justify-between gap-3 mb-3">
                     {availableExtensions.length > 0 && (
-                        <div className="flex items-center gap-2">
+                        <div className="flex items-center gap-2 ml-auto">
                             {/* Plus icon indicator (non-clickable) */}
                             <div className="w-8 h-8 flex items-center justify-center text-gray-600 dark:text-gray-500">
                                 <div className="w-5 h-5 svg-mask" style={{
@@ -989,14 +980,14 @@ export function ExtensionsList({ projectName }) {
                                             onClick={() => {
                                                 navigate(`/project/${projectName}/extensions/${extType.extension_type}/@new`);
                                             }}
-                                            className="w-8 h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-700 hover:border-indigo-500 rounded-sm transition-all"
+                                            className="mono-extension-create-button w-8 h-8 flex items-center justify-center bg-gray-100 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700 border border-gray-300 dark:border-gray-700 hover:border-indigo-500 transition-all"
                                             title={`Add ${extType.display_name}`}
                                         >
                                             {iconUrl ? (
                                                 <img
                                                     src={iconUrl}
                                                     alt={extType.display_name}
-                                                    className="w-6 h-6 rounded object-contain"
+                                                    className="w-6 h-6 object-contain"
                                                 />
                                             ) : (
                                                 <div className="w-6 h-6 flex items-center justify-center text-gray-600 dark:text-gray-400 text-xs font-bold">
@@ -1017,18 +1008,18 @@ export function ExtensionsList({ projectName }) {
                         </p>
                     </div>
                 ) : (
-                    <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
-                        <table className="w-full">
-                            <thead className="bg-gray-100 dark:bg-gray-800">
+                    <MonoTableFrame>
+                        <MonoTable>
+                            <MonoTableHead>
                                 <tr>
-                                    <th className="w-12 px-3 py-3"></th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Extension</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Type</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Updated</th>
+                                    <MonoTh className="w-12 px-3 py-3"></MonoTh>
+                                    <MonoTh className="px-6 py-3 text-left">Extension</MonoTh>
+                                    <MonoTh className="px-6 py-3 text-left">Type</MonoTh>
+                                    <MonoTh className="px-6 py-3 text-left">Status</MonoTh>
+                                    <MonoTh className="px-6 py-3 text-left">Updated</MonoTh>
                                 </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
+                            </MonoTableHead>
+                            <MonoTableBody>
                                 {enabledExtensions
                                     .sort((a, b) => a.extension.localeCompare(b.extension))
                                     .map(ext => {
@@ -1036,15 +1027,16 @@ export function ExtensionsList({ projectName }) {
                                         const iconUrl = getExtensionIcon(ext.extension_type);
 
                                         return (
-                                            <tr
+                                            <MonoTableRow
                                                 key={ext.extension}
-                                                className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors cursor-pointer"
+                                                interactive
+                                                className="transition-colors cursor-pointer"
                                                 onClick={() => {
                                                     // Navigate to the specific extension instance
                                                     navigate(`/project/${projectName}/extensions/${ext.extension_type}/${ext.extension}`);
                                                 }}
                                             >
-                                                <td className="px-3 py-4">
+                                                <MonoTd className="px-3 py-4">
                                                     {iconUrl ? (
                                                         <img
                                                             src={iconUrl}
@@ -1054,25 +1046,25 @@ export function ExtensionsList({ projectName }) {
                                                     ) : (
                                                         <div className="w-8 h-8"></div>
                                                     )}
-                                                </td>
-                                                <td className="px-6 py-4 text-sm">
+                                                </MonoTd>
+                                                <MonoTd className="px-6 py-4 text-sm">
                                                     <span className="font-mono text-gray-900 dark:text-gray-200">{ext.extension}</span>
-                                                </td>
-                                                <td className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                                                </MonoTd>
+                                                <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
                                                     {extType?.description || ext.extension_type}
-                                                </td>
-                                                <td className="px-6 py-4 text-sm">
+                                                </MonoTd>
+                                                <MonoTd className="px-6 py-4 text-sm">
                                                     {renderExtensionStatusBadge(ext)}
-                                                </td>
-                                                <td className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
+                                                </MonoTd>
+                                                <MonoTd className="px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                                                     {formatDate(ext.updated)}
-                                                </td>
-                                            </tr>
+                                                </MonoTd>
+                                            </MonoTableRow>
                                         );
                                     })}
-                            </tbody>
-                        </table>
-                    </div>
+                            </MonoTableBody>
+                        </MonoTable>
+                    </MonoTableFrame>
                 )}
             </div>
 
@@ -1083,34 +1075,33 @@ export function ExtensionsList({ projectName }) {
                 title={editMode ? `Extension: ${selectedExtension?.name}` : `Enable Extension: ${selectedExtension?.name}`}
                 maxWidth="max-w-4xl"
             >
-                <div className="space-y-4">
+                <ModalSection>
                     {selectedExtension && (
                         <>
                             {/* Tab Navigation */}
-                            <div className="border-b border-gray-300 dark:border-gray-700">
-                                <div className="flex gap-6">
+                            <ModalTabs className="px-2">
                                     {hasExtensionUI(selectedExtension.extension_type) && (
                                         <button
-                                            className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'ui' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                            className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'ui' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                             onClick={() => setModalTab('ui')}
                                         >
                                             Configure
                                         </button>
                                     )}
                                     <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'config' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                        className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'config' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                         onClick={() => setModalTab('config')}
                                     >
                                         {hasExtensionUI(selectedExtension.extension_type) ? 'JSON' : 'Configuration'}
                                     </button>
                                     <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'schema' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                        className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'schema' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                         onClick={() => setModalTab('schema')}
                                     >
                                         Schema
                                     </button>
                                     <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'docs' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                        className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'docs' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                         onClick={() => setModalTab('docs')}
                                     >
                                         Documentation
@@ -1118,7 +1109,7 @@ export function ExtensionsList({ projectName }) {
                                     {editMode && selectedExtensionData && (
                                         <>
                                             <button
-                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'status' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
+                                                className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'status' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
                                                 onClick={() => setModalTab('status')}
                                             >
                                                 Status
@@ -1131,8 +1122,7 @@ export function ExtensionsList({ projectName }) {
                                             </button>
                                         </>
                                     )}
-                                </div>
-                            </div>
+                            </ModalTabs>
 
                             {/* Tab Content */}
                             {modalTab === 'ui' && hasExtensionUI(selectedExtension.extension_type) && (
@@ -1276,7 +1266,7 @@ export function ExtensionsList({ projectName }) {
                             )}
                         </>
                     )}
-                </div>
+                </ModalSection>
             </Modal>
 
         </div>
@@ -1533,6 +1523,8 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                 // Create new extension using user-provided instance name
                 await api.createExtension(projectName, instanceName.trim(), extensionType.extension_type, spec);
                 showToast(`Extension ${instanceName.trim()} created successfully`, 'success');
+                navigate(`/project/${projectName}/extensions`);
+                return;
             }
             // Refresh data
             const enabledResponse = await api.getProjectExtensions(projectName);
@@ -1592,18 +1584,6 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
     if (error || !extensionType) {
         return (
             <div className="max-w-7xl mx-auto">
-                <div className="mb-6">
-                    <button
-                        onClick={() => navigate(`/project/${projectName}/extensions`)}
-                        className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-2"
-                    >
-                        <div className="w-5 h-5 svg-mask" style={{
-                            maskImage: 'url(/assets/arrow-left.svg)',
-                            WebkitMaskImage: 'url(/assets/arrow-left.svg)'
-                        }}></div>
-                        Back to Extensions
-                    </button>
-                </div>
                 <div className="bg-red-900/20 border border-red-700 rounded-lg p-6">
                     <h2 className="text-lg font-semibold text-red-300 mb-2">Error</h2>
                     <p className="text-red-200">{error || 'Extension type not found'}</p>
@@ -1616,26 +1596,6 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
 
     return (
         <div className="max-w-7xl mx-auto">
-            <div className="mb-6 flex items-center justify-between">
-                <button
-                    onClick={() => navigate(`/project/${projectName}/extensions`)}
-                    className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 flex items-center gap-2"
-                >
-                    <div className="w-5 h-5 svg-mask" style={{
-                        maskImage: 'url(/assets/arrow-left.svg)',
-                        WebkitMaskImage: 'url(/assets/arrow-left.svg)'
-                    }}></div>
-                    Back to Extensions
-                </button>
-                <div className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-400">
-                    <a href={`/project/${projectName}`} className="hover:text-indigo-600 dark:text-indigo-400 transition-colors">
-                        {projectName}
-                    </a>
-                    <span>/</span>
-                    <span>Extensions</span>
-                </div>
-            </div>
-
             <div className="bg-gray-100 dark:bg-gray-800 rounded-lg shadow-xl p-6">
                 <div className="flex items-center justify-between mb-6">
                     <div className="flex items-center space-x-4">

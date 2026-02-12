@@ -118,19 +118,19 @@ rise --version
 
 Full documentation is available in [`/docs`](./docs):
 
-- [Setup](docs/setup.md) - Quick start guide
+- [Setup](docs/user-guide/setup.md) - Quick start guide
 - [Local Development](docs/development.md) - Development workflow
-- [CLI Guide](docs/cli.md) - Command-line usage
-- [Authentication](docs/authentication.md) - OAuth2 & service accounts
-- [Deployments](docs/deployments.md) - Deployment lifecycle
-- [Building Images](docs/builds.md) - Docker, pack, railpack
+- [CLI Guide](docs/user-guide/cli.md) - Command-line usage
+- [Authentication](docs/user-guide/authentication.md) - OAuth2 & service accounts
+- [Deployments](docs/user-guide/deployments.md) - Deployment lifecycle
+- [Building Images](docs/user-guide/builds.md) - Docker, pack, railpack
 - [Configuration](docs/configuration.md) - Backend configuration
-- [Container Registries](docs/registries.md) - ECR, Docker, local
+- [Container Registries](docs/user-guide/registries.md) - Registry usage in app workflows
 - [Kubernetes](docs/kubernetes.md) - K8s deployment backend
 - [Production Deployment](docs/production.md) - Production setup
 - [Database](docs/database.md) - PostgreSQL & migrations
 - [Testing](docs/testing.md) - Testing strategies
-- [Troubleshooting](docs/troubleshooting.md) - Common issues
+- [Troubleshooting](docs/user-guide/troubleshooting.md) - Common issues
 
 ## Architecture
 

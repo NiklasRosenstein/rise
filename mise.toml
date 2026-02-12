@@ -58,7 +58,16 @@ run = "cd frontend && npm install && npm run dev"
 
 [tasks."frontend:build"]
 description = "Build the frontend bundle for embedding in the backend binary."
-run = "cd frontend && npm install && npm run build && rm -rf ../static/ui && mkdir -p ../static/ui && cp -r dist/* ../static/ui/"
+run = """
+cd frontend
+npm install
+npm run build
+rm -rf ../static/ui ../static/docs-content
+mkdir -p ../static/ui ../static/docs-content
+cp -r dist/* ../static/ui/
+cp -r ../docs/* ../static/docs-content/
+cp ../README.md ../static/docs-content/README.md
+"""
 
 [tasks."minikube:launch"]
 description = "Start minikube, preconfigured with access to the local Docker registry (rise-registry)."

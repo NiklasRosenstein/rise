@@ -156,7 +156,7 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`
 
 ## Troubleshooting
 
-See [Troubleshooting](troubleshooting.md) for common issues.
+See [Troubleshooting](user-guide/troubleshooting.md) for common issues.
 
 **Reset everything:**
 ```bash

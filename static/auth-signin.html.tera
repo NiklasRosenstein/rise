@@ -7,41 +7,104 @@
     <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        :root {
+            --bg: #111111;
+            --panel: #141414;
+            --line: #3a3a3a;
+            --text: #ececec;
+            --muted: #b8b8b8;
+            --warn: #ffe3a8;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "IBM Plex Mono", ui-monospace, monospace;
+            color: var(--text);
+            background: radial-gradient(circle at 0 0, #202020 0%, #101010 40%), var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .card {
+            width: 100%;
+            max-width: 32rem;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            padding: 1.2rem;
+        }
+        .logo {
+            width: 2rem;
+            height: 2rem;
+            margin: 0 auto 0.75rem;
+            background-color: currentColor;
+            mask-size: contain;
+            mask-repeat: no-repeat;
+            mask-position: center;
+            -webkit-mask-size: contain;
+            -webkit-mask-repeat: no-repeat;
+            -webkit-mask-position: center;
+            mask-image: url(/assets/logo.svg);
+            -webkit-mask-image: url(/assets/logo.svg);
+        }
+        .center { text-align: center; }
+        h1 { margin: 0 0 0.35rem; font-size: 1.5rem; }
+        h2 { margin: 0.2rem 0 0.9rem; font-size: 1.1rem; }
+        p { color: var(--muted); }
+        .pill {
+            display: inline-block;
+            border: 1px solid #7a6d4a;
+            color: var(--warn);
+            background: #1a1812;
+            font-size: 0.78rem;
+            padding: 0.2rem 0.5rem;
+            margin: 0.45rem 0;
+        }
+        .mono-code {
+            color: var(--text);
+            background: #1a1a1a;
+            border: 1px solid var(--line);
+            padding: 0.1rem 0.35rem;
+            word-break: break-all;
+        }
+        .btn {
+            display: block;
+            width: 100%;
+            text-align: center;
+            border: 1px solid var(--line);
+            background: #1a1a1a;
+            color: var(--text);
+            text-decoration: none;
+            padding: 0.65rem 0.8rem;
+            margin-top: 1rem;
+        }
+    </style>
 </head>
-<body class="bg-gray-950 text-gray-100">
-    <div class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-black">
-        <div class="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl">
-            <div class="text-center mb-6">
-                <div class="flex justify-center mb-4">
-                    <div class="w-16 h-16 svg-mask text-white" style="mask-image: url(/assets/logo.svg); -webkit-mask-image: url(/assets/logo.svg);"></div>
-                </div>
-                <h1 class="text-3xl font-bold text-white mb-2">Rise</h1>
-                <span class="inline-block bg-indigo-600 text-white text-sm font-semibold px-3 py-1 rounded-full mb-4">🔒 Private Project</span>
-                <h2 class="text-xl font-semibold text-gray-200 mb-2">Authentication Required</h2>
-            </div>
-
-            <div class="mb-6">
-                <p class="text-gray-300 mb-4">
-                    The project <strong class="font-mono text-white bg-gray-800 px-2 py-1 rounded">{{ project_name }}</strong> is private
-                    and requires authentication to access.
-                </p>
-                <p class="text-sm text-gray-400">
-                    You'll be redirected to sign in with your identity provider.
-                    After authentication, you'll be able to access this project.
-                </p>
-            </div>
-
-            <a href="{{ continue_url }}" class="block w-full bg-indigo-600 hover:bg-indigo-700 text-white font-semibold py-3 px-4 rounded-lg transition-colors text-center">
-                Sign In
-            </a>
-
-            {% if redirect_url %}
-            <p class="mt-4 text-center text-xs text-gray-500">
-                <small>After signing in, you'll be redirected to:<br><code class="bg-gray-800 px-1 rounded">{{ redirect_url }}</code></small>
-            </p>
-            {% endif %}
+<body>
+    <div class="card">
+        <div class="center">
+            <div class="logo" aria-hidden="true"></div>
+            <h1>Rise</h1>
+            <span class="pill">[private_project]</span>
+            <h2>Authentication Required</h2>
         </div>
+
+        <p>
+            The project <strong class="mono-code">{{ project_name }}</strong> is private and requires authentication to access.
+        </p>
+        <p>
+            You will be redirected to your identity provider. After signing in, you will return to this project.
+        </p>
+
+        <a href="{{ continue_url }}" class="btn">Sign In</a>
+
+        {% if redirect_url %}
+        <p class="center" style="font-size: 0.8rem; margin-top: 1rem;">
+            Redirect target:<br><code class="mono-code">{{ redirect_url }}</code>
+        </p>
+        {% endif %}
     </div>
 </body>
 </html>

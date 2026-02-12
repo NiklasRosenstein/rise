@@ -4,18 +4,31 @@ import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
 import { formatDate } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, Modal, FormField } from '../components/ui';
+import { Button, Modal, FormField, ConfirmDialog, ModalActions, ModalSection } from '../components/ui';
+import { ProjectTable } from '../components/project-table';
+import { MonoSortButton, MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
+import { EmptyState, ErrorState, LoadingState } from '../components/states';
+import { useRowKeyboardNavigation, useSortableData } from '../lib/table';
 
 
 // Teams List Component
-export function TeamsList({ currentUser }) {
+export function TeamsList({ currentUser, openCreate = false }) {
     const [teams, setTeams] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [formData, setFormData] = useState({ name: '', members: '', owners: '' });
     const [saving, setSaving] = useState(false);
+    const [actionStatus, setActionStatus] = useState('');
     const { showToast } = useToast();
+    const { sortedItems: sortedTeams, sortKey, sortDirection, requestSort } = useSortableData(teams, 'name');
+    const { activeIndex, setActiveIndex, onKeyDown } = useRowKeyboardNavigation(
+        (idx) => {
+            const team = sortedTeams[idx];
+            if (team) navigate(`/team/${team.name}`);
+        },
+        sortedTeams.length
+    );
 
     const loadTeams = useCallback(async () => {
         try {
@@ -36,6 +49,12 @@ export function TeamsList({ currentUser }) {
         setFormData({ name: '', members: '', owners: currentUser?.email || '' });
         setIsModalOpen(true);
     };
+
+    useEffect(() => {
+        if (!openCreate) return;
+        handleCreateClick();
+        window.history.replaceState({}, '', window.location.pathname);
+    }, [openCreate, currentUser?.email]);
 
     const handleCreate = async () => {
         if (!formData.name) {
@@ -60,6 +79,7 @@ export function TeamsList({ currentUser }) {
         }
 
         setSaving(true);
+        setActionStatus(`Creating team ${formData.name}...`);
         try {
             // Look up user IDs for owners and members
             const ownerLookup = await api.lookupUsers(ownerEmails);
@@ -82,74 +102,83 @@ export function TeamsList({ currentUser }) {
 
             await api.createTeam(formData.name, memberIds, ownerIds);
             showToast(`Team ${formData.name} created successfully`, 'success');
+            setActionStatus(`Created team ${formData.name}.`);
             setIsModalOpen(false);
             loadTeams();
         } catch (err) {
             showToast(`Failed to create team: ${err.message}`, 'error');
+            setActionStatus(`Failed to create team ${formData.name}.`);
         } finally {
             setSaving(false);
         }
     };
 
-    if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-600 dark:text-red-400">Error loading teams: {error}</p>;
+    if (loading) return <LoadingState label="Loading teams..." />;
+    if (error) return <ErrorState message={`Error loading teams: ${error}`} onRetry={loadTeams} />;
 
     return (
         <section>
-            <div className="flex justify-between items-center mb-6">
-                <h2 className="text-2xl font-bold">Teams</h2>
+            <div className="flex justify-end items-center mb-6">
                 <Button variant="primary" size="sm" onClick={handleCreateClick}>
                     Create Team
                 </Button>
             </div>
-            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800">
-                <table className="w-full">
-                    <thead className="bg-gray-100 dark:bg-gray-800">
+            {actionStatus && <p className="mono-inline-status mb-3">{actionStatus}</p>}
+            <MonoTableFrame>
+                <MonoTable className="mono-sticky-table mono-table--sticky" onKeyDown={onKeyDown}>
+                    <MonoTableHead>
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Name</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Members</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Owners</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created</th>
+                            <MonoTh stickyCol className="px-6 py-3 text-left">
+                                <MonoSortButton label="Name" active={sortKey === 'name'} direction={sortDirection} onClick={() => requestSort('name')} />
+                            </MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Members</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Owners</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">
+                                <MonoSortButton label="Created" active={sortKey === 'created'} direction={sortDirection} onClick={() => requestSort('created')} />
+                            </MonoTh>
                         </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                        {teams.length === 0 ? (
-                            <tr>
-                                <td colSpan="4" className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
-                                    No teams found.
-                                </td>
-                            </tr>
+                    </MonoTableHead>
+                    <MonoTableBody>
+                        {sortedTeams.length === 0 ? (
+                            <MonoTableEmptyRow colSpan={4}>
+                                <EmptyState message="No teams found." actionLabel="Create Team" onAction={handleCreateClick} />
+                            </MonoTableEmptyRow>
                         ) : (
-                            teams.map(t => (
-                                <tr
+                            sortedTeams.map((t, idx) => (
+                                <MonoTableRow
                                     key={t.id}
                                     onClick={() => navigate(`/team/${t.name}`)}
-                                    className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors cursor-pointer"
+                                    onFocus={() => setActiveIndex(idx)}
+                                    tabIndex={0}
+                                    aria-label={`Team ${t.name}`}
+                                    interactive
+                                    active={activeIndex === idx}
+                                    className={activeIndex === idx ? 'mono-row-active transition-colors' : 'transition-colors'}
                                 >
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
+                                    <MonoTd stickyCol className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
                                         <div className="flex items-center gap-2">
                                             {t.name}
                                             {t.idp_managed && (
                                                 <span className="text-xs bg-purple-600 text-white px-2 py-0.5 rounded">IDP</span>
                                             )}
                                         </div>
-                                    </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{t.members.length}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{t.owners.length}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(t.created)}</td>
-                                </tr>
+                                    </MonoTd>
+                                    <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{t.members.length}</MonoTd>
+                                    <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{t.owners.length}</MonoTd>
+                                    <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(t.created)}</MonoTd>
+                                </MonoTableRow>
                             ))
                         )}
-                    </tbody>
-                </table>
-            </div>
+                    </MonoTableBody>
+                </MonoTable>
+            </MonoTableFrame>
 
             <Modal
                 isOpen={isModalOpen}
                 onClose={() => setIsModalOpen(false)}
                 title="Create Team"
             >
-                <div className="space-y-4">
+                <ModalSection>
                     <FormField
                         label="Team Name"
                         id="team-name"
@@ -186,7 +215,7 @@ export function TeamsList({ currentUser }) {
                         Members can use the team for project ownership.
                     </p>
 
-                    <div className="flex justify-end gap-3 pt-4">
+                    <ModalActions>
                         <Button
                             variant="secondary"
                             onClick={() => setIsModalOpen(false)}
@@ -201,8 +230,8 @@ export function TeamsList({ currentUser }) {
                         >
                             Create
                         </Button>
-                    </div>
-                </div>
+                    </ModalActions>
+                </ModalSection>
             </Modal>
         </section>
     );
@@ -211,18 +240,31 @@ export function TeamsList({ currentUser }) {
 // Team Detail Component
 export function TeamDetail({ teamName, currentUser }) {
     const [team, setTeam] = useState(null);
+    const [teamProjects, setTeamProjects] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
     const [newOwnerEmail, setNewOwnerEmail] = useState('');
     const [newMemberEmail, setNewMemberEmail] = useState('');
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
+    const [detailActionStatus, setDetailActionStatus] = useState('');
     const { showToast } = useToast();
 
     const loadTeam = useCallback(async () => {
         try {
-            const data = await api.getTeam(teamName, { expand: 'members,owners' });
+            const [data, projects] = await Promise.all([
+                api.getTeam(teamName, { expand: 'members,owners' }),
+                api.getProjects(),
+            ]);
             setTeam(data);
+            const ownedProjects = (projects || []).filter((p) => {
+                if (p.owner_team_name && p.owner_team_name === data.name) return true;
+                if (p.owner_team_id && data.id && p.owner_team_id === data.id) return true;
+                if (p.owner?.team && data.id && p.owner.team === data.id) return true;
+                if (p.owner?.team_id && data.id && p.owner.team_id === data.id) return true;
+                return false;
+            });
+            setTeamProjects(ownedProjects);
         } catch (err) {
             setError(err.message);
         } finally {
@@ -250,6 +292,7 @@ export function TeamDetail({ teamName, currentUser }) {
         }
 
         try {
+            setDetailActionStatus(`Adding owner ${newOwnerEmail}...`);
             // Look up user ID by email
             const lookupResult = await api.lookupUsers([newOwnerEmail.trim()]);
             if (!lookupResult.users || lookupResult.users.length === 0) {
@@ -264,15 +307,18 @@ export function TeamDetail({ teamName, currentUser }) {
                 owners: [...currentOwnerIds, newOwnerId]
             });
             showToast(`Added ${newOwnerEmail} as owner`, 'success');
+            setDetailActionStatus(`Added owner ${newOwnerEmail}.`);
             setNewOwnerEmail('');
             await loadTeam();
         } catch (err) {
             showToast(`Failed to add owner: ${err.message}`, 'error');
+            setDetailActionStatus(`Failed to add owner ${newOwnerEmail}.`);
         }
     };
 
     const handleRemoveOwner = async (ownerId, email) => {
         try {
+            setDetailActionStatus(`Removing owner ${email}...`);
             const currentOwnerIds = team.owners?.map(o => o.id) || [];
             const updatedOwnerIds = currentOwnerIds.filter(id => id !== ownerId);
 
@@ -283,9 +329,11 @@ export function TeamDetail({ teamName, currentUser }) {
 
             await api.updateTeam(team.id, { owners: updatedOwnerIds });
             showToast(`Removed ${email} from owners`, 'success');
+            setDetailActionStatus(`Removed owner ${email}.`);
             await loadTeam();
         } catch (err) {
             showToast(`Failed to remove owner: ${err.message}`, 'error');
+            setDetailActionStatus(`Failed to remove owner ${email}.`);
         }
     };
 
@@ -296,6 +344,7 @@ export function TeamDetail({ teamName, currentUser }) {
         }
 
         try {
+            setDetailActionStatus(`Adding member ${newMemberEmail}...`);
             // Look up user ID by email
             const lookupResult = await api.lookupUsers([newMemberEmail.trim()]);
             if (!lookupResult.users || lookupResult.users.length === 0) {
@@ -310,230 +359,223 @@ export function TeamDetail({ teamName, currentUser }) {
                 members: [...currentMemberIds, newMemberId]
             });
             showToast(`Added ${newMemberEmail} as member`, 'success');
+            setDetailActionStatus(`Added member ${newMemberEmail}.`);
             setNewMemberEmail('');
             await loadTeam();
         } catch (err) {
             showToast(`Failed to add member: ${err.message}`, 'error');
+            setDetailActionStatus(`Failed to add member ${newMemberEmail}.`);
         }
     };
 
     const handleRemoveMember = async (memberId, email) => {
         try {
+            setDetailActionStatus(`Removing member ${email}...`);
             const currentMemberIds = team.members?.map(m => m.id) || [];
             const updatedMemberIds = currentMemberIds.filter(id => id !== memberId);
             await api.updateTeam(team.id, { members: updatedMemberIds });
             showToast(`Removed ${email} from members`, 'success');
+            setDetailActionStatus(`Removed member ${email}.`);
             await loadTeam();
         } catch (err) {
             showToast(`Failed to remove member: ${err.message}`, 'error');
+            setDetailActionStatus(`Failed to remove member ${email}.`);
         }
     };
 
     const handleDeleteTeam = async () => {
         setDeleting(true);
+        setDetailActionStatus(`Deleting team ${team.name}...`);
         try {
             await api.deleteTeam(team.id);
             showToast(`Team ${team.name} deleted successfully`, 'success');
+            setDetailActionStatus(`Deleted team ${team.name}.`);
             navigate('/teams');
         } catch (err) {
             showToast(`Failed to delete team: ${err.message}`, 'error');
+            setDetailActionStatus(`Failed to delete team ${team.name}.`);
             setDeleting(false);
         }
     };
 
-    if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-600 dark:text-red-400">Error loading team: {error}</p>;
-    if (!team) return <p className="text-gray-600 dark:text-gray-400">Team not found.</p>;
+    if (loading) return <LoadingState label="Loading team..." />;
+    if (error) return <ErrorState message={`Error loading team: ${error}`} onRetry={loadTeam} />;
+    if (!team) return <EmptyState message="Team not found." />;
 
     return (
         <section>
-            <a href="/teams" onClick={(e) => { e.preventDefault(); navigate('/teams'); }} className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
-                ← Back to Teams
-            </a>
-
-            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-6 mb-6">
-                <div className="flex justify-between items-start mb-4">
-                    <div>
-                        <div className="flex items-center gap-2">
-                            <h3 className="text-2xl font-bold">Team {team.name}</h3>
-                            {team.idp_managed && (
-                                <span className="text-xs bg-purple-600 text-white px-2 py-1 rounded">IDP</span>
-                            )}
-                        </div>
-                    </div>
-                    {canEdit && (
-                        <Button
-                            variant="danger"
-                            size="sm"
-                            onClick={() => setDeleteDialogOpen(true)}
-                        >
-                            Delete Team
-                        </Button>
+            <div className="flex items-center justify-between mb-4">
+                <div>
+                    {team.idp_managed && (
+                        <span className="text-xs bg-purple-600 text-white px-2 py-1 rounded">IDP</span>
                     )}
                 </div>
-                <dl className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                        <dt className="text-gray-600 dark:text-gray-400">Created</dt>
-                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{formatDate(team.created)}</dd>
-                    </div>
-                    <div>
-                        <dt className="text-gray-600 dark:text-gray-400">Updated</dt>
-                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{formatDate(team.updated)}</dd>
-                    </div>
-                </dl>
-                {team.idp_managed && !currentUser?.is_admin && (
-                    <div className="mt-4 p-3 bg-purple-900/20 border border-purple-700 rounded text-sm text-purple-300">
-                        This team is managed by your identity provider and can only be modified by administrators.
-                    </div>
+                {canEdit && (
+                    <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setDeleteDialogOpen(true)}
+                    >
+                        Delete Team
+                    </Button>
                 )}
             </div>
+
+            <div className="mono-status-strip mb-4">
+                <div><span>team</span><strong>{team.name}</strong></div>
+                <div><span>updated</span><strong>{formatDate(team.updated)}</strong></div>
+            </div>
+
+            {detailActionStatus && <p className="mono-inline-status mb-4">{detailActionStatus}</p>}
+
+            {team.idp_managed && !currentUser?.is_admin && (
+                <div className="mb-6 p-3 bg-purple-900/20 border border-purple-700 rounded text-sm text-purple-300">
+                    This team is managed by your identity provider and can only be modified by administrators.
+                </div>
+            )}
 
             <div className="mb-6">
                 <div className="flex justify-between items-center mb-4">
-                    <h4 className="text-lg font-bold">Owners</h4>
+                    <h4 className="text-lg font-bold">Projects ({teamProjects.length})</h4>
                 </div>
-                {team.owners && team.owners.length > 0 ? (
-                    <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800 mb-4">
-                        <table className="w-full">
-                            <thead className="bg-gray-100 dark:bg-gray-800">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Email</th>
-                                    {canEdit && <th className="px-6 py-3 text-right text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>}
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                                {team.owners.map(owner => (
-                                    <tr key={owner.id} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
-                                        <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{owner.email}</td>
-                                        {canEdit && (
-                                            <td className="px-6 py-4">
-                                                <div className="flex justify-end">
-                                                    <Button
-                                                        variant="danger"
-                                                        size="sm"
-                                                        onClick={() => handleRemoveOwner(owner.id, owner.email)}
-                                                    >
-                                                        Remove
-                                                    </Button>
-                                                </div>
-                                            </td>
-                                        )}
-                                    </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
+                {teamProjects.length > 0 ? (
+                    <ProjectTable
+                        projects={teamProjects.slice().sort((a, b) => a.name.localeCompare(b.name))}
+                        onRowClick={(project) => navigate(`/project/${project.name}`)}
+                    />
                 ) : (
-                    <p className="text-gray-600 dark:text-gray-400 mb-4">No owners</p>
-                )}
-                {canEdit && (
-                    <div className="flex justify-end">
-                        <div className="flex gap-2">
-                            <input
-                                type="email"
-                                placeholder="owner@example.com"
-                                value={newOwnerEmail}
-                                onChange={(e) => setNewOwnerEmail(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleAddOwner()}
-                                className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
-                            />
-                            <Button variant="primary" size="sm" onClick={handleAddOwner}>
-                                Add
-                            </Button>
-                        </div>
-                    </div>
+                    <p className="text-gray-600 dark:text-gray-400">No projects owned by this team.</p>
                 )}
             </div>
 
-            <div>
-                <div className="flex justify-between items-center mb-4">
-                    <h4 className="text-lg font-bold">Members</h4>
-                </div>
-                {team.members && team.members.length > 0 ? (
-                    <div className="bg-white dark:bg-gray-900 rounded-lg overflow-hidden border border-gray-200 dark:border-gray-800 mb-4">
-                        <table className="w-full">
-                            <thead className="bg-gray-100 dark:bg-gray-800">
-                                <tr>
-                                    <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Email</th>
-                                    {canEdit && <th className="px-6 py-3 text-right text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>}
-                                </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                                {team.members.map(member => (
-                                    <tr key={member.id} className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors">
-                                        <td className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{member.email}</td>
-                                        {canEdit && (
-                                            <td className="px-6 py-4">
-                                                <div className="flex justify-end">
-                                                    <Button
-                                                        variant="danger"
-                                                        size="sm"
-                                                        onClick={() => handleRemoveMember(member.id, member.email)}
-                                                    >
-                                                        Remove
-                                                    </Button>
-                                                </div>
-                                            </td>
-                                        )}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                <div>
+                    <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-lg font-bold">Owners ({team.owners?.length || 0})</h4>
+                    </div>
+                    {team.owners && team.owners.length > 0 ? (
+                        <MonoTableFrame className="mb-4">
+                            <MonoTable>
+                                <MonoTableHead>
+                                    <tr>
+                                        <MonoTh className="px-6 py-3 text-left">Email</MonoTh>
+                                        {canEdit && <MonoTh className="px-6 py-3 text-right">Actions</MonoTh>}
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
-                    </div>
-                ) : (
-                    <p className="text-gray-600 dark:text-gray-400 mb-4">No members</p>
-                )}
-                {canEdit && (
-                    <div className="flex justify-end">
-                        <div className="flex gap-2">
-                            <input
-                                type="email"
-                                placeholder="member@example.com"
-                                value={newMemberEmail}
-                                onChange={(e) => setNewMemberEmail(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleAddMember()}
-                                className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
-                            />
-                            <Button variant="primary" size="sm" onClick={handleAddMember}>
-                                Add
-                            </Button>
+                                </MonoTableHead>
+                                <MonoTableBody>
+                                    {team.owners.map(owner => (
+                                        <MonoTableRow key={owner.id} interactive className="transition-colors">
+                                            <MonoTd className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{owner.email}</MonoTd>
+                                            {canEdit && (
+                                                <MonoTd className="px-6 py-4">
+                                                    <div className="flex justify-end">
+                                                        <Button
+                                                            variant="danger"
+                                                            size="sm"
+                                                            onClick={() => handleRemoveOwner(owner.id, owner.email)}
+                                                        >
+                                                            Remove
+                                                        </Button>
+                                                    </div>
+                                                </MonoTd>
+                                            )}
+                                        </MonoTableRow>
+                                    ))}
+                                </MonoTableBody>
+                            </MonoTable>
+                        </MonoTableFrame>
+                    ) : (
+                        <p className="text-gray-600 dark:text-gray-400 mb-4">No owners</p>
+                    )}
+                    {canEdit && (
+                        <div className="flex justify-end">
+                            <div className="flex gap-2">
+                                <input
+                                    type="email"
+                                    placeholder="owner@example.com"
+                                    value={newOwnerEmail}
+                                    onChange={(e) => setNewOwnerEmail(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && handleAddOwner()}
+                                    className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                                />
+                                <Button variant="primary" size="sm" onClick={handleAddOwner}>
+                                    Add
+                                </Button>
+                            </div>
                         </div>
+                    )}
+                </div>
+
+                <div>
+                    <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-lg font-bold">Members ({team.members?.length || 0})</h4>
                     </div>
-                )}
+                    {team.members && team.members.length > 0 ? (
+                        <MonoTableFrame className="mb-4">
+                            <MonoTable>
+                                <MonoTableHead>
+                                    <tr>
+                                        <MonoTh className="px-6 py-3 text-left">Email</MonoTh>
+                                        {canEdit && <MonoTh className="px-6 py-3 text-right">Actions</MonoTh>}
+                                    </tr>
+                                </MonoTableHead>
+                                <MonoTableBody>
+                                    {team.members.map(member => (
+                                        <MonoTableRow key={member.id} interactive className="transition-colors">
+                                            <MonoTd className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{member.email}</MonoTd>
+                                            {canEdit && (
+                                                <MonoTd className="px-6 py-4">
+                                                    <div className="flex justify-end">
+                                                        <Button
+                                                            variant="danger"
+                                                            size="sm"
+                                                            onClick={() => handleRemoveMember(member.id, member.email)}
+                                                        >
+                                                            Remove
+                                                        </Button>
+                                                    </div>
+                                                </MonoTd>
+                                            )}
+                                        </MonoTableRow>
+                                    ))}
+                                </MonoTableBody>
+                            </MonoTable>
+                        </MonoTableFrame>
+                    ) : (
+                        <p className="text-gray-600 dark:text-gray-400 mb-4">No members</p>
+                    )}
+                    {canEdit && (
+                        <div className="flex justify-end">
+                            <div className="flex gap-2">
+                                <input
+                                    type="email"
+                                    placeholder="member@example.com"
+                                    value={newMemberEmail}
+                                    onChange={(e) => setNewMemberEmail(e.target.value)}
+                                    onKeyPress={(e) => e.key === 'Enter' && handleAddMember()}
+                                    className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                                />
+                                <Button variant="primary" size="sm" onClick={handleAddMember}>
+                                    Add
+                                </Button>
+                            </div>
+                        </div>
+                    )}
+                </div>
             </div>
 
-            {deleteDialogOpen && (
-                <Modal
-                    isOpen={deleteDialogOpen}
-                    onClose={() => setDeleteDialogOpen(false)}
-                    title="Delete Team"
-                >
-                    <div className="mb-6">
-                        <p className="text-gray-700 dark:text-gray-300 mb-4">
-                            Are you sure you want to delete team <strong className="text-white">{team.name}</strong>?
-                        </p>
-                        <p className="text-sm text-gray-600 dark:text-gray-400">
-                            This action cannot be undone.
-                        </p>
-                    </div>
-                    <div className="flex justify-end gap-3">
-                        <Button
-                            variant="secondary"
-                            onClick={() => setDeleteDialogOpen(false)}
-                            disabled={deleting}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            variant="danger"
-                            onClick={handleDeleteTeam}
-                            disabled={deleting}
-                        >
-                            {deleting ? 'Deleting...' : 'Delete Team'}
-                        </Button>
-                    </div>
-                </Modal>
-            )}
+            <ConfirmDialog
+                isOpen={deleteDialogOpen}
+                onClose={() => setDeleteDialogOpen(false)}
+                onConfirm={handleDeleteTeam}
+                title="Delete Team"
+                message={`Delete team "${team.name}"? Impact: projects owned by this team may lose expected ownership workflows.`}
+                confirmText="Delete Team"
+                variant="danger"
+                requireConfirmation={true}
+                confirmationText={team.name}
+                loading={deleting}
+            />
         </section>
     );
 }
