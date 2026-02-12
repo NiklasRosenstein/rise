@@ -97,12 +97,7 @@ The OAuth examples require additional setup to create the OAuth extension:
 
 For local development with Dex:
 
-- **Email**: `admin@example.com`
-- **Password**: `password`
-
-Or:
-
-- **Email**: `test@example.com`
+- **Email**: `admin@example.com` / `dev@example.com` / `user@example.com`
 - **Password**: `password`
 
 ## Documentation

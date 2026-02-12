@@ -89,7 +89,7 @@ Test full workflows using the CLI:
 # tests/e2e/deploy_workflow.sh
 
 # Login
-rise login --email test@example.com --password password
+rise login --email dev@example.com --password password
 
 # Create project
 rise project create e2e-test --visibility public
@@ -111,15 +111,16 @@ rise project delete e2e-test
 ## Test Data
 
 ### Development Accounts
-
-Use these pre-configured accounts for testing:
-
-**Admin user**:
+**Admin user:**
 - Email: `admin@example.com`
 - Password: `password`
 
-**Test user**:
-- Email: `test@example.com`
+**Developer user:**
+- Email: `dev@example.com`
+- Password: `password`
+
+**End user:**
+- Email: `user@example.com`
 - Password: `password`
 
 ### Creating Test Projects

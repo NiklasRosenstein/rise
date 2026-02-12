@@ -19,7 +19,7 @@ curl http://localhost:8080
 
 ```bash
 # Login to Rise
-rise login --email test@example.com --password test1234
+rise login --email dev@example.com --password test1234
 
 # Create a project
 rise project create hello-world --visibility public

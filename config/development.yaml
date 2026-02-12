@@ -24,6 +24,7 @@ auth:
     policy: restrictive
     allowed_user_emails:
       - "admin@example.com"
+      - "dev@example.com"
 
 registry:
   type: "oci-client-auth"

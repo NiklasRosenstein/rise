@@ -27,9 +27,14 @@ staticPasswords:
   username: admin
   userID: 08a8684b-db88-4b73-90a9-3cd1661f5466
 
-- email: test@example.com
+- email: dev@example.com
   hash: $2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W  # password
-  username: test
+  username: dev
+  userID: f4d1c5e1-3c6e-4d2a-9f4b-2e5d7c8e9f01
+
+- email: user@example.com
+  hash: $2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W  # password
+  username: user
   userID: f4d1c5e1-3c6e-4d2a-9f4b-2e5d7c8e9f01
 
 oauth2:
