@@ -610,7 +610,7 @@ mod tests {
     #[sqlx::test]
     async fn test_project_status_with_active_and_failed_deployments(pool: PgPool) {
         // Create a test user
-        let user = crate::db::users::create(&pool, "test@example.com", true)
+        let user = crate::db::users::create(&pool, "test@example.com")
             .await
             .expect("Failed to create test user");
 
@@ -706,7 +706,7 @@ mod tests {
     #[sqlx::test]
     async fn test_project_status_with_only_failed_deployment(pool: PgPool) {
         // Create a test user
-        let user = crate::db::users::create(&pool, "test@example.com", true)
+        let user = crate::db::users::create(&pool, "test@example.com")
             .await
             .expect("Failed to create test user");
 

@@ -223,20 +223,15 @@ async fn sync_groups_after_login(
         })?;
 
     // Get or create user
-    let user = users::find_or_create(
-        &state.db_pool,
-        &claims.email,
-        &state.auth_settings.platform_access,
-        &state.admin_users,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to find/create user for group sync: {:#}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Database error".to_string(),
-        )
-    })?;
+    let user = users::find_or_create(&state.db_pool, &claims.email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find/create user for group sync: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?;
 
     // Sync groups if present in claims
     if let Some(ref groups) = claims.groups {
@@ -247,14 +242,9 @@ async fn sync_groups_after_login(
                 user.email
             );
 
-            if let Err(e) = crate::server::auth::group_sync::sync_user_groups(
-                &state.db_pool,
-                user.id,
-                groups,
-                &state.auth_settings.platform_access,
-                &state.admin_users,
-            )
-            .await
+            if let Err(e) =
+                crate::server::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups)
+                    .await
             {
                 // Log error but don't fail login
                 tracing::error!(
@@ -494,20 +484,15 @@ pub async fn code_exchange(
         .ok_or_else(|| (StatusCode::BAD_REQUEST, "Email claim missing".to_string()))?;
 
     // Find or create user
-    let user = users::find_or_create(
-        &state.db_pool,
-        email,
-        &state.auth_settings.platform_access,
-        &state.admin_users,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to find/create user: {:#}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to process user".to_string(),
-        )
-    })?;
+    let user = users::find_or_create(&state.db_pool, email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find/create user: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to process user".to_string(),
+            )
+        })?;
 
     // Issue Rise JWT for user authentication (consumed by the CLI)
     let rise_jwt = state
@@ -594,14 +579,7 @@ pub async fn device_exchange(
             };
 
             // Find or create user
-            let user = match users::find_or_create(
-                &state.db_pool,
-                email,
-                &state.auth_settings.platform_access,
-                &state.admin_users,
-            )
-            .await
-            {
+            let user = match users::find_or_create(&state.db_pool, email).await {
                 Ok(user) => user,
                 Err(e) => {
                     tracing::error!("Failed to find/create user: {:#}", e);
@@ -1271,20 +1249,15 @@ pub async fn oauth_callback(
         })?;
 
         // Find or create user to get user_id for team lookup
-        let user = users::find_or_create(
-            &state.db_pool,
-            user_email,
-            &state.auth_settings.platform_access,
-            &state.admin_users,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to find/create user: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            )
-        })?;
+        let user = users::find_or_create(&state.db_pool, user_email)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to find/create user: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
         // Issue Rise JWT with user's team memberships
         // Extract project URL from redirect_url for the aud claim
@@ -1378,20 +1351,15 @@ pub async fn oauth_callback(
         })?;
 
     // Find or create user
-    let user = users::find_or_create(
-        &state.db_pool,
-        email,
-        &state.auth_settings.platform_access,
-        &state.admin_users,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Failed to find or create user: {:#}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Failed to process user".to_string(),
-        )
-    })?;
+    let user = users::find_or_create(&state.db_pool, email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to find or create user: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to process user".to_string(),
+            )
+        })?;
 
     // Sync groups after login
     sync_groups_after_login(&state, &token_info.id_token).await?;
@@ -1661,20 +1629,15 @@ pub async fn ingress_auth(
     let email = ingress_claims.email;
 
     // Find or create user in database
-    let user = users::find_or_create(
-        &state.db_pool,
-        &email,
-        &state.auth_settings.platform_access,
-        &state.admin_users,
-    )
-    .await
-    .map_err(|e| {
-        tracing::error!("Database error finding/creating user: {:#}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Database error".to_string(),
-        )
-    })?;
+    let user = users::find_or_create(&state.db_pool, &email)
+        .await
+        .map_err(|e| {
+            tracing::error!("Database error finding/creating user: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?;
 
     tracing::debug!(
         project = %params.project,

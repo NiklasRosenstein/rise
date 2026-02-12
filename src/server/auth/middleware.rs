@@ -260,20 +260,15 @@ pub async fn auth_middleware(
 
         tracing::debug!("Rise JWT validated for user: {}", email);
 
-        users::find_or_create(
-            &state.db_pool,
-            email,
-            &state.auth_settings.platform_access,
-            &state.admin_users,
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to find/create user: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            )
-        })?
+        users::find_or_create(&state.db_pool, email)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to find/create user: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?
     } else {
         // External issuer - service account authentication
         tracing::debug!("Authenticating as service account from issuer: {}", issuer);
@@ -311,13 +306,7 @@ pub async fn optional_auth_middleware(
                             // Try to validate Rise JWT
                             if let Ok(rise_claims) = state.jwt_signer.verify_jwt_skip_aud(&token) {
                                 let email = &rise_claims.email;
-                                if let Ok(user) = users::find_or_create(
-                                    &state.db_pool,
-                                    email,
-                                    &state.auth_settings.platform_access,
-                                    &state.admin_users,
-                                )
-                                .await
+                                if let Ok(user) = users::find_or_create(&state.db_pool, email).await
                                 {
                                     req.extensions_mut().insert(user);
                                 }
@@ -339,10 +328,12 @@ pub async fn optional_auth_middleware(
 /// Applied AFTER auth_middleware (which validates JWT and injects User).
 /// Only applies to protected API routes - does NOT apply to ingress auth endpoint.
 pub async fn platform_access_middleware(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     req: Request,
     next: Next,
 ) -> Result<Response, (StatusCode, String)> {
+    use crate::server::auth::platform_access::{ConfigBasedAccessChecker, PlatformAccessChecker};
+
     // Extract user from extensions (injected by auth_middleware)
     let user = req.extensions().get::<User>().ok_or_else(|| {
         tracing::error!("platform_access_middleware called without user in extensions");
@@ -352,8 +343,15 @@ pub async fn platform_access_middleware(
         )
     })?;
 
-    // Check platform access
-    if !user.is_platform_user {
+    // Check platform access dynamically
+    let checker = ConfigBasedAccessChecker {
+        config: &state.auth_settings.platform_access,
+        admin_users: &state.admin_users,
+    };
+
+    // Note: IdP groups not available here - they're only synced during login
+    // For most accurate group-based checking, groups are evaluated during login via group_sync
+    if !checker.has_platform_access(user, None) {
         tracing::warn!(
             user_id = %user.id,
             user_email = %user.email,

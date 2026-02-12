@@ -116,7 +116,7 @@ pub async fn get_members(pool: &PgPool, team_id: Uuid) -> Result<Vec<User>> {
     let members = sqlx::query_as!(
         User,
         r#"
-        SELECT u.id, u.email, u.is_platform_user, u.created_at, u.updated_at
+        SELECT u.id, u.email, u.created_at, u.updated_at
         FROM users u
         INNER JOIN team_members tm ON u.id = tm.user_id
         WHERE tm.team_id = $1 AND tm.role = 'member'
@@ -136,7 +136,7 @@ pub async fn get_owners(pool: &PgPool, team_id: Uuid) -> Result<Vec<User>> {
     let owners = sqlx::query_as!(
         User,
         r#"
-        SELECT u.id, u.email, u.is_platform_user, u.created_at, u.updated_at
+        SELECT u.id, u.email, u.created_at, u.updated_at
         FROM users u
         INNER JOIN team_members tm ON u.id = tm.user_id
         WHERE tm.team_id = $1 AND tm.role = 'owner'
