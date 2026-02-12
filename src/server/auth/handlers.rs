@@ -1553,93 +1553,48 @@ fn render_ui_login_success_page(
 
 /// Helper function to render platform access denied page
 fn render_platform_access_denied_page(user_email: &str) -> Result<Response, (StatusCode, String)> {
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Access Denied - Rise</title>
-    <style>
-        * {{
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }}
-        body {{
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            padding: 20px;
-        }}
-        .container {{
-            background: white;
-            border-radius: 12px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
-            max-width: 500px;
-            width: 100%;
-            padding: 40px;
-            text-align: center;
-        }}
-        .icon {{
-            width: 80px;
-            height: 80px;
-            margin: 0 auto 20px;
-            background: #fee;
-            border-radius: 50%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 40px;
-        }}
-        h1 {{
-            color: #d32f2f;
-            font-size: 24px;
-            margin-bottom: 16px;
-            font-weight: 600;
-        }}
-        p {{
-            color: #666;
-            line-height: 1.6;
-            margin-bottom: 12px;
-        }}
-        .user-email {{
-            background: #f5f5f5;
-            padding: 12px;
-            border-radius: 6px;
-            font-family: monospace;
-            color: #333;
-            margin: 20px 0;
-            word-break: break-all;
-        }}
-        .help-text {{
-            font-size: 14px;
-            color: #999;
-            margin-top: 24px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="icon">🚫</div>
-        <h1>Platform Access Denied</h1>
-        <p>Your account is not authorized to access Rise platform features.</p>
-        <p>You can authenticate to access deployed applications, but you cannot use the Rise Dashboard, CLI, or API.</p>
-        <div class="user-email">{}</div>
-        <p class="help-text">If you believe this is an error, please contact your administrator.</p>
-    </div>
-</body>
-</html>"#,
-        user_email
-            .replace('&', "&amp;")
-            .replace('<', "&lt;")
-            .replace('>', "&gt;")
-            .replace('"', "&quot;")
-            .replace('\'', "&#x27;")
-    );
+    // Load template
+    let template_content =
+        StaticAssets::get("platform-access-denied.html.tera").ok_or_else(|| {
+            tracing::error!("platform-access-denied.html.tera template not found");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template not found".to_string(),
+            )
+        })?;
+
+    let template_str = std::str::from_utf8(&template_content.data).map_err(|e| {
+        tracing::error!("Failed to decode template: {:#}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Template encoding error".to_string(),
+        )
+    })?;
+
+    // Create Tera instance and add template
+    let mut tera = Tera::default();
+    tera.add_raw_template("platform-access-denied.html.tera", template_str)
+        .map_err(|e| {
+            tracing::error!("Failed to parse template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template error".to_string(),
+            )
+        })?;
+
+    // Render template with user email
+    let mut context = tera::Context::new();
+    context.insert("user_email", user_email);
+
+    let html = tera
+        .render("platform-access-denied.html.tera", &context)
+        .map_err(|e| {
+            tracing::error!("Failed to render template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template rendering error".to_string(),
+            )
+        })?;
 
     let response = (StatusCode::FORBIDDEN, Html(html)).into_response();
     Ok(response)
