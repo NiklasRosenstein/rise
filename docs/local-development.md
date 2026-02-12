@@ -63,11 +63,10 @@ EOF
 ### 5. Start Minikube
 
 ```bash
-minikube start \
-  --driver=docker \
-  --insecure-registry="rise-registry:5000" \
-  --host-dns-resolver=false
+mise run minikube:launch
 ```
+
+This will start Minikube with registry access configured and port-forward the ingress controller.
 
 ### 6. Run Backend
 
@@ -132,9 +131,7 @@ curl http://rise-registry:5000/v2/
 # Should return: {}
 ```
 
-If it fails, check:
-1. Minikube started with `--insecure-registry="rise-registry:5000"`
-2. Host aliases configured in Minikube (should happen automatically)
+If it fails, ensure you used `mise run minikube:launch` which configures registry access automatically.
 
 ## Architecture
 
