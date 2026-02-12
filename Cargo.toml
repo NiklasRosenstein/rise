@@ -10,6 +10,17 @@ description = "A simple and powerful CLI for deploying containerized application
 # Always include the default cli feature to avoid testing empty feature set
 always_include_features = ["cli"]
 
+[package.metadata.dist]
+cargo-dist-version = "0.31.0"
+ci = []
+installers = []
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+pr-run-mode = "skip"
+
 [[bin]]
 name = "rise"
 path = "src/main.rs"

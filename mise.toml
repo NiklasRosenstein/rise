@@ -66,6 +66,13 @@ run = "cd frontend && npm install && npm run dev"
 description = "Build the frontend bundle for embedding in the backend binary."
 run = "cd frontend && npm install && npm run build && rm -rf ../static/ui && mkdir -p ../static/ui && cp -r dist/* ../static/ui/"
 
+[tasks."dist:build"]
+description = "Build local release artifacts using cargo-dist."
+run = """
+cargo install cargo-dist --locked
+cargo dist build --target x86_64-unknown-linux-gnu --target x86_64-apple-darwin --target aarch64-apple-darwin
+"""
+
 [tasks."minikube:launch"]
 description = "Start minikube, preconfigured with access to the local Docker registry (rise-registry)."
 run = """
