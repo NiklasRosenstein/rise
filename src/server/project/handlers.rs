@@ -38,40 +38,22 @@ pub async fn list_access_classes(
 async fn resolve_user_identifier(
     pool: &sqlx::PgPool,
     identifier: &str,
-) -> Result<uuid::Uuid, (StatusCode, String)> {
+) -> Result<uuid::Uuid, ServerError> {
+    use crate::server::error::ServerErrorExt;
+
     if let Ok(uuid) = uuid::Uuid::parse_str(identifier) {
         // Valid UUID - verify user exists
         db_users::find_by_id(pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to lookup user: {}", e),
-                )
-            })?
-            .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    format!("User not found: {}", identifier),
-                )
-            })
+            .internal_err("Failed to lookup user")?
+            .ok_or_else(|| ServerError::not_found(format!("User not found: {}", identifier)))
             .map(|u| u.id)
     } else {
         // Treat as email - look up user
         db_users::find_by_email(pool, identifier)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to lookup user: {}", e),
-                )
-            })?
-            .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    format!("User not found: {}", identifier),
-                )
-            })
+            .internal_err("Failed to lookup user")?
+            .ok_or_else(|| ServerError::not_found(format!("User not found: {}", identifier)))
             .map(|u| u.id)
     }
 }
@@ -80,40 +62,22 @@ async fn resolve_user_identifier(
 async fn resolve_team_identifier(
     pool: &sqlx::PgPool,
     identifier: &str,
-) -> Result<uuid::Uuid, (StatusCode, String)> {
+) -> Result<uuid::Uuid, ServerError> {
+    use crate::server::error::ServerErrorExt;
+
     if let Ok(uuid) = uuid::Uuid::parse_str(identifier) {
         // Valid UUID - verify team exists
         db_teams::find_by_id(pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to lookup team: {}", e),
-                )
-            })?
-            .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    format!("Team not found: {}", identifier),
-                )
-            })
+            .internal_err("Failed to lookup team")?
+            .ok_or_else(|| ServerError::not_found(format!("Team not found: {}", identifier)))
             .map(|t| t.id)
     } else {
         // Treat as team name - look up team
         db_teams::find_by_name(pool, identifier)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to lookup team: {}", e),
-                )
-            })?
-            .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    format!("Team not found: {}", identifier),
-                )
-            })
+            .internal_err("Failed to lookup team")?
+            .ok_or_else(|| ServerError::not_found(format!("Team not found: {}", identifier)))
             .map(|t| t.id)
     }
 }
@@ -197,24 +161,20 @@ pub async fn create_project(
     })?;
 
     // Transaction for app user/team additions
-    let mut tx = state.db_pool.begin().await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to start transaction: {}", e),
-        )
-    })?;
+    use crate::server::error::ServerErrorExt;
+
+    let mut tx = state
+        .db_pool
+        .begin()
+        .await
+        .internal_err("Failed to start transaction")?;
 
     // Add app users if provided
     for user_identifier in &payload.app_users {
         let user_id = resolve_user_identifier(&state.db_pool, user_identifier).await?;
         crate::db::project_app_users::add_user(&mut *tx, project.id, user_id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to add app user: {}", e),
-                )
-            })?;
+            .internal_err("Failed to add app user")?;
     }
 
     // Add app teams if provided
@@ -222,20 +182,12 @@ pub async fn create_project(
         let team_id = resolve_team_identifier(&state.db_pool, team_identifier).await?;
         crate::db::project_app_users::add_team(&mut *tx, project.id, team_id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to add app team: {}", e),
-                )
-            })?;
+            .internal_err("Failed to add app team")?;
     }
 
-    tx.commit().await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to commit transaction: {}", e),
-        )
-    })?;
+    tx.commit()
+        .await
+        .internal_err("Failed to commit transaction")?;
 
     Ok(Json(CreateProjectResponse {
         project: convert_project(project),
@@ -769,11 +721,11 @@ pub async fn update_project(
         for user_identifier in &app_users {
             let user_id = resolve_user_identifier(&state.db_pool, user_identifier)
                 .await
-                .map_err(|(status, msg)| {
+                .map_err(|e| {
                     (
-                        status,
+                        e.status,
                         Json(ProjectErrorResponse {
-                            error: msg,
+                            error: e.message,
                             suggestions: None,
                         }),
                     )
@@ -846,11 +798,11 @@ pub async fn update_project(
         for team_identifier in &app_teams {
             let team_id = resolve_team_identifier(&state.db_pool, team_identifier)
                 .await
-                .map_err(|(status, msg)| {
+                .map_err(|e| {
                     (
-                        status,
+                        e.status,
                         Json(ProjectErrorResponse {
-                            error: msg,
+                            error: e.message,
                             suggestions: None,
                         }),
                     )

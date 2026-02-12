@@ -17,7 +17,6 @@ pub mod state;
 pub mod team;
 pub mod workload_identity;
 
-
 use anyhow::Result;
 use axum::{extract::Request, middleware as axum_middleware, response::Response, Router};
 use state::{AppState, ControllerState};
