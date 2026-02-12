@@ -10,11 +10,11 @@ rust = { version = "1.91.1", profile = "default" }
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
-run = "cargo sqlx prepare -- --features backend --all-targets"
+run = "cargo sqlx prepare -- --features cli,backend --all-targets"
 
 [tasks."sqlx:check"]
 description = "Check that all SQLX queries are valid."
-run = "cargo sqlx prepare --check -- --features backend --all-targets"
+run = "cargo sqlx prepare --check -- --features cli,backend --all-targets"
 
 [tasks.lint]
 description = "Run all linting checks (clippy, formatting, sqlx, helm)."
@@ -24,12 +24,6 @@ SQLX_OFFLINE=true cargo all-features clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 mise sqlx:check
 helm lint helm/rise
-"""
-
-[tasks.fmt]
-run = """
-SQLX_OFFLINE=true cargo all-features clippy --all-targets --allow-dirty --fix -- -D warnings
-cargo fmt --all
 """
 
 [tasks."docs:serve"]
@@ -55,7 +49,7 @@ run = "docker compose up -d"
 [tasks."backend:run"]
 description = "Run the backend server."
 depends = ["backend:deps", "db:migrate"]
-run = "cargo run --features backend -- backend server"
+run = "cargo run --features server,k8s,aws,snowflake -- backend server"
 alias = "br"
 
 [tasks."frontend:dev"]
@@ -64,7 +58,16 @@ run = "cd frontend && npm install && npm run dev"
 
 [tasks."frontend:build"]
 description = "Build the frontend bundle for embedding in the backend binary."
-run = "cd frontend && npm install && npm run build && rm -rf ../static/ui && mkdir -p ../static/ui && cp -r dist/* ../static/ui/"
+run = """
+cd frontend
+npm install
+npm run build
+rm -rf ../static/ui ../static/docs-content
+mkdir -p ../static/ui ../static/docs-content
+cp -r dist/* ../static/ui/
+cp -r ../docs/* ../static/docs-content/
+cp ../README.md ../static/docs-content/README.md
+"""
 
 [tasks."dist:build"]
 description = "Build local release artifacts using cargo-dist."

@@ -7,6 +7,7 @@ use axum::{
     Router,
 };
 use serde_json::json;
+use std::path::{Component, Path, PathBuf};
 use tera::Tera;
 
 use crate::server::state::AppState;
@@ -53,6 +54,30 @@ async fn fallback_handler(State(state): State<AppState>, request: Request) -> Re
             .unwrap();
     }
 
+    // Virtual docs route: /static/docs/*
+    // - production: serves embedded static/docs-content/*
+    // - development: falls back to filesystem docs/*
+    if let Some(rel) = path.strip_prefix("static/docs/") {
+        if let Some(content) = StaticAssets::get(format!("docs-content/{}", rel).as_str()) {
+            let mime = mime_guess::from_path(rel).first_or_octet_stream();
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, mime.as_ref())
+                .header(header::CACHE_CONTROL, "public, max-age=3600")
+                .body(Body::from(content.data))
+                .unwrap();
+        }
+        if let Some((bytes, mime)) = load_docs_content_from_filesystem(rel).await {
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, mime)
+                .header(header::CACHE_CONTROL, "no-cache")
+                .body(Body::from(bytes))
+                .unwrap();
+        }
+        return (StatusCode::NOT_FOUND, "Documentation content not found").into_response();
+    }
+
     // In development, proxy frontend requests to Vite dev server.
     if state.server_settings.frontend_dev_proxy_url.is_some() {
         return proxy_to_vite(&state, parts.method, parts.uri, parts.headers, body).await;
@@ -60,6 +85,30 @@ async fn fallback_handler(State(state): State<AppState>, request: Request) -> Re
 
     // If not a static file, serve SPA index.html
     render_index(&state)
+}
+
+async fn load_docs_content_from_filesystem(rel: &str) -> Option<(Vec<u8>, &'static str)> {
+    // Prevent traversal and absolute paths
+    let mut rel_buf = PathBuf::new();
+    for part in PathBuf::from(rel).components() {
+        match part {
+            Component::Normal(seg) => rel_buf.push(seg),
+            _ => return None,
+        }
+    }
+
+    let fs_path = if rel_buf == Path::new("README.md") {
+        PathBuf::from("README.md")
+    } else {
+        PathBuf::from("docs").join(rel_buf)
+    };
+
+    if !fs_path.exists() {
+        return None;
+    }
+
+    let bytes = tokio::fs::read(fs_path).await.ok()?;
+    Some((bytes, "text/markdown; charset=utf-8"))
 }
 
 fn render_index(state: &AppState) -> Response {

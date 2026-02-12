@@ -1,11 +1,35 @@
 // @ts-nocheck
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
-import { formatDate, formatTimeRemaining } from '../lib/utils';
+import { copyToClipboard, formatDate, formatISO8601, formatRelativeTimeRounded, formatTimeRemaining } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, ConfirmDialog, Modal, StatusBadge } from '../components/ui';
+import { Button, ConfirmDialog, Modal, ModalActions, ModalSection, StatusBadge } from '../components/ui';
+import { MonoSortButton, MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import { EnvVarsList } from './resources';
+import { EmptyState, ErrorState, LoadingState } from '../components/states';
+import { useRowKeyboardNavigation, useSortableData } from '../lib/table';
+
+const STATUS_TONES = {
+    Healthy: 'ok',
+    Running: 'ok',
+    Deploying: 'warn',
+    Pending: 'warn',
+    Building: 'warn',
+    Pushing: 'warn',
+    Pushed: 'warn',
+    Unhealthy: 'bad',
+    Failed: 'bad',
+    Stopped: 'muted',
+    Cancelled: 'muted',
+    Superseded: 'muted',
+    Expired: 'muted',
+    Terminating: 'muted',
+};
+
+function getStatusTone(status) {
+    return STATUS_TONES[status] || 'muted';
+}
 
 
 export function ActiveDeploymentsSummary({ projectName }) {
@@ -73,8 +97,8 @@ export function ActiveDeploymentsSummary({ projectName }) {
         return () => clearInterval(interval);
     }, [loadSummary]);
 
-    if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-600 dark:text-red-400">Error loading active deployments: {error}</p>;
+    if (loading) return <LoadingState label="Loading active deployments..." />;
+    if (error) return <ErrorState message={`Error loading active deployments: ${error}`} onRetry={loadSummary} />;
 
     const handleStopClick = (deployment) => {
         setDeploymentToStop(deployment);
@@ -99,7 +123,7 @@ export function ActiveDeploymentsSummary({ projectName }) {
     };
 
     const groups = Object.keys(activeDeployments);
-    if (groups.length === 0) return <p className="text-gray-600 dark:text-gray-400">No active deployments.</p>;
+    if (groups.length === 0) return <EmptyState message="No active deployments." />;
 
     // Sort groups: "default" first, then by active deployment's created timestamp
     const sortedGroups = groups.sort((a, b) => {
@@ -124,7 +148,7 @@ export function ActiveDeploymentsSummary({ projectName }) {
 
     return (
         <>
-            <div className="space-y-4">
+            <div className="mono-active-deployments-grid grid gap-4 md:grid-cols-2">
                 {sortedGroups.map(group => {
                     const groupData = activeDeployments[group];
                     const deployment = groupData.active;
@@ -139,16 +163,32 @@ export function ActiveDeploymentsSummary({ projectName }) {
                     const otherProgressing = groupData.progressing.filter(d => d.deployment_id !== deployment.deployment_id).length;
 
                     return (
-                        <div key={group} className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-6">
+                        <div
+                            key={group}
+                            className={`mono-active-deployment-card mono-status-card mono-status-card-${getStatusTone(deployment.status)} border border-gray-200 dark:border-gray-800 p-6`}
+                            onClick={() => navigate(`/deployment/${projectName}/${deployment.deployment_id}`)}
+                            onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                    e.preventDefault();
+                                    navigate(`/deployment/${projectName}/${deployment.deployment_id}`);
+                                }
+                            }}
+                            role="link"
+                            tabIndex={0}
+                            aria-label={`View deployment ${deployment.deployment_id}`}
+                        >
                             <div className="flex justify-between items-center mb-4">
-                                <h5 className="text-lg font-semibold">Group: {group}</h5>
+                                <h5 className="text-lg font-semibold">{group}</h5>
                                 <div className="flex items-center gap-3">
                                     <StatusBadge status={deployment.status} />
                                     {canStop && (
                                         <Button
                                             variant="danger"
                                             size="sm"
-                                            onClick={() => handleStopClick(deployment)}
+                                            onClick={(e) => {
+                                                e.stopPropagation();
+                                                handleStopClick(deployment);
+                                            }}
                                         >
                                             Stop
                                         </Button>
@@ -170,7 +210,9 @@ export function ActiveDeploymentsSummary({ projectName }) {
                             </div>
                             <div>
                                 <dt className="text-gray-600 dark:text-gray-400">Created</dt>
-                                <dd className="text-gray-900 dark:text-gray-200">{formatDate(deployment.created)}</dd>
+                                <dd className="text-gray-900 dark:text-gray-200" title={formatISO8601(deployment.created)}>
+                                    {formatRelativeTimeRounded(deployment.created)}
+                                </dd>
                             </div>
                             {deployment.expires_at && (
                                 <div>
@@ -182,10 +224,7 @@ export function ActiveDeploymentsSummary({ projectName }) {
                                 </div>
                             )}
                         </dl>
-                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
-                            <a href={`/deployment/${projectName}/${deployment.deployment_id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">
-                                View Details
-                            </a>
+                        <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-end">
                             {otherProgressing > 0 && (
                                 <span className="text-sm text-gray-600 dark:text-gray-500">
                                     +{otherProgressing} other{otherProgressing === 1 ? '' : 's'} progressing
@@ -205,7 +244,7 @@ export function ActiveDeploymentsSummary({ projectName }) {
                 }}
                 onConfirm={handleStopConfirm}
                 title="Stop Deployment"
-                message={`Are you sure you want to stop deployment ${deploymentToStop?.deployment_id}? This action will terminate the deployment.`}
+                message={`Are you sure you want to stop deployment ${deploymentToStop?.deployment_id}? Impact: traffic for group "${deploymentToStop?.deployment_group || 'default'}" may terminate.`}
                 confirmText="Stop Deployment"
                 variant="danger"
                 loading={stopping}
@@ -229,8 +268,17 @@ export function DeploymentsList({ projectName }) {
     const [rollbackDialogOpen, setRollbackDialogOpen] = useState(false);
     const [deploymentToRollback, setDeploymentToRollback] = useState(null);
     const [rollingBack, setRollingBack] = useState(false);
+    const [actionStatus, setActionStatus] = useState('');
     const { showToast } = useToast();
     const pageSize = 10;
+    const { sortedItems: sortedDeployments, sortKey, sortDirection, requestSort } = useSortableData(deployments, 'created', 'desc');
+    const { activeIndex, setActiveIndex, onKeyDown } = useRowKeyboardNavigation(
+        (idx) => {
+            const deployment = sortedDeployments[idx];
+            if (deployment) navigate(`/deployment/${projectName}/${deployment.deployment_id}`);
+        },
+        sortedDeployments.length
+    );
 
     // Load deployment groups
     useEffect(() => {
@@ -291,14 +339,17 @@ export function DeploymentsList({ projectName }) {
         if (!deploymentToStop) return;
 
         setStopping(true);
+        setActionStatus(`Stopping deployment ${deploymentToStop.deployment_id}...`);
         try {
             await api.stopDeployment(projectName, deploymentToStop.deployment_id);
             showToast(`Deployment ${deploymentToStop.deployment_id} stopped successfully`, 'success');
+            setActionStatus(`Stopped deployment ${deploymentToStop.deployment_id}.`);
             setConfirmDialogOpen(false);
             setDeploymentToStop(null);
             loadDeployments();
         } catch (err) {
             showToast(`Failed to stop deployment: ${err.message}`, 'error');
+            setActionStatus(`Failed to stop deployment ${deploymentToStop.deployment_id}.`);
         } finally {
             setStopping(false);
         }
@@ -315,25 +366,28 @@ export function DeploymentsList({ projectName }) {
         if (!deploymentToRollback) return;
 
         setRollingBack(true);
+        setActionStatus(`${deploymentToRollback.is_active ? 'Redeploying' : 'Rolling back'} deployment ${deploymentToRollback.deployment_id}...`);
         try {
             const response = await api.createDeploymentFrom(projectName, deploymentToRollback.deployment_id, useSourceEnvVars);
             showToast(`${deploymentToRollback.is_active ? 'Redeploy' : 'Rollback'} successful! New deployment: ${response.deployment_id}`, 'success');
+            setActionStatus(`${deploymentToRollback.is_active ? 'Redeployed' : 'Rolled back'} to new deployment ${response.deployment_id}.`);
             setRollbackDialogOpen(false);
             setDeploymentToRollback(null);
             setUseSourceEnvVars(false); // Reset checkbox
             loadDeployments();
         } catch (err) {
             showToast(`Failed to ${deploymentToRollback.is_active ? 'redeploy' : 'rollback'} deployment: ${err.message}`, 'error');
+            setActionStatus(`Failed to ${deploymentToRollback.is_active ? 'redeploy' : 'rollback'} deployment ${deploymentToRollback.deployment_id}.`);
         } finally {
             setRollingBack(false);
         }
     };
 
-    if (loading && deployments.length === 0) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-600 dark:text-red-400">Error loading deployments: {error}</p>;
+    if (loading && deployments.length === 0) return <LoadingState label="Loading deployments..." />;
+    if (error) return <ErrorState message={`Error loading deployments: ${error}`} onRetry={loadDeployments} />;
 
     // Find the most recent deployment in the default group (only non-terminal)
-    const mostRecentDefault = deployments.find(d => d.deployment_group === 'default' && !isTerminal(d.status));
+    const mostRecentDefault = sortedDeployments.find(d => d.deployment_group === 'default' && !isTerminal(d.status));
 
     return (
         <div>
@@ -353,44 +407,55 @@ export function DeploymentsList({ projectName }) {
                     </select>
                 </label>
             </div>
+            {actionStatus && <p className="mono-inline-status mb-3">{actionStatus}</p>}
 
-            <div className="bg-white dark:bg-gray-900 rounded-lg overflow-x-auto border border-gray-200 dark:border-gray-800">
-                <table className="w-full">
-                    <thead className="bg-gray-100 dark:bg-gray-800">
+            <MonoTableFrame>
+                <MonoTable className="mono-sticky-table mono-table--sticky" onKeyDown={onKeyDown}>
+                    <MonoTableHead>
                         <tr>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">ID</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Status</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created by</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Image</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Group</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">URL</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Expires</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Created</th>
-                            <th className="px-6 py-3 text-left text-xs font-medium text-gray-700 dark:text-gray-300 uppercase tracking-wider">Actions</th>
+                            <MonoTh stickyCol className="px-6 py-3 text-left">
+                                <MonoSortButton label="ID" active={sortKey === 'deployment_id'} direction={sortDirection} onClick={() => requestSort('deployment_id')} />
+                            </MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">
+                                <MonoSortButton label="Status" active={sortKey === 'status'} direction={sortDirection} onClick={() => requestSort('status')} />
+                            </MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Created by</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Image</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Group</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">URL</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Expires</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">
+                                <MonoSortButton label="Created" active={sortKey === 'created'} direction={sortDirection} onClick={() => requestSort('created')} />
+                            </MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Actions</MonoTh>
                         </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-200 dark:divide-gray-800">
-                        {deployments.length === 0 ? (
-                            <tr>
-                                <td colSpan="9" className="px-6 py-8 text-center text-gray-600 dark:text-gray-400">
-                                    No deployments found.
-                                </td>
-                            </tr>
+                    </MonoTableHead>
+                    <MonoTableBody>
+                        {sortedDeployments.length === 0 ? (
+                            <MonoTableEmptyRow colSpan={9}>
+                                <EmptyState message="No deployments found." />
+                            </MonoTableEmptyRow>
                         ) : (
-                            deployments.map(d => {
+                            sortedDeployments.map((d, idx) => {
                                     const isHighlighted = mostRecentDefault && d.id === mostRecentDefault.id;
                                     return (
-                                    <tr
+                                    <MonoTableRow
                                         key={d.id}
                                         onClick={() => navigate(`/deployment/${projectName}/${d.deployment_id}`)}
-                                        className={`transition-colors cursor-pointer ${isHighlighted ? 'bg-indigo-900/20 border-l-4 border-l-indigo-500 hover:bg-indigo-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
+                                        onFocus={() => setActiveIndex(idx)}
+                                        tabIndex={0}
+                                        aria-label={`Deployment ${d.deployment_id}`}
+                                        interactive
+                                        active={activeIndex === idx}
+                                        highlight={Boolean(isHighlighted)}
+                                        className="transition-colors"
                                     >
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-gray-200">{d.deployment_id}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge status={d.status} /></td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{d.created_by_email || '-'}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-xs font-mono text-gray-700 dark:text-gray-300">{d.image ? d.image.split('/').pop() : '-'}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{d.deployment_group}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm">
+                                        <MonoTd stickyCol mono className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-200">{d.deployment_id}</MonoTd>
+                                        <MonoTd className="px-6 py-4 whitespace-nowrap text-sm"><StatusBadge status={d.status} /></MonoTd>
+                                        <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{d.created_by_email || '-'}</MonoTd>
+                                        <MonoTd mono className="px-6 py-4 whitespace-nowrap text-xs text-gray-700 dark:text-gray-300">{d.image ? d.image.split('/').pop() : '-'}</MonoTd>
+                                        <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{d.deployment_group}</MonoTd>
+                                        <MonoTd className="px-6 py-4 whitespace-nowrap text-sm">
                                             {d.primary_url ? (
                                                 <a
                                                     href={d.primary_url}
@@ -402,8 +467,8 @@ export function DeploymentsList({ projectName }) {
                                                     Link
                                                 </a>
                                             ) : '-'}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
+                                        </MonoTd>
+                                        <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">
                                             {d.expires_at ? (
                                                 <span>
                                                     {formatTimeRemaining(d.expires_at)}
@@ -411,10 +476,12 @@ export function DeploymentsList({ projectName }) {
                                                     <span className="text-gray-600 dark:text-gray-500 text-xs">({formatDate(d.expires_at)})</span>
                                                 </span>
                                             ) : '-'}
-                                        </td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(d.created)}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm">
-                                            <div className="flex gap-2">
+                                        </MonoTd>
+                                        <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300" title={formatISO8601(d.created)}>
+                                            {formatRelativeTimeRounded(d.created)}
+                                        </MonoTd>
+                                        <MonoTd className="px-6 py-4 whitespace-nowrap text-sm">
+                                            <div className="mono-table-action-slot">
                                                 {isRollbackable(d.status) && (
                                                     <Button
                                                         variant="primary"
@@ -440,14 +507,14 @@ export function DeploymentsList({ projectName }) {
                                                     </Button>
                                                 )}
                                             </div>
-                                        </td>
-                                    </tr>
+                                        </MonoTd>
+                                    </MonoTableRow>
                                     );
                                 })
                         )}
-                    </tbody>
-                </table>
-            </div>
+                    </MonoTableBody>
+                </MonoTable>
+            </MonoTableFrame>
 
             <div className="mt-4 flex justify-between items-center">
                 <button
@@ -477,7 +544,7 @@ export function DeploymentsList({ projectName }) {
                 }}
                 onConfirm={handleStopConfirm}
                 title="Stop Deployment"
-                message={`Are you sure you want to stop deployment ${deploymentToStop?.deployment_id}? This action will terminate the deployment.`}
+                message={`Are you sure you want to stop deployment ${deploymentToStop?.deployment_id}? Impact: traffic for group "${deploymentToStop?.deployment_group || 'default'}" may terminate.`}
                 confirmText="Stop Deployment"
                 variant="danger"
                 loading={stopping}
@@ -492,7 +559,7 @@ export function DeploymentsList({ projectName }) {
                 }}
                 title={deploymentToRollback?.is_active ? 'Redeploy' : 'Rollback to Deployment'}
             >
-                <div className="space-y-4">
+                <ModalSection>
                     <p className="text-gray-700 dark:text-gray-300">
                         {deploymentToRollback?.is_active
                             ? `Are you sure you want to redeploy ${deploymentToRollback?.deployment_id}? This will create a new deployment with the same image.`
@@ -520,7 +587,7 @@ export function DeploymentsList({ projectName }) {
                         </label>
                     </div>
 
-                    <div className="flex gap-3 justify-end pt-4">
+                    <ModalActions>
                         <Button
                             variant="secondary"
                             onClick={() => {
@@ -540,8 +607,8 @@ export function DeploymentsList({ projectName }) {
                         >
                             {deploymentToRollback?.is_active ? 'Redeploy' : 'Rollback'}
                         </Button>
-                    </div>
-                </div>
+                    </ModalActions>
+                </ModalSection>
             </Modal>
         </div>
     );
@@ -851,6 +918,74 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
     );
 }
 
+function getPhaseForEvent(event: string) {
+    const e = event.toLowerCase();
+    if (e.includes('build')) return 'build';
+    if (e.includes('push') || e.includes('image')) return 'push';
+    if (e.includes('rollout') || e.includes('deploy')) return 'rollout';
+    if (e.includes('health') || e.includes('ready') || e.includes('active')) return 'health';
+    return 'other';
+}
+
+function formatDurationDelta(fromTs?: string | null, toTs?: string | null) {
+    if (!fromTs || !toTs) return '--';
+    const from = new Date(fromTs).getTime();
+    const to = new Date(toTs).getTime();
+    if (Number.isNaN(from) || Number.isNaN(to) || to < from) return '--';
+    const seconds = Math.floor((to - from) / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const minutes = Math.floor(seconds / 60);
+    const rem = seconds % 60;
+    if (minutes < 60) return `${minutes}m ${rem}s`;
+    const hours = Math.floor(minutes / 60);
+    const mins = minutes % 60;
+    return `${hours}h ${mins}m`;
+}
+
+function buildDeploymentTimeline(deployment: any) {
+    const events: Array<{ label: string; ts: string | null; phase: string }> = [
+        { label: 'Deployment requested', ts: deployment.created || null, phase: 'build' },
+        { label: 'Image prepared', ts: deployment.created || null, phase: 'push' },
+        { label: 'Rollout started', ts: deployment.created || null, phase: 'rollout' },
+    ];
+
+    if (deployment.completed_at) {
+        events.push({
+            label: deployment.status === 'Failed' ? 'Deployment failed' : 'Deployment completed',
+            ts: deployment.completed_at,
+            phase: deployment.status === 'Failed' ? 'rollout' : 'health',
+        });
+    }
+
+    const healthLastCheck = deployment.controller_metadata?.health?.last_check || null;
+    if (healthLastCheck) {
+        events.push({
+            label: deployment.controller_metadata?.health?.healthy ? 'Health check healthy' : 'Health check degraded',
+            ts: healthLastCheck,
+            phase: 'health',
+        });
+    }
+
+    const statusEventTime = deployment.completed_at || deployment.created || null;
+    events.push({
+        label: `Current status: ${deployment.status}`,
+        ts: statusEventTime,
+        phase: getPhaseForEvent(deployment.status || ''),
+    });
+
+    const sorted = events
+        .filter((e) => e.ts)
+        .sort((a, b) => new Date(a.ts || '').getTime() - new Date(b.ts || '').getTime());
+
+    return sorted.map((event, index) => {
+        const prev = index > 0 ? sorted[index - 1] : null;
+        return {
+            ...event,
+            delta: prev ? formatDurationDelta(prev.ts, event.ts) : '--',
+        };
+    });
+}
+
 export function DeploymentDetail({ projectName, deploymentId }) {
     const [deployment, setDeployment] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -858,7 +993,18 @@ export function DeploymentDetail({ projectName, deploymentId }) {
     const [rollbackDialogOpen, setRollbackDialogOpen] = useState(false);
     const [rolling, setRolling] = useState(false);
     const [useSourceEnvVars, setUseSourceEnvVars] = useState(false);
+    const [detailActionStatus, setDetailActionStatus] = useState('');
     const { showToast } = useToast();
+    const handleCopy = useCallback(async (value, label) => {
+        if (!value || value === '-') return;
+
+        try {
+            await copyToClipboard(value);
+            showToast(`${label} copied`, 'success');
+        } catch (err) {
+            showToast(`Failed to copy ${label.toLowerCase()}: ${err.message}`, 'error');
+        }
+    }, [showToast]);
 
     const isTerminal = (status) => {
         return ['Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired'].includes(status);
@@ -881,15 +1027,18 @@ export function DeploymentDetail({ projectName, deploymentId }) {
 
     const handleRollback = async () => {
         setRolling(true);
+        setDetailActionStatus(`${deployment.is_active ? 'Redeploying' : 'Rolling back'} deployment ${deploymentId}...`);
         try {
             const response = await api.createDeploymentFrom(projectName, deploymentId, useSourceEnvVars);
             showToast(`${deployment.is_active ? 'Redeploy' : 'Rollback'} successful! New deployment: ${response.deployment_id}`, 'success');
+            setDetailActionStatus(`${deployment.is_active ? 'Redeployed' : 'Rolled back'} to deployment ${response.deployment_id}.`);
             setRollbackDialogOpen(false);
             setUseSourceEnvVars(false); // Reset checkbox
             // Redirect to project page to see the new deployment
             navigate(`/project/${projectName}`);
         } catch (err) {
             showToast(`Failed to ${deployment.is_active ? 'redeploy' : 'rollback'} deployment: ${err.message}`, 'error');
+            setDetailActionStatus(`Failed to ${deployment.is_active ? 'redeploy' : 'rollback'} deployment ${deploymentId}.`);
         } finally {
             setRolling(false);
         }
@@ -907,106 +1056,175 @@ export function DeploymentDetail({ projectName, deploymentId }) {
         }
     }, [deployment?.status, loadDeployment]);
 
-    if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
-    if (error) return <p className="text-red-600 dark:text-red-400">Error loading deployment: {error}</p>;
-    if (!deployment) return <p className="text-gray-600 dark:text-gray-400">Deployment not found.</p>;
+    if (loading) return <LoadingState label="Loading deployment..." />;
+    if (error) return <ErrorState message={`Error loading deployment: ${error}`} onRetry={loadDeployment} />;
+    if (!deployment) return <EmptyState message="Deployment not found." />;
+
+    const timeline = buildDeploymentTimeline(deployment);
+    const phases = ['build', 'push', 'rollout', 'health', 'other'];
+    const groupedTimeline = phases
+        .map((phase) => ({ phase, events: timeline.filter((e) => e.phase === phase) }))
+        .filter((group) => group.events.length > 0);
 
     return (
         <section>
-            <a href={`/project/${projectName}`} className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
-                ← Back
-            </a>
+            <div className="flex justify-end items-center mb-4">
+                {(deployment.status === 'Healthy' || deployment.status === 'Superseded') && (
+                    <Button
+                        variant="secondary"
+                        size="sm"
+                        onClick={handleRollbackClick}
+                    >
+                        {deployment.is_active ? 'Redeploy' : 'Rollback'}
+                    </Button>
+                )}
+            </div>
+
+            {detailActionStatus && <p className="mono-inline-status mb-4">{detailActionStatus}</p>}
+
+            <div className="mono-status-strip mb-6">
+                <div className={`mono-status-card mono-status-card-${getStatusTone(deployment.status)}`}>
+                    <span>status</span>
+                    <strong>{deployment.status}</strong>
+                </div>
+                <div>
+                    <span>deployment</span>
+                    <strong className="mono-copyable-value">
+                        <span>{deployment.deployment_id}</span>
+                        <button
+                            type="button"
+                            className="mono-copy-button"
+                            title="Copy deployment ID"
+                            aria-label="Copy deployment ID"
+                            onClick={() => handleCopy(deployment.deployment_id, 'Deployment ID')}
+                        >
+                            <span
+                                className="mono-copy-icon svg-mask"
+                                style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                            />
+                        </button>
+                    </strong>
+                </div>
+                <div><span>group</span><strong>{deployment.deployment_group}</strong></div>
+                <div>
+                    <span>created</span>
+                    <strong className="mono-copyable-value" title={formatISO8601(deployment.created)}>
+                        <span>{formatRelativeTimeRounded(deployment.created)}</span>
+                        <button
+                            type="button"
+                            className="mono-copy-button"
+                            title="Copy created timestamp (ISO8601)"
+                            aria-label="Copy created timestamp (ISO8601)"
+                            onClick={() => handleCopy(formatISO8601(deployment.created), 'Created timestamp')}
+                        >
+                            <span
+                                className="mono-copy-icon svg-mask"
+                                style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                            />
+                        </button>
+                    </strong>
+                </div>
+                <div><span>project</span><strong>{projectName}</strong></div>
+                <div><span>created_by</span><strong>{deployment.created_by_email || '-'}</strong></div>
+                <div>
+                    <span>image</span>
+                    <strong className="mono-copyable-value">
+                        <span>{deployment.image || '-'}</span>
+                        {deployment.image && (
+                            <button
+                                type="button"
+                                className="mono-copy-button"
+                                title="Copy image"
+                                aria-label="Copy image"
+                                onClick={() => handleCopy(deployment.image, 'Image')}
+                            >
+                                <span
+                                    className="mono-copy-icon svg-mask"
+                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                                />
+                            </button>
+                        )}
+                    </strong>
+                </div>
+                <div><span>digest</span><strong>{deployment.image_digest || '-'}</strong></div>
+                <div>
+                    <span>primary_url</span>
+                    <strong className="mono-copyable-value">
+                        <span>
+                            {deployment.primary_url ? (
+                                <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="underline uppercase">
+                                    {deployment.primary_url}
+                                </a>
+                            ) : '-'}
+                        </span>
+                        {deployment.primary_url && (
+                            <button
+                                type="button"
+                                className="mono-copy-button"
+                                title="Copy primary URL"
+                                aria-label="Copy primary URL"
+                                onClick={() => handleCopy(deployment.primary_url, 'Primary URL')}
+                            >
+                                <span
+                                    className="mono-copy-icon svg-mask"
+                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                                />
+                            </button>
+                        )}
+                    </strong>
+                </div>
+                <div>
+                    <span>custom_urls</span>
+                    <strong>
+                        {deployment.custom_domain_urls && deployment.custom_domain_urls.length > 0
+                            ? deployment.custom_domain_urls.map((url, idx) => (
+                                <Fragment key={url}>
+                                    {idx > 0 ? ', ' : ''}
+                                    <a href={url} target="_blank" rel="noopener noreferrer" className="underline uppercase">
+                                        {url}
+                                    </a>
+                                </Fragment>
+                            ))
+                            : '-'}
+                    </strong>
+                </div>
+                <div><span>completed</span><strong>{deployment.completed_at ? formatDate(deployment.completed_at) : '-'}</strong></div>
+                <div><span>expires</span><strong>{deployment.expires_at ? formatTimeRemaining(deployment.expires_at) : '-'}</strong></div>
+            </div>
+
+            {deployment.error_message && (
+                <div className="mono-inline-status mb-6" style={{ color: '#ffc0c0', borderColor: '#7d4b4b', background: '#1a1212' }}>
+                    Error: {deployment.error_message}
+                </div>
+            )}
+
+            {deployment.build_logs && (
+                <details className="mb-6">
+                    <summary className="cursor-pointer text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-semibold">Build Logs</summary>
+                    <pre className="mt-2 bg-gray-950 border border-gray-200 dark:border-gray-800 rounded p-4 overflow-x-auto text-xs">
+                        <code className="text-gray-700 dark:text-gray-300">{deployment.build_logs}</code>
+                    </pre>
+                </details>
+            )}
 
             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-lg p-6 mb-6">
-                <div className="flex justify-between items-center mb-4">
-                    <h3 className="text-2xl font-bold">Deployment {deployment.deployment_id}</h3>
-                    <div className="flex items-center gap-3">
-                        <StatusBadge status={deployment.status} />
-                        {(deployment.status === 'Healthy' || deployment.status === 'Superseded') && (
-                            <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={handleRollbackClick}
-                            >
-                                {deployment.is_active ? 'Redeploy' : 'Rollback'}
-                            </Button>
-                        )}
-                    </div>
-                </div>
-                <dl className="grid grid-cols-2 gap-4 text-sm">
-                    <div>
-                        <dt className="text-gray-600 dark:text-gray-400">Project</dt>
-                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{deployment.project}</dd>
-                    </div>
-                    <div>
-                        <dt className="text-gray-600 dark:text-gray-400">Created by</dt>
-                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{deployment.created_by_email || '-'}</dd>
-                    </div>
-                    <div className="col-span-2">
-                        <dt className="text-gray-600 dark:text-gray-400">Image</dt>
-                        <dd className="mt-1 font-mono text-sm text-gray-900 dark:text-gray-200">{deployment.image || '-'}</dd>
-                    </div>
-                    <div className="col-span-2">
-                        <dt className="text-gray-600 dark:text-gray-400">Image Digest</dt>
-                        <dd className="mt-1 font-mono text-xs text-gray-700 dark:text-gray-300">{deployment.image_digest || '-'}</dd>
-                    </div>
-                    <div>
-                        <dt className="text-gray-600 dark:text-gray-400">Group</dt>
-                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{deployment.deployment_group}</dd>
-                    </div>
-                    <div>
-                        <dt className="text-gray-600 dark:text-gray-400">URLs</dt>
-                        <dd className="mt-1 space-y-1">
-                            {deployment.primary_url ? (
-                                <>
-                                    <div>
-                                        <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">{deployment.primary_url}</a>
+                <h3 className="text-xl font-bold mb-4">Deployment Timeline</h3>
+                <div className="space-y-4">
+                    {groupedTimeline.map((group) => (
+                        <div key={group.phase} className="mono-timeline-group">
+                            <h4 className="mono-timeline-phase">{group.phase}</h4>
+                            <div className="mono-timeline-list">
+                                {group.events.map((event, idx) => (
+                                    <div key={`${group.phase}-${idx}`} className="mono-timeline-item">
+                                        <span>{formatDate(event.ts || '')}</span>
+                                        <span>{event.label}</span>
+                                        <span>+{event.delta}</span>
                                     </div>
-                                    {deployment.custom_domain_urls && deployment.custom_domain_urls.map((url, idx) => (
-                                        <div key={idx}>
-                                            <a href={url} target="_blank" rel="noopener noreferrer" className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">{url}</a>
-                                        </div>
-                                    ))}
-                                </>
-                            ) : (
-                                <span className="text-gray-600 dark:text-gray-500">-</span>
-                            )}
-                        </dd>
-                    </div>
-                    <div>
-                        <dt className="text-gray-600 dark:text-gray-400">Created</dt>
-                        <dd className="mt-1 text-gray-900 dark:text-gray-200">{formatDate(deployment.created)}</dd>
-                    </div>
-                    {deployment.completed_at && (
-                        <div>
-                            <dt className="text-gray-600 dark:text-gray-400">Completed</dt>
-                            <dd className="mt-1 text-gray-900 dark:text-gray-200">{formatDate(deployment.completed_at)}</dd>
+                                ))}
+                            </div>
                         </div>
-                    )}
-                    {deployment.expires_at && (
-                        <div>
-                            <dt className="text-gray-600 dark:text-gray-400">Expires</dt>
-                            <dd className="mt-1 text-gray-900 dark:text-gray-200">
-                                {formatTimeRemaining(deployment.expires_at)}
-                                <span className="text-gray-600 dark:text-gray-500 text-xs ml-2">({formatDate(deployment.expires_at)})</span>
-                            </dd>
-                        </div>
-                    )}
-                    {deployment.error_message && (
-                        <div className="col-span-2">
-                            <dt className="text-gray-600 dark:text-gray-400">Error</dt>
-                            <dd className="mt-1 text-red-600 dark:text-red-400">{deployment.error_message}</dd>
-                        </div>
-                    )}
-                </dl>
-                {deployment.build_logs && (
-                    <details className="mt-4">
-                        <summary className="cursor-pointer text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 font-semibold">Build Logs</summary>
-                        <pre className="mt-2 bg-gray-950 border border-gray-200 dark:border-gray-800 rounded p-4 overflow-x-auto text-xs">
-                            <code className="text-gray-700 dark:text-gray-300">{deployment.build_logs}</code>
-                        </pre>
-                    </details>
-                )}
+                    ))}
+                </div>
             </div>
 
             <DeploymentLogs projectName={projectName} deploymentId={deploymentId} deploymentStatus={deployment.status} />
@@ -1022,7 +1240,7 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                 }}
                 title={deployment?.is_active ? 'Redeploy' : 'Rollback to Deployment'}
             >
-                <div className="space-y-4">
+                <ModalSection>
                     <p className="text-gray-700 dark:text-gray-300">
                         {deployment?.is_active
                             ? `Are you sure you want to redeploy ${deploymentId}? This will create a new deployment with the same image.`
@@ -1050,7 +1268,7 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                         </label>
                     </div>
 
-                    <div className="flex gap-3 justify-end pt-4">
+                    <ModalActions>
                         <Button
                             variant="secondary"
                             onClick={() => {
@@ -1069,8 +1287,8 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                         >
                             {deployment?.is_active ? 'Redeploy' : 'Rollback'}
                         </Button>
-                    </div>
-                </div>
+                    </ModalActions>
+                </ModalSection>
             </Modal>
         </section>
     );

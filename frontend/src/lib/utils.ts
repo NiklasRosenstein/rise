@@ -24,6 +24,36 @@ export function formatDate(dateString: string): string {
   return date.toLocaleString();
 }
 
+export function formatISO8601(dateString: string): string {
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '-';
+  return date.toISOString();
+}
+
+export function formatRelativeTimeRounded(dateString: string): string {
+  const date = new Date(dateString);
+  if (Number.isNaN(date.getTime())) return '-';
+
+  const now = new Date();
+  const diffMs = date.getTime() - now.getTime();
+  const absMs = Math.abs(diffMs);
+  const absSec = absMs / 1000;
+  const absMin = absSec / 60;
+  const absHour = absMin / 60;
+  const absDay = absHour / 24;
+  const absMonth = absDay / 30;
+  const absYear = absDay / 365;
+
+  const rtf = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto', style: 'long' });
+
+  if (absYear >= 1) return rtf.format(Math.round(diffMs / (1000 * 60 * 60 * 24 * 365)), 'year');
+  if (absMonth >= 1) return rtf.format(Math.round(diffMs / (1000 * 60 * 60 * 24 * 30)), 'month');
+  if (absDay >= 1) return rtf.format(Math.round(diffMs / (1000 * 60 * 60 * 24)), 'day');
+  if (absHour >= 1) return rtf.format(Math.round(diffMs / (1000 * 60 * 60)), 'hour');
+  if (absMin >= 1) return rtf.format(Math.round(diffMs / (1000 * 60)), 'minute');
+  return rtf.format(Math.round(diffMs / 1000), 'second');
+}
+
 export function formatTimeRemaining(expiresAt: string | null | undefined): string | null {
   if (!expiresAt) return null;
 

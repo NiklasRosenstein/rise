@@ -1,6 +1,50 @@
 #!/bin/bash
 set -e
 
+# Check prerequisites
+check_prerequisites() {
+    local missing=()
+
+    if ! command -v git &> /dev/null; then
+        missing+=("git")
+    fi
+
+    if ! command -v cargo &> /dev/null; then
+        missing+=("cargo")
+    fi
+
+    if ! command -v gh &> /dev/null; then
+        missing+=("gh (GitHub CLI)")
+    fi
+
+    if ! command -v claude &> /dev/null; then
+        missing+=("claude (Claude CLI - optional for AI-generated release notes)")
+    fi
+
+    if [ ${#missing[@]} -gt 0 ]; then
+        echo "Error: Missing required tools:"
+        for tool in "${missing[@]}"; do
+            if [[ "$tool" == *"optional"* ]]; then
+                echo "  - $tool"
+            else
+                echo "  ✗ $tool"
+            fi
+        done
+        echo ""
+        echo "Install missing tools:"
+        echo "  - gh: https://cli.github.com/"
+        echo "  - claude: https://github.com/anthropics/anthropic-tools"
+        exit 1
+    fi
+
+    # Check if gh is authenticated
+    if ! gh auth status &> /dev/null; then
+        echo "Error: GitHub CLI (gh) is not authenticated"
+        echo "Run: gh auth login"
+        exit 1
+    fi
+}
+
 # Parse arguments
 DRY_RUN=false
 VERSION=""
@@ -34,6 +78,9 @@ if [ -z "$VERSION" ]; then
     exit 1
 fi
 
+# Check prerequisites before proceeding
+check_prerequisites
+
 TAG="v${VERSION}"
 
 # Validate version format (basic check for X.Y.Z)
@@ -42,50 +89,27 @@ if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
     exit 1
 fi
 
+# Check for uncommitted changes (only in non-dry-run mode)
 if [ "$DRY_RUN" = false ]; then
-    echo "Updating version to ${VERSION}..."
-
-    # Update version in Cargo.toml
-    sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml && rm Cargo.toml.bak
-
-    # Update Cargo.lock
-    echo "Updating Cargo.lock..."
-    cargo update --workspace
-
-    # Show the changes
-    echo ""
-    echo "Changes to be committed:"
-    git diff Cargo.toml Cargo.lock
-
-    # Confirm before proceeding
-    read -p "Proceed with commit and tag? (y/n) " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo "Aborted. Rolling back changes..."
-        git checkout Cargo.toml Cargo.lock
+    if ! git diff-index --quiet HEAD --; then
+        echo "Error: You have uncommitted changes in your working directory"
+        echo "Please commit or stash your changes before creating a release"
+        git status --short
         exit 1
     fi
 
-    # Commit the changes
-    echo "Committing version bump..."
-    git add Cargo.toml Cargo.lock
-    git commit -m "chore: bump version to ${VERSION}"
-
-    # Create the tag
-    echo "Creating tag ${TAG}..."
-    git tag -a "${TAG}" -m "Release ${TAG}"
-
-    # Push commit and tag
-    echo "Pushing to remote..."
-    git push origin main
-    git push origin "${TAG}"
-else
-    echo "DRY RUN MODE: Generating release notes preview for ${TAG}"
-    echo ""
+    # Check if on main branch
+    CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
+    if [ "$CURRENT_BRANCH" != "main" ]; then
+        echo "Warning: You are not on the main branch (current: $CURRENT_BRANCH)"
+        read -p "Continue anyway? (y/n) " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            echo "Aborted."
+            exit 1
+        fi
+    fi
 fi
-
-# Generate release notes with Claude analysis
-echo "Generating release notes..."
 
 # Determine commit range
 if [ -z "$COMMIT_RANGE" ]; then
@@ -105,6 +129,9 @@ fi
 
 # Get commit messages
 COMMITS=$(git log "${COMMIT_RANGE}" --pretty=format:"%h %s" --no-merges)
+
+# Generate release notes with Claude analysis
+echo "Generating release notes..."
 
 if [ -z "$COMMITS" ]; then
     echo "No commits found in range ${COMMIT_RANGE}"
@@ -126,12 +153,12 @@ ${COMMITS}
 EOF
 
     # Call Claude API to generate summary
-    RELEASE_SUMMARY=$(claude -p "$(cat "$TEMP_PROMPT")" 2>/dev/null || echo "Failed to generate AI summary")
+    RELEASE_SUMMARY=$(claude -p "$(cat "$TEMP_PROMPT")" 2>/dev/null || echo "Failed to generate AI summary. Please install Claude CLI from https://github.com/anthropics/anthropic-tools")
     rm "$TEMP_PROMPT"
 fi
 
+# DRY RUN: Just print the release notes and exit
 if [ "$DRY_RUN" = true ]; then
-    # Dry run mode: just print the release notes
     echo ""
     echo "=========================================="
     echo "Release Notes Preview for ${TAG}"
@@ -145,10 +172,70 @@ if [ "$DRY_RUN" = true ]; then
     echo ""
     echo "(GitHub auto-generated changelog would appear here)"
     echo ""
-else
-    # Create release notes file
-    NOTES_FILE=$(mktemp)
-    cat > "$NOTES_FILE" << EOF
+    exit 0
+fi
+
+# REAL RUN: Show summary and ask for confirmation
+echo ""
+echo "=========================================="
+echo "Release Plan for ${TAG}"
+echo "=========================================="
+echo ""
+echo "The following actions will be performed:"
+echo "  1. Update version in Cargo.toml to ${VERSION}"
+echo "  2. Update Cargo.lock"
+echo "  3. Commit changes with message: 'chore: bump version to ${VERSION}'"
+echo "  4. Create git tag: ${TAG}"
+echo "  5. Push commit and tag to origin"
+echo "  6. Create GitHub release with AI-generated notes"
+echo ""
+echo "Release notes preview:"
+echo "---"
+echo "${RELEASE_SUMMARY}"
+echo "---"
+echo ""
+
+read -p "Proceed with release? (y/n) " -n 1 -r
+echo
+if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    echo "Release cancelled."
+    exit 1
+fi
+
+# ============================================================================
+# MUTATION ZONE: All changes happen below this point
+# ============================================================================
+
+echo ""
+echo "Creating release ${VERSION}..."
+echo ""
+
+# Step 1: Update version in Cargo.toml
+echo "[1/6] Updating Cargo.toml..."
+sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml && rm Cargo.toml.bak
+
+# Step 2: Update Cargo.lock
+echo "[2/6] Updating Cargo.lock..."
+cargo update --workspace --quiet
+
+# Step 3: Commit the changes
+echo "[3/6] Committing version bump..."
+git add Cargo.toml Cargo.lock
+git commit -m "chore: bump version to ${VERSION}"
+
+# Step 4: Create the tag
+echo "[4/6] Creating tag ${TAG}..."
+git tag -a "${TAG}" -m "Release ${TAG}"
+
+# Step 5: Push commit and tag
+echo "[5/6] Pushing to remote..."
+git push origin main
+git push origin "${TAG}"
+
+# Step 6: Create GitHub release
+echo "[6/6] Creating GitHub release..."
+NOTES_FILE=$(mktemp)
+cat > "$NOTES_FILE" << EOF
 ${RELEASE_SUMMARY}
 
 ---
@@ -156,14 +243,16 @@ ${RELEASE_SUMMARY}
 ## Full Changelog
 EOF
 
-    # Create GitHub release with custom notes and auto-generated changelog
-    echo "Creating GitHub release..."
-    gh release create "${TAG}" --notes-file "$NOTES_FILE" --generate-notes
+gh release create "${TAG}" --notes-file "$NOTES_FILE" --generate-notes
 
-    # Clean up
-    rm "$NOTES_FILE"
+# Clean up
+rm "$NOTES_FILE"
 
-    echo ""
-    echo "✓ Successfully created and pushed version ${VERSION} with tag ${TAG}"
-    echo "✓ GitHub release created with AI-generated summary and auto-generated notes"
-fi
+echo ""
+echo "✓ Successfully created and pushed version ${VERSION} with tag ${TAG}"
+echo "✓ GitHub release created with AI-generated summary and auto-generated notes"
+echo ""
+echo "CI will now:"
+echo "  - Publish to crates.io"
+echo "  - Build and push Docker images to ghcr.io"
+echo "  - Package Helm charts"

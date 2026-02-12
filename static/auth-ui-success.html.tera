@@ -7,28 +7,95 @@
     <link rel="icon" type="image/x-icon" href="/assets/favicon.ico">
     <link rel="icon" type="image/png" sizes="16x16" href="/assets/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="32x32" href="/assets/favicon-32x32.png">
-    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <style>
+        :root {
+            --bg: #111111;
+            --panel: #141414;
+            --line: #3a3a3a;
+            --text: #ececec;
+            --muted: #b8b8b8;
+            --ok: #b7ffce;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            min-height: 100vh;
+            font-family: "IBM Plex Mono", ui-monospace, monospace;
+            color: var(--text);
+            background: radial-gradient(circle at 0 0, #202020 0%, #101010 40%), var(--bg);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 1rem;
+        }
+        .card {
+            width: 100%;
+            max-width: 32rem;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            padding: 1.2rem;
+            text-align: center;
+        }
+        .logo {
+            width: 2rem;
+            height: 2rem;
+            margin: 0 auto 0.75rem;
+            background-color: currentColor;
+            mask-size: contain;
+            mask-repeat: no-repeat;
+            mask-position: center;
+            -webkit-mask-size: contain;
+            -webkit-mask-repeat: no-repeat;
+            -webkit-mask-position: center;
+            mask-image: url(/assets/logo.svg);
+            -webkit-mask-image: url(/assets/logo.svg);
+        }
+        .state-ok { color: var(--ok); font-size: 2rem; margin-bottom: 0.5rem; }
+        h2 { margin: 0 0 0.8rem; font-size: 1.2rem; }
+        p { color: var(--muted); }
+        .progress {
+            width: 100%;
+            background: #1a1a1a;
+            border: 1px solid var(--line);
+            height: 8px;
+            margin: 1rem 0;
+        }
+        .progress > div {
+            background: #d6d6d6;
+            height: 100%;
+            width: 0%;
+            transition: width 1000ms;
+        }
+        .btn {
+            display: inline-block;
+            border: 1px solid var(--line);
+            background: #1a1a1a;
+            color: var(--text);
+            text-decoration: none;
+            padding: 0.55rem 0.75rem;
+        }
+    </style>
 </head>
-<body class="bg-gray-950 text-gray-100">
-    <div class="flex items-center justify-center min-h-screen bg-gradient-to-br from-gray-900 via-gray-950 to-black">
-        <div class="w-full max-w-md p-8 bg-gray-900 rounded-lg border border-gray-800 shadow-2xl text-center">
+<body>
+    <div class="card">
             <div>
-                <div class="text-6xl text-green-500 mb-4">✓</div>
-                <h2 class="text-2xl font-bold text-white mb-4">Authentication Successful</h2>
+                <div class="logo" aria-hidden="true"></div>
+                <div class="state-ok">[ok]</div>
+                <h2>Authentication Successful</h2>
 
-                <p class="text-gray-300 mb-4">
+                <p>
                     Signing you in...
                 </p>
 
-                <div class="w-full bg-gray-800 rounded-full h-2 mb-4">
-                    <div class="bg-indigo-600 h-2 rounded-full transition-all duration-1000" id="progress-bar" style="width: 0%"></div>
+                <div class="progress">
+                    <div id="progress-bar"></div>
                 </div>
 
-                <p class="text-xs text-gray-500 mb-4">
+                <p>
                     <small>You will be redirected shortly.</small>
                 </p>
 
-                <a href="{{ redirect_url }}" class="text-sm text-indigo-400 hover:text-indigo-300">Click here if not redirected automatically</a>
+                <a href="{{ redirect_url }}" class="btn">Click here if not redirected automatically</a>
             </div>
 
             <script>
@@ -43,7 +110,6 @@
                     window.location.href = redirectUrl;
                 }, 1000);
             </script>
-        </div>
     </div>
 </body>
 </html>
