@@ -31,7 +31,7 @@
         }
         .card {
             width: 100%;
-            max-width: 34rem;
+            max-width: 48rem;
             background: var(--panel);
             border: 1px solid var(--line);
             padding: 1.2rem;

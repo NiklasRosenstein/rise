@@ -46,7 +46,7 @@ export function EmptyState({
 export function PlatformAccessDenied({ userEmail, onLogout }: { userEmail: string; onLogout: () => void }) {
     return (
         <div className="mono-login-wrap">
-            <div className="mono-login-card" style={{ maxWidth: '48rem' }}>
+            <div className="mono-login-card">
                 <div className="text-center mb-8">
                     <div
                         className="mono-login-logo svg-mask mx-auto mb-4"
