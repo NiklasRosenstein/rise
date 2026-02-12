@@ -49,7 +49,7 @@ run = "docker compose up -d"
 [tasks."backend:run"]
 description = "Run the backend server."
 depends = ["backend:deps", "db:migrate"]
-run = "cargo run --features server,k8s,aws,snowflake -- backend server"
+run = "cargo run --features cli,backend -- backend server"
 alias = "br"
 
 [tasks."frontend:dev"]
