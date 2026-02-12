@@ -1,0 +1,39 @@
+# CI-specific Helm values for Minikube e2e tests
+# Used by scripts/ci/e2e-minikube.sh
+
+postgresql:
+  enabled: true
+
+dex:
+  enabled: true
+
+ingress:
+  enabled: false
+
+config:
+  server:
+    public_url: http://rise.local
+    jwt_signing_secret: test-jwt-secret-key-for-ci-testing-only-not-secure
+
+  auth:
+    issuer: http://dex:5556/dex
+    client_id: rise-backend
+    client_secret: rise-backend-secret
+
+  registry:
+    type: oci-client-auth
+    registry_url: localhost:5000
+    namespace: rise-apps
+    client_registry_url: http://localhost:5000
+
+  deployment_controller:
+    type: kubernetes
+    production_ingress_url_template: "{project_name}.apps.rise.local"
+    namespace_format: "rise-{project_name}"
+    ingress_schema: http
+    access_classes:
+      public:
+        display_name: Public
+        description: Public access without authentication
+        ingress_class: nginx
+        access_requirement: None

@@ -24,6 +24,10 @@ pub struct ServerSettings {
     pub host: String,
     pub port: u16,
     pub public_url: String,
+    /// Development-only frontend proxy target (for Vite), e.g. "http://localhost:5173"
+    /// When set, non-API frontend routes are proxied to this URL instead of serving embedded assets.
+    #[serde(default)]
+    pub frontend_dev_proxy_url: Option<String>,
 
     /// Cookie domain for session cookies (e.g., ".rise.dev" for all subdomains, "" for current host only)
     #[serde(default)]
@@ -281,7 +285,7 @@ pub struct AccessClass {
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum DeploymentControllerSettings {
     /// Kubernetes deployment controller
-    #[cfg(feature = "k8s")]
+    #[cfg(feature = "backend")]
     Kubernetes {
         /// Optional kubeconfig path (defaults to in-cluster or ~/.kube/config)
         #[serde(default)]
@@ -845,7 +849,7 @@ pub struct ExtensionsSettings {
 }
 
 /// Snowflake authentication configuration
-#[cfg(feature = "snowflake")]
+#[cfg(feature = "backend")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "auth_type", rename_all = "snake_case")]
 pub enum SnowflakeAuth {
@@ -861,7 +865,7 @@ pub enum SnowflakeAuth {
 }
 
 /// Private key source (path or inline PEM)
-#[cfg(feature = "snowflake")]
+#[cfg(feature = "backend")]
 #[derive(Debug, Clone, Deserialize)]
 #[serde(untagged)]
 pub enum PrivateKeySource {
@@ -873,7 +877,7 @@ pub enum PrivateKeySource {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ExtensionProviderConfig {
-    #[cfg(feature = "aws")]
+    #[cfg(feature = "backend")]
     AwsRdsProvisioner {
         region: String,
         instance_size: String,
@@ -913,7 +917,7 @@ pub enum ExtensionProviderConfig {
         secret_access_key: Option<String>,
     },
 
-    #[cfg(feature = "snowflake")]
+    #[cfg(feature = "backend")]
     #[serde(rename = "snowflake-oauth-provisioner")]
     SnowflakeOAuthProvisioner {
         /// Snowflake account identifier (e.g., "myorg.us-east-1")

@@ -1,46 +1,43 @@
-# Rise
+# Rise <img src="static/assets/favicon-32x32.png" height="32px" align="right"/> 
 
 <p align="center">
+    <p align="center">Rise is a Kubernetes-based platform for deploying containerized apps.</p>
+    <p align="center"><small><em>DISCLAIMER: Rise is an early work-in-progress project that mostly uses AI-generated code.</em></small></p>
     <img src="./screenshot.png" alt="Rise Web Dashboard Screenshot"/>
-    <p align="center">A Rust-based platform for deploying containerized applications with minimal configuration.</p>
 </p>
 
----
-
-&nbsp;
-
-> [!WARNING]
-> **Early Work in Progress**
->
-> This project is in a **very early experimental stage**. It is approximately **99% coded by Claude AI** (under technical guidance), which means:
-> - The codebase is actively evolving and may contain bugs or incomplete features
-> - APIs and interfaces may change frequently without notice
-> - Documentation may be out of sync with the current implementation
-> - Production use is **not recommended** at this stage
->
-> If you choose to use or experiment with Rise, please be aware that you're working with experimental software. Contributions, bug reports, and feedback are welcome, but please set expectations accordingly.
+[Go to Documentation → ](https://niklasrosenstein.github.io/rise/)
 
 ## What is Rise?
 
+  [pack]: https://buildpacks.io/docs/for-platform-operators/how-to/integrate-ci/pack/
+  [railpack]: https://railpack.com/
+
 Rise simplifies container deployment by providing:
+
 - **Simple CLI** for building and deploying apps
-- **Multi-tenant projects** with team collaboration
-- **OAuth2 authentication** via Dex
-- **Multiple registry backends** (AWS ECR, Docker)
-- **Service accounts** for CI/CD integration
+    - **Buildpack support** with [pack] and [railpack]
+    - **Enterprise ready** with support for corparate MITM proxies (handles `SSL_CERT_FILE` and `HTTPS_PROXY` forwarding)
 - **Web dashboard** for monitoring deployments
-
-## Features
-
 - **Project & Team Management**: Organize apps and collaborate with teams
-- **OAuth2/OIDC Authentication**: Secure authentication via Dex
-- **Multi-Registry Support**: AWS ECR, Docker Registry (Harbor, Quay, etc.)
-- **Service Accounts**: Workload identity for GitHub Actions, GitLab CI
-- **Multiple Build Backends**: Docker, Buildpacks, Railpack with build-time configuration
-- **Multi-Process Architecture**: Separate controllers for deployments, projects, ECR
-- **Embedded Web Frontend**: Single-binary deployment with built-in UI
+- **OAuth2/OIDC Authentication**: Secure authentication for Rise and deployed apps
+- **Multi-tenant projects** with team collaboration
+- **Automatic OCI repository provisioning**: Push images to AWS ACR with secure temporary credentials without per-project infrastructure setup
+- **Service Accounts**: Workload identity for GitHub Actions, GitLab CI, etc. to deploy from CI/CD
 
-## Quick Start
+## Install CLI from crates.io
+
+```bash
+# Install the CLI and backend from crates.io
+cargo install rise-deploy
+
+# Verify installation
+rise --version
+```
+
+Note that this does not include server code unless you use `--features cli,server`.
+
+## Local Development
 
 ### Prerequisites
 
@@ -51,109 +48,81 @@ Rise simplifies container deployment by providing:
 ### Start Services
 
 ```bash
+direnv allow
+# or else use `. .envrc`
+
 # Install development tools
 mise install
 
-# Start all services (postgres, dex, registry, backend)
+# Terminal (1): Start Minikube
+mise minikube:launch
+
+# Terminal (2): Start the frontend
+mise frontend:dev
+
+# Terminal (3) Start the backend (will also start required containers with docker compose)
 mise backend:run
 ```
 
 Services will be available at:
-- **Backend API**: http://localhost:3000
-- **Web UI**: http://localhost:3000
+- **Rise server**: http://localhost:3000
 - **PostgreSQL**: localhost:5432
+- **Minikube HTTP/HTTPS Ingress**: http://localhost:8080, https://localhost:8443
+- **Vite.js Frontend Server**: http://localhost:5731
+
+However, you need to configure your `/etc/hosts` on your host to ensure consistent name resolution between the involved network namespace:
+
+```
+127.0.0.1 rise-registry
+127.0.0.1 rise.local
+127.0.0.1 {project}.rise.local # One for each Rise-deployed project you want to access
+```
 
 **Default credentials**:
 - Email: `admin@example.com` or `test@example.com`
 - Password: `password`
 
-### Build and Use CLI
+## Deploy your first app
 
 ```bash
-# Build the CLI from source
-cargo build --bin rise
+# Build the CLI
+cargo build
+# `rise` binary should be available from direnv, otherwise use `cargo run`
 
-# The CLI is now available as 'rise' (if using direnv)
-# Or use the full path: ./target/debug/rise
+rise login # Add --url http://rise.local:3000 if you've logged into another backend before
 
-rise login
-rise project create my-app
-rise deployment create my-app --image nginx:latest
-
-# Local development
-rise run --project my-app  # Build and run locally with project env vars
-
-# Build with custom build-time variables (for build configuration)
-rise build myapp:latest -e NODE_ENV=production -e BUILD_VERSION=1.2.3
-
-# Or configure in rise.toml
-cat > rise.toml <<EOF
-[build]
-backend = "pack"
-env = ["NODE_ENV=production", "BP_NODE_VERSION=20"]
-EOF
+cd examples/hello-world
+rise project create hello-world
+rise deploy
 ```
 
-### Install from crates.io
+## Releasing
+
+**Prerequisites:**
+- [GitHub CLI (`gh`)](https://cli.github.com/) - authenticated via `gh auth login`
+- [Claude CLI](https://github.com/anthropics/anthropic-tools) - for AI-generated release notes (optional)
+
+**Create a new release:**
 
 ```bash
-# Install the CLI and backend from crates.io
-cargo install rise-deploy
+# Preview release notes
+./scripts/tag-version.sh --dry-run 0.14.0
 
-# Verify installation
-rise --version
+# Create and publish release
+./scripts/tag-version.sh 0.14.0
 ```
 
-## Documentation
-
-Full documentation is available in [`/docs`](./docs):
-
-- [Setup](docs/setup.md) - Quick start guide
-- [Local Development](docs/development.md) - Development workflow
-- [CLI Guide](docs/cli.md) - Command-line usage
-- [Authentication](docs/authentication.md) - OAuth2 & service accounts
-- [Deployments](docs/deployments.md) - Deployment lifecycle
-- [Building Images](docs/builds.md) - Docker, pack, railpack
-- [Configuration](docs/configuration.md) - Backend configuration
-- [Container Registries](docs/registries.md) - ECR, Docker, local
-- [Kubernetes](docs/kubernetes.md) - K8s deployment backend
-- [Production Deployment](docs/production.md) - Production setup
-- [Database](docs/database.md) - PostgreSQL & migrations
-- [Testing](docs/testing.md) - Testing strategies
-- [Troubleshooting](docs/troubleshooting.md) - Common issues
-
-## Architecture
-
-Rise uses a multi-process architecture:
-
-| Component | Purpose |
-|-----------|---------|
-| **rise-backend (server)** | HTTP API with embedded web frontend |
-| **rise-backend (controllers)** | Deployment, project, and ECR reconciliation |
-| **rise (CLI)** | Command-line interface |
-| **PostgreSQL** | Database for projects, teams, deployments |
-| **Dex** | OAuth2/OIDC provider for authentication |
-
-
-## Project Status
-
-**Production Ready**:
-- ✅ OAuth2 PKCE authentication
-- ✅ Project & team management
-- ✅ Service accounts (workload identity for CI/CD)
-- ✅ AWS ECR integration with Terraform module
-- ✅ Kubernetes controller with Ingress authentication
-- ✅ Build integrations (Docker, Buildpacks, Railpack)
-- ✅ Embedded web frontend
-- ✅ Deployment rollback and expiration
-
-**In Development**:
-- 🚧 Additional registry providers (GCR, ACR, GHCR)
-
-## Contributing
-
-Contributions are welcome! See [Local Development](docs/development.md) for development setup, code style, testing, and commit conventions.
+The script validates prerequisites, generates release notes, shows a plan, and after confirmation performs all git operations (commit, tag, push) and creates a GitHub release. CI then publishes to crates.io and builds Docker images.
 
 ## License
 
-[Add your license here]
+Licensed under either of
+
+- Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE) or http://www.apache.org/licenses/LICENSE-2.0)
+- MIT license ([LICENSE-MIT](LICENSE-MIT) or http://opensource.org/licenses/MIT)
+
+at your option.
+
+### Contribution
+
+Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in the work by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.

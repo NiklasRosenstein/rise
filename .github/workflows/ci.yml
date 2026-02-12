@@ -1,94 +1,123 @@
 name: CI
 
 on:
+  pull_request:
+    branches:
+      - main
   push:
     branches:
       - main
     tags:
-      - 'v*'
-  pull_request:
-    branches:
-      - main
+      - "v*"
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-  packages: write
 
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: niklasrosenstein/rise
-  BUILDER_IMAGE_NAME: niklasrosenstein/rise-builder
-
-# NOTE: Rust toolchain version (1.91.1) must be kept in sync with mise.toml
-# See: https://github.com/jdx/mise-action/issues/215
+  CHART_REGISTRY: ghcr.io/niklasrosenstein/charts
+  RUST_VERSION: "1.91.1"
 
 jobs:
-  sqlx-check:
-    name: Verify SQLX offline query data
+  prepare:
+    name: Prepare CI metadata
     runs-on: ubuntu-latest
+    outputs:
+      ci_version: ${{ steps.meta.outputs.ci_version }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+      is_trusted_pr: ${{ steps.meta.outputs.is_trusted_pr }}
+      should_publish: ${{ steps.meta.outputs.should_publish }}
+    steps:
+      - name: Compute metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          short_sha="${GITHUB_SHA::7}"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            pr_number="${{ github.event.pull_request.number }}"
+            ci_version="0.0.0-pr.${pr_number}+${short_sha}"
+            image_tag="pr-${pr_number}-${short_sha}"
+            is_trusted_pr="false"
+            if [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; then
+              is_trusted_pr="true"
+            fi
+          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
+            ci_version="0.0.0-main.${GITHUB_RUN_NUMBER}+${short_sha}"
+            image_tag="main-${short_sha}"
+            is_trusted_pr="false"
+          elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF#refs/tags/v}"
+            ci_version="${version}"
+            image_tag="${version}"
+            is_trusted_pr="false"
+          else
+            ci_version="0.0.0-dev.${GITHUB_RUN_NUMBER}+${short_sha}"
+            image_tag="dev-${short_sha}"
+            is_trusted_pr="false"
+          fi
+
+          should_publish="false"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            should_publish="true"
+          elif [[ "${GITHUB_EVENT_NAME}" == "pull_request" && "${is_trusted_pr}" == "true" ]]; then
+            should_publish="true"
+          fi
+
+          echo "ci_version=${ci_version}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${image_tag}" >> "$GITHUB_OUTPUT"
+          echo "is_trusted_pr=${is_trusted_pr}" >> "$GITHUB_OUTPUT"
+          echo "should_publish=${should_publish}" >> "$GITHUB_OUTPUT"
+
+          echo "CI Version: ${ci_version}"
+          echo "Image Tag: ${image_tag}"
+          echo "Is Trusted PR: ${is_trusted_pr}"
+          echo "Should Publish: ${should_publish}"
+
+  rust-quality:
+    name: Rust quality checks
+    runs-on: ubuntu-latest
+    needs: prepare
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Set up Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.91.1"
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Setup mise
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: cargo:sqlx-cli
-
-      - name: Check SQLX offline data is up to date
-        run: mise run sqlx:check
-
-  fmt:
-    name: Check code formatting
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: "1.91.1"
-          components: rustfmt
+          tools: cargo:sqlx-cli cargo:cargo-all-features
 
       - name: Check formatting
         run: cargo fmt --all -- --check
-
-  clippy:
-    name: Lint with Clippy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: "1.91.1"
-          components: clippy
-
-      - name: Setup mise
-        uses: jdx/mise-action@v2
-        with:
-          cache: true
-          tools: cargo:cargo-all-features
 
       - name: Run Clippy (all feature combinations)
         run: cargo all-features clippy --all-targets -- -D warnings
         env:
           SQLX_OFFLINE: true
 
-  test:
-    name: Run tests
+      - name: Verify SQLX offline query data
+        run: mise run sqlx:check
+
+  unit-tests-linux:
+    name: Linux tests
     runs-on: ubuntu-latest
+    needs: rust-quality
     services:
       postgres:
         image: postgres:16
@@ -108,9 +137,12 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Set up Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
+        uses: dtolnay/rust-toolchain@stable
         with:
-          toolchain: "1.91.1"
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
 
       - name: Setup mise
         uses: jdx/mise-action@v2
@@ -130,31 +162,8 @@ jobs:
         env:
           DATABASE_URL: postgres://postgres:postgres@localhost:5432/rise_test
 
-  build:
-    name: Build all targets
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: "1.91.1"
-
-      - name: Setup mise
-        uses: jdx/mise-action@v2
-        with:
-          cache: true
-          tools: cargo:cargo-all-features
-
-      - name: Build all targets (all feature combinations)
-        run: cargo all-features build --all-targets
-        env:
-          SQLX_OFFLINE: true
-
   helm-lint:
-    name: Lint Helm charts
+    name: Helm lint
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -174,37 +183,55 @@ jobs:
       - name: Run chart-testing (lint)
         run: ct lint --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise --validate-maintainers=false
 
-  # helm-test:
-  #   name: Test Helm charts
-  #   runs-on: ubuntu-latest
-  #   if: github.event_name == 'pull_request'
-  #   needs: helm-lint
-  #   steps:
-  #     - name: Checkout repository
-  #       uses: actions/checkout@v4
-  #       with:
-  #         fetch-depth: 0
-
-  #     - name: Setup mise
-  #       uses: jdx/mise-action@v2
-  #       with:
-  #         cache: true
-  #         tools: helm
-
-  #     - name: Set up chart-testing
-  #       uses: helm/chart-testing-action@v2.6.1
-
-  #     - name: Create kind cluster
-  #       uses: helm/kind-action@v1.10.0
-
-  #     - name: Run chart-testing (install)
-  #       run: ct install --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise
-
-  helm-package:
-    name: Package Helm charts
+  package-image:
+    name: Build and publish image
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: helm-lint
+    needs:
+      - prepare
+      - unit-tests-linux
+      - helm-lint
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        if: needs.prepare.outputs.should_publish == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and optionally push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          target: rise
+          push: ${{ needs.prepare.outputs.should_publish == 'true' }}
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.prepare.outputs.image_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          platforms: linux/amd64
+          provenance: false
+
+  package-helm:
+    name: Package and publish Helm chart
+    runs-on: ubuntu-latest
+    needs:
+      - prepare
+      - package-image
+    permissions:
+      contents: read
+      packages: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -215,19 +242,48 @@ jobs:
           cache: true
           tools: helm
 
-      - name: Package Helm chart
-        run: helm package helm/rise -d .helm-packages
+      - name: Patch chart version and appVersion for CI package
+        shell: bash
+        run: |
+          set -euo pipefail
+          ci_version="${{ needs.prepare.outputs.ci_version }}"
+          image_tag="${{ needs.prepare.outputs.image_tag }}"
+          sed -i "s/^version: .*/version: ${ci_version}/" helm/rise/Chart.yaml
+          sed -i "s/^appVersion: .*/appVersion: \"${image_tag}\"/" helm/rise/Chart.yaml
+          cat helm/rise/Chart.yaml
 
-      - name: Upload Helm chart package
+      - name: Package chart
+        run: |
+          mkdir -p .helm-packages
+          helm package helm/rise -d .helm-packages
+
+      - name: Upload chart artifact
         uses: actions/upload-artifact@v4
         with:
-          name: helm-chart
+          name: helm-chart-${{ needs.prepare.outputs.image_tag }}
           path: .helm-packages/*.tgz
 
-  docs-build:
-    name: Build documentation
+      - name: Login to GHCR for Helm OCI push
+        if: needs.prepare.outputs.should_publish == 'true'
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ${{ env.REGISTRY }} -u "${{ github.actor }}" --password-stdin
+
+      - name: Push chart to OCI registry
+        if: needs.prepare.outputs.should_publish == 'true'
+        run: |
+          chart_file=$(ls .helm-packages/*.tgz)
+          helm push "$chart_file" "oci://${{ env.CHART_REGISTRY }}"
+
+  e2e-minikube:
+    name: Minikube end-to-end smoke tests
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs:
+      - prepare
+      - package-image
+      - package-helm
+    permissions:
+      contents: read
+      packages: read
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -236,158 +292,10 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: cargo:mdbook
+          tools: minikube kubectl helm
 
-      - name: Build book
-        run: mdbook build
-
-      - name: Setup Pages
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/configure-pages@v4
-
-      - name: Upload artifact
-        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './book'
-
-  docs-deploy:
-    name: Deploy documentation
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: docs-build
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
-
-  docker-build:
-    name: Build and push Docker images
-    runs-on: ubuntu-latest
-    if: github.event_name == 'push' || startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Log in to GitHub Container Registry
-        if: github.event_name != 'pull_request'
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push Docker image
-        id: build
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          target: rise
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: |
-            type=gha
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
-          cache-to: |
-            type=gha,mode=max
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
-          platforms: linux/amd64
-          provenance: false
-
-      - name: Output build results
-        run: |
-          echo "Image digest: ${{ steps.build.outputs.digest }}"
-          echo "Build completed successfully!"
-
-      - name: Extract metadata (tags, labels) for Builder Docker image
-        id: meta-builder
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.BUILDER_IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=semver,pattern={{major}}
-            type=sha,prefix=sha-
-            type=raw,value=latest,enable={{is_default_branch}}
-
-      - name: Build and push Builder Docker image
-        id: build-builder
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          file: ./Dockerfile
-          target: rise-builder
-          push: ${{ github.event_name != 'pull_request' }}
-          tags: ${{ steps.meta-builder.outputs.tags }}
-          labels: ${{ steps.meta-builder.outputs.labels }}
-          cache-from: |
-            type=gha
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.BUILDER_IMAGE_NAME }}:buildcache
-          cache-to: |
-            type=gha,mode=max
-            type=registry,ref=${{ env.REGISTRY }}/${{ env.BUILDER_IMAGE_NAME }}:buildcache,mode=max
-          platforms: linux/amd64
-          provenance: false
-
-      - name: Output builder build results
-        run: |
-          echo "Builder image digest: ${{ steps.build-builder.outputs.digest }}"
-          echo "Builder build completed successfully!"
-
-  publish-crates:
-    name: Publish to crates.io
-    runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/v')
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Set up Rust toolchain
-        uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: "1.91.1"
-
-      - name: Verify version matches tag
-        run: |
-          TAG_VERSION=${GITHUB_REF#refs/tags/v}
-          CARGO_VERSION=$(cargo metadata --format-version=1 --no-deps | jq -r '.packages[0].version')
-          echo "Tag version: $TAG_VERSION"
-          echo "Cargo version: $CARGO_VERSION"
-          if [ "$TAG_VERSION" != "$CARGO_VERSION" ]; then
-            echo "::error::Tag version ($TAG_VERSION) doesn't match Cargo version ($CARGO_VERSION)"
-            exit 1
-          fi
-
-      - name: Authenticate with crates.io
-        uses: rust-lang/crates-io-auth-action@v1
-        id: auth
-
-      - name: Publish to crates.io
-        run: cargo publish --features cli
+      - name: Start Minikube and run smoke tests
         env:
-          CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token }}
+          RISE_IMAGE_REPOSITORY: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          RISE_IMAGE_TAG: ${{ needs.prepare.outputs.image_tag }}
+        run: bash scripts/ci/e2e-minikube.sh

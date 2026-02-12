@@ -22,6 +22,17 @@
 
 Single process running HTTP API server + controllers (deployment, project, ECR) as concurrent tokio tasks. Controllers enabled automatically based on config.
 
+### Networking Setup
+
+For comprehensive networking setup including Docker registry configuration, BuildKit network connectivity, Minikube configuration, and troubleshooting, see the **[Local Development Networking Guide](local-development.md)**.
+
+Key topics covered:
+- Name resolution (/etc/hosts configuration)
+- Docker registry insecure access
+- BuildKit network connectivity (`RISE_MANAGED_BUILDKIT_NETWORK_NAME`)
+- Minikube host aliases and registry access
+- Common networking issues and solutions
+
 ### Mise Tasks
 
 - `mise docs:serve` - Serve docs (port 3001)
@@ -77,6 +88,22 @@ Server config in `config/default.toml`.
 ```bash
 # Edit code
 mise backend:reload  # or: mise br
+```
+
+**Frontend (React + Vite):**
+```bash
+# Terminal 1
+mise backend:run
+
+# Terminal 2
+mise frontend:dev
+```
+
+Open the app at `http://rise.local:3000` during development. The backend proxies frontend routes to Vite (`http://localhost:5173`) when `server.frontend_dev_proxy_url` is configured.
+Add `rise.local` to `/etc/hosts` if needed:
+
+```text
+127.0.0.1 rise.local
 ```
 
 **CLI:**
@@ -140,7 +167,7 @@ Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`
 
 ## Troubleshooting
 
-See [Troubleshooting](troubleshooting.md) for common issues.
+See [Troubleshooting](user-guide/troubleshooting.md) for common issues.
 
 **Reset everything:**
 ```bash

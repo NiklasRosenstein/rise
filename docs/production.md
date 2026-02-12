@@ -166,6 +166,6 @@ FROM pg_tables WHERE schemaname = 'public' ORDER BY pg_total_relation_size(schem
 
 ## Next Steps
 
-- **Configure authentication**: See [Authentication](authentication.md)
+- **Configure authentication**: See [Authentication](user-guide/authentication.md)
 - **Set up CI/CD**: See [Authentication](authentication.md#service-accounts-workload-identity)
-- **Container registries**: See [Container Registries](registries.md)
+- **Container registries**: See [Container Registries](user-guide/registries.md)

@@ -1,9 +1,9 @@
 // Extension providers
 
-#[cfg(feature = "aws")]
+#[cfg(feature = "backend")]
 pub mod aws_rds;
 
 pub mod oauth;
 
-#[cfg(feature = "snowflake")]
+#[cfg(feature = "backend")]
 pub mod snowflake_oauth;

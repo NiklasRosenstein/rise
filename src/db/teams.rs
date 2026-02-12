@@ -312,6 +312,27 @@ pub async fn get_names_batch(
     Ok(records.into_iter().map(|r| (r.id, r.name)).collect())
 }
 
+/// Batch fetch full team details by IDs
+pub async fn get_teams_batch(
+    pool: &PgPool,
+    team_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, Team>> {
+    let teams = sqlx::query_as!(
+        Team,
+        r#"
+        SELECT id, name, idp_managed, created_at, updated_at
+        FROM teams
+        WHERE id = ANY($1)
+        "#,
+        team_ids
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to batch fetch teams")?;
+
+    Ok(teams.into_iter().map(|t| (t.id, t)).collect())
+}
+
 // ============================================================================
 // IdP Group Sync Functions
 // ============================================================================

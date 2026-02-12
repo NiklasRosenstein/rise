@@ -10,6 +10,17 @@ description = "A simple and powerful CLI for deploying containerized application
 # Always include the default cli feature to avoid testing empty feature set
 always_include_features = ["cli"]
 
+[package.metadata.dist]
+cargo-dist-version = "0.31.0"
+ci = []
+installers = []
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-apple-darwin",
+    "aarch64-apple-darwin",
+]
+pr-run-mode = "skip"
+
 [[bin]]
 name = "rise"
 path = "src/main.rs"
@@ -27,8 +38,8 @@ cli = [
     "dep:webbrowser",
     "dep:serde_ignored",
 ]
-server = [
-    "k8s",  # Server requires a deployment backend (currently k8s is the only one)
+backend = [
+    # Server core (former "server" feature)
     "dep:config",
     "dep:oauth2",
     "dep:openssl",
@@ -49,22 +60,17 @@ server = [
     "dep:serde_ignored",
     "dep:subtle",
     "dep:serde_urlencoded",
-]
-aws = [
-    "server",  # AWS features require server (which includes k8s)
+    # Kubernetes (former "k8s" feature)
+    "dep:kube",
+    "dep:k8s-openapi",
+    "dep:rustls",
+    # AWS services (former "aws" feature)
     "dep:aws-config",
     "dep:aws-sdk-ecr",
     "dep:aws-sdk-kms",
     "dep:aws-sdk-rds",
     "dep:aws-sdk-sts",
-]
-k8s = [
-    "dep:kube",
-    "dep:k8s-openapi",
-    "dep:rustls",
-]
-snowflake = [
-    "server",  # Snowflake extension requires server (which includes k8s)
+    # Snowflake (former "snowflake" feature)
     "dep:snowflake-connector-rs",
 ]
 
@@ -151,3 +157,8 @@ serde_urlencoded = { version = "0.7.1", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
