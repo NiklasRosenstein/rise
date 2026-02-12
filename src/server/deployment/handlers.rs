@@ -20,11 +20,6 @@ use crate::db::{
 use crate::server::registry::ImageTagType;
 use crate::server::state::AppState;
 
-/// Check if a user is an admin (based on email in config)
-fn is_admin(state: &AppState, user_email: &str) -> bool {
-    state.admin_users.contains(&user_email.to_string())
-}
-
 /// Check if user has permission to deploy to the project
 async fn check_deploy_permission(
     state: &AppState,
@@ -32,7 +27,7 @@ async fn check_deploy_permission(
     user: &User,
 ) -> Result<(), String> {
     // Admins have full access
-    if is_admin(state, &user.email) {
+    if state.is_admin(&user.email) {
         return Ok(());
     }
 

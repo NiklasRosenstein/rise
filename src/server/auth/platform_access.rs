@@ -21,11 +21,7 @@ pub struct ConfigBasedAccessChecker<'a> {
 impl<'a> PlatformAccessChecker for ConfigBasedAccessChecker<'a> {
     fn has_platform_access(&self, user: &User, idp_groups: Option<&[String]>) -> bool {
         // Admin users always have platform access
-        if self
-            .admin_users
-            .iter()
-            .any(|admin| admin.eq_ignore_ascii_case(&user.email))
-        {
+        if super::admin::is_admin_user(self.admin_users, &user.email) {
             return true;
         }
 

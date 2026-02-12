@@ -40,21 +40,24 @@ pub async fn add_custom_domain(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
+    // Check permission (admin bypass)
+    if !state.is_admin(&user.email) {
+        let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to check project access: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
-    if !has_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
+        if !can_access {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "You do not have access to this project".to_string(),
+            ));
+        }
     }
 
     // Validate that the custom domain doesn't overlap with project default domain patterns
@@ -173,18 +176,21 @@ pub async fn list_custom_domains(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
+    // Check permission (admin bypass)
+    if !state.is_admin(&user.email) {
+        let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to check project access: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
-    if !has_access {
-        return Err((StatusCode::NOT_FOUND, "Project not found".to_string()));
+        if !can_access {
+            return Err((StatusCode::NOT_FOUND, "Project not found".to_string()));
+        }
     }
 
     // Get all custom domains for the project
@@ -233,18 +239,21 @@ pub async fn get_custom_domain(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
+    // Check permission (admin bypass)
+    if !state.is_admin(&user.email) {
+        let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to check project access: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
-    if !has_access {
-        return Err((StatusCode::NOT_FOUND, "Project not found".to_string()));
+        if !can_access {
+            return Err((StatusCode::NOT_FOUND, "Project not found".to_string()));
+        }
     }
 
     // Get the custom domain
@@ -289,21 +298,24 @@ pub async fn delete_custom_domain(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
+    // Check permission (admin bypass)
+    if !state.is_admin(&user.email) {
+        let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to check project access: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
-    if !has_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
+        if !can_access {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "You do not have access to this project".to_string(),
+            ));
+        }
     }
 
     // Delete the custom domain
@@ -395,21 +407,24 @@ pub async fn set_primary_domain(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
+    // Check permission (admin bypass)
+    if !state.is_admin(&user.email) {
+        let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to check project access: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
-    if !has_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
+        if !can_access {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "You do not have access to this project".to_string(),
+            ));
+        }
     }
 
     // Set the domain as primary
@@ -500,21 +515,24 @@ pub async fn unset_primary_domain(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
+    // Check permission (admin bypass)
+    if !state.is_admin(&user.email) {
+        let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to check project access: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
-    if !has_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
+        if !can_access {
+            return Err((
+                StatusCode::FORBIDDEN,
+                "You do not have access to this project".to_string(),
+            ));
+        }
     }
 
     // Unset the primary status

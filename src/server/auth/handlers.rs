@@ -655,7 +655,7 @@ pub async fn me(
 ) -> Result<Json<MeResponse>, (StatusCode, String)> {
     // User is injected by auth middleware
     tracing::debug!("GET /me: user_id={}, email={}", user.id, user.email);
-    let is_admin = state.admin_users.contains(&user.email);
+    let is_admin = state.is_admin(&user.email);
     Ok(Json(MeResponse {
         id: user.id.to_string(),
         email: user.email,

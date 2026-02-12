@@ -1,3 +1,4 @@
+pub mod admin;
 pub mod cookie_helpers;
 pub mod group_sync;
 pub mod handlers;

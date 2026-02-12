@@ -586,24 +586,24 @@ export function EnvVarsList({ projectName, deploymentId }) {
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingEnvVar, setEditingEnvVar] = useState(null);
-    const [formData, setFormData] = useState({ key: '', value: '', is_secret: false, is_protected: true });
+    const [formData, setFormData] = useState({ key: '', value: '', type: 'plain' });
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [envVarToDelete, setEnvVarToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
     const [saving, setSaving] = useState(false);
     const { showToast } = useToast();
-    const getVarType = (isSecret, isProtected) => {
+
+    // Convert API representation to UI type
+    const apiToType = (isSecret, isProtected) => {
         if (!isSecret) return 'plain';
         return isProtected ? 'protected' : 'secret';
     };
 
-    const setVarType = (type) => {
-        setFormData((prev) => ({
-            ...prev,
-            is_secret: type !== 'plain',
-            is_protected: type === 'protected',
-        }));
-    };
+    // Convert UI type to API representation
+    const typeToApi = (type) => ({
+        is_secret: type !== 'plain',
+        is_protected: type === 'protected',
+    });
 
     const loadEnvVars = useCallback(async () => {
         try {
@@ -624,13 +624,17 @@ export function EnvVarsList({ projectName, deploymentId }) {
 
     const handleAddClick = () => {
         setEditingEnvVar(null);
-        setFormData({ key: '', value: '', is_secret: false, is_protected: true });
+        setFormData({ key: '', value: '', type: 'plain' });
         setIsModalOpen(true);
     };
 
     const handleEditClick = (envVar) => {
         setEditingEnvVar(envVar);
-        setFormData({ key: envVar.key, value: envVar.is_secret ? '' : envVar.value, is_secret: envVar.is_secret, is_protected: envVar.is_protected });
+        setFormData({
+            key: envVar.key,
+            value: envVar.is_secret ? '' : envVar.value,
+            type: apiToType(envVar.is_secret, envVar.is_protected)
+        });
         setIsModalOpen(true);
     };
 
@@ -647,7 +651,8 @@ export function EnvVarsList({ projectName, deploymentId }) {
 
         setSaving(true);
         try {
-            await api.setEnvVar(projectName, formData.key, formData.value, formData.is_secret, formData.is_protected);
+            const { is_secret, is_protected } = typeToApi(formData.type);
+            await api.setEnvVar(projectName, formData.key, formData.value, is_secret, is_protected);
             showToast(`Environment variable ${formData.key} ${editingEnvVar ? 'updated' : 'created'} successfully`, 'success');
             setIsModalOpen(false);
             loadEnvVars();
@@ -677,7 +682,6 @@ export function EnvVarsList({ projectName, deploymentId }) {
 
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-600 dark:text-red-400">Error loading environment variables: {error}</p>;
-    const selectedVarType = getVarType(formData.is_secret, formData.is_protected);
 
     return (
         <div>
@@ -744,18 +748,15 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                     </div>
                                 </MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm">
-                                    {env.is_secret ? (
-                                        <div className="flex gap-1">
-                                            <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
-                                            {env.is_protected && (
-                                                <span className="bg-purple-600 text-white text-xs font-semibold px-2 py-1 rounded-full uppercase flex items-center gap-1">
-                                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
-                                                        <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
-                                                    </svg>
-                                                    protected
-                                                </span>
-                                            )}
-                                        </div>
+                                    {env.is_protected ? (
+                                        <span className="bg-purple-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase inline-flex items-center gap-1">
+                                            <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
+                                            </svg>
+                                            protected
+                                        </span>
+                                    ) : env.is_secret ? (
+                                        <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
                                     ) : (
                                         <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">plain</span>
                                     )}
@@ -827,8 +828,8 @@ export function EnvVarsList({ projectName, deploymentId }) {
                     <SegmentedRadioGroup
                         label="Type"
                         name="env-var-type"
-                        value={selectedVarType}
-                        onChange={setVarType}
+                        value={formData.type}
+                        onChange={(type) => setFormData({ ...formData, type })}
                         ariaLabel="Variable type"
                         options={[
                             { value: 'plain', label: 'PLAIN' },
