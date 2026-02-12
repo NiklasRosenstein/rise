@@ -43,3 +43,41 @@ export function EmptyState({
     );
 }
 
+export function PlatformAccessDenied({ userEmail }: { userEmail: string }) {
+    return (
+        <div className="mono-login-wrap">
+            <div className="mono-login-card">
+                <div className="text-center mb-8">
+                    <div
+                        className="mono-login-logo svg-mask mx-auto mb-4"
+                        aria-hidden="true"
+                        style={{
+                            maskImage: 'url(/assets/logo.svg)',
+                            WebkitMaskImage: 'url(/assets/logo.svg)',
+                        }}
+                    ></div>
+                    <div className="text-4xl mb-4" style={{ color: '#ff6b6b' }}>[!]</div>
+                    <h1 className="text-2xl font-bold mb-4" style={{ color: '#ff6b6b' }}>Platform Access Denied</h1>
+                </div>
+
+                <p className="text-gray-300 mb-4 text-center">
+                    Your account is not authorized to access Rise platform features.
+                </p>
+
+                <p className="text-gray-300 mb-6 text-center">
+                    You can authenticate to access deployed applications, but you cannot use
+                    the Rise Dashboard, CLI, or API.
+                </p>
+
+                <div className="bg-gray-900 border border-gray-700 p-3 mb-6 text-center font-mono text-sm break-all">
+                    {userEmail}
+                </div>
+
+                <p className="text-gray-500 text-sm text-center">
+                    If you believe this is an error, please contact your administrator.
+                </p>
+            </div>
+        </div>
+    );
+}
+
