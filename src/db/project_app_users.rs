@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use sqlx::PgPool;
 use uuid::Uuid;
 
 /// Add a user to project's app users (view-only access to deployed app)
@@ -128,16 +127,20 @@ where
 
 /// Check if a user can access the deployed application (via app users or app teams)
 /// This is for ingress auth only - it does NOT grant project management permissions
-pub async fn user_can_access_app(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> Result<bool> {
+pub async fn user_can_access_app(
+    pool: &sqlx::PgPool,
+    project_id: Uuid,
+    user_id: Uuid,
+) -> Result<bool> {
     let result = sqlx::query!(
         r#"
         SELECT EXISTS(
             -- Direct app user
             SELECT 1 FROM project_app_users pau
             WHERE pau.project_id = $1 AND pau.user_id = $2
-            
+
             UNION
-            
+
             -- Team member of an app team
             SELECT 1 FROM project_app_teams pat
             INNER JOIN team_members tm ON tm.team_id = pat.team_id

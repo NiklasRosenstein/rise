@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { Fragment, useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
 import { copyToClipboard, formatISO8601, formatRelativeTimeRounded } from '../lib/utils';
@@ -8,6 +8,7 @@ import { Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, Se
 import { ProjectTable } from '../components/project-table';
 import { ActiveDeploymentsSummary, DeploymentDetail, DeploymentsList } from './deployments';
 import { DomainsList, EnvVarsList, ExtensionDetailPage, ExtensionsList, ServiceAccountsList } from './resources';
+import { MonoTable, MonoTableBody, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
 import { useRowKeyboardNavigation, useSortableData } from '../lib/table';
 
@@ -158,9 +159,7 @@ export function ProjectsList({ openCreate = false }) {
                 onKeyDown={onKeyDown}
                 activeIndex={activeIndex}
                 setActiveIndex={setActiveIndex}
-                emptyMessage="No projects found."
-                emptyActionLabel="Create Project"
-                onEmptyAction={handleCreateClick}
+                emptyMessage="No projects."
             />
 
             <Modal
@@ -245,9 +244,6 @@ export function ProjectDetail({ projectName, initialTab }) {
     const [activeTab, setActiveTab] = useState(initialTab || 'overview');
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [deleting, setDeleting] = useState(false);
-    const [editingAccessClass, setEditingAccessClass] = useState(false);
-    const [newAccessClass, setNewAccessClass] = useState(null);
-    const [updatingAccessClass, setUpdatingAccessClass] = useState(false);
     const [accessClasses, setAccessClasses] = useState([]);
     const [editingOwner, setEditingOwner] = useState(false);
     const [ownerType, setOwnerType] = useState('user');
@@ -289,56 +285,16 @@ export function ProjectDetail({ projectName, initialTab }) {
     };
 
     const getOwnerInfo = (projectData) => {
-        if (!projectData) return null;
-
-        if (projectData.owner_user_email) {
-            return { type: 'user', label: projectData.owner_user_email };
-        }
-        if (projectData.owner_team_name) {
-            return { type: 'team', label: projectData.owner_team_name, teamId: projectData.owner_team_id || null };
-        }
-
+        if (!projectData?.owner) return null;
         const owner = projectData.owner;
-        if (!owner) return null;
-
-        if (typeof owner === 'string') {
-            if (owner.startsWith('user:')) return { type: 'user', label: owner.slice(5) };
-            if (owner.startsWith('team:')) return { type: 'team', label: owner.slice(5), teamId: null };
-            return { type: 'user', label: owner };
-        }
-
-        if (owner.user_email) return { type: 'user', label: owner.user_email };
-        if (owner.team_name) return { type: 'team', label: owner.team_name, teamId: owner.team_id || owner.team || null };
         if (owner.email) return { type: 'user', label: owner.email, userId: owner.id || null };
         if (owner.name) return { type: 'team', label: owner.name, teamId: owner.id || null };
-
-        if (owner.user && typeof owner.user === 'object' && owner.user.email) {
-            return { type: 'user', label: owner.user.email, userId: owner.user.id || owner.user.user_id || null };
-        }
-        if (owner.team && typeof owner.team === 'object' && owner.team.name) {
-            return { type: 'team', label: owner.team.name, teamId: owner.team.id || owner.team.team_id || null };
-        }
-
-        if (owner.user && typeof owner.user === 'string') {
-            return { type: 'user', label: owner.user, userId: owner.user };
-        }
-        if (owner.team && typeof owner.team === 'string') {
-            return { type: 'team', label: owner.team, teamId: owner.team };
-        }
-
-        if (projectData.owner_user) {
-            return { type: 'user', label: String(projectData.owner_user).replace(/^user:/, ''), userId: projectData.owner_user };
-        }
-        if (projectData.owner_team) {
-            return { type: 'team', label: String(projectData.owner_team).replace(/^team:/, ''), teamId: projectData.owner_team };
-        }
-
         return null;
     };
 
     const loadProject = useCallback(async () => {
         try {
-            const data = await api.getProject(projectName, { expand: 'owner' });
+            const data = await api.getProject(projectName);
             setProject(data);
         } catch (err) {
             setError(err.message);
@@ -412,41 +368,6 @@ export function ProjectDetail({ projectName, initialTab }) {
         }
     };
 
-    const handleEditAccessClass = () => {
-        setNewAccessClass(project.access_class);
-        setEditingAccessClass(true);
-    };
-
-    const handleCancelEditAccessClass = () => {
-        setEditingAccessClass(false);
-        setNewAccessClass(null);
-    };
-
-    const handleSaveAccessClass = async () => {
-        if (!project || !newAccessClass || newAccessClass === project.access_class) {
-            setEditingAccessClass(false);
-            return;
-        }
-
-        setUpdatingAccessClass(true);
-        setDetailActionStatus(`Updating access class for ${project.name}...`);
-        try {
-            await api.updateProject(project.name, { access_class: newAccessClass });
-            const ac = accessClasses.find(a => a.id === newAccessClass);
-            showToast(`Project access class updated to ${ac ? ac.display_name : newAccessClass}`, 'success');
-            setDetailActionStatus(`Updated access class to ${ac ? ac.display_name : newAccessClass}.`);
-            // Reload project to get updated data
-            const updatedProject = await api.getProject(projectName, { expand: 'owner' });
-            setProject(updatedProject);
-            setEditingAccessClass(false);
-        } catch (err) {
-            showToast(`Failed to update access class: ${err.message}`, 'error');
-            setDetailActionStatus(`Failed to update access class for ${project.name}.`);
-        } finally {
-            setUpdatingAccessClass(false);
-        }
-    };
-
     const handleEditOwner = () => {
         const currentOwner = getOwnerInfo(project);
         const initialType = currentOwner?.type || 'user';
@@ -454,9 +375,9 @@ export function ProjectDetail({ projectName, initialTab }) {
         setOwnerUserEmail(initialType === 'user' ? (currentOwner?.label || '') : '');
         if (initialType === 'team' && teams.length > 0) {
             const matchingTeam = teams.find((t) => t.name === currentOwner?.label || t.id === currentOwner?.teamId);
-            setOwnerTeamId(matchingTeam?.id || currentOwner?.teamId || teams[0]?.id || '');
+            setOwnerTeamId(matchingTeam?.id || currentOwner?.teamId || '');
         } else {
-            setOwnerTeamId(teams[0]?.id || '');
+            setOwnerTeamId('');
         }
         setEditingOwner(true);
     };
@@ -486,19 +407,13 @@ export function ProjectDetail({ projectName, initialTab }) {
         try {
             let ownerPayload;
             if (ownerType === 'user') {
-                const lookup = await api.lookupUsers([ownerUserEmail.trim()]);
-                if (!lookup?.users?.length) {
-                    showToast(`User not found: ${ownerUserEmail.trim()}`, 'error');
-                    setDetailActionStatus(`Failed to transfer ownership for ${project.name}.`);
-                    return;
-                }
-                ownerPayload = { user: lookup.users[0].id };
+                ownerPayload = { user: ownerUserEmail.trim() };
             } else {
                 ownerPayload = { team: ownerTeamId };
             }
 
             await api.updateProject(project.name, { owner: ownerPayload });
-            const updatedProject = await api.getProject(projectName, { expand: 'owner' });
+            const updatedProject = await api.getProject(projectName);
             setProject(updatedProject);
             showToast('Project owner updated', 'success');
             setDetailActionStatus(`Ownership transferred for ${project.name}.`);
@@ -535,103 +450,6 @@ export function ProjectDetail({ projectName, initialTab }) {
                 <div className={`mono-status-card mono-status-card-${getStatusTone(project.status)}`}>
                     <span>status</span>
                     <strong>{project.status}</strong>
-                </div>
-                <div>
-                    <span>primary_url</span>
-                    <strong className="mono-copyable-value">
-                        <span>
-                            {project.primary_url ? (
-                                <a href={project.primary_url} target="_blank" rel="noopener noreferrer" className="underline uppercase">
-                                    {project.primary_url}
-                                </a>
-                            ) : '-'}
-                        </span>
-                        {project.primary_url && (
-                            <button
-                                type="button"
-                                className="mono-copy-button"
-                                title="Copy primary URL"
-                                aria-label="Copy primary URL"
-                                onClick={() => handleCopy(project.primary_url, 'Primary URL')}
-                            >
-                                <span
-                                    className="mono-copy-icon svg-mask"
-                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
-                                />
-                            </button>
-                        )}
-                    </strong>
-                </div>
-                <div>
-                    <span>access</span>
-                    {!editingAccessClass ? (
-                        <strong className="mono-copyable-value">
-                            <span>{project.access_class}</span>
-                            <button
-                                type="button"
-                                className="mono-copy-button"
-                                title="Edit access class"
-                                aria-label="Edit access class"
-                                onClick={handleEditAccessClass}
-                            >
-                                <svg className="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M12 20h9" />
-                                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
-                                </svg>
-                            </button>
-                        </strong>
-                    ) : (
-                        <div className="flex flex-wrap items-center gap-2">
-                            <select
-                                value={newAccessClass}
-                                onChange={(e) => setNewAccessClass(e.target.value)}
-                                className="bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                                disabled={updatingAccessClass}
-                            >
-                                {accessClasses.map(ac => (
-                                    <option key={ac.id} value={ac.id}>
-                                        {ac.display_name}
-                                    </option>
-                                ))}
-                            </select>
-                            <Button
-                                variant="primary"
-                                size="sm"
-                                onClick={handleSaveAccessClass}
-                                loading={updatingAccessClass}
-                                className="!py-1 !px-2 !text-xs"
-                            >
-                                Save
-                            </Button>
-                            <Button
-                                variant="secondary"
-                                size="sm"
-                                onClick={handleCancelEditAccessClass}
-                                disabled={updatingAccessClass}
-                                className="!py-1 !px-2 !text-xs"
-                            >
-                                Cancel
-                            </Button>
-                        </div>
-                    )}
-                </div>
-                <div>
-                    <span>created</span>
-                    <strong className="mono-copyable-value" title={formatISO8601(project.created)}>
-                        <span>{formatRelativeTimeRounded(project.created)}</span>
-                        <button
-                            type="button"
-                            className="mono-copy-button"
-                            title="Copy created timestamp (ISO8601)"
-                            aria-label="Copy created timestamp (ISO8601)"
-                            onClick={() => handleCopy(formatISO8601(project.created), 'Created timestamp')}
-                        >
-                            <span
-                                className="mono-copy-icon svg-mask"
-                                style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
-                            />
-                        </button>
-                    </strong>
                 </div>
                 <div>
                     <span>owner</span>
@@ -678,19 +496,82 @@ export function ProjectDetail({ projectName, initialTab }) {
                         </button>
                     </strong>
                 </div>
+                <div
+                    className="cursor-pointer"
+                    onClick={() => changeTab('access')}
+                    title="Edit access settings"
+                >
+                    <span>access</span>
+                    <strong className="inline-flex items-center gap-3">
+                        <span>{accessClasses.find(ac => ac.id === project.access_class)?.display_name || project.access_class}</span>
+                        <span className="text-gray-400">|</span>
+                        <span className="inline-flex items-center gap-1">
+                            <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                                <path d="M7 10a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm6 0a3 3 0 1 0-3-3 3 3 0 0 0 3 3ZM1.5 16.5a5.5 5.5 0 0 1 11 0v.5h-11Zm12 0a5.5 5.5 0 0 1 5-5.48 5.53 5.53 0 0 1 .5.02V17h-5.5Z" />
+                            </svg>
+                            {project.app_teams?.length || 0}
+                        </span>
+                        <span className="inline-flex items-center gap-1">
+                            <span
+                                className="w-3 h-3 svg-mask inline-block"
+                                aria-hidden="true"
+                                style={{
+                                    maskImage: 'url(/assets/user.svg)',
+                                    WebkitMaskImage: 'url(/assets/user.svg)',
+                                }}
+                            />
+                            {project.app_users?.length || 0}
+                        </span>
+                    </strong>
+                </div>
                 <div>
-                    <span>custom_domains</span>
-                    <strong>
-                        {project.custom_domain_urls && project.custom_domain_urls.length > 0
-                            ? project.custom_domain_urls.map((url, idx) => (
-                                <Fragment key={url}>
-                                    {idx > 0 ? ', ' : ''}
-                                    <a href={url} target="_blank" rel="noopener noreferrer" className="underline uppercase">
-                                        {url}
-                                    </a>
-                                </Fragment>
-                            ))
-                            : '-'}
+                    <span>created</span>
+                    <strong className="mono-copyable-value" title={formatISO8601(project.created)}>
+                        <span>{formatRelativeTimeRounded(project.created)}</span>
+                        <button
+                            type="button"
+                            className="mono-copy-button"
+                            title="Copy created timestamp (ISO8601)"
+                            aria-label="Copy created timestamp (ISO8601)"
+                            onClick={() => handleCopy(formatISO8601(project.created), 'Created timestamp')}
+                        >
+                            <span
+                                className="mono-copy-icon svg-mask"
+                                style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                            />
+                        </button>
+                    </strong>
+                </div>
+                <div
+                    className="cursor-pointer"
+                    onClick={() => changeTab('domains')}
+                    title="View domains"
+                >
+                    <span>primary_url</span>
+                    <strong className="mono-copyable-value">
+                        <span>
+                            {project.primary_url ? (
+                                <a href={project.primary_url} target="_blank" rel="noopener noreferrer" className="underline uppercase"
+                                    onClick={(e) => e.stopPropagation()}
+                                >
+                                    {project.primary_url}
+                                </a>
+                            ) : '-'}
+                        </span>
+                        {project.primary_url && (
+                            <button
+                                type="button"
+                                className="mono-copy-button"
+                                title="Copy primary URL"
+                                aria-label="Copy primary URL"
+                                onClick={(e) => { e.stopPropagation(); handleCopy(project.primary_url, 'Primary URL'); }}
+                            >
+                                <span
+                                    className="mono-copy-icon svg-mask"
+                                    style={{ maskImage: 'url(/assets/copy.svg)', WebkitMaskImage: 'url(/assets/copy.svg)' }}
+                                />
+                            </button>
+                        )}
                     </strong>
                 </div>
             </div>
@@ -733,6 +614,12 @@ export function ProjectDetail({ projectName, initialTab }) {
                     >
                         Extensions
                     </button>
+                    <button
+                        className={`mono-tab-button ${activeTab === 'access' ? 'active' : ''}`}
+                        onClick={() => changeTab('access')}
+                    >
+                        Access
+                    </button>
                 </div>
             </div>
 
@@ -760,12 +647,17 @@ export function ProjectDetail({ projectName, initialTab }) {
                 )}
                 {activeTab === 'domains' && (
                     <div>
-                        <DomainsList projectName={projectName} />
+                        <DomainsList projectName={projectName} defaultUrl={project.default_url} />
                     </div>
                 )}
                 {activeTab === 'extensions' && (
                     <div>
                         <ExtensionsList projectName={projectName} />
+                    </div>
+                )}
+                {activeTab === 'access' && (
+                    <div>
+                        <AppUsersList projectName={projectName} project={project} accessClasses={accessClasses} onProjectUpdated={loadProject} />
                     </div>
                 )}
             </div>
@@ -811,19 +703,17 @@ export function ProjectDetail({ projectName, initialTab }) {
                             required
                         />
                     ) : (
-                        <FormField
-                            label="Owner Team"
-                            id="project-owner-team"
-                            type="select"
-                            value={ownerTeamId}
-                            onChange={(e) => setOwnerTeamId(e.target.value)}
-                            required
-                        >
-                            <option value="" disabled>Select a team</option>
-                            {teams.map((team) => (
-                                <option key={team.id} value={team.id}>{team.name}</option>
-                            ))}
-                        </FormField>
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                Owner Team
+                            </label>
+                            <Combobox
+                                value={ownerTeamId}
+                                onChange={setOwnerTeamId}
+                                options={teams.map(t => ({ value: t.id, label: t.name }))}
+                                placeholder="Search teams..."
+                            />
+                        </div>
                     )}
 
                     <ModalActions>
@@ -837,5 +727,316 @@ export function ProjectDetail({ projectName, initialTab }) {
                 </ModalSection>
             </Modal>
         </section>
+    );
+}
+
+// Combobox component for team selection with autocomplete
+function Combobox({ value, onChange, options, placeholder = '', disabled = false, loading = false }) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [inputText, setInputText] = useState('');
+    const ref = useRef(null);
+
+    const selectedOption = options.find(opt => opt.value === value);
+
+    const filteredOptions = options.filter(opt =>
+        opt.label.toLowerCase().includes(inputText.toLowerCase())
+    );
+
+    useEffect(() => {
+        function handleClickOutside(e) {
+            if (ref.current && !ref.current.contains(e.target)) {
+                setIsOpen(false);
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    // Sync input text when value changes externally (e.g. selection or reset)
+    useEffect(() => {
+        if (selectedOption) {
+            setInputText(selectedOption.label);
+        } else if (!value) {
+            setInputText('');
+        }
+    }, [value, selectedOption]);
+
+    return (
+        <div ref={ref} className="relative">
+            <input
+                type="text"
+                className="mono-input w-full"
+                placeholder={placeholder}
+                value={inputText}
+                onChange={(e) => {
+                    setInputText(e.target.value);
+                    // Clear the selected value when the user types freely
+                    if (value) onChange('');
+                    if (!isOpen) setIsOpen(true);
+                }}
+                onFocus={() => {
+                    setIsOpen(true);
+                }}
+                disabled={disabled || loading}
+            />
+            {isOpen && (
+                <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded shadow-lg max-h-48 overflow-y-auto">
+                    {loading ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">Loading...</div>
+                    ) : filteredOptions.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">No matches</div>
+                    ) : (
+                        filteredOptions.map(opt => (
+                            <button
+                                key={opt.value}
+                                type="button"
+                                className={`w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700 ${
+                                    opt.value === value ? 'bg-gray-100 dark:bg-gray-700' : ''
+                                }`}
+                                onClick={() => {
+                                    onChange(opt.value);
+                                    setInputText(opt.label);
+                                    setIsOpen(false);
+                                }}
+                            >
+                                {opt.label}
+                            </button>
+                        ))
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+// Access tab component - manages access class and app-level user/team access
+function AppUsersList({ projectName, project, accessClasses, onProjectUpdated }) {
+    const [newUserEmail, setNewUserEmail] = useState('');
+    const [selectedTeamId, setSelectedTeamId] = useState('');
+    const [teams, setTeams] = useState([]);
+    const { showToast } = useToast();
+
+    const appUsers = project?.app_users || [];
+    const appTeams = project?.app_teams || [];
+
+    useEffect(() => {
+        async function loadTeams() {
+            try {
+                const data = await api.getTeams();
+                setTeams(data || []);
+            } catch (err) {
+                console.error('Failed to load teams:', err);
+            }
+        }
+        loadTeams();
+    }, []);
+
+    const handleChangeAccessClass = async (newAccessClass) => {
+        if (!project || !newAccessClass || newAccessClass === project.access_class) return;
+
+        try {
+            await api.updateProject(projectName, { access_class: newAccessClass });
+            const ac = accessClasses.find(a => a.id === newAccessClass);
+            showToast(`Access class updated to ${ac ? ac.display_name : newAccessClass}`, 'success');
+            onProjectUpdated();
+        } catch (err) {
+            showToast(`Failed to update access class: ${err.message}`, 'error');
+        }
+    };
+
+    const handleAddUser = async () => {
+        if (!newUserEmail.trim()) {
+            showToast('User email is required', 'error');
+            return;
+        }
+
+        try {
+            const currentUserEmails = appUsers.map(u => u.email);
+            await api.updateProject(projectName, {
+                app_users: [...currentUserEmails, newUserEmail.trim()]
+            });
+            showToast(`Added app user ${newUserEmail}`, 'success');
+            setNewUserEmail('');
+            onProjectUpdated();
+        } catch (err) {
+            showToast(`Failed to add app user: ${err.message}`, 'error');
+        }
+    };
+
+    const handleRemoveUser = async (email) => {
+        try {
+            const updatedEmails = appUsers.filter(u => u.email !== email).map(u => u.email);
+            await api.updateProject(projectName, { app_users: updatedEmails });
+            showToast(`Removed app user ${email}`, 'success');
+            onProjectUpdated();
+        } catch (err) {
+            showToast(`Failed to remove app user: ${err.message}`, 'error');
+        }
+    };
+
+    const handleAddTeam = async () => {
+        if (!selectedTeamId) {
+            showToast('Team selection is required', 'error');
+            return;
+        }
+
+        const selectedTeam = teams.find(t => t.id === selectedTeamId);
+        try {
+            const currentTeamIds = appTeams.map(t => t.id);
+            await api.updateProject(projectName, {
+                app_teams: [...currentTeamIds, selectedTeamId]
+            });
+            showToast(`Added app team ${selectedTeam?.name || ''}`, 'success');
+            onProjectUpdated();
+        } catch (err) {
+            showToast(`Failed to add app team: ${err.message}`, 'error');
+        }
+    };
+
+    const handleRemoveTeam = async (teamId, teamName) => {
+        try {
+            const updatedTeamIds = appTeams.filter(t => t.id !== teamId).map(t => t.id);
+            await api.updateProject(projectName, { app_teams: updatedTeamIds });
+            showToast(`Removed app team ${teamName}`, 'success');
+            onProjectUpdated();
+        } catch (err) {
+            showToast(`Failed to remove app team: ${err.message}`, 'error');
+        }
+    };
+
+    return (
+        <div>
+            <div className="mb-6 flex items-center gap-3">
+                <SegmentedRadioGroup
+                    label="Access Class"
+                    name="access-class"
+                    value={project?.access_class}
+                    onChange={handleChangeAccessClass}
+                    options={accessClasses.map(ac => ({ value: ac.id, label: ac.display_name }))}
+                />
+                {accessClasses.find(ac => ac.id === project?.access_class)?.description && (
+                    <span className="text-sm text-gray-400 self-end mb-1">
+                        {accessClasses.find(ac => ac.id === project?.access_class).description}
+                    </span>
+                )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <div>
+                    <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-lg font-bold">Users ({appUsers.length})</h4>
+                    </div>
+                    {appUsers.length > 0 ? (
+                        <MonoTableFrame className="mb-4">
+                            <MonoTable>
+                                <MonoTableHead>
+                                    <tr>
+                                        <MonoTh className="px-6 py-3 text-left">Email</MonoTh>
+                                        <MonoTh className="px-6 py-3 text-right">Actions</MonoTh>
+                                    </tr>
+                                </MonoTableHead>
+                                <MonoTableBody>
+                                    {appUsers.map(user => (
+                                        <MonoTableRow key={user.id} interactive className="transition-colors">
+                                            <MonoTd className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{user.email}</MonoTd>
+                                            <MonoTd className="px-6 py-4">
+                                                <div className="flex justify-end">
+                                                    <Button
+                                                        variant="danger"
+                                                        size="sm"
+                                                        onClick={() => handleRemoveUser(user.email)}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </div>
+                                            </MonoTd>
+                                        </MonoTableRow>
+                                    ))}
+                                </MonoTableBody>
+                            </MonoTable>
+                        </MonoTableFrame>
+                    ) : (
+                        <p className="text-gray-600 dark:text-gray-400 mb-4">No users</p>
+                    )}
+                    <div className="flex justify-end">
+                        <div className="flex gap-2">
+                            <input
+                                type="email"
+                                placeholder="user@example.com"
+                                value={newUserEmail}
+                                onChange={(e) => setNewUserEmail(e.target.value)}
+                                onKeyPress={(e) => e.key === 'Enter' && handleAddUser()}
+                                className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                            />
+                            <Button variant="primary" size="sm" onClick={handleAddUser}>
+                                Add
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <div className="flex justify-between items-center mb-4">
+                        <h4 className="text-lg font-bold">Teams ({appTeams.length})</h4>
+                    </div>
+                    {appTeams.length > 0 ? (
+                        <MonoTableFrame className="mb-4">
+                            <MonoTable>
+                                <MonoTableHead>
+                                    <tr>
+                                        <MonoTh className="px-6 py-3 text-left">Name</MonoTh>
+                                        <MonoTh className="px-6 py-3 text-right">Actions</MonoTh>
+                                    </tr>
+                                </MonoTableHead>
+                                <MonoTableBody>
+                                    {appTeams.map(team => (
+                                        <MonoTableRow key={team.id} interactive className="transition-colors">
+                                            <MonoTd className="px-6 py-4 text-sm">
+                                                <button
+                                                    type="button"
+                                                    className="text-gray-900 dark:text-gray-200 underline"
+                                                    onClick={() => navigate(`/team/${team.name}`)}
+                                                >
+                                                    {team.name}
+                                                </button>
+                                            </MonoTd>
+                                            <MonoTd className="px-6 py-4">
+                                                <div className="flex justify-end">
+                                                    <Button
+                                                        variant="danger"
+                                                        size="sm"
+                                                        onClick={() => handleRemoveTeam(team.id, team.name)}
+                                                    >
+                                                        Remove
+                                                    </Button>
+                                                </div>
+                                            </MonoTd>
+                                        </MonoTableRow>
+                                    ))}
+                                </MonoTableBody>
+                            </MonoTable>
+                        </MonoTableFrame>
+                    ) : (
+                        <p className="text-gray-600 dark:text-gray-400 mb-4">No teams</p>
+                    )}
+                    <div className="flex justify-end">
+                        <div className="flex gap-2 items-center">
+                            <div className="w-64">
+                                <Combobox
+                                    value={selectedTeamId}
+                                    onChange={setSelectedTeamId}
+                                    options={teams.map(t => ({ value: t.id, label: t.name }))}
+                                    placeholder="Search teams..."
+                                    loading={teams.length === 0}
+                                />
+                            </div>
+                            <Button variant="primary" size="sm" onClick={handleAddTeam} disabled={teams.length === 0}>
+                                Add
+                            </Button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
     );
 }

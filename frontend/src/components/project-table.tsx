@@ -4,8 +4,9 @@ import { StatusBadge } from './ui';
 import { MonoSortButton, MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from './table';
 
 function OwnerCell({ project }) {
-    const ownerType = project.owner_user_email ? 'user' : project.owner_team_name ? 'team' : null;
-    const ownerLabel = project.owner_user_email || project.owner_team_name || '-';
+    const owner = project.owner;
+    const ownerType = owner?.email ? 'user' : owner?.name ? 'team' : null;
+    const ownerLabel = owner?.email || owner?.name || '-';
 
     return (
         <span className="inline-flex items-center gap-2">

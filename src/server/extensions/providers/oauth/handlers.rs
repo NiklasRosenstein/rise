@@ -186,9 +186,9 @@ async fn validate_cors_origin(
             .await
         {
             Ok(urls) => {
-                // Check primary URL
-                if !urls.primary_url.is_empty() {
-                    if let Ok(deployment_url) = Url::parse(&urls.primary_url) {
+                // Check default URL
+                if !urls.default_url.is_empty() {
+                    if let Ok(deployment_url) = Url::parse(&urls.default_url) {
                         if origin_url.host() == deployment_url.host()
                             && origin_url.port() == deployment_url.port()
                             && origin_url.scheme() == deployment_url.scheme()
@@ -287,8 +287,8 @@ async fn validate_redirect_uri(
             .await
         {
             Ok(urls) => {
-                // Check primary URL
-                if !urls.primary_url.is_empty() && redirect_uri.starts_with(&urls.primary_url) {
+                // Check default URL
+                if !urls.default_url.is_empty() && redirect_uri.starts_with(&urls.default_url) {
                     return Ok(());
                 }
 

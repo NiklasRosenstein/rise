@@ -467,6 +467,7 @@ export function App() {
         'env-vars': 'Environment Variables',
         domains: 'Domains',
         extensions: 'Extensions',
+        access: 'Access',
     };
     const breadcrumbs =
         view === 'home'

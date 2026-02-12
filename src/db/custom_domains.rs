@@ -119,24 +119,6 @@ pub async fn get_custom_domains_batch(
     Ok(map)
 }
 
-/// Get the primary custom domain for a project
-pub async fn get_primary_domain(pool: &PgPool, project_id: Uuid) -> Result<Option<CustomDomain>> {
-    let domain = sqlx::query_as!(
-        CustomDomain,
-        r#"
-        SELECT id, project_id, domain, is_primary, created_at, updated_at
-        FROM project_custom_domains
-        WHERE project_id = $1 AND is_primary = true
-        "#,
-        project_id
-    )
-    .fetch_optional(pool)
-    .await
-    .context("Failed to get primary custom domain")?;
-
-    Ok(domain)
-}
-
 /// Set a custom domain as primary for a project
 /// Unsets any existing primary domain in the same transaction
 pub async fn set_primary_domain(

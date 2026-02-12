@@ -296,7 +296,7 @@ export function ServiceAccountsList({ projectName }) {
 }
 
 // Custom Domains Component
-export function DomainsList({ projectName }) {
+export function DomainsList({ projectName, defaultUrl = null }) {
     const [domains, setDomains] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -308,6 +308,9 @@ export function DomainsList({ projectName }) {
     const [saving, setSaving] = useState(false);
     const [updatingPrimaryDomain, setUpdatingPrimaryDomain] = useState(null);
     const { showToast } = useToast();
+
+    const hasStarredCustomDomain = domains.some(d => d.is_primary);
+    const isDefaultPrimary = !hasStarredCustomDomain;
 
     const loadDomains = useCallback(async () => {
         try {
@@ -390,6 +393,22 @@ export function DomainsList({ projectName }) {
         }
     };
 
+    // Starring the default URL row = unstarring the currently starred custom domain
+    const handleStarDefault = async () => {
+        const starredDomain = domains.find(d => d.is_primary);
+        if (!starredDomain) return; // Already default primary
+        setUpdatingPrimaryDomain('__default__');
+        try {
+            await api.unsetCustomDomainPrimary(projectName, starredDomain.domain);
+            showToast('Default URL set as primary domain', 'success');
+            loadDomains();
+        } catch (err) {
+            showToast(`Failed to update primary domain: ${err.message}`, 'error');
+        } finally {
+            setUpdatingPrimaryDomain(null);
+        }
+    };
+
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-600 dark:text-red-400">Error loading custom domains: {error}</p>;
 
@@ -411,10 +430,49 @@ export function DomainsList({ projectName }) {
                         </tr>
                     </MonoTableHead>
                     <MonoTableBody>
-                        {domains.length === 0 ? (
-                            <MonoTableEmptyRow colSpan={4}>No custom domains configured.</MonoTableEmptyRow>
-                        ) : (
-                            domains.map(domain => (
+                        {defaultUrl && (
+                            <MonoTableRow interactive className="transition-colors">
+                                <MonoTd className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
+                                    <a href={defaultUrl} target="_blank" rel="noopener noreferrer" className="underline">
+                                        {(() => { try { return new URL(defaultUrl).hostname; } catch { return defaultUrl; } })()}
+                                    </a>
+                                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
+                                        Default
+                                    </span>
+                                    {isDefaultPrimary && (
+                                        <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
+                                            Primary
+                                        </span>
+                                    )}
+                                </MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm">
+                                    <button
+                                        onClick={handleStarDefault}
+                                        disabled={isDefaultPrimary || updatingPrimaryDomain === '__default__'}
+                                        className="text-gray-400 hover:text-yellow-500 dark:text-gray-500 dark:hover:text-yellow-400 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                                        title={isDefaultPrimary ? "Default URL is primary" : "Set default URL as primary"}
+                                    >
+                                        {updatingPrimaryDomain === '__default__' ? (
+                                            <svg className="w-5 h-5 animate-spin" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                            </svg>
+                                        ) : isDefaultPrimary ? (
+                                            <svg className="w-5 h-5 fill-current text-yellow-500 dark:text-yellow-400" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24">
+                                                <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                                            </svg>
+                                        ) : (
+                                            <svg className="w-5 h-5 stroke-current" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth="2">
+                                                <path strokeLinecap="round" strokeLinejoin="round" d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+                                            </svg>
+                                        )}
+                                    </button>
+                                </MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">-</MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm"></MonoTd>
+                            </MonoTableRow>
+                        )}
+                        {domains.map(domain => (
                             <MonoTableRow key={domain.id} interactive className="transition-colors">
                                 <MonoTd className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
                                     {domain.domain}
@@ -458,7 +516,9 @@ export function DomainsList({ projectName }) {
                                     </Button>
                                 </MonoTd>
                             </MonoTableRow>
-                        ))
+                        ))}
+                        {!defaultUrl && domains.length === 0 && (
+                            <MonoTableEmptyRow colSpan={4}>No domains configured.</MonoTableEmptyRow>
                         )}
                     </MonoTableBody>
                 </MonoTable>
