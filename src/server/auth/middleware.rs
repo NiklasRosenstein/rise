@@ -87,6 +87,7 @@ async fn authenticate_service_account(
 
     // Validate all service accounts and collect matches
     let mut matching_accounts = Vec::new();
+    let mut validation_errors = Vec::new();
 
     for sa in &service_accounts {
         // Convert JSONB claims to HashMap
@@ -100,22 +101,34 @@ async fn authenticate_service_account(
             })?;
 
         // Try to validate with this service account's claims
-        if state
-            .jwt_validator
-            .validate(token, issuer, &claims)
-            .await
-            .is_ok()
-        {
-            matching_accounts.push(sa);
+        match state.jwt_validator.validate(token, issuer, &claims).await {
+            Ok(_) => {
+                matching_accounts.push(sa);
+            }
+            Err(e) => {
+                // Collect validation errors for better error reporting
+                validation_errors.push(e.to_string());
+            }
         }
     }
 
     // Check for collisions
     if matching_accounts.is_empty() {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            "No service account matched the provided token claims".to_string(),
-        ));
+        // Provide specific error messages based on validation failures
+        let error_msg = if validation_errors.iter().any(|e| e.contains("'aud'")) {
+            "The provided JWT is missing the \"aud\" claim".to_string()
+        } else if validation_errors.iter().any(|e| {
+            e.contains("validate JWT token")
+                || e.contains("signature")
+                || e.contains("InvalidSignature")
+        }) {
+            "The provided JWT signature could not be validated".to_string()
+        } else {
+            "No service account matches the provided claims".to_string()
+        };
+
+        tracing::warn!("Service account validation failed: {}", error_msg);
+        return Err((StatusCode::UNAUTHORIZED, error_msg));
     }
 
     if matching_accounts.len() > 1 {
@@ -129,12 +142,7 @@ async fn authenticate_service_account(
         );
         return Err((
             StatusCode::CONFLICT,
-            format!(
-                "Multiple service accounts ({}) matched this token. \
-                 This indicates ambiguous claim configuration. \
-                 Each service account must have unique claim requirements.",
-                matching_accounts.len()
-            ),
+            "Multiple service accounts match the provided claims".to_string(),
         ));
     }
 

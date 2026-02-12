@@ -24,6 +24,40 @@ fn format_error_chain(error: &anyhow::Error) -> String {
     chain.join(" -> ")
 }
 
+/// Check if user has access to a project (admin bypass)
+///
+/// Admins always have access. Non-admins must pass the project ownership/team membership check.
+async fn ensure_project_access_or_admin(
+    state: &AppState,
+    user: &User,
+    project: &crate::db::models::Project,
+) -> Result<(), (StatusCode, String)> {
+    // Admins bypass all access checks
+    if state.is_admin(&user.email) {
+        return Ok(());
+    }
+
+    // Check if user has access via ownership or team membership
+    let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+        .await
+        .map_err(|e| {
+            tracing::error!("Failed to check project access: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Database error".to_string(),
+            )
+        })?;
+
+    if !can_access {
+        return Err((
+            StatusCode::FORBIDDEN,
+            "You do not have access to this project".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
 /// Set or update a project environment variable
 pub async fn set_project_env_var(
     State(state): State<AppState>,
@@ -53,25 +87,15 @@ pub async fn set_project_env_var(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
+    // Check permission (admin bypass)
+    ensure_project_access_or_admin(&state, &user, &project).await?;
 
-    if !has_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
-    }
+    // Normalize: when is_protected is omitted, infer from is_secret
+    // This preserves backward compatibility: secrets default to protected, plain vars default to unprotected
+    let is_protected = payload.is_protected.unwrap_or(payload.is_secret);
 
     // Validate: is_protected requires is_secret (non-secrets cannot be "protected")
-    if payload.is_protected && !payload.is_secret {
+    if is_protected && !payload.is_secret {
         return Err((
             StatusCode::BAD_REQUEST,
             "Non-secret variables cannot be protected. Protection only applies to secrets."
@@ -116,7 +140,7 @@ pub async fn set_project_env_var(
         &key,
         &value_to_store,
         payload.is_secret,
-        payload.is_protected,
+        is_protected,
     )
     .await
     .map_err(|e| {
@@ -131,7 +155,7 @@ pub async fn set_project_env_var(
         key,
         project.name,
         payload.is_secret,
-        payload.is_protected
+        is_protected
     );
 
     // Note: Environment variables are snapshots at deployment time.
@@ -176,22 +200,8 @@ pub async fn list_project_env_vars(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
-
-    if !has_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
-    }
+    // Check permission (admin bypass)
+    ensure_project_access_or_admin(&state, &user, &project).await?;
 
     // Check if we should include unprotected values
     let include_unprotected = params
@@ -284,22 +294,8 @@ pub async fn delete_project_env_var(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
-
-    if !has_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
-    }
+    // Check permission (admin bypass)
+    ensure_project_access_or_admin(&state, &user, &project).await?;
 
     // Delete environment variable
     let deleted = db_env_vars::delete_project_env_var(&state.db_pool, project.id, &key)
@@ -360,22 +356,8 @@ pub async fn list_deployment_env_vars(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
-
-    if !has_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
-    }
+    // Check permission (admin bypass)
+    ensure_project_access_or_admin(&state, &user, &project).await?;
 
     // Get deployment by deployment_id within the project
     let deployment =
@@ -480,22 +462,8 @@ pub async fn get_project_env_var_value(
     }
     .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
 
-    // Check if user has access to the project
-    let has_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to check project access: {}", e),
-            )
-        })?;
-
-    if !has_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
-    }
+    // Check permission (admin bypass)
+    ensure_project_access_or_admin(&state, &user, &project).await?;
 
     // Get the specific environment variable
     let env_var = db_env_vars::get_project_env_var(&state.db_pool, project.id, &key)

@@ -1,17 +1,13 @@
 use serde::{Deserialize, Serialize};
 
-fn default_protected() -> bool {
-    true
-}
-
 /// Request to set or update an environment variable
 #[derive(Debug, Deserialize)]
 pub struct SetEnvVarRequest {
     pub value: String,
     #[serde(default)]
     pub is_secret: bool,
-    #[serde(default = "default_protected")]
-    pub is_protected: bool,
+    /// When omitted, defaults to the same value as is_secret (secrets are protected by default)
+    pub is_protected: Option<bool>,
 }
 
 /// API response for a single environment variable

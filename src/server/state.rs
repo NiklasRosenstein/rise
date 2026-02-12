@@ -248,6 +248,11 @@ async fn init_kubernetes_backend(
 }
 
 impl AppState {
+    /// Check if a user is an admin (case-insensitive email match)
+    pub fn is_admin(&self, user_email: &str) -> bool {
+        crate::server::auth::admin::is_admin_user(&self.admin_users, user_email)
+    }
+
     /// Run database migrations
     async fn run_migrations(pool: &PgPool) -> Result<()> {
         tracing::info!("Running database migrations...");

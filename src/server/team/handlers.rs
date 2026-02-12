@@ -175,7 +175,7 @@ pub async fn update_team(
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
     // Check if user is an admin or owner of the team
-    let is_admin = state.admin_users.contains(&user.email);
+    let is_admin = state.is_admin(&user.email);
     let is_owner = if !is_admin {
         db_teams::is_owner(&state.db_pool, team.id, user.id)
             .await
@@ -470,7 +470,7 @@ pub async fn delete_team(
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
     // Check if user is an admin or owner of the team
-    let is_admin = state.admin_users.contains(&user.email);
+    let is_admin = state.is_admin(&user.email);
     let is_owner = if !is_admin {
         db_teams::is_owner(&state.db_pool, team.id, user.id)
             .await
@@ -528,7 +528,7 @@ pub async fn list_teams(
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<ApiTeam>>, (StatusCode, String)> {
     // Admins can see all teams, others only see teams they have access to
-    let teams = if state.admin_users.contains(&user.email) {
+    let teams = if state.is_admin(&user.email) {
         db_teams::list(&state.db_pool).await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

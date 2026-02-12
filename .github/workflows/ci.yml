@@ -101,7 +101,10 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: cargo:sqlx-cli cargo:cargo-all-features
+          experimental: true
+
+      - name: Install mise tools
+        run: mise use -g cargo:sqlx-cli cargo:cargo-all-features
 
       - name: Check formatting
         run: cargo fmt --all -- --check
@@ -148,7 +151,10 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: cargo:sqlx-cli
+          experimental: true
+
+      - name: Install mise tools
+        run: mise use -g cargo:sqlx-cli
 
       - name: Run database migrations
         run: |
@@ -175,7 +181,10 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: helm
+          experimental: true
+
+      - name: Install mise tools
+        run: mise use -g helm
 
       - name: Set up chart-testing
         uses: helm/chart-testing-action@v2.6.1
@@ -240,7 +249,10 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: helm
+          experimental: true
+
+      - name: Install mise tools
+        run: mise use -g helm
 
       - name: Patch chart version and appVersion for CI package
         shell: bash
@@ -292,7 +304,10 @@ jobs:
         uses: jdx/mise-action@v2
         with:
           cache: true
-          tools: minikube kubectl helm
+          experimental: true
+
+      - name: Install mise tools
+        run: mise use -g minikube kubectl helm
 
       - name: Start Minikube and run smoke tests
         env:

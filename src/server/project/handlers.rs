@@ -202,7 +202,7 @@ pub async fn list_projects(
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<ApiProject>>, ServerError> {
     // Admins can see all projects, others only see projects they have access to
-    let projects = if is_admin(&state, &user.email) {
+    let projects = if state.is_admin(&user.email) {
         projects::list(&state.db_pool, None)
             .await
             .internal_err("Failed to list projects")?
@@ -1157,11 +1157,6 @@ fn convert_project(project: crate::db::models::Project, owner: Option<OwnerInfo>
     }
 }
 
-/// Check if a user is an admin (based on email in config)
-fn is_admin(state: &AppState, user_email: &str) -> bool {
-    state.admin_users.contains(&user_email.to_string())
-}
-
 /// Check if user can read a project (owner, team member, or admin)
 pub async fn check_read_permission(
     state: &AppState,
@@ -1169,7 +1164,7 @@ pub async fn check_read_permission(
     user: &User,
 ) -> Result<bool, String> {
     // Admins have full access
-    if is_admin(state, &user.email) {
+    if state.is_admin(&user.email) {
         return Ok(true);
     }
 
@@ -1186,7 +1181,7 @@ pub async fn check_write_permission(
     user: &User,
 ) -> Result<bool, String> {
     // Admins have full access
-    if is_admin(state, &user.email) {
+    if state.is_admin(&user.email) {
         return Ok(true);
     }
 
