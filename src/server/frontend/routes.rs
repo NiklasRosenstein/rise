@@ -88,7 +88,6 @@ async fn fallback_handler(State(state): State<AppState>, request: Request) -> Re
 }
 
 async fn load_docs_content_from_filesystem(rel: &str) -> Option<(Vec<u8>, &'static str)> {
-
     // Prevent traversal and absolute paths
     let mut rel_buf = PathBuf::new();
     for part in PathBuf::from(rel).components() {
