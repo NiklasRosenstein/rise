@@ -15,8 +15,13 @@ cleanup() {
     kubectl get pods -A || true
     kubectl get events -A --sort-by=.metadata.creationTimestamp | tail -n 200 || true
   fi
+  echo "Cleaning up Minikube"
+  minikube delete || true
 }
 trap cleanup EXIT
+
+echo "Ensuring clean Minikube environment"
+minikube delete || true
 
 echo "Starting Minikube"
 minikube start --driver=docker --cpus=2 --memory=4096
