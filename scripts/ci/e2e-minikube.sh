@@ -37,6 +37,10 @@ helm upgrade --install "${RELEASE_NAME}" ./helm/rise \
   --set "config.auth.issuer=http://dex:5556/dex" \
   --set "config.auth.client_id=rise-backend" \
   --set "config.auth.client_secret=rise-backend-secret" \
+  --set-string "config.registry.type=oci-client-auth" \
+  --set-string "config.registry.registry_url=localhost:5000" \
+  --set-string "config.registry.namespace=rise-apps" \
+  --set-string "config.registry.client_registry_url=http://localhost:5000" \
   --set "config.deployment_controller.type=kubernetes" \
   --set "config.deployment_controller.production_ingress_url_template={project_name}.apps.rise.local" \
   --set "config.deployment_controller.auth_backend_url=http://${RELEASE_NAME}-server.${NAMESPACE}.svc.cluster.local:3000" \
@@ -87,6 +91,10 @@ helm upgrade "${RELEASE_NAME}" ./helm/rise \
   --set "config.auth.issuer=http://dex:5556/dex" \
   --set "config.auth.client_id=rise-backend" \
   --set "config.auth.client_secret=rise-backend-secret" \
+  --set-string "config.registry.type=oci-client-auth" \
+  --set-string "config.registry.registry_url=localhost:5000" \
+  --set-string "config.registry.namespace=rise-apps" \
+  --set-string "config.registry.client_registry_url=http://localhost:5000" \
   --set "config.deployment_controller.type=kubernetes" \
   --set "config.deployment_controller.production_ingress_url_template={project_name}.apps.rise.local" \
   --set "config.deployment_controller.auth_backend_url=http://${RELEASE_NAME}-server.${NAMESPACE}.svc.cluster.local:3000" \
