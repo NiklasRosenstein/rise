@@ -233,31 +233,23 @@ async fn sync_groups_after_login(
             )
         })?;
 
-    // Sync groups if present in claims
+    // Sync groups if present in claims (including empty groups - user may have been removed from all groups)
     if let Some(ref groups) = claims.groups {
-        if !groups.is_empty() {
-            tracing::debug!(
-                "Syncing {} IdP groups for user {} during login",
-                groups.len(),
-                user.email
-            );
+        tracing::debug!(
+            "Syncing {} IdP groups for user {} during login",
+            groups.len(),
+            user.email
+        );
 
-            if let Err(e) =
-                crate::server::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups)
-                    .await
-            {
-                // Log error but don't fail login
-                tracing::error!(
-                    "Failed to sync IdP groups during login for user {}: {:#}",
-                    user.email,
-                    e
-                );
-            } else {
-                tracing::info!(
-                    "Successfully synced IdP groups during login for user {}",
-                    user.email
-                );
-            }
+        if let Err(e) =
+            crate::server::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups).await
+        {
+            // Log error but don't fail login
+            tracing::error!(
+                "Failed to sync IdP groups during login for user {}: {:#}",
+                user.email,
+                e
+            );
         }
     }
 
@@ -493,29 +485,6 @@ pub async fn code_exchange(
                 "Failed to process user".to_string(),
             )
         })?;
-
-    // Check platform access - block non-platform users from using CLI
-    use crate::server::auth::platform_access::{ConfigBasedAccessChecker, PlatformAccessChecker};
-    let checker = ConfigBasedAccessChecker {
-        config: &state.auth_settings.platform_access,
-        admin_users: &state.admin_users,
-    };
-
-    if !checker.has_platform_access(&user, None) {
-        tracing::warn!(
-            user_email = %user.email,
-            "Platform access denied during CLI login"
-        );
-        return Err((
-            StatusCode::FORBIDDEN,
-            format!(
-                "Platform access denied for {}. \
-                 Your account is configured for application access only and cannot use the Rise CLI. \
-                 Please contact your administrator if you need platform access.",
-                user.email
-            ),
-        ));
-    }
 
     // Issue Rise JWT for user authentication (consumed by the CLI)
     let rise_jwt = state
@@ -1387,23 +1356,6 @@ pub async fn oauth_callback(
     // Sync groups after login
     sync_groups_after_login(&state, &token_info.id_token).await?;
 
-    // Check platform access - block non-platform users from logging into dashboard
-    use crate::server::auth::platform_access::{ConfigBasedAccessChecker, PlatformAccessChecker};
-    let checker = ConfigBasedAccessChecker {
-        config: &state.auth_settings.platform_access,
-        admin_users: &state.admin_users,
-    };
-
-    // Note: IdP groups not available here - they're synced but not returned
-    // Email-based and admin checks are performed
-    if !checker.has_platform_access(&user, None) {
-        tracing::warn!(
-            user_email = %user.email,
-            "Platform access denied during login"
-        );
-        return render_platform_access_denied_page(&user.email);
-    }
-
     // Issue Rise HS256 JWT for user authentication (consumed by the UI)
     let rise_jwt = state
         .jwt_signer
@@ -1548,55 +1500,6 @@ fn render_ui_login_success_page(
     // Build response with cookie and HTML
     let response = (StatusCode::OK, [("Set-Cookie", cookie)], Html(html)).into_response();
 
-    Ok(response)
-}
-
-/// Helper function to render platform access denied page
-fn render_platform_access_denied_page(user_email: &str) -> Result<Response, (StatusCode, String)> {
-    // Load template
-    let template_content =
-        StaticAssets::get("platform-access-denied.html.tera").ok_or_else(|| {
-            tracing::error!("platform-access-denied.html.tera template not found");
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Template not found".to_string(),
-            )
-        })?;
-
-    let template_str = std::str::from_utf8(&template_content.data).map_err(|e| {
-        tracing::error!("Failed to decode template: {:#}", e);
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "Template encoding error".to_string(),
-        )
-    })?;
-
-    // Create Tera instance and add template
-    let mut tera = Tera::default();
-    tera.add_raw_template("platform-access-denied.html.tera", template_str)
-        .map_err(|e| {
-            tracing::error!("Failed to parse template: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Template error".to_string(),
-            )
-        })?;
-
-    // Render template with user email
-    let mut context = tera::Context::new();
-    context.insert("user_email", user_email);
-
-    let html = tera
-        .render("platform-access-denied.html.tera", &context)
-        .map_err(|e| {
-            tracing::error!("Failed to render template: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Template rendering error".to_string(),
-            )
-        })?;
-
-    let response = (StatusCode::FORBIDDEN, Html(html)).into_response();
     Ok(response)
 }
 
