@@ -35,7 +35,7 @@ staticPasswords:
 - email: user@example.com
   hash: $2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W  # password
   username: user
-  userID: f4d1c5e1-3c6e-4d2a-9f4b-2e5d7c8e9f01
+  userID: a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d
 
 oauth2:
   skipApprovalScreen: true
