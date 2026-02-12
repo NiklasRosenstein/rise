@@ -494,6 +494,29 @@ pub async fn code_exchange(
             )
         })?;
 
+    // Check platform access - block non-platform users from using CLI
+    use crate::server::auth::platform_access::{ConfigBasedAccessChecker, PlatformAccessChecker};
+    let checker = ConfigBasedAccessChecker {
+        config: &state.auth_settings.platform_access,
+        admin_users: &state.admin_users,
+    };
+
+    if !checker.has_platform_access(&user, None) {
+        tracing::warn!(
+            user_email = %user.email,
+            "Platform access denied during CLI login"
+        );
+        return Err((
+            StatusCode::FORBIDDEN,
+            format!(
+                "Platform access denied for {}. \
+                 Your account is configured for application access only and cannot use the Rise CLI. \
+                 Please contact your administrator if you need platform access.",
+                user.email
+            ),
+        ));
+    }
+
     // Issue Rise JWT for user authentication (consumed by the CLI)
     let rise_jwt = state
         .jwt_signer
@@ -1364,6 +1387,23 @@ pub async fn oauth_callback(
     // Sync groups after login
     sync_groups_after_login(&state, &token_info.id_token).await?;
 
+    // Check platform access - block non-platform users from logging into dashboard
+    use crate::server::auth::platform_access::{ConfigBasedAccessChecker, PlatformAccessChecker};
+    let checker = ConfigBasedAccessChecker {
+        config: &state.auth_settings.platform_access,
+        admin_users: &state.admin_users,
+    };
+
+    // Note: IdP groups not available here - they're synced but not returned
+    // Email-based and admin checks are performed
+    if !checker.has_platform_access(&user, None) {
+        tracing::warn!(
+            user_email = %user.email,
+            "Platform access denied during login"
+        );
+        return render_platform_access_denied_page(&user.email);
+    }
+
     // Issue Rise HS256 JWT for user authentication (consumed by the UI)
     let rise_jwt = state
         .jwt_signer
@@ -1508,6 +1548,100 @@ fn render_ui_login_success_page(
     // Build response with cookie and HTML
     let response = (StatusCode::OK, [("Set-Cookie", cookie)], Html(html)).into_response();
 
+    Ok(response)
+}
+
+/// Helper function to render platform access denied page
+fn render_platform_access_denied_page(user_email: &str) -> Result<Response, (StatusCode, String)> {
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Access Denied - Rise</title>
+    <style>
+        * {{
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+        }}
+        .container {{
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            max-width: 500px;
+            width: 100%;
+            padding: 40px;
+            text-align: center;
+        }}
+        .icon {{
+            width: 80px;
+            height: 80px;
+            margin: 0 auto 20px;
+            background: #fee;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 40px;
+        }}
+        h1 {{
+            color: #d32f2f;
+            font-size: 24px;
+            margin-bottom: 16px;
+            font-weight: 600;
+        }}
+        p {{
+            color: #666;
+            line-height: 1.6;
+            margin-bottom: 12px;
+        }}
+        .user-email {{
+            background: #f5f5f5;
+            padding: 12px;
+            border-radius: 6px;
+            font-family: monospace;
+            color: #333;
+            margin: 20px 0;
+            word-break: break-all;
+        }}
+        .help-text {{
+            font-size: 14px;
+            color: #999;
+            margin-top: 24px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="icon">🚫</div>
+        <h1>Platform Access Denied</h1>
+        <p>Your account is not authorized to access Rise platform features.</p>
+        <p>You can authenticate to access deployed applications, but you cannot use the Rise Dashboard, CLI, or API.</p>
+        <div class="user-email">{}</div>
+        <p class="help-text">If you believe this is an error, please contact your administrator.</p>
+    </div>
+</body>
+</html>"#,
+        user_email
+            .replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+            .replace('\'', "&#x27;")
+    );
+
+    let response = (StatusCode::FORBIDDEN, Html(html)).into_response();
     Ok(response)
 }
 

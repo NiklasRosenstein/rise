@@ -290,6 +290,21 @@ pub async fn handle_authorization_code_flow(
             .text()
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
+
+        // Special handling for platform access denial
+        if status == reqwest::StatusCode::FORBIDDEN {
+            eprintln!("\n{}", "=".repeat(70));
+            eprintln!("Platform Access Denied");
+            eprintln!("{}", "=".repeat(70));
+            eprintln!("\n{}\n", error_text);
+            eprintln!("You authenticated successfully, but your account does not have");
+            eprintln!("permission to use the Rise platform (CLI/API/Dashboard).");
+            eprintln!("\nYour account is configured for application access only.");
+            eprintln!("\nIf you believe this is an error, please contact your administrator.");
+            eprintln!("{}\n", "=".repeat(70));
+            std::process::exit(1);
+        }
+
         anyhow::bail!("Code exchange failed (status {}): {}", status, error_text);
     }
 
