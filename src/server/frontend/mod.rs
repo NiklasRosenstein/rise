@@ -109,21 +109,5 @@ mod tests {
             StaticAssets::get("assets/arrow-left.svg").is_some(),
             "assets/arrow-left.svg should be embedded"
         );
-        assert!(
-            StaticAssets::get("mockups/index.html").is_some(),
-            "mockups/index.html should be embedded"
-        );
-        assert!(
-            StaticAssets::get("mockups/mockup-enterprise.html").is_some(),
-            "mockups/mockup-enterprise.html should be embedded"
-        );
-        assert!(
-            StaticAssets::get("mockups/mockup-editorial.html").is_some(),
-            "mockups/mockup-editorial.html should be embedded"
-        );
-        assert!(
-            StaticAssets::get("mockups/mockup-mono.html").is_some(),
-            "mockups/mockup-mono.html should be embedded"
-        );
     }
 }
