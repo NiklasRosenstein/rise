@@ -26,6 +26,12 @@ mise sqlx:check
 helm lint helm/rise
 """
 
+[tasks.fmt]
+run = """
+SQLX_OFFLINE=true cargo all-features clippy --all-targets --allow-dirty --fix -- -D warnings
+cargo fmt --all
+"""
+
 [tasks."docs:serve"]
 description = "Serve documentation with live reload in port 3001."
 run = "mdbook serve -p 3001 --open"
