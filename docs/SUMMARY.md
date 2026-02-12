@@ -6,6 +6,7 @@
 
 - [Setup](setup.md)
 - [Local Development](development.md)
+- [Local Development Networking](local-development.md)
 - [CLI Guide](cli.md)
 - [Authentication](authentication.md)
 - [Authentication for Applications](authentication-for-apps.md)

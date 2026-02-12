@@ -25,7 +25,7 @@ registry:
   type: "oci-client-auth"
   registry_url: "rise-registry:5000"      # Internal URL for deployment controllers
   namespace: "rise-apps"
-  client_registry_url: "localhost:5000"   # Client-facing URL for CLI push operations
+  client_registry_url: "http://rise-registry:5000"   # Client-facing URL for CLI push operations
 
 deployment_controller:
   auth_backend_url: "http://host.minikube.internal:3000"  # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host)
