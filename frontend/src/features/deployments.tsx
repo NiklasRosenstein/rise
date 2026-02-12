@@ -1,9 +1,14 @@
-// Deployment-related components for Rise Dashboard
-// This file depends on React, utils.js, components/ui.js, and components/toast.js being loaded first
+// @ts-nocheck
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { api } from '../lib/api';
+import { navigate } from '../lib/navigation';
+import { formatDate, formatTimeRemaining } from '../lib/utils';
+import { useToast } from '../components/toast';
+import { Button, ConfirmDialog, Modal, StatusBadge } from '../components/ui';
+import { EnvVarsList } from './resources';
 
-const { useState, useEffect, useCallback, useRef } = React;
 
-function ActiveDeploymentsSummary({ projectName }) {
+export function ActiveDeploymentsSummary({ projectName }) {
     const [activeDeployments, setActiveDeployments] = useState({});
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -178,7 +183,7 @@ function ActiveDeploymentsSummary({ projectName }) {
                             )}
                         </dl>
                         <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-800 flex items-center justify-between">
-                            <a href={`#deployment/${projectName}/${deployment.deployment_id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">
+                            <a href={`/deployment/${projectName}/${deployment.deployment_id}`} className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300">
                                 View Details
                             </a>
                             {otherProgressing > 0 && (
@@ -210,7 +215,7 @@ function ActiveDeploymentsSummary({ projectName }) {
 }
 
 // Deployments List Component (with pagination)
-function DeploymentsList({ projectName }) {
+export function DeploymentsList({ projectName }) {
     const [deployments, setDeployments] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -377,7 +382,7 @@ function DeploymentsList({ projectName }) {
                                     return (
                                     <tr
                                         key={d.id}
-                                        onClick={() => window.location.hash = `deployment/${projectName}/${d.deployment_id}`}
+                                        onClick={() => navigate(`/deployment/${projectName}/${d.deployment_id}`)}
                                         className={`transition-colors cursor-pointer ${isHighlighted ? 'bg-indigo-900/20 border-l-4 border-l-indigo-500 hover:bg-indigo-900/30' : 'hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
                                     >
                                         <td className="px-6 py-4 whitespace-nowrap text-sm font-mono text-gray-900 dark:text-gray-200">{d.deployment_id}</td>
@@ -846,7 +851,7 @@ function DeploymentLogs({ projectName, deploymentId, deploymentStatus }) {
     );
 }
 
-function DeploymentDetail({ projectName, deploymentId }) {
+export function DeploymentDetail({ projectName, deploymentId }) {
     const [deployment, setDeployment] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -882,7 +887,7 @@ function DeploymentDetail({ projectName, deploymentId }) {
             setRollbackDialogOpen(false);
             setUseSourceEnvVars(false); // Reset checkbox
             // Redirect to project page to see the new deployment
-            window.location.hash = `project/${projectName}`;
+            navigate(`/project/${projectName}`);
         } catch (err) {
             showToast(`Failed to ${deployment.is_active ? 'redeploy' : 'rollback'} deployment: ${err.message}`, 'error');
         } finally {
@@ -908,7 +913,7 @@ function DeploymentDetail({ projectName, deploymentId }) {
 
     return (
         <section>
-            <a href={`#project/${projectName}`} className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
+            <a href={`/project/${projectName}`} className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
                 ← Back
             </a>
 

@@ -34,16 +34,8 @@ mod tests {
             "auth-warning.html.tera should be embedded"
         );
         assert!(
-            StaticAssets::get("js/auth.js").is_some(),
-            "js/auth.js should be embedded"
-        );
-        assert!(
-            StaticAssets::get("js/api.js").is_some(),
-            "js/api.js should be embedded"
-        );
-        assert!(
-            StaticAssets::get("js/app.js").is_some(),
-            "js/app.js should be embedded"
+            StaticAssets::get("ui/assets/.gitkeep").is_some(),
+            "ui/assets placeholder should be embedded"
         );
         assert!(
             StaticAssets::get("assets/favicon.ico").is_some(),

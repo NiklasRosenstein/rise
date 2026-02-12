@@ -89,6 +89,27 @@ pub async fn get_emails_batch(
     Ok(records.into_iter().map(|r| (r.id, r.email)).collect())
 }
 
+/// Batch fetch full user details by IDs
+pub async fn get_users_batch(
+    pool: &PgPool,
+    user_ids: &[Uuid],
+) -> Result<std::collections::HashMap<Uuid, User>> {
+    let users = sqlx::query_as!(
+        User,
+        r#"
+        SELECT id, email, created_at, updated_at
+        FROM users
+        WHERE id = ANY($1)
+        "#,
+        user_ids
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to batch fetch users")?;
+
+    Ok(users.into_iter().map(|u| (u.id, u)).collect())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

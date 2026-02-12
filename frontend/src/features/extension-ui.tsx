@@ -1,11 +1,14 @@
-// Extension UI Components Registry
-// This file contains custom UI components for extensions that provide
-// a form-based interface instead of just raw JSON editing.
+// @ts-nocheck
+import { useEffect, useRef, useState } from 'react';
+import { api } from '../lib/api';
+import { CONFIG } from '../lib/config';
+import { copyToClipboard, formatDate } from '../lib/utils';
+import { useToast } from '../components/toast';
+import { Button, FormField, Modal } from '../components/ui';
 
-const { useState, useEffect } = React;
 
 // AWS RDS Extension UI Component
-function AwsRdsExtensionUI({ spec, schema, onChange }) {
+export function AwsRdsExtensionUI({ spec, schema, onChange }) {
     const [engine, setEngine] = useState(spec?.engine || 'postgres');
     const [engineVersion, setEngineVersion] = useState(spec?.engine_version || '');
     const [databaseIsolation, setDatabaseIsolation] = useState(spec?.database_isolation || 'shared');
@@ -16,8 +19,8 @@ function AwsRdsExtensionUI({ spec, schema, onChange }) {
     const defaultEngineVersion = schema?.properties?.engine_version?.default || '';
 
     // Use a ref to store the latest onChange callback
-    const onChangeRef = React.useRef(onChange);
-    React.useEffect(() => {
+    const onChangeRef = useRef(onChange);
+    useEffect(() => {
         onChangeRef.current = onChange;
     }, [onChange]);
 
@@ -184,7 +187,7 @@ const AwsRdsExtensionAPI = {
 };
 
 // OAuth Extension UI Component
-function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, isEnabled }) {
+export function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, isEnabled }) {
     const [providerName, setProviderName] = useState(spec?.provider_name || '');
     const [description, setDescription] = useState(spec?.description || '');
     const [clientId, setClientId] = useState(spec?.client_id || '');
@@ -207,8 +210,8 @@ function OAuthExtensionUI({ spec, schema, onChange, projectName, instanceName, i
     const redirectUri = `${backendUrl}/oidc/${displayProjectName}/${displayExtensionName}/callback`;
 
     // Use a ref to store the latest onChange callback
-    const onChangeRef = React.useRef(onChange);
-    React.useEffect(() => {
+    const onChangeRef = useRef(onChange);
+    useEffect(() => {
         onChangeRef.current = onChange;
     }, [onChange]);
 
@@ -845,7 +848,7 @@ app.get('/oauth/callback', async (req, res) => {
 }
 
 // OAuth Detail View Component
-function OAuthDetailView({ extension, projectName }) {
+export function OAuthDetailView({ extension, projectName }) {
     const status = extension.status || {};
     const spec = extension.spec || {};
     const scopesArray = spec.scopes || [];
@@ -1151,14 +1154,14 @@ function OAuthDetailView({ extension, projectName }) {
 }
 
 // Snowflake OAuth Provisioner Extension UI Component
-function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
+export function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
     const [blockedRoles, setBlockedRoles] = useState(spec?.blocked_roles?.join(', ') || '');
     const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
     const [clientSecretEnvVar, setClientSecretEnvVar] = useState(spec?.client_secret_env_var || 'SNOWFLAKE_CLIENT_SECRET');
 
     // Use a ref to store the latest onChange callback
-    const onChangeRef = React.useRef(onChange);
-    React.useEffect(() => {
+    const onChangeRef = useRef(onChange);
+    useEffect(() => {
         onChangeRef.current = onChange;
     }, [onChange]);
 
@@ -1279,7 +1282,7 @@ function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
 }
 
 // Snowflake OAuth Provisioner Detail View Component
-function SnowflakeOAuthDetailView({ extension, projectName }) {
+export function SnowflakeOAuthDetailView({ extension, projectName }) {
     const status = extension.status || {};
     const spec = extension.spec || {};
 
@@ -1397,7 +1400,7 @@ function SnowflakeOAuthDetailView({ extension, projectName }) {
                             {status.state === 'Available' && (
                                 <div className="mt-4">
                                     <a
-                                        href={`#project/${projectName}/extensions/oauth/${status.oauth_extension_name}`}
+                                        href={`/project/${projectName}/extensions/oauth/${status.oauth_extension_name}`}
                                         className="inline-block bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded transition"
                                     >
                                         View OAuth Extension →
@@ -1525,7 +1528,7 @@ const ExtensionUIRegistry = {
 };
 
 // AWS RDS Custom Detail View Component
-function AwsRdsDetailView({ extension, projectName }) {
+export function AwsRdsDetailView({ extension, projectName }) {
     const status = extension.status || {};
     const spec = extension.spec || {};
     const databases = status.databases || {};
@@ -1731,17 +1734,17 @@ function DatabaseCard({ name, status }) {
 // Helper functions to access extension UI API
 
 // Check if an extension has a custom UI API registered
-function hasExtensionUI(extensionType) {
+export function hasExtensionUI(extensionType) {
     return extensionType in ExtensionUIRegistry;
 }
 
 // Get the extension UI API object
-function getExtensionUIAPI(extensionType) {
+export function getExtensionUIAPI(extensionType) {
     return ExtensionUIRegistry[extensionType] || null;
 }
 
 // Get the configure tab component (for backward compatibility)
-function getExtensionUI(extensionType) {
+export function getExtensionUI(extensionType) {
     const api = getExtensionUIAPI(extensionType);
     return api?.renderConfigureTab ?
         (props) => api.renderConfigureTab(props.spec, props.schema, props.onChange) :
@@ -1749,13 +1752,13 @@ function getExtensionUI(extensionType) {
 }
 
 // Check if extension has custom overview tab
-function hasExtensionDetailView(extensionType) {
+export function hasExtensionDetailView(extensionType) {
     const api = getExtensionUIAPI(extensionType);
     return api?.renderOverviewTab != null;
 }
 
 // Get the overview tab component (for backward compatibility)
-function getExtensionDetailView(extensionType) {
+export function getExtensionDetailView(extensionType) {
     const api = getExtensionUIAPI(extensionType);
     return api?.renderOverviewTab ?
         (props) => api.renderOverviewTab(props.extension, props.projectName) :
@@ -1763,13 +1766,13 @@ function getExtensionDetailView(extensionType) {
 }
 
 // Get custom status badge renderer
-function getExtensionStatusBadge(extensionType) {
+export function getExtensionStatusBadge(extensionType) {
     const api = getExtensionUIAPI(extensionType);
     return api?.renderStatusBadge || null;
 }
 
 // Get the icon URL for an extension
-function getExtensionIcon(extensionType) {
+export function getExtensionIcon(extensionType) {
     const api = getExtensionUIAPI(extensionType);
     return api?.icon || null;
 }

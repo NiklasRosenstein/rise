@@ -46,6 +46,10 @@ pub struct Project {
     pub primary_url: Option<String>,
     #[serde(default)]
     pub custom_domain_urls: Vec<String>,
+    #[serde(default)]
+    pub app_users: Vec<UserInfo>,
+    #[serde(default)]
+    pub app_teams: Vec<TeamInfo>,
 }
 
 /// User information in owner context
@@ -88,6 +92,10 @@ pub struct ProjectWithOwnerInfo {
     pub deployment_groups: Option<Vec<String>>,
     #[serde(default)]
     pub finalizers: Vec<String>,
+    #[serde(default)]
+    pub app_users: Vec<UserInfo>,
+    #[serde(default)]
+    pub app_teams: Vec<TeamInfo>,
 }
 
 /// Error response from project API
@@ -107,6 +115,21 @@ pub struct CreateProjectResponse {
 #[derive(Debug, Deserialize)]
 pub struct UpdateProjectResponse {
     pub project: Project,
+}
+
+/// Request for updating a project
+#[derive(Debug, Serialize)]
+pub struct UpdateProjectRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub access_class: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub owner: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_users: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_teams: Option<Vec<String>>,
 }
 
 /// Domain item in list response

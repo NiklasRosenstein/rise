@@ -1,10 +1,14 @@
-// Team-related components for Rise Dashboard
-// This file depends on React, utils.js, components/ui.js, and components/toast.js being loaded first
+// @ts-nocheck
+import { useCallback, useEffect, useState } from 'react';
+import { api } from '../lib/api';
+import { navigate } from '../lib/navigation';
+import { formatDate } from '../lib/utils';
+import { useToast } from '../components/toast';
+import { Button, Modal, FormField } from '../components/ui';
 
-const { useState, useEffect, useCallback } = React;
 
 // Teams List Component
-function TeamsList({ currentUser }) {
+export function TeamsList({ currentUser }) {
     const [teams, setTeams] = useState([]);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -119,7 +123,7 @@ function TeamsList({ currentUser }) {
                             teams.map(t => (
                                 <tr
                                     key={t.id}
-                                    onClick={() => window.location.hash = `team/${t.name}`}
+                                    onClick={() => navigate(`/team/${t.name}`)}
                                     className="hover:bg-gray-100 dark:bg-gray-800/50 transition-colors cursor-pointer"
                                 >
                                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-gray-100">
@@ -205,7 +209,7 @@ function TeamsList({ currentUser }) {
 }
 
 // Team Detail Component
-function TeamDetail({ teamName, currentUser }) {
+export function TeamDetail({ teamName, currentUser }) {
     const [team, setTeam] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -330,7 +334,7 @@ function TeamDetail({ teamName, currentUser }) {
         try {
             await api.deleteTeam(team.id);
             showToast(`Team ${team.name} deleted successfully`, 'success');
-            window.location.hash = '#teams';
+            navigate('/teams');
         } catch (err) {
             showToast(`Failed to delete team: ${err.message}`, 'error');
             setDeleting(false);
@@ -343,7 +347,7 @@ function TeamDetail({ teamName, currentUser }) {
 
     return (
         <section>
-            <a href="#teams" className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
+            <a href="/teams" onClick={(e) => { e.preventDefault(); navigate('/teams'); }} className="inline-flex items-center gap-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 mb-6 transition-colors">
                 ← Back to Teams
             </a>
 

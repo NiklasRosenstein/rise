@@ -1,10 +1,8 @@
-// Reusable UI components for Rise Dashboard
-// This file depends on React being loaded first
+import { useEffect, useState } from 'react';
 
-const { useState, useEffect } = React;
 
 // Status Badge Component
-function StatusBadge({ status }) {
+export function StatusBadge({ status }) {
     const statusColors = {
         'Healthy': 'bg-green-600',
         'Running': 'bg-green-600',
@@ -32,7 +30,7 @@ function StatusBadge({ status }) {
 }
 
 // Button Component
-function Button({
+export function Button({
     children,
     onClick,
     variant = 'primary',
@@ -72,7 +70,7 @@ function Button({
 }
 
 // Modal Component
-function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
+export function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
     useEffect(() => {
         const handleEscape = (e) => {
             if (e.key === 'Escape' && isOpen) {
@@ -118,7 +116,7 @@ function Modal({ isOpen, onClose, title, children, maxWidth = 'max-w-2xl' }) {
 }
 
 // FormField Component
-function FormField({
+export function FormField({
     label,
     id,
     type = 'text',
@@ -199,7 +197,7 @@ function FormField({
 }
 
 // ConfirmDialog Component
-function ConfirmDialog({
+export function ConfirmDialog({
     isOpen,
     onClose,
     onConfirm,
@@ -276,8 +274,126 @@ function ConfirmDialog({
     );
 }
 
+// LoadingSpinner Component
+function LoadingSpinner({ size = 'md' }) {
+    const sizeClasses = {
+        sm: 'w-4 h-4 border-2',
+        md: 'w-6 h-6 border-2',
+        lg: 'w-8 h-8 border-4',
+    };
+
+    return (
+        <div className={`${sizeClasses[size]} border-indigo-600 border-t-transparent rounded-full animate-spin`}></div>
+    );
+}
+
+// Combobox Component (autocomplete with dropdown)
+function Combobox({
+    value,
+    onChange,
+    options = [],
+    placeholder = '',
+    disabled = false,
+    loading = false,
+    className = ''
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const [inputValue, setInputValue] = useState(value || '');
+    const comboboxRef = React.useRef(null);
+
+    // Update inputValue when value prop changes
+    useEffect(() => {
+        setInputValue(value || '');
+    }, [value]);
+
+    // Filter options based on input
+    const filteredOptions = options.filter(option =>
+        option.toLowerCase().includes(inputValue.toLowerCase())
+    );
+
+    // Handle click outside to close dropdown
+    useEffect(() => {
+        const handleClickOutside = (e) => {
+            if (comboboxRef.current && !comboboxRef.current.contains(e.target)) {
+                setIsOpen(false);
+            }
+        };
+
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const handleInputChange = (e) => {
+        const newValue = e.target.value;
+        setInputValue(newValue);
+        onChange(newValue);
+        setIsOpen(true);
+    };
+
+    const handleOptionSelect = (option) => {
+        setInputValue(option);
+        onChange(option);
+        setIsOpen(false);
+    };
+
+    const handleInputFocus = () => {
+        setIsOpen(true);
+    };
+
+    const handleKeyDown = (e) => {
+        if (e.key === 'Escape') {
+            setIsOpen(false);
+        }
+    };
+
+    return (
+        <div ref={comboboxRef} className={`relative ${className}`}>
+            <div className="relative">
+                <input
+                    type="text"
+                    value={inputValue}
+                    onChange={handleInputChange}
+                    onFocus={handleInputFocus}
+                    onKeyDown={handleKeyDown}
+                    placeholder={placeholder}
+                    disabled={disabled || loading}
+                    className="w-full px-3 py-2 pr-8 border border-gray-300 dark:border-gray-700 rounded bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                />
+                {loading ? (
+                    <div className="absolute right-2 top-1/2 -translate-y-1/2">
+                        <LoadingSpinner size="sm" />
+                    </div>
+                ) : (
+                    <div
+                        className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 cursor-pointer"
+                        onClick={() => !disabled && setIsOpen(!isOpen)}
+                    >
+                        <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d={isOpen ? "M5 15l7-7 7 7" : "M19 9l-7 7-7-7"} />
+                        </svg>
+                    </div>
+                )}
+            </div>
+
+            {isOpen && !disabled && !loading && filteredOptions.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded shadow-lg max-h-60 overflow-y-auto">
+                    {filteredOptions.map((option, index) => (
+                        <div
+                            key={index}
+                            onClick={() => handleOptionSelect(option)}
+                            className="px-3 py-2 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-700 text-gray-900 dark:text-gray-100"
+                        >
+                            {option}
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
+    );
+}
+
 // Footer Component
-function Footer({ version }) {
+export function Footer({ version }) {
     return (
         <footer className="bg-white dark:bg-gray-900 border-t border-gray-200 dark:border-gray-800 mt-auto">
             <div className="container mx-auto px-4 py-4">

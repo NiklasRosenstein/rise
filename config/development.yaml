@@ -4,6 +4,7 @@
 
 server:
   public_url: http://rise.local:3000
+  frontend_dev_proxy_url: http://localhost:5173
   cookie_secure: false
   cookie_domain: ""  # Empty = current host only (for localhost:3000 access)
   # If you access via rise.local:3000, use ".rise.local" instead
@@ -24,7 +25,7 @@ registry:
   type: "oci-client-auth"
   registry_url: "rise-registry:5000"      # Internal URL for deployment controllers
   namespace: "rise-apps"
-  client_registry_url: "localhost:5000"   # Client-facing URL for CLI push operations
+  client_registry_url: "http://rise-registry:5000"   # Client-facing URL for CLI push operations
 
 deployment_controller:
   auth_backend_url: "http://host.minikube.internal:3000"  # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host)
