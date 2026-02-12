@@ -49,16 +49,13 @@ docker-compose up -d
 ### 4. Configure BuildKit Network
 
 ```bash
-# Find network name (usually rise_default)
-NETWORK_NAME=$(docker network ls --filter "name=rise" --format "{{.Name}}" | grep default)
-
 # Configure environment
-export RISE_MANAGED_BUILDKIT_NETWORK_NAME=$NETWORK_NAME
+export RISE_MANAGED_BUILDKIT_NETWORK_NAME=rise_default
 export RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES="rise-registry:5000,localhost:5000,127.0.0.1:5000"
 
 # Add to shell profile
 cat >> ~/.bashrc <<EOF
-export RISE_MANAGED_BUILDKIT_NETWORK_NAME=$NETWORK_NAME
+export RISE_MANAGED_BUILDKIT_NETWORK_NAME=rise_default
 export RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES="rise-registry:5000,localhost:5000,127.0.0.1:5000"
 EOF
 ```
