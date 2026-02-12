@@ -75,6 +75,11 @@ jobs:
           echo "is_trusted_pr=${is_trusted_pr}" >> "$GITHUB_OUTPUT"
           echo "should_publish=${should_publish}" >> "$GITHUB_OUTPUT"
 
+          echo "CI Version: ${ci_version}"
+          echo "Image Tag: ${image_tag}"
+          echo "Is Trusted PR: ${is_trusted_pr}"
+          echo "Should Publish: ${should_publish}"
+
   rust-quality:
     name: Rust quality checks
     runs-on: ubuntu-latest
