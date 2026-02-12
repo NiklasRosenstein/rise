@@ -10,11 +10,11 @@ rust = { version = "1.91.1", profile = "default" }
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
-run = "cargo sqlx prepare -- --features server,aws,k8s,snowflake --all-targets"
+run = "cargo sqlx prepare -- --features cli,backend --all-targets"
 
 [tasks."sqlx:check"]
 description = "Check that all SQLX queries are valid."
-run = "cargo sqlx prepare --check -- --features server,aws,k8s,snowflake --all-targets"
+run = "cargo sqlx prepare --check -- --features cli,backend --all-targets"
 
 [tasks.lint]
 description = "Run all linting checks (clippy, formatting, sqlx, helm)."
