@@ -54,9 +54,13 @@ pub fn rise_auth_routes() -> Router<AppState> {
         .route("/.rise/auth/complete", get(handlers::oauth_complete))
 }
 
-/// Protected routes that require authentication
-pub fn protected_routes() -> Router<AppState> {
-    Router::new()
-        .route("/users/me", get(handlers::me))
-        .route("/users/lookup", post(handlers::users_lookup))
+/// Auth-only routes that require authentication but NOT platform access
+/// These routes are accessible to all authenticated users regardless of platform access policy
+pub fn auth_only_routes() -> Router<AppState> {
+    Router::new().route("/users/me", get(handlers::me))
+}
+
+/// Protected routes that require authentication AND platform access
+pub fn platform_routes() -> Router<AppState> {
+    Router::new().route("/users/lookup", post(handlers::users_lookup))
 }

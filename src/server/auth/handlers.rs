@@ -233,31 +233,23 @@ async fn sync_groups_after_login(
             )
         })?;
 
-    // Sync groups if present in claims
+    // Sync groups if present in claims (including empty groups - user may have been removed from all groups)
     if let Some(ref groups) = claims.groups {
-        if !groups.is_empty() {
-            tracing::debug!(
-                "Syncing {} IdP groups for user {} during login",
-                groups.len(),
-                user.email
-            );
+        tracing::debug!(
+            "Syncing {} IdP groups for user {} during login",
+            groups.len(),
+            user.email
+        );
 
-            if let Err(e) =
-                crate::server::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups)
-                    .await
-            {
-                // Log error but don't fail login
-                tracing::error!(
-                    "Failed to sync IdP groups during login for user {}: {:#}",
-                    user.email,
-                    e
-                );
-            } else {
-                tracing::info!(
-                    "Successfully synced IdP groups during login for user {}",
-                    user.email
-                );
-            }
+        if let Err(e) =
+            crate::server::auth::group_sync::sync_user_groups(&state.db_pool, user.id, groups).await
+        {
+            // Log error but don't fail login
+            tracing::error!(
+                "Failed to sync IdP groups during login for user {}: {:#}",
+                user.email,
+                e
+            );
         }
     }
 

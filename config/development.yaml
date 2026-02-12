@@ -20,6 +20,11 @@ auth:
   client_secret: rise-backend-secret
   admin_users:
     - "admin@example.com"
+  platform_access:
+    policy: restrictive
+    allowed_user_emails:
+      - "admin@example.com"
+      - "dev@example.com"
 
 registry:
   type: "oci-client-auth"

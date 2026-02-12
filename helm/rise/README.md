@@ -289,7 +289,7 @@ When Dex is enabled (`dex.enabled: true`), the chart provides sensible defaults 
 
 By default, `dex.config` is empty and the chart uses a pre-configured development setup that includes:
 - In-memory storage (data is lost on pod restart)
-- Static password authentication with test users (admin@example.com and test@example.com, both with password "password")
+- Static password authentication with test users (`admin@example.com`, `dev@example.com` and `user@example.com`, all with password "password")
 - Placeholder redirect URIs (`http://rise.example.com/` and `http://rise.example.com/auth/callback`)
 
 **Important:** The default configuration is for testing only. You must customize the redirect URIs to match your actual `public_url` for production deployments.

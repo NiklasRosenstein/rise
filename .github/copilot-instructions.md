@@ -181,8 +181,12 @@ cargo test --all-features
 - Email: `admin@example.com`
 - Password: `password`
 
-**Test user:**
-- Email: `test@example.com`
+**Developer user:**
+- Email: `dev@example.com`
+- Password: `password`
+
+**End user:**
+- Email: `user@example.com`
 - Password: `password`
 
 ## Documentation

@@ -23,6 +23,14 @@ class RiseAPI {
             throw new Error('Authentication required');
         }
 
+        if (response.status === 403) {
+            // Platform access denied - user is authenticated but lacks platform access
+            const errorText = await response.text();
+            const error = new Error(errorText || 'You do not have access to Rise platform features. Your account is configured for application access only. Please contact your administrator if you need platform access.');
+            error.isPlatformAccessDenied = true;
+            throw error;
+        }
+
         if (!response.ok) {
             const errorText = await response.text();
             throw new Error(`API error: ${response.status} ${errorText}`);

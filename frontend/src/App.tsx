@@ -7,6 +7,7 @@ import { parseDocsSummary, titleFromSlug } from './lib/docs';
 import { maybeMigrateLegacyHashRoute, navigate, usePathLocation } from './lib/navigation';
 import { Footer } from './components/ui';
 import { useToast } from './components/toast';
+import { PlatformAccessDenied } from './components/states';
 import { DeploymentDetail } from './features/deployments';
 import { DocsPage } from './features/docs';
 import { HomePage } from './features/home';
@@ -249,6 +250,7 @@ function LoginPage() {
 export function App() {
     const [user, setUser] = useState(null);
     const [authChecked, setAuthChecked] = useState(false);
+    const [platformAccessDenied, setPlatformAccessDenied] = useState(false);
     const [version, setVersion] = useState(null);
     const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
     const [paletteProjects, setPaletteProjects] = useState([]);
@@ -380,6 +382,11 @@ export function App() {
                 setPaletteProjects(projects || []);
                 setPaletteTeams(teams || []);
             } catch (err) {
+                // Check if this is a platform access denial
+                if (err.isPlatformAccessDenied) {
+                    setPlatformAccessDenied(true);
+                    return;
+                }
                 console.error('Failed to load command palette targets:', err);
             }
         }
@@ -401,6 +408,10 @@ export function App() {
 
     if (!user) {
         return <LoginPage />;
+    }
+
+    if (platformAccessDenied) {
+        return <PlatformAccessDenied userEmail={user.email} onLogout={handleLogout} />;
     }
 
     let view = 'projects';

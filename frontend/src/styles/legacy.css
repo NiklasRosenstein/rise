@@ -1264,7 +1264,7 @@ textarea:focus-visible {
 
 .mono-login-card {
     width: 100%;
-    max-width: 420px;
+    max-width: 768px;
     background: #141414;
     border: 1px solid var(--mono-line);
     padding: 1.2rem;

@@ -15,7 +15,7 @@ mise backend:run
 
 Services available at http://localhost:3000 (API and Web UI).
 
-**Default credentials**: `admin@example.com` / `password` or `test@example.com` / `password`
+**Default credentials**: `admin@example.com` / `dev@example.com` / `user@example.com` and `password`
 
 ## Build CLI
 

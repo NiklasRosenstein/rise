@@ -79,7 +79,7 @@ However, you need to configure your `/etc/hosts` on your host to ensure consiste
 ```
 
 **Default credentials**:
-- Email: `admin@example.com` or `test@example.com`
+- Email: `admin@example.com`, `dev@example.com` or `user@example.com`
 - Password: `password`
 
 ## Deploy your first app

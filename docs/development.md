@@ -146,7 +146,7 @@ psql postgres://rise:rise123@localhost:5432/rise
 
 **PostgreSQL:** `postgres://rise:rise123@localhost:5432/rise`
 
-**Dex:** `admin@example.com` / `password` or `test@example.com` / `password`
+**Dex:** `admin@example.com` / `dev@example.com` / `user@example.com` and `password`
 
 ## Code Style
 

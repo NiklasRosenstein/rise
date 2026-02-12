@@ -23,7 +23,10 @@ pub async fn find_by_email(pool: &PgPool, email: &str) -> Result<Option<User>> {
 }
 
 /// Find user by ID
-pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>> {
+pub async fn find_by_id(
+    executor: impl sqlx::Executor<'_, Database = sqlx::Postgres>,
+    id: Uuid,
+) -> Result<Option<User>> {
     let user = sqlx::query_as!(
         User,
         r#"
@@ -33,7 +36,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>> {
         "#,
         id
     )
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await
     .context("Failed to find user by ID")?;
 
