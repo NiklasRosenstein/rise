@@ -13,6 +13,11 @@ use crate::db::{service_accounts, users, User};
 use crate::server::auth::cookie_helpers;
 use crate::server::state::AppState;
 
+/// Marker type to indicate service account authentication
+/// Used to exempt service accounts from platform access checks
+#[derive(Debug, Clone, Copy)]
+struct IsServiceAccount;
+
 /// Check if a JWT issuer is a Rise-issued JWT
 ///
 /// Rise JWTs have `iss` set to the Rise public URL (e.g., "https://rise.example.com").
@@ -260,6 +265,10 @@ pub async fn auth_middleware(
 
         tracing::debug!("Rise JWT validated for user: {}", email);
 
+        // Extract groups from Rise JWT for platform access checks
+        let groups = claims.groups.clone();
+        req.extensions_mut().insert(groups);
+
         users::find_or_create(&state.db_pool, email)
             .await
             .map_err(|e| {
@@ -272,7 +281,12 @@ pub async fn auth_middleware(
     } else {
         // External issuer - service account authentication
         tracing::debug!("Authenticating as service account from issuer: {}", issuer);
-        authenticate_service_account(&state, &token, &issuer).await?
+        let user = authenticate_service_account(&state, &token, &issuer).await?;
+
+        // Mark this as a service account authentication
+        req.extensions_mut().insert(IsServiceAccount);
+
+        user
     };
 
     tracing::debug!("User authenticated: {} ({})", user.email, user.id);
@@ -343,15 +357,26 @@ pub async fn platform_access_middleware(
         )
     })?;
 
+    // Check if this is a service account - service accounts bypass platform access checks
+    if req.extensions().get::<IsServiceAccount>().is_some() {
+        tracing::debug!("Skipping platform access check for service account");
+        return Ok(next.run(req).await);
+    }
+
+    // Extract groups from request extensions (stored by auth_middleware)
+    let groups = req.extensions().get::<Option<Vec<String>>>();
+
     // Check platform access dynamically
     let checker = ConfigBasedAccessChecker {
         config: &state.auth_settings.platform_access,
         admin_users: &state.admin_users,
     };
 
-    // Note: IdP groups not available here - they're only synced during login
-    // For most accurate group-based checking, groups are evaluated during login via group_sync
-    if !checker.has_platform_access(user, None) {
+    // Pass groups from Rise JWT to platform access checker
+    if !checker.has_platform_access(
+        user,
+        groups.as_ref().and_then(|g| g.as_ref().map(|v| v.as_ref())),
+    ) {
         tracing::warn!(
             user_id = %user.id,
             user_email = %user.email,
