@@ -32,7 +32,21 @@ helm upgrade --install "${RELEASE_NAME}" ./helm/rise \
   --set "postgresql.enabled=true" \
   --set "dex.enabled=true" \
   --set "ingress.enabled=false" \
-  --set "config.server.public_url=http://rise.local"
+  --set "config.server.public_url=http://rise.local" \
+  --set "config.server.jwt_signing_secret=test-jwt-secret-key-for-ci-testing-only-not-secure" \
+  --set "config.auth.issuer=http://dex:5556/dex" \
+  --set "config.auth.client_id=rise-backend" \
+  --set "config.auth.client_secret=rise-backend-secret" \
+  --set "config.deployment_controller.type=kubernetes" \
+  --set "config.deployment_controller.production_ingress_url_template={project_name}.apps.rise.local" \
+  --set "config.deployment_controller.auth_backend_url=http://${RELEASE_NAME}-server.${NAMESPACE}.svc.cluster.local:3000" \
+  --set "config.deployment_controller.auth_signin_url=http://rise.local" \
+  --set "config.deployment_controller.namespace_format=rise-{project_name}" \
+  --set "config.deployment_controller.ingress_schema=http" \
+  --set "config.deployment_controller.access_classes.public.display_name=Public" \
+  --set "config.deployment_controller.access_classes.public.description=Public access without authentication" \
+  --set "config.deployment_controller.access_classes.public.ingress_class=nginx" \
+  --set "config.deployment_controller.access_classes.public.access_requirement=None"
 
 echo "Waiting for workloads to become ready"
 kubectl wait --namespace "${NAMESPACE}" --for=condition=Available deployment -l "app.kubernetes.io/instance=${RELEASE_NAME}" --timeout=10m
@@ -68,6 +82,20 @@ helm upgrade "${RELEASE_NAME}" ./helm/rise \
   --set "postgresql.enabled=true" \
   --set "dex.enabled=true" \
   --set "ingress.enabled=false" \
-  --set "config.server.public_url=http://rise.local"
+  --set "config.server.public_url=http://rise.local" \
+  --set "config.server.jwt_signing_secret=test-jwt-secret-key-for-ci-testing-only-not-secure" \
+  --set "config.auth.issuer=http://dex:5556/dex" \
+  --set "config.auth.client_id=rise-backend" \
+  --set "config.auth.client_secret=rise-backend-secret" \
+  --set "config.deployment_controller.type=kubernetes" \
+  --set "config.deployment_controller.production_ingress_url_template={project_name}.apps.rise.local" \
+  --set "config.deployment_controller.auth_backend_url=http://${RELEASE_NAME}-server.${NAMESPACE}.svc.cluster.local:3000" \
+  --set "config.deployment_controller.auth_signin_url=http://rise.local" \
+  --set "config.deployment_controller.namespace_format=rise-{project_name}" \
+  --set "config.deployment_controller.ingress_schema=http" \
+  --set "config.deployment_controller.access_classes.public.display_name=Public" \
+  --set "config.deployment_controller.access_classes.public.description=Public access without authentication" \
+  --set "config.deployment_controller.access_classes.public.ingress_class=nginx" \
+  --set "config.deployment_controller.access_classes.public.access_requirement=None"
 
 echo "Minikube E2E smoke tests completed successfully"
