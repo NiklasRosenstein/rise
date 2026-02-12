@@ -302,7 +302,7 @@ jobs:
           tools: cargo:cargo-dist
 
       - name: Build distributable artifacts
-        run: cargo-dist build --target ${{ matrix.target }}
+        run: dist build --target ${{ matrix.target }}
 
       - name: Collect artifacts
         shell: bash
@@ -388,7 +388,7 @@ jobs:
           tools: cargo:cargo-dist
 
       - name: Build distributable artifacts
-        run: cargo-dist build --target ${{ matrix.target }}
+        run: dist build --target ${{ matrix.target }}
 
       - name: Collect artifacts
         shell: bash
