@@ -1,6 +1,6 @@
 use crate::api::project::{
     CreateProjectResponse, DomainsResponse, EnvVarsResponse, MeResponse, OwnerInfo, Project,
-    ProjectErrorResponse, ProjectStatus, ProjectWithOwnerInfo, UpdateProjectResponse,
+    ProjectErrorResponse, ProjectStatus, UpdateProjectResponse,
 };
 use crate::config::Config;
 use anyhow::{Context, Result};
@@ -311,12 +311,10 @@ pub async fn list_projects(http_client: &Client, backend_url: &str, config: &Con
                     .to_string();
 
                 // Format owner
-                let owner = if let Some(user_email) = &project.owner_user_email {
-                    format!("user:{}", user_email)
-                } else if let Some(team_name) = &project.owner_team_name {
-                    format!("team:{}", team_name)
-                } else {
-                    "-".to_string()
+                let owner = match &project.owner {
+                    Some(OwnerInfo::User(u)) => format!("user:{}", u.email),
+                    Some(OwnerInfo::Team(t)) => format!("team:{}", t.name),
+                    None => "-".to_string(),
                 };
 
                 table.add_row(vec![
@@ -358,11 +356,7 @@ pub async fn show_project(
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    // Always request expanded data with owner info
-    let url = format!(
-        "{}/api/v1/projects/{}?expand=owner",
-        backend_url, project_identifier
-    );
+    let url = format!("{}/api/v1/projects/{}", backend_url, project_identifier);
     let response = http_client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -371,7 +365,7 @@ pub async fn show_project(
         .context("Failed to send get project request")?;
 
     if response.status().is_success() {
-        let project: ProjectWithOwnerInfo = response
+        let project: Project = response
             .json()
             .await
             .context("Failed to parse get project response")?;
@@ -864,7 +858,7 @@ pub async fn add_app_user(
     project: &str,
     identifier: &str,
 ) -> Result<()> {
-    use crate::api::project::{ProjectWithOwnerInfo, UpdateProjectRequest, UpdateProjectResponse};
+    use crate::api::project::{UpdateProjectRequest, UpdateProjectResponse};
 
     let (identifier_type, identifier_value) = parse_app_user_identifier(identifier)?;
 
@@ -890,7 +884,7 @@ pub async fn add_app_user(
         );
     }
 
-    let current_project: ProjectWithOwnerInfo = response
+    let current_project: Project = response
         .json()
         .await
         .context("Failed to parse project response")?;
@@ -974,7 +968,7 @@ pub async fn remove_app_user(
     project: &str,
     identifier: &str,
 ) -> Result<()> {
-    use crate::api::project::{ProjectWithOwnerInfo, UpdateProjectRequest, UpdateProjectResponse};
+    use crate::api::project::{UpdateProjectRequest, UpdateProjectResponse};
 
     let (identifier_type, identifier_value) = parse_app_user_identifier(identifier)?;
 
@@ -1000,7 +994,7 @@ pub async fn remove_app_user(
         );
     }
 
-    let current_project: ProjectWithOwnerInfo = response
+    let current_project: Project = response
         .json()
         .await
         .context("Failed to parse project response")?;
@@ -1087,8 +1081,6 @@ pub async fn list_app_users(
     token: &str,
     project: &str,
 ) -> Result<()> {
-    use crate::api::project::ProjectWithOwnerInfo;
-
     let url = format!("{}/api/v1/projects/{}", backend_url, project);
     let response = http_client
         .get(&url)
@@ -1110,7 +1102,7 @@ pub async fn list_app_users(
         );
     }
 
-    let project_info: ProjectWithOwnerInfo = response
+    let project_info: Project = response
         .json()
         .await
         .context("Failed to parse project response")?;

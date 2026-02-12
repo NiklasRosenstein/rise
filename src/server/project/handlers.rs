@@ -2,8 +2,7 @@ use super::fuzzy::find_similar_projects;
 use super::models::{
     AccessClassInfo, CreateProjectRequest, CreateProjectResponse, GetProjectParams,
     ListAccessClassesResponse, OwnerInfo, Project as ApiProject, ProjectErrorResponse,
-    ProjectOwner, ProjectStatus, ProjectWithOwnerInfo, TeamInfo, UpdateProjectRequest,
-    UpdateProjectResponse, UserInfo,
+    ProjectOwner, ProjectStatus, TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
 };
 use crate::db::models::User;
 use crate::db::{projects, service_accounts, teams as db_teams, users as db_users};
@@ -189,8 +188,12 @@ pub async fn create_project(
         .await
         .internal_err("Failed to commit transaction")?;
 
+    let owner_info = resolve_owner_info(&state, &project)
+        .await
+        .map_err(|e| ServerError::internal(format!("Failed to resolve owner info: {}", e)))?;
+
     Ok(Json(CreateProjectResponse {
-        project: convert_project(project),
+        project: convert_project(project, owner_info),
     }))
 }
 
@@ -254,7 +257,7 @@ pub async fn list_projects(
     // Calculate URLs for all projects
     let mut api_projects = Vec::new();
     for project in projects {
-        let (active_deployment_status, primary_url, custom_domain_urls) =
+        let (active_deployment_status, default_url, primary_url, custom_domain_urls) =
             if let Some(Some(info)) = active_deployment_info.get(&project.id) {
                 if let Some(deployment) = deployments_map.get(&info.id) {
                     match state
@@ -264,6 +267,7 @@ pub async fn list_projects(
                     {
                         Ok(urls) => (
                             Some(info.status.to_string()),
+                            Some(urls.default_url),
                             Some(urls.primary_url),
                             urls.custom_domain_urls,
                         ),
@@ -276,18 +280,29 @@ pub async fn list_projects(
                         }
                     }
                 } else {
-                    (Some(info.status.to_string()), None, vec![])
+                    (Some(info.status.to_string()), None, None, vec![])
                 }
             } else {
-                (None, None, vec![])
+                (None, None, None, vec![])
             };
 
-        let owner_user_email = project
-            .owner_user_id
-            .and_then(|id| user_emails.get(&id).cloned());
-        let owner_team_name = project
-            .owner_team_id
-            .and_then(|id| team_names.get(&id).cloned());
+        let owner = if let Some(user_id) = project.owner_user_id {
+            user_emails.get(&user_id).map(|email| {
+                OwnerInfo::User(UserInfo {
+                    id: user_id.to_string(),
+                    email: email.clone(),
+                })
+            })
+        } else if let Some(team_id) = project.owner_team_id {
+            team_names.get(&team_id).map(|name| {
+                OwnerInfo::Team(TeamInfo {
+                    id: team_id.to_string(),
+                    name: name.clone(),
+                })
+            })
+        } else {
+            None
+        };
 
         api_projects.push(ApiProject {
             id: project.id.to_string(),
@@ -296,14 +311,13 @@ pub async fn list_projects(
             name: project.name,
             status: ProjectStatus::from(project.status),
             access_class: project.access_class,
-            owner_user: project.owner_user_id.map(|id| id.to_string()),
-            owner_team: project.owner_team_id.map(|id| id.to_string()),
-            owner_user_email,
-            owner_team_name,
+            owner,
             active_deployment_status,
+            default_url,
             primary_url,
             custom_domain_urls,
             deployment_groups: None, // Not populated in list view for performance
+            finalizers: vec![],      // Not populated in list view for performance
             app_users: vec![],       // Not populated in list view for performance
             app_teams: vec![],       // Not populated in list view for performance
         });
@@ -346,7 +360,7 @@ pub async fn get_project(
     }
 
     // Calculate deployment URLs if there's an active deployment
-    let (primary_url, custom_domain_urls) =
+    let (default_url, primary_url, custom_domain_urls) =
         match crate::db::deployments::get_active_deployments_for_project(&state.db_pool, project.id)
             .await
         {
@@ -361,7 +375,11 @@ pub async fn get_project(
                         .get_deployment_urls(deployment, &project)
                         .await
                     {
-                        Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
+                        Ok(urls) => (
+                            Some(urls.default_url),
+                            Some(urls.primary_url),
+                            urls.custom_domain_urls,
+                        ),
                         Err(e) => {
                             return Err((
                                 StatusCode::INTERNAL_SERVER_ERROR,
@@ -373,7 +391,7 @@ pub async fn get_project(
                         }
                     }
                 } else {
-                    (None, vec![])
+                    (None, None, vec![])
                 }
             }
             Err(e) => {
@@ -387,64 +405,57 @@ pub async fn get_project(
             }
         };
 
-    // Check if we should expand owner information
-    if params.should_expand("owner") {
-        let mut expanded = expand_project_with_owner(&state, project)
+    // Resolve owner info
+    let owner_info = resolve_owner_info(&state, &project).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(ProjectErrorResponse {
+                error: format!("Failed to resolve owner info: {}", e),
+                suggestions: None,
+            }),
+        )
+    })?;
+
+    let mut api_project = convert_project(project.clone(), owner_info);
+    api_project.default_url = default_url;
+    api_project.primary_url = primary_url;
+    api_project.custom_domain_urls = custom_domain_urls;
+
+    // Get active deployment groups
+    let deployment_groups =
+        crate::db::deployments::get_active_deployment_groups(&state.db_pool, project.id)
             .await
             .map_err(|e| {
                 (
                     StatusCode::INTERNAL_SERVER_ERROR,
                     Json(ProjectErrorResponse {
-                        error: format!("Failed to expand project data: {}", e),
+                        error: format!("Failed to get deployment groups: {}", e),
                         suggestions: None,
                     }),
                 )
             })?;
-
-        expanded.primary_url = primary_url;
-        expanded.custom_domain_urls = custom_domain_urls;
-        Ok(Json(serde_json::to_value(expanded).unwrap()))
+    api_project.deployment_groups = if deployment_groups.is_empty() {
+        None
     } else {
-        let mut api_project = convert_project(project.clone());
-        api_project.primary_url = primary_url;
-        api_project.custom_domain_urls = custom_domain_urls;
+        Some(deployment_groups)
+    };
 
-        // Get active deployment groups
-        let deployment_groups =
-            crate::db::deployments::get_active_deployment_groups(&state.db_pool, project.id)
-                .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ProjectErrorResponse {
-                            error: format!("Failed to get deployment groups: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
-        api_project.deployment_groups = if deployment_groups.is_empty() {
-            None
-        } else {
-            Some(deployment_groups)
-        };
+    // Load app users and teams
+    let (app_users, app_teams) = load_app_users_for_project(&state, project.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to load app users: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+    api_project.app_users = app_users;
+    api_project.app_teams = app_teams;
 
-        // Load app users and teams
-        let (app_users, app_teams) = load_app_users_for_project(&state, project.id)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ProjectErrorResponse {
-                        error: format!("Failed to load app users: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
-        api_project.app_users = app_users;
-        api_project.app_teams = app_teams;
-
-        Ok(Json(serde_json::to_value(api_project).unwrap()))
-    }
+    Ok(Json(serde_json::to_value(api_project).unwrap()))
 }
 
 pub async fn update_project(
@@ -851,8 +862,20 @@ pub async fn update_project(
         })?;
     }
 
+    let owner_info = resolve_owner_info(&state, &updated_project)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ProjectErrorResponse {
+                    error: format!("Failed to resolve owner info: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
+
     Ok(Json(UpdateProjectResponse {
-        project: convert_project(updated_project),
+        project: convert_project(updated_project, owner_info),
     }))
 }
 
@@ -961,49 +984,34 @@ async fn query_project_by_name(
         .ok_or_else(|| format!("Project '{}' not found", project_name))
 }
 
-/// Expand project with owner information
-async fn expand_project_with_owner(
+/// Resolve owner information for a project
+async fn resolve_owner_info(
     state: &AppState,
-    project: crate::db::models::Project,
-) -> Result<ProjectWithOwnerInfo, String> {
-    let owner_info = if let Some(user_id) = project.owner_user_id {
-        // Fetch user information
+    project: &crate::db::models::Project,
+) -> Result<Option<OwnerInfo>, String> {
+    if let Some(user_id) = project.owner_user_id {
         let user = db_users::find_by_id(&state.db_pool, user_id)
             .await
             .map_err(|e| format!("Failed to fetch user: {}", e))?
-            .ok_or_else(|| "User not found".to_string())?;
+            .ok_or_else(|| "Owner user not found".to_string())?;
 
-        Some(OwnerInfo::User(UserInfo {
+        Ok(Some(OwnerInfo::User(UserInfo {
             id: user.id.to_string(),
             email: user.email,
-        }))
+        })))
     } else if let Some(team_id) = project.owner_team_id {
-        // Fetch team information
         let team = db_teams::find_by_id(&state.db_pool, team_id)
             .await
             .map_err(|e| format!("Failed to fetch team: {}", e))?
-            .ok_or_else(|| "Team not found".to_string())?;
+            .ok_or_else(|| "Owner team not found".to_string())?;
 
-        Some(OwnerInfo::Team(TeamInfo {
+        Ok(Some(OwnerInfo::Team(TeamInfo {
             id: team.id.to_string(),
             name: team.name,
-        }))
+        })))
     } else {
-        None
-    };
-
-    Ok(ProjectWithOwnerInfo {
-        id: project.id.to_string(),
-        name: project.name,
-        status: ProjectStatus::from(project.status),
-        access_class: project.access_class,
-        owner: owner_info,
-        primary_url: None,          // Will be populated by caller
-        custom_domain_urls: vec![], // Will be populated by caller
-        finalizers: project.finalizers.clone(),
-        created: project.created_at.to_rfc3339(),
-        updated: project.updated_at.to_rfc3339(),
-    })
+        Ok(None)
+    }
 }
 
 /// Resolve project by ID or name with fuzzy matching support
@@ -1043,8 +1051,10 @@ async fn resolve_project(
 
                     let suggestions = match all_projects {
                         Ok(all_projects) => {
-                            let api_projects: Vec<ApiProject> =
-                                all_projects.into_iter().map(convert_project).collect();
+                            let api_projects: Vec<ApiProject> = all_projects
+                                .into_iter()
+                                .map(|p| convert_project(p, None))
+                                .collect();
                             let similar = find_similar_projects(id_or_name, &api_projects, 0.85);
                             if similar.is_empty() {
                                 None
@@ -1127,7 +1137,7 @@ async fn load_app_users_for_project(
 }
 
 /// Convert database Project model to API Project model
-fn convert_project(project: crate::db::models::Project) -> ApiProject {
+fn convert_project(project: crate::db::models::Project, owner: Option<OwnerInfo>) -> ApiProject {
     ApiProject {
         id: project.id.to_string(),
         created: project.created_at.to_rfc3339(),
@@ -1135,16 +1145,15 @@ fn convert_project(project: crate::db::models::Project) -> ApiProject {
         name: project.name,
         status: ProjectStatus::from(project.status),
         access_class: project.access_class,
-        owner_user: project.owner_user_id.map(|id| id.to_string()),
-        owner_team: project.owner_team_id.map(|id| id.to_string()),
-        owner_user_email: None, // Will be populated by caller if needed
-        owner_team_name: None,  // Will be populated by caller if needed
+        owner,
         active_deployment_status: None, // Will be populated by caller if needed
-        primary_url: None,      // Will be populated by caller
-        custom_domain_urls: vec![], // Will be populated by caller
-        deployment_groups: None, // Will be populated by caller if needed
-        app_users: vec![],      // Will be populated by caller if needed
-        app_teams: vec![],      // Will be populated by caller if needed
+        default_url: None,              // Will be populated by caller
+        primary_url: None,              // Will be populated by caller
+        custom_domain_urls: vec![],     // Will be populated by caller
+        deployment_groups: None,        // Will be populated by caller if needed
+        finalizers: project.finalizers.clone(),
+        app_users: vec![], // Will be populated by caller if needed
+        app_teams: vec![], // Will be populated by caller if needed
     }
 }
 

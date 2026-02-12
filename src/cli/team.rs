@@ -108,16 +108,6 @@ async fn get_current_user(
 struct Team {
     id: String,
     name: String,
-    members: Vec<String>,
-    owners: Vec<String>,
-    #[serde(default)]
-    idp_managed: bool,
-}
-
-#[derive(Debug, Deserialize)]
-struct TeamWithEmails {
-    id: String,
-    name: String,
     members: Vec<UserInfo>,
     owners: Vec<UserInfo>,
     #[serde(default)]
@@ -198,8 +188,26 @@ pub async fn create_team(
             create_response.team.name
         );
         println!("  ID: {}", create_response.team.id);
-        println!("  Owners: {}", create_response.team.owners.join(", "));
-        println!("  Members: {}", create_response.team.members.join(", "));
+        println!(
+            "  Owners: {}",
+            create_response
+                .team
+                .owners
+                .iter()
+                .map(|u| u.email.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!(
+            "  Members: {}",
+            create_response
+                .team
+                .members
+                .iter()
+                .map(|u| u.email.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     } else {
         let status = response.status();
         let error_text = response
@@ -287,11 +295,7 @@ pub async fn show_team(
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not logged in. Please run 'rise login' first."))?;
 
-    // Always request expanded data with user emails
-    let url = format!(
-        "{}/api/v1/teams/{}?expand=members,owners",
-        backend_url, team_identifier
-    );
+    let url = format!("{}/api/v1/teams/{}", backend_url, team_identifier);
     let response = http_client
         .get(&url)
         .header("Authorization", format!("Bearer {}", token))
@@ -300,7 +304,7 @@ pub async fn show_team(
         .context("Failed to send get team request")?;
 
     if response.status().is_success() {
-        let team: TeamWithEmails = response
+        let team: Team = response
             .json()
             .await
             .context("Failed to parse get team response")?;
@@ -431,32 +435,37 @@ pub async fn update_team(
         anyhow::bail!("Team not found");
     }
 
-    let mut team: Team = get_response
+    let team: Team = get_response
         .json()
         .await
         .context("Failed to parse team response")?;
 
+    // Work with owner/member IDs
+    let mut owner_ids: Vec<String> = team.owners.iter().map(|u| u.id.clone()).collect();
+    let mut member_ids: Vec<String> = team.members.iter().map(|u| u.id.clone()).collect();
+    let mut updated_name = team.name.clone();
+
     // Apply changes
     for owner in add_owner_ids {
-        if !team.owners.contains(&owner) {
-            team.owners.push(owner);
+        if !owner_ids.contains(&owner) {
+            owner_ids.push(owner);
         }
     }
     for owner in remove_owner_ids {
-        team.owners.retain(|o| o != &owner);
+        owner_ids.retain(|o| o != &owner);
     }
     for member in add_member_ids {
-        if !team.members.contains(&member) {
-            team.members.push(member);
+        if !member_ids.contains(&member) {
+            member_ids.push(member);
         }
     }
     for member in remove_member_ids {
-        team.members.retain(|m| m != &member);
+        member_ids.retain(|m| m != &member);
     }
 
     // Update name if provided
     if let Some(new_name) = name {
-        team.name = new_name;
+        updated_name = new_name;
     }
 
     #[derive(Serialize)]
@@ -467,9 +476,9 @@ pub async fn update_team(
     }
 
     let request = UpdateRequest {
-        name: Some(team.name.clone()),
-        owners: Some(team.owners.clone()),
-        members: Some(team.members.clone()),
+        name: Some(updated_name),
+        owners: Some(owner_ids),
+        members: Some(member_ids),
     };
 
     let url = format!("{}/api/v1/teams/{}", backend_url, team.id);
@@ -491,8 +500,26 @@ pub async fn update_team(
             "✓ Team '{}' updated successfully!",
             update_response.team.name
         );
-        println!("  Owners: {}", update_response.team.owners.join(", "));
-        println!("  Members: {}", update_response.team.members.join(", "));
+        println!(
+            "  Owners: {}",
+            update_response
+                .team
+                .owners
+                .iter()
+                .map(|u| u.email.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!(
+            "  Members: {}",
+            update_response
+                .team
+                .members
+                .iter()
+                .map(|u| u.email.as_str())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     } else {
         let status = response.status();
         let error_text = response

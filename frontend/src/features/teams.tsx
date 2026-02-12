@@ -140,9 +140,7 @@ export function TeamsList({ currentUser, openCreate = false }) {
                     </MonoTableHead>
                     <MonoTableBody>
                         {sortedTeams.length === 0 ? (
-                            <MonoTableEmptyRow colSpan={4}>
-                                <EmptyState message="No teams found." actionLabel="Create Team" onAction={handleCreateClick} />
-                            </MonoTableEmptyRow>
+                            <MonoTableEmptyRow colSpan={4}>No teams.</MonoTableEmptyRow>
                         ) : (
                             sortedTeams.map((t, idx) => (
                                 <MonoTableRow
@@ -253,15 +251,13 @@ export function TeamDetail({ teamName, currentUser }) {
     const loadTeam = useCallback(async () => {
         try {
             const [data, projects] = await Promise.all([
-                api.getTeam(teamName, { expand: 'members,owners' }),
+                api.getTeam(teamName),
                 api.getProjects(),
             ]);
             setTeam(data);
             const ownedProjects = (projects || []).filter((p) => {
-                if (p.owner_team_name && p.owner_team_name === data.name) return true;
-                if (p.owner_team_id && data.id && p.owner_team_id === data.id) return true;
-                if (p.owner?.team && data.id && p.owner.team === data.id) return true;
-                if (p.owner?.team_id && data.id && p.owner.team_id === data.id) return true;
+                if (p.owner?.name && p.owner.name === data.name) return true;
+                if (p.owner?.id && data.id && p.owner.id === data.id) return true;
                 return false;
             });
             setTeamProjects(ownedProjects);

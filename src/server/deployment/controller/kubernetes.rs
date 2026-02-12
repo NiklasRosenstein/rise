@@ -3535,40 +3535,55 @@ impl DeploymentBackend for KubernetesController {
         deployment: &Deployment,
         project: &Project,
     ) -> Result<DeploymentUrls> {
-        // Calculate primary URL from templates
-        let primary_url_host = self.full_ingress_url(project, deployment);
-        let primary_url = format!("{}://{}", self.ingress_schema, primary_url_host);
+        // Calculate default URL from templates
+        let default_url_host = self.full_ingress_url(project, deployment);
+        let default_url = format!("{}://{}", self.ingress_schema, default_url_host);
 
         // Custom domains only apply to deployments in the default group
-        let custom_domain_urls = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP {
-            // Fetch custom domains from database
-            let custom_domains = crate::db::custom_domains::list_project_custom_domains(
-                &self.state.db_pool,
-                project.id,
-            )
-            .await?;
+        let (custom_domain_urls, primary_url) =
+            if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP {
+                // Fetch custom domains from database
+                let custom_domains = crate::db::custom_domains::list_project_custom_domains(
+                    &self.state.db_pool,
+                    project.id,
+                )
+                .await?;
 
-            // Filter out custom domains that conflict with project default patterns
-            let custom_domains = self.filter_valid_custom_domains(custom_domains);
+                // Filter out custom domains that conflict with project default patterns
+                let custom_domains = self.filter_valid_custom_domains(custom_domains);
 
-            // Build custom domain URLs with schema
-            let mut urls = Vec::new();
-            for domain in custom_domains {
-                let url_host = if let Some(port) = self.ingress_port {
-                    format!("{}:{}", domain.domain, port)
+                // Find the starred (primary) custom domain
+                let starred = custom_domains.iter().find(|d| d.is_primary);
+                let primary = if let Some(starred) = starred {
+                    let host = if let Some(port) = self.ingress_port {
+                        format!("{}:{}", starred.domain, port)
+                    } else {
+                        starred.domain.clone()
+                    };
+                    format!("{}://{}", self.ingress_schema, host)
                 } else {
-                    domain.domain
+                    default_url.clone()
                 };
-                let url = format!("{}://{}", self.ingress_schema, url_host);
-                urls.push(url);
-            }
-            urls
-        } else {
-            // Non-default groups don't get custom domain URLs
-            Vec::new()
-        };
+
+                // Build custom domain URLs with schema
+                let mut urls = Vec::new();
+                for domain in custom_domains {
+                    let url_host = if let Some(port) = self.ingress_port {
+                        format!("{}:{}", domain.domain, port)
+                    } else {
+                        domain.domain
+                    };
+                    let url = format!("{}://{}", self.ingress_schema, url_host);
+                    urls.push(url);
+                }
+                (urls, primary)
+            } else {
+                // Non-default groups don't get custom domain URLs
+                (Vec::new(), default_url.clone())
+            };
 
         Ok(DeploymentUrls {
+            default_url,
             primary_url,
             custom_domain_urls,
         })

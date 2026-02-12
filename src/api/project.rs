@@ -33,19 +33,19 @@ pub struct Project {
     pub status: ProjectStatus,
     pub access_class: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_user: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_team: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_user_email: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_team_name: Option<String>,
+    pub owner: Option<OwnerInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_deployment_status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub default_url: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub primary_url: Option<String>,
     #[serde(default)]
     pub custom_domain_urls: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub deployment_groups: Option<Vec<String>>,
+    #[serde(default)]
+    pub finalizers: Vec<String>,
     #[serde(default)]
     pub app_users: Vec<UserInfo>,
     #[serde(default)]
@@ -72,30 +72,6 @@ pub struct TeamInfo {
 pub enum OwnerInfo {
     User(UserInfo),
     Team(TeamInfo),
-}
-
-/// Project with expanded owner information
-#[derive(Debug, Deserialize)]
-pub struct ProjectWithOwnerInfo {
-    pub id: String,
-    pub name: String,
-    pub status: ProjectStatus,
-    #[allow(dead_code)]
-    pub access_class: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner: Option<OwnerInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub primary_url: Option<String>,
-    #[serde(default)]
-    pub custom_domain_urls: Vec<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub deployment_groups: Option<Vec<String>>,
-    #[serde(default)]
-    pub finalizers: Vec<String>,
-    #[serde(default)]
-    pub app_users: Vec<UserInfo>,
-    #[serde(default)]
-    pub app_teams: Vec<TeamInfo>,
 }
 
 /// Error response from project API

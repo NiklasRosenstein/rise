@@ -33,7 +33,9 @@ pub struct HealthStatus {
 /// URLs where a deployment can be accessed
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DeploymentUrls {
-    /// Primary URL based on ingress template configuration
+    /// Default URL based on ingress template configuration
+    pub default_url: String,
+    /// Primary URL - the starred custom domain if one exists, otherwise the default URL
     pub primary_url: String,
     /// Additional URLs for custom domains
     pub custom_domain_urls: Vec<String>,

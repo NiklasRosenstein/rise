@@ -272,32 +272,11 @@ async fn insert_rise_env_vars(
             )
         })?;
 
-    // First, determine RISE_APP_URL (canonical URL)
-    // Use primary custom domain if set, otherwise use default project URL
-    let canonical_url =
-        match crate::db::custom_domains::get_primary_domain(&state.db_pool, project.id)
-            .await
-            .map_err(|e| {
-                error!("Failed to get primary custom domain: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get primary custom domain: {}", e),
-                )
-            })? {
-            Some(primary_domain) => {
-                // Find the URL for this domain in custom_domain_urls
-                deployment_urls
-                    .custom_domain_urls
-                    .iter()
-                    .find(|url| url.contains(&primary_domain.domain))
-                    .cloned()
-                    .unwrap_or_else(|| deployment_urls.primary_url.clone())
-            }
-            None => deployment_urls.primary_url.clone(),
-        };
+    // RISE_APP_URL is the primary URL (starred custom domain, or default URL)
+    let canonical_url = deployment_urls.primary_url.clone();
 
-    // Then build RISE_APP_URLS (all URLs)
-    let mut app_urls = vec![deployment_urls.primary_url];
+    // RISE_APP_URLS includes the default URL and all custom domain URLs
+    let mut app_urls = vec![deployment_urls.default_url];
     app_urls.extend(deployment_urls.custom_domain_urls);
 
     let app_urls_json = serde_json::to_string(&app_urls).map_err(|e| {

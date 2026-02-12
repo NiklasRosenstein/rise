@@ -1,7 +1,7 @@
 use super::fuzzy::find_similar_teams;
 use super::models::{
     CreateTeamRequest, CreateTeamResponse, GetTeamParams, Team as ApiTeam, TeamErrorResponse,
-    TeamWithEmails, UpdateTeamRequest, UpdateTeamResponse, UserInfo,
+    UpdateTeamRequest, UpdateTeamResponse, UserInfo,
 };
 use crate::db::models::{TeamRole, User};
 use crate::db::{service_accounts, teams as db_teams};
@@ -96,8 +96,29 @@ pub async fn create_team(
             })?;
     }
 
+    // Fetch members/owners with email info for response
+    let members = db_teams::get_members(&state.db_pool, team.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get team members: {}", e),
+            )
+        })?;
+    let owners = db_teams::get_owners(&state.db_pool, team.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get team owners: {}", e),
+            )
+        })?;
+
+    let member_infos = users_to_infos(&members);
+    let owner_infos = users_to_infos(&owners);
+
     Ok(Json(CreateTeamResponse {
-        team: convert_team(team, payload.members, payload.owners),
+        team: convert_team(team, member_infos, owner_infos),
     }))
 }
 
@@ -110,52 +131,37 @@ pub async fn get_team(
     // Resolve team by ID or name
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
-    // Check if we should expand user emails
-    if params.should_expand("members") || params.should_expand("owners") {
-        let expanded = expand_team_with_emails(&state, team).await.map_err(|e| {
+    // Always resolve member/owner emails
+    let members = db_teams::get_members(&state.db_pool, team.id)
+        .await
+        .map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(TeamErrorResponse {
-                    error: format!("Failed to expand team data: {}", e),
+                    error: format!("Failed to get team members: {}", e),
                     suggestions: None,
                 }),
             )
         })?;
 
-        Ok(Json(serde_json::to_value(expanded).unwrap()))
-    } else {
-        // Fetch members and owners to build the API response
-        let members = db_teams::get_members(&state.db_pool, team.id)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(TeamErrorResponse {
-                        error: format!("Failed to get team members: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
+    let owners = db_teams::get_owners(&state.db_pool, team.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(TeamErrorResponse {
+                    error: format!("Failed to get team owners: {}", e),
+                    suggestions: None,
+                }),
+            )
+        })?;
 
-        let owners = db_teams::get_owners(&state.db_pool, team.id)
-            .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(TeamErrorResponse {
-                        error: format!("Failed to get team owners: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
+    let member_infos = users_to_infos(&members);
+    let owner_infos = users_to_infos(&owners);
 
-        let member_ids: Vec<String> = members.iter().map(|u| u.id.to_string()).collect();
-        let owner_ids: Vec<String> = owners.iter().map(|u| u.id.to_string()).collect();
-
-        Ok(Json(
-            serde_json::to_value(convert_team(team, member_ids, owner_ids)).unwrap(),
-        ))
-    }
+    Ok(Json(
+        serde_json::to_value(convert_team(team, member_infos, owner_infos)).unwrap(),
+    ))
 }
 
 pub async fn update_team(
@@ -446,11 +452,11 @@ pub async fn update_team(
             )
         })?;
 
-    let member_ids: Vec<String> = members.iter().map(|u| u.id.to_string()).collect();
-    let owner_ids: Vec<String> = owners.iter().map(|u| u.id.to_string()).collect();
+    let member_infos = users_to_infos(&members);
+    let owner_infos = users_to_infos(&owners);
 
     Ok(Json(UpdateTeamResponse {
-        team: convert_team(updated_team, member_ids, owner_ids),
+        team: convert_team(updated_team, member_infos, owner_infos),
     }))
 }
 
@@ -561,10 +567,10 @@ pub async fn list_teams(
                 )
             })?;
 
-        let member_ids: Vec<String> = members.iter().map(|u| u.id.to_string()).collect();
-        let owner_ids: Vec<String> = owners.iter().map(|u| u.id.to_string()).collect();
+        let member_infos = users_to_infos(&members);
+        let owner_infos = users_to_infos(&owners);
 
-        api_teams.push(convert_team(team, member_ids, owner_ids));
+        api_teams.push(convert_team(team, member_infos, owner_infos));
     }
 
     Ok(Json(api_teams))
@@ -594,46 +600,6 @@ async fn query_team_by_name(
         .await
         .map_err(|e| format!("Failed to query team by name: {}", e))?
         .ok_or_else(|| format!("Team '{}' not found", team_name))
-}
-
-/// Expand team with user emails (batch query for efficiency)
-async fn expand_team_with_emails(
-    state: &AppState,
-    team: crate::db::models::Team,
-) -> Result<TeamWithEmails, String> {
-    let members = db_teams::get_members(&state.db_pool, team.id)
-        .await
-        .map_err(|e| format!("Failed to get team members: {}", e))?;
-
-    let owners = db_teams::get_owners(&state.db_pool, team.id)
-        .await
-        .map_err(|e| format!("Failed to get team owners: {}", e))?;
-
-    let member_infos: Vec<UserInfo> = members
-        .iter()
-        .map(|u| UserInfo {
-            id: u.id.to_string(),
-            email: u.email.clone(),
-        })
-        .collect();
-
-    let owner_infos: Vec<UserInfo> = owners
-        .iter()
-        .map(|u| UserInfo {
-            id: u.id.to_string(),
-            email: u.email.clone(),
-        })
-        .collect();
-
-    Ok(TeamWithEmails {
-        id: team.id.to_string(),
-        name: team.name,
-        members: member_infos,
-        owners: owner_infos,
-        idp_managed: team.idp_managed,
-        created: team.created_at.to_rfc3339(),
-        updated: team.updated_at.to_rfc3339(),
-    })
 }
 
 /// Resolve team by ID or name with fuzzy matching support
@@ -701,11 +667,22 @@ async fn resolve_team(
     Ok(team)
 }
 
+/// Convert a list of db users to UserInfo structs
+fn users_to_infos(users: &[crate::db::models::User]) -> Vec<UserInfo> {
+    users
+        .iter()
+        .map(|u| UserInfo {
+            id: u.id.to_string(),
+            email: u.email.clone(),
+        })
+        .collect()
+}
+
 /// Convert database Team model to API Team model
 fn convert_team(
     team: crate::db::models::Team,
-    members: Vec<String>,
-    owners: Vec<String>,
+    members: Vec<UserInfo>,
+    owners: Vec<UserInfo>,
 ) -> ApiTeam {
     ApiTeam {
         id: team.id.to_string(),

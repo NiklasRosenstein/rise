@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
 
 /// Access class information for API responses
 #[derive(Debug, Serialize, Clone)]
@@ -70,21 +69,19 @@ pub struct Project {
     #[serde(default)]
     pub access_class: String,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_user: Option<String>, // Relation to users collection
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_team: Option<String>, // Relation to teams collection
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_user_email: Option<String>, // Email of the user owner (for display)
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner_team_name: Option<String>, // Name of the team owner (for display)
+    pub owner: Option<OwnerInfo>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub active_deployment_status: Option<String>, // Status of the active deployment
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub primary_url: Option<String>, // Primary URL from ingress template
+    pub default_url: Option<String>, // Default URL from ingress template
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub primary_url: Option<String>, // Primary URL (starred custom domain, or default URL)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub custom_domain_urls: Vec<String>, // Additional custom domain URLs
     #[serde(skip_serializing_if = "Option::is_none")]
     pub deployment_groups: Option<Vec<String>>, // Active deployment groups
+    #[serde(default)]
+    pub finalizers: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub app_users: Vec<UserInfo>, // Users who can access the deployed app
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -149,24 +146,6 @@ pub enum OwnerInfo {
     Team(TeamInfo),
 }
 
-// Project with expanded owner information
-#[derive(Debug, Deserialize, Serialize, Clone)]
-pub struct ProjectWithOwnerInfo {
-    pub id: String,
-    pub name: String,
-    pub status: ProjectStatus,
-    pub access_class: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub owner: Option<OwnerInfo>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub primary_url: Option<String>, // Primary URL from ingress template
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub custom_domain_urls: Vec<String>, // Additional custom domain URLs
-    pub finalizers: Vec<String>,
-    pub created: String,
-    pub updated: String,
-}
-
 // Error response with optional fuzzy match suggestions
 #[derive(Debug, Serialize, Clone)]
 pub struct ProjectErrorResponse {
@@ -180,18 +159,4 @@ pub struct ProjectErrorResponse {
 pub struct GetProjectParams {
     #[serde(default)]
     pub by_id: bool,
-    #[serde(default)]
-    pub expand: String, // Comma-separated list like "owner"
-}
-
-impl GetProjectParams {
-    /// Check if a field should be expanded
-    pub fn should_expand(&self, field: &str) -> bool {
-        if self.expand.is_empty() {
-            return false;
-        }
-
-        let fields: HashSet<&str> = self.expand.split(',').map(|s| s.trim()).collect();
-        fields.contains(field)
-    }
 }
