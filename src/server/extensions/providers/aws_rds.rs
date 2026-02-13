@@ -1206,13 +1206,7 @@ impl AwsRdsProvisioner {
 
         // Inject PG* environment variables if requested
         if spec.inject_pg_vars {
-            let encrypted_password = self
-                .encryption_provider
-                .encrypt(db_password)
-                .await
-                .context("Failed to encrypt password")?;
-
-            // Non-secret vars
+            // Non-secret connection parameters use Plain variant
             for (key, value) in [
                 ("PGHOST", host.as_str()),
                 ("PGPORT", port.as_str()),
@@ -1221,12 +1215,16 @@ impl AwsRdsProvisioner {
             ] {
                 result.push(InjectedEnvVar {
                     key: key.to_string(),
-                    value: InjectedEnvVarValue::Protected {
-                        decrypted: value.to_string(),
-                        encrypted: value.to_string(),
-                    },
+                    value: InjectedEnvVarValue::Plain(value.to_string()),
                 });
             }
+
+            // Only the password is a protected secret
+            let encrypted_password = self
+                .encryption_provider
+                .encrypt(db_password)
+                .await
+                .context("Failed to encrypt password")?;
 
             result.push(InjectedEnvVar {
                 key: "PGPASSWORD".to_string(),
