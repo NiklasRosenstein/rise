@@ -7,9 +7,10 @@ use axum::{
     Router,
 };
 use serde_json::json;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Component, PathBuf};
 use tera::Tera;
 
+use crate::server::settings::ServerSettings;
 use crate::server::state::AppState;
 
 use super::StaticAssets;
@@ -54,20 +55,11 @@ async fn fallback_handler(State(state): State<AppState>, request: Request) -> Re
             .unwrap();
     }
 
-    // Virtual docs route: /static/docs/*
-    // - production: serves embedded static/docs-content/*
-    // - development: falls back to filesystem docs/*
+    // Virtual docs route: /static/docs/* — served from configured docs_dir
     if let Some(rel) = path.strip_prefix("static/docs/") {
-        if let Some(content) = StaticAssets::get(format!("docs-content/{}", rel).as_str()) {
-            let mime = mime_guess::from_path(rel).first_or_octet_stream();
-            return Response::builder()
-                .status(StatusCode::OK)
-                .header(header::CONTENT_TYPE, mime.as_ref())
-                .header(header::CACHE_CONTROL, "public, max-age=3600")
-                .body(Body::from(content.data))
-                .unwrap();
-        }
-        if let Some((bytes, mime)) = load_docs_content_from_filesystem(rel).await {
+        if let Some((bytes, mime)) =
+            load_docs_content_from_filesystem(&state.server_settings, rel).await
+        {
             return Response::builder()
                 .status(StatusCode::OK)
                 .header(header::CONTENT_TYPE, mime)
@@ -87,7 +79,12 @@ async fn fallback_handler(State(state): State<AppState>, request: Request) -> Re
     render_index(&state)
 }
 
-async fn load_docs_content_from_filesystem(rel: &str) -> Option<(Vec<u8>, &'static str)> {
+async fn load_docs_content_from_filesystem(
+    settings: &ServerSettings,
+    rel: &str,
+) -> Option<(Vec<u8>, &'static str)> {
+    let docs_dir = settings.docs_dir.as_deref()?;
+
     // Prevent traversal and absolute paths
     let mut rel_buf = PathBuf::new();
     for part in PathBuf::from(rel).components() {
@@ -97,17 +94,9 @@ async fn load_docs_content_from_filesystem(rel: &str) -> Option<(Vec<u8>, &'stat
         }
     }
 
-    let fs_path = if rel_buf == Path::new("README.md") {
-        PathBuf::from("README.md")
-    } else {
-        PathBuf::from("docs").join(rel_buf)
-    };
+    let fs_path = PathBuf::from(docs_dir).join(rel_buf);
 
-    if !fs_path.exists() {
-        return None;
-    }
-
-    let bytes = tokio::fs::read(fs_path).await.ok()?;
+    let bytes = tokio::fs::read(&fs_path).await.ok()?;
     Some((bytes, "text/markdown; charset=utf-8"))
 }
 

@@ -63,6 +63,11 @@ pub struct ServerSettings {
     /// Default: 86400 (24 hours)
     #[serde(default = "default_jwt_expiry_seconds")]
     pub jwt_expiry_seconds: u64,
+
+    /// Directory to serve documentation files from (e.g., "/var/rise/docs" or "docs")
+    /// If not set, documentation endpoints return 404.
+    #[serde(default)]
+    pub docs_dir: Option<String>,
 }
 
 fn default_cookie_secure() -> bool {

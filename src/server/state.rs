@@ -454,6 +454,11 @@ impl AppState {
 
         let public_url = settings.server.public_url.clone();
         tracing::info!("Public URL: {}", public_url);
+        if let Some(ref docs_dir) = settings.server.docs_dir {
+            tracing::info!("Documentation directory: {}", docs_dir);
+        } else {
+            tracing::warn!("No docs_dir configured — documentation endpoints will return 404");
+        }
         if let Some(frontend_proxy_url) = &settings.server.frontend_dev_proxy_url {
             tracing::info!(
                 "Frontend dev proxy enabled: backend will proxy UI requests to {}",
