@@ -121,7 +121,7 @@ export function DocsPage({ initialSlug }) {
         setSummaryLoading(true);
         setSummaryError(null);
         try {
-            const response = await fetch(`${docsBasePath}/SUMMARY.md`);
+            const response = await fetch(`${docsBasePath}/FRONTEND_DOCS.md`);
             if (!response.ok) throw new Error(`Failed to load summary (${response.status})`);
             const markdown = await response.text();
             const items = parseDocsSummary(markdown);

@@ -1,0 +1,15 @@
+# User Guide
+
+- [Getting Started](user-guide/getting-started.md)
+  - [Setup](user-guide/setup.md)
+  - [CLI Guide](user-guide/cli.md)
+  - [Deployments](user-guide/deployments.md)
+- [Security & Identity](user-guide/security-identity.md)
+  - [Authentication](user-guide/authentication.md)
+  - [Authentication for Applications](user-guide/authentication-for-apps.md)
+- [Integrations (Advanced)](user-guide/integrations.md)
+  - [OAuth Extensions](user-guide/oauth.md)
+  - [Container Registries](user-guide/registries.md)
+- [Operations for Users](user-guide/operations.md)
+  - [Building Images](user-guide/builds.md)
+  - [Troubleshooting](user-guide/troubleshooting.md)

@@ -338,7 +338,7 @@ export function App() {
     useEffect(() => {
         async function loadDocsSummary() {
             try {
-                const response = await fetch('/static/docs/SUMMARY.md');
+                const response = await fetch('/static/docs/FRONTEND_DOCS.md');
                 if (!response.ok) return;
                 const summary = await response.text();
                 setDocsItems(parseDocsSummary(summary));
