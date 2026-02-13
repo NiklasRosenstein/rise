@@ -52,6 +52,11 @@ depends = ["backend:deps", "db:migrate"]
 run = "cargo run --features cli,backend -- backend server"
 alias = "br"
 
+[tasks."backend:run-container"]
+description = "Build and run the backend server in its container (host network). Useful to validate the containerized version works as intended."
+depends = ["backend:deps", "db:migrate"]
+run = "docker build . -t rise --target rise && docker run --rm --network host -v $PWD/config:/config:ro -v $HOME/.kube:/root/.kube:ro -v $HOME/.minikube:$HOME/.minikube:ro -e DATABASE_URL=$DATABASE_URL rise backend server"
+
 [tasks."frontend:dev"]
 description = "Run the Vite frontend development server."
 run = "cd frontend && npm install && npm run dev"
@@ -62,11 +67,9 @@ run = """
 cd frontend
 npm install
 npm run build
-rm -rf ../static/ui ../static/docs-content
-mkdir -p ../static/ui ../static/docs-content
+rm -rf ../static/ui
+mkdir -p ../static/ui
 cp -r dist/* ../static/ui/
-cp -r ../docs/* ../static/docs-content/
-cp ../README.md ../static/docs-content/README.md
 """
 
 [tasks."dist:build"]
