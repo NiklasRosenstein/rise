@@ -525,9 +525,12 @@ pub async fn get_project_env_var_value(
 
 /// Preview the full set of environment variables a deployment would receive.
 ///
-/// Returns user-set vars + system vars (PORT, RISE_ISSUER, RISE_APP_URL, RISE_APP_URLS)
-/// + extension-injected vars. Protected vars are masked. This enables `rise run`
-/// to inject the same env vars as a real deployment.
+/// Returns:
+/// - User-set environment variables
+/// - System vars (PORT, RISE_ISSUER, RISE_APP_URL, RISE_APP_URLS)
+/// - Extension-injected vars
+///
+/// Protected vars are masked. This enables `rise run` to inject the same env vars as a real deployment.
 pub async fn preview_deployment_env_vars(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
