@@ -1,62 +1,46 @@
 # Authentication
 
-Rise uses JWT tokens for user authentication and service accounts for CI/CD workload identity.
-
-## Overview
-
-- **User Authentication**: Rise issues its own HS256 JWTs after validating IdP (Dex) tokens
-- **Token Flow**: IdP auth → Rise validates IdP token → Rise issues JWT → Client receives Rise JWT
-- **Service Accounts**: CI/CD systems authenticate using OIDC JWT tokens from external issuers
-
-The IdP (Dex) tokens are used internally for group synchronization but are not exposed to users. All user-facing authentication (CLI and UI) uses Rise-issued JWTs.
+Rise uses JWT tokens for user authentication, service accounts for CI/CD workload identity, and app users for controlling access to deployed applications.
 
 ## User Authentication
 
-### Browser Flow (Default, Recommended)
-
-OAuth2 authorization code flow with PKCE:
+### Browser Flow (Default)
 
 ```bash
 rise login
 ```
 
-CLI starts local HTTP server (ports 8765-8767), opens browser to Dex, exchanges auth code for JWT token.
+This starts a local HTTP server (ports 8765-8767), opens your browser to the OAuth2/OIDC provider, and exchanges the auth code for a Rise JWT token using PKCE.
 
-### Device Flow (Not Compatible with Dex)
-
-⚠️ Dex's device flow doesn't follow RFC 8628. Use browser flow instead.
-
-### Token Storage
-
-Tokens stored in `~/.config/rise/config.json` (plain JSON; OS-native secure storage planned).
-
-### Backend URL
+Connect to a specific Rise instance:
 
 ```bash
 rise login --url https://rise.example.com
 ```
 
+### Token Storage
+
+Tokens are stored in `~/.config/rise/config.json` (plain JSON).
+
+### Environment Variables
+
+- `RISE_URL` — default backend URL
+- `RISE_TOKEN` — authentication token (bypasses interactive login)
+
 ### API Usage
 
-Protected endpoints require `Authorization: Bearer <token>` header (401 if missing/invalid).
-
-### Authentication Endpoints
-
-**Public**: `POST /api/v1/auth/code/exchange` - Exchange auth code for JWT
-
-**Protected**: `GET /api/v1/users/me`, `POST /users/lookup`
+Protected endpoints require `Authorization: Bearer <token>`. Missing or invalid tokens return 401.
 
 ## Service Accounts (Workload Identity)
 
-CI/CD systems (GitLab CI, GitHub Actions) authenticate using OIDC JWT tokens.
+CI/CD systems authenticate using OIDC JWT tokens from their identity provider. No long-lived secrets are needed.
 
-**Process**: CI generates JWT → Rise validates signature against OIDC issuer → Matches claims → Deploys if matched
-
-**Security**: Short-lived tokens, claim-based authorization, project-scoped access
+**How it works:** CI generates JWT → Rise validates signature against OIDC issuer → matches claims against service account → grants project-scoped access.
 
 ### Quick Start
 
 **GitLab CI:**
+
 ```bash
 rise sa create my-project \
   --issuer https://gitlab.com \
@@ -66,6 +50,7 @@ rise sa create my-project \
 ```
 
 Add to `.gitlab-ci.yml`:
+
 ```yaml
 deploy:
   stage: deploy
@@ -73,12 +58,13 @@ deploy:
     RISE_TOKEN:
       aud: rise-project-my-project
   script:
-    - rise deployment create my-project --image $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
+    - rise deploy --image $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
   only:
     - tags
 ```
 
 **GitHub Actions:**
+
 ```bash
 rise sa create my-app \
   --issuer https://token.actions.githubusercontent.com \
@@ -87,6 +73,7 @@ rise sa create my-app \
 ```
 
 Add to `.github/workflows/deploy.yml`:
+
 ```yaml
 name: Deploy
 on:
@@ -108,7 +95,7 @@ jobs:
                        "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=rise-project-my-app" | jq -r .value)
           echo "RISE_TOKEN=$TOKEN" >> $GITHUB_ENV
       - name: Deploy
-        run: rise deployment create my-app --image ghcr.io/myorg/my-app:$GITHUB_SHA
+        run: rise deploy --image ghcr.io/myorg/my-app:$GITHUB_SHA
 ```
 
 ### Creating Service Accounts
@@ -120,11 +107,12 @@ rise sa create <project> \
   --claim <key>=<value>
 ```
 
-**Requirements**: Must specify `aud` claim + at least one additional claim for authorization.
+Requirements: an `aud` claim and at least one additional claim for authorization.
 
 ### Common Use Cases
 
 **Protected branches only (production):**
+
 ```bash
 rise sa create prod \
   --issuer https://gitlab.com \
@@ -134,6 +122,7 @@ rise sa create prod \
 ```
 
 **Specific branch (staging):**
+
 ```bash
 rise sa create staging \
   --issuer https://gitlab.com \
@@ -143,6 +132,7 @@ rise sa create staging \
 ```
 
 **Deploy from tags (releases):**
+
 ```bash
 rise sa create releases \
   --issuer https://gitlab.com \
@@ -153,71 +143,27 @@ rise sa create releases \
 
 ### Available Claims
 
-**GitLab CI**: `project_path`, `ref`, `ref_type`, `ref_protected`, `environment`, `pipeline_source` - [Docs](https://docs.gitlab.com/ee/ci/secrets/id_token_authentication.html)
+**GitLab CI**: `project_path`, `ref`, `ref_type`, `ref_protected`, `environment`, `pipeline_source` — [Docs](https://docs.gitlab.com/ee/ci/secrets/id_token_authentication.html)
 
-**GitHub Actions**: `repository`, `ref`, `workflow`, `environment`, `actor` - [Docs](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
+**GitHub Actions**: `repository`, `ref`, `workflow`, `environment`, `actor` — [Docs](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
 
 ### Wildcard Patterns in Claims
 
-Service account claims support glob-style wildcard patterns using `*` to match multiple values. This is particularly useful for monorepo CI scenarios where you deploy per-branch apps with dynamic environment names.
+Claims support glob-style `*` wildcards:
 
-**Syntax:**
-- `*` matches any sequence of characters (including empty string)
-- Unlike filesystem globs, wildcards match across any characters (including `/` and `-`)
-- Use exact matching when no wildcard is present (backward compatible)
-
-**Important:** 
-- The wildcard `*` matches partial words. For example, `app*` will match both `app-staging` (intended) and `application` (which starts with "app")
-- Since `*` can match an empty string, `app*` will also match `app` exactly
-- Pattern `app-*` requires the dash, so it matches `app-staging` but NOT `app`
-- Design your patterns carefully to avoid unintended matches
-
-**Examples:**
-
-**Match all environments starting with "app":**
 ```bash
+# Match all merge request environments
 rise sa create my-app \
   --issuer https://gitlab.com \
   --claim aud=rise-project-my-app \
   --claim project_path=myorg/myrepo \
-  --claim environment=app*
-```
-Matches: `app` (wildcard matches empty string), `app-mr/6`, `app-staging`  
-Also matches: `application`, `app_test` (wildcard matches any continuation)
+  --claim environment=app-mr/*
 
-**Match all production environments:**
-```bash
-rise sa create prod-services \
-  --issuer https://gitlab.com \
-  --claim aud=rise-project-prod \
-  --claim project_path=myorg/myrepo \
-  --claim environment=*-prod
-```
-Matches: `api-prod`, `web-prod`, `my-service-prod`, etc.
-
-**Match specific pattern with multiple wildcards:**
-```bash
-rise sa create test-environments \
-  --issuer https://gitlab.com \
-  --claim aud=rise-project-test \
-  --claim project_path=myorg/myrepo \
-  --claim environment=app-*-test
-```
-Matches: `app-staging-test`, `app-mr/6-test`, etc.
-
-**Common patterns for monorepo CI:**
-```bash
-# Match all merge request environments: app-mr/1, app-mr/2, etc.
---claim environment=app-mr/*
-
-# Match all branch deployments: app-feature-*, app-hotfix-*, etc.
---claim environment=app-*
-
-# Match specific repository branches: myorg/repo/branch-*
+# Match all feature branches
 --claim ref=refs/heads/feature/*
 ```
 
-**Note:** You can mix exact and wildcard claims in the same service account. All claims must match for authentication to succeed.
+`*` matches any sequence of characters (including `/` and `-`). Design patterns carefully — `app*` matches `app`, `app-staging`, and `application`.
 
 ### Managing Service Accounts
 
@@ -227,20 +173,44 @@ rise sa show <project> <service-account-id>
 rise sa delete <project> <service-account-id>
 ```
 
-**Permissions**: Can create/view/list/stop/rollback deployments. Cannot manage projects/teams/service accounts.
+Service accounts can create, view, list, stop, and rollback deployments. They cannot manage projects, teams, or other service accounts.
+
+## App Users
+
+App users grant view-only access to deployed applications. This controls who can access private projects through the ingress.
+
+### Adding App Users
+
+```bash
+# Add a user by email
+rise project app-user add my-app user:alice@example.com
+
+# Add an entire team
+rise project app-user add my-app team:backend
+```
+
+### Listing App Users
+
+```bash
+rise project app-user list my-app
+```
+
+### Removing App Users
+
+```bash
+rise project app-user remove my-app user:alice@example.com
+```
+
+Aliases: `rise project app-user rm`, `rise project app-user del`
 
 ## Troubleshooting
 
-### User Authentication
+- **"Failed to start local callback server"** — ports 8765-8767 are in use
+- **"Code exchange failed"** — check that the backend and identity provider are running
+- **Token expired** — run `rise login` (tokens expire after 1 hour by default)
+- **"The 'aud' claim is required"** — add `--claim aud=<value>` to service account
+- **"No service account matched"** — check claims match exactly (case-sensitive), verify issuer URL has no trailing slash
+- **"Multiple service accounts matched"** — make claims more specific to avoid ambiguity
+- **"403 Forbidden"** (service account) — service accounts can only deploy, not manage projects
 
-- **"Failed to start local callback server"**: Ports 8765-8767 in use
-- **"Code exchange failed"**: Check backend/Dex logs
-- **Token expired**: Run `rise login`
-
-### Service Accounts
-
-- **"The 'aud' claim is required"**: Add `--claim aud=<value>`
-- **"At least one additional claim required"**: Add authorization claims (e.g., `project_path`)
-- **"Multiple service accounts matched"**: Make claims more specific to avoid ambiguity
-- **"No service account matched"**: Check token claims (case-sensitive), verify issuer URL (no trailing slash), ensure ALL claims present
-- **"403 Forbidden"**: Service accounts can only deploy, not manage projects
+See [Troubleshooting](troubleshooting.md) for more.

@@ -276,6 +276,8 @@ app.get('/admin', requireTeam('admin'), (req: Request, res: Response) => {
 
 ## Additional Resources
 
-- [JWT.io](https://jwt.io/) - JWT debugger and documentation
-- [JWKS Specification](https://datatracker.ietf.org/doc/html/rfc7517) - JSON Web Key Set standard
-- [RS256 vs HS256](https://stackoverflow.com/questions/39239051/rs256-vs-hs256-whats-the-difference) - Understanding signature algorithms
+- [Authentication](authentication.md) — user login, service accounts, app users
+- [OAuth Extensions](oauth.md) — OAuth proxy for third-party providers
+- [Environment Variables](environment-variables.md) — auto-injected variables reference
+- [JWT.io](https://jwt.io/) — JWT debugger and documentation
+- [JWKS Specification](https://datatracker.ietf.org/doc/html/rfc7517) — JSON Web Key Set standard
