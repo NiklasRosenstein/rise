@@ -217,7 +217,14 @@ jwt_expiry_seconds = 86400     # JWT expiry duration in seconds (default: 24 hou
 jwt_claims = ["sub", "email", "name"]  # Claims to include from IdP
 rs256_private_key_pem = "..."  # Optional: RS256 private key (persists JWTs across restarts)
 rs256_public_key_pem = "..."   # Optional: RS256 public key (derived if not provided)
+docs_dir = "/var/rise/docs"    # Optional: directory to serve documentation from
 ```
+
+**Documentation Serving (`docs_dir`):**
+- When set, the backend serves markdown files from the specified directory at `/static/docs/*`
+- In the container image, docs are copied to `/var/rise/docs`
+- In development, set to `"docs"` to serve from the repository's `docs/` directory
+- If not set, documentation endpoints return 404
 
 **JWT Configuration:**
 - `jwt_signing_secret`: Base64-encoded secret for HS256 JWT signing (generate with `openssl rand -base64 32`)

@@ -28,6 +28,7 @@ server:
   cookie_secure: true
   jwt_signing_secret: "${RISE_JWT_SIGNING_SECRET}" # Generate with openssl rand -base64 32
   jwt_claims: ["sub", "email", "name"]
+  # docs_dir: "/var/rise/docs"  # Directory to serve documentation from
 
 database:
   # DATABASE_URL environment variable is always used if set
