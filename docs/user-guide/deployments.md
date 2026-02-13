@@ -30,6 +30,8 @@ rise deploy --image myregistry.io/my-app:v1.2.3
 
 When using `--image`, no build occurs and `--http-port` is required.
 
+> **Note:** Private images from external registries may not be pullable by the container runtime due to missing credentials. Contact your Rise platform administrator for guidance.
+
 ### Deploying from an Existing Deployment
 
 Reuse the image from a previous deployment:
@@ -97,7 +99,7 @@ The `default` group represents the primary deployment:
 
 ```bash
 rise deploy
-# Accessible at: https://my-app.rise.dev
+# Accessible at: https://my-app.app.example.com
 ```
 
 ### Custom Groups
@@ -112,7 +114,7 @@ rise deploy --group mr/123 --expire 7d
 rise deploy --group staging
 ```
 
-Each custom group gets its own URL: `https://{project}-{group}.rise.dev`
+Each custom group gets its own URL: `https://{project}-{group}.preview.example.com`
 
 Group names must match `[a-z0-9][a-z0-9/-]*[a-z0-9]` (max 100 characters). When a new deployment in a group reaches `Healthy`, the previous deployment in that group is `Superseded`.
 
@@ -172,6 +174,9 @@ rise deployment logs my-app 20241205-1234 --since 5m
 rise deployment logs my-app 20241205-1234 --timestamps
 ```
 
+Note that logs are currently only available for active deployments (`Healthy` or `Unhealthy`) and can not be accessed
+for past deployments.
+
 ## Rollback
 
 Rollback creates a new deployment using the same image as a previous one:
@@ -202,20 +207,12 @@ Rise automatically injects these variables into every deployment:
 | `PORT` | HTTP port the container should listen on | `8080` |
 | `RISE_ISSUER` | Rise server URL and JWT issuer | `https://rise.example.com` |
 | `RISE_APP_URL` | Canonical URL where your app is accessible | `https://myapp.example.com` |
-| `RISE_APP_URLS` | JSON array of all URLs where your app is accessible | `["https://myapp.rise.dev", "https://myapp.example.com"]` |
+| `RISE_APP_URLS` | JSON array of all URLs where your app is accessible | `["https://myapp.app.example.com", "https://myapp.example.com"]` |
 
-`PORT` defaults to 8080 and can be overridden with `--http-port`. `RISE_APP_URL` is your primary custom domain if set, otherwise the default project URL.
+`PORT` defaults to 8080 and can be overridden per-deployment with `--http-port`, or set permanently with `rise env set`. `RISE_APP_URL` is your primary custom domain if set, otherwise the default project URL.
 
 For JWT validation using `RISE_ISSUER`, see [Authentication for Applications](authentication-for-apps.md).
 
 ## CI/CD Deployments
 
-```bash
-# Wait for deployment to succeed in CI
-rise deploy --image $CI_REGISTRY_IMAGE:$CI_COMMIT_TAG
-
-# Follow with timeout (exit non-zero on failure)
-rise d s my-app:latest --follow --timeout 5m || exit 1
-```
-
-See [Authentication](authentication.md#service-accounts-workload-identity) for setting up service accounts.
+For automated deployments from CI/CD pipelines, use service accounts with OIDC workload identity. See [Authentication](authentication.md#service-accounts-workload-identity) for setup instructions and examples for GitLab CI and GitHub Actions.

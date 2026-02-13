@@ -83,9 +83,9 @@ Rise automatically injects these variables into every deployment:
 | `PORT` | HTTP port the container should listen on | `8080` |
 | `RISE_ISSUER` | Rise server URL and JWT issuer | `https://rise.example.com` |
 | `RISE_APP_URL` | Canonical URL (primary custom domain or default URL) | `https://myapp.example.com` |
-| `RISE_APP_URLS` | JSON array of all URLs for the app | `["https://myapp.rise.dev"]` |
+| `RISE_APP_URLS` | JSON array of all URLs for the app | `["https://myapp.app.example.com"]` |
 
-`PORT` defaults to 8080. Override it with `--http-port` on `rise deploy`.
+`PORT` defaults to 8080. Override it per-deployment with `--http-port` on `rise deploy`, or set it permanently with `rise env set my-app PORT 3000`.
 
 ## Build-Time vs Runtime Variables
 

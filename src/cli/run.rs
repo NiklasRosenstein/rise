@@ -67,8 +67,7 @@ pub async fn run_locally(
         .arg("-p")
         .arg(format!("{}:{}", options.expose, options.http_port)); // Port mapping
 
-    // Set PORT environment variable
-    cmd.arg("-e").arg(format!("PORT={}", options.http_port));
+    // PORT is set below after loading project env vars (CLI flag takes precedence)
 
     cmd.arg("--add-host=host.docker.internal:host-gateway");
 
@@ -94,45 +93,36 @@ pub async fn run_locally(
         }
     };
 
-    // Load project environment variables if enabled and we have a project name
+    // Load deployment preview environment variables if enabled and we have a project name.
+    // The preview endpoint returns user vars + system vars (PORT, RISE_ISSUER, RISE_APP_URL, etc.)
+    // + extension-injected vars (OAuth CLIENT_ID/CLIENT_SECRET/ISSUER, etc.).
+    let mut port_from_preview = false;
     if options.use_project_env {
         if let Some(project_name) = &project_name {
             if let Some(token) = config.get_token() {
-                match env::fetch_env_vars_with_secret_list(
+                match env::fetch_preview_env_vars(
                     http_client,
                     &backend_url,
                     &token,
                     project_name,
+                    "default",
                 )
                 .await
                 {
-                    Ok((non_secret_vars, unprotected_secrets, protected_keys)) => {
-                        // Set non-secret environment variables
-                        if !non_secret_vars.is_empty() {
+                    Ok((loadable_vars, protected_keys)) => {
+                        if !loadable_vars.is_empty() {
                             info!(
-                                "Loading {} non-secret environment variable{} from project '{}'",
-                                non_secret_vars.len(),
-                                if non_secret_vars.len() == 1 { "" } else { "s" },
+                                "Loading {} environment variable{} from project '{}'",
+                                loadable_vars.len(),
+                                if loadable_vars.len() == 1 { "" } else { "s" },
                                 project_name
                             );
-                            for (key, value) in non_secret_vars {
-                                cmd.arg("-e").arg(format!("{}={}", key, value));
-                            }
-                        }
-
-                        // Load unprotected secrets
-                        if !unprotected_secrets.is_empty() {
-                            info!(
-                                "Loading {} unprotected secret{} from project '{}'",
-                                unprotected_secrets.len(),
-                                if unprotected_secrets.len() == 1 {
-                                    ""
-                                } else {
-                                    "s"
-                                },
-                                project_name
-                            );
-                            for (key, value) in unprotected_secrets {
+                            for (key, value) in &loadable_vars {
+                                // Skip PORT from preview — CLI --http-port flag takes precedence
+                                if key == "PORT" {
+                                    port_from_preview = true;
+                                    continue;
+                                }
                                 cmd.arg("-e").arg(format!("{}={}", key, value));
                             }
                         }
@@ -140,7 +130,7 @@ pub async fn run_locally(
                         // Warn about protected secret variables that cannot be loaded
                         if !protected_keys.is_empty() {
                             warn!(
-                                "Project '{}' has {} protected secret{} that cannot be loaded automatically:",
+                                "Project '{}' has {} protected secret{} that cannot be loaded locally:",
                                 project_name,
                                 protected_keys.len(),
                                 if protected_keys.len() == 1 { "" } else { "s" }
@@ -148,7 +138,7 @@ pub async fn run_locally(
                             for key in &protected_keys {
                                 warn!("  - {}", key);
                             }
-                            warn!("Mark secrets as unprotected with --protected=false if needed for local development");
+                            warn!("These secrets are provisioned automatically during deployment");
                         }
                     }
                     Err(e) => {
@@ -165,6 +155,10 @@ pub async fn run_locally(
             }
         }
     }
+
+    // Set PORT — CLI flag always takes precedence over preview value
+    cmd.arg("-e").arg(format!("PORT={}", options.http_port));
+    let _ = port_from_preview; // suppress unused warning when env loading is skipped
 
     // Add user-specified runtime environment variables (these take precedence)
     if !options.run_env.is_empty() {
@@ -191,7 +185,7 @@ pub async fn run_locally(
         image_tag, options.expose, options.http_port, options.http_port
     );
     if options.use_project_env && project_name.is_some() {
-        info!("Project environment variables loaded (non-secret only)");
+        info!("Project environment variables loaded (including extension vars)");
     }
     info!(
         "Application will be available at http://localhost:{}",

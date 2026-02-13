@@ -1,6 +1,7 @@
 use super::models::{EnvVarResponse, EnvVarValueResponse, EnvVarsResponse, SetEnvVarRequest};
 use crate::db::models::User;
 use crate::db::{env_vars as db_env_vars, projects};
+use crate::server::extensions::InjectedEnvVarValue;
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Path, Query, State},
@@ -520,4 +521,224 @@ pub async fn get_project_env_var_value(
     Ok(Json(EnvVarValueResponse {
         value: decrypted_value,
     }))
+}
+
+/// Preview the full set of environment variables a deployment would receive.
+///
+/// Returns user-set vars + system vars (PORT, RISE_ISSUER, RISE_APP_URL, RISE_APP_URLS)
+/// + extension-injected vars. Protected vars are masked. This enables `rise run`
+/// to inject the same env vars as a real deployment.
+pub async fn preview_deployment_env_vars(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(project_id_or_name): Path<String>,
+    Query(params): Query<HashMap<String, String>>,
+) -> Result<Json<EnvVarsResponse>, (StatusCode, String)> {
+    // Find project by ID or name
+    let project = if let Ok(uuid) = project_id_or_name.parse() {
+        projects::find_by_id(&state.db_pool, uuid)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get project: {}", e),
+                )
+            })?
+    } else {
+        projects::find_by_name(&state.db_pool, &project_id_or_name)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get project: {}", e),
+                )
+            })?
+    }
+    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    // Check permission (admin bypass)
+    ensure_project_access_or_admin(&state, &user, &project).await?;
+
+    let deployment_group = params
+        .get("deployment_group")
+        .cloned()
+        .unwrap_or_else(|| "default".to_string());
+
+    // Collect all env vars into a map (later entries override earlier ones)
+    let mut env_map: HashMap<String, EnvVarResponse> = HashMap::new();
+
+    // 1. Load user-set project vars
+    let db_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to list environment variables: {}", e),
+            )
+        })?;
+
+    for var in db_vars {
+        if var.is_secret && !var.is_protected {
+            // Unprotected secret — decrypt for preview
+            let decrypted = match &state.encryption_provider {
+                Some(provider) => provider.decrypt(&var.value).await.map_err(|e| {
+                    tracing::error!(
+                        "Failed to decrypt unprotected secret '{}': {:?}",
+                        var.key,
+                        e
+                    );
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to decrypt secret '{}': {}", var.key, e),
+                    )
+                })?,
+                None => {
+                    return Err((
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        "Cannot decrypt secrets: no encryption provider configured".to_string(),
+                    ))
+                }
+            };
+            env_map.insert(
+                var.key.clone(),
+                EnvVarResponse {
+                    key: var.key,
+                    value: decrypted,
+                    is_secret: true,
+                    is_protected: false,
+                },
+            );
+        } else if var.is_secret {
+            // Protected secret — mask
+            env_map.insert(
+                var.key.clone(),
+                EnvVarResponse {
+                    key: var.key,
+                    value: "••••••••".to_string(),
+                    is_secret: true,
+                    is_protected: true,
+                },
+            );
+        } else {
+            // Plain var
+            env_map.insert(
+                var.key.clone(),
+                EnvVarResponse {
+                    key: var.key.clone(),
+                    value: var.value,
+                    is_secret: false,
+                    is_protected: false,
+                },
+            );
+        }
+    }
+
+    // 2. Add system vars
+    if !env_map.contains_key("PORT") {
+        env_map.insert(
+            "PORT".to_string(),
+            EnvVarResponse {
+                key: "PORT".to_string(),
+                value: "8080".to_string(),
+                is_secret: false,
+                is_protected: false,
+            },
+        );
+    }
+
+    env_map.insert(
+        "RISE_ISSUER".to_string(),
+        EnvVarResponse {
+            key: "RISE_ISSUER".to_string(),
+            value: state.public_url.clone(),
+            is_secret: false,
+            is_protected: false,
+        },
+    );
+
+    // Get project URLs from deployment backend (if available)
+    match state
+        .deployment_backend
+        .get_project_urls(&project, &deployment_group)
+        .await
+    {
+        Ok(urls) => {
+            env_map.insert(
+                "RISE_APP_URL".to_string(),
+                EnvVarResponse {
+                    key: "RISE_APP_URL".to_string(),
+                    value: urls.primary_url.clone(),
+                    is_secret: false,
+                    is_protected: false,
+                },
+            );
+
+            let mut all_urls = vec![urls.default_url.clone()];
+            all_urls.extend(urls.custom_domain_urls);
+            let urls_json = serde_json::to_string(&all_urls).unwrap_or_else(|_| "[]".to_string());
+            env_map.insert(
+                "RISE_APP_URLS".to_string(),
+                EnvVarResponse {
+                    key: "RISE_APP_URLS".to_string(),
+                    value: urls_json,
+                    is_secret: false,
+                    is_protected: false,
+                },
+            );
+        }
+        Err(e) => {
+            tracing::debug!(
+                "Could not compute project URLs for preview (no deployment controller?): {:?}",
+                e
+            );
+        }
+    }
+
+    // 3. Collect extension env vars
+    for (_, extension) in state.extension_registry.iter() {
+        match extension
+            .preview_env_vars(project.id, &deployment_group)
+            .await
+        {
+            Ok(vars) => {
+                for var in vars {
+                    let response = match var.value {
+                        InjectedEnvVarValue::Plain(v) => EnvVarResponse {
+                            key: var.key.clone(),
+                            value: v,
+                            is_secret: false,
+                            is_protected: false,
+                        },
+                        InjectedEnvVarValue::Secret { decrypted, .. } => EnvVarResponse {
+                            key: var.key.clone(),
+                            value: decrypted,
+                            is_secret: true,
+                            is_protected: false,
+                        },
+                        InjectedEnvVarValue::Protected { .. } => EnvVarResponse {
+                            key: var.key.clone(),
+                            value: "••••••••".to_string(),
+                            is_secret: true,
+                            is_protected: true,
+                        },
+                    };
+                    // Extension vars override user vars for the same key
+                    env_map.insert(var.key, response);
+                }
+            }
+            Err(e) => {
+                tracing::warn!(
+                    "Extension '{}' failed to provide preview env vars: {:?}",
+                    extension.extension_type(),
+                    e
+                );
+            }
+        }
+    }
+
+    // Convert to sorted vec
+    let mut env_vars: Vec<EnvVarResponse> = env_map.into_values().collect();
+    env_vars.sort_by(|a, b| a.key.cmp(&b.key));
+
+    Ok(Json(EnvVarsResponse { env_vars }))
 }

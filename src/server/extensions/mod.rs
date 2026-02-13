@@ -14,6 +14,34 @@ pub mod providers;
 #[cfg(feature = "backend")]
 pub mod routes;
 
+/// Represents the value of an environment variable injected by an extension.
+///
+/// Extensions handle encryption internally (they have access to the encryption provider),
+/// so callers receive pre-encrypted values where applicable.
+pub enum InjectedEnvVarValue {
+    /// Plaintext, non-secret value.
+    Plain(String),
+    /// Secret but not protected. Carries (decrypted, encrypted) so the caller can write
+    /// the pre-encrypted value to DB without re-encrypting.
+    Secret {
+        decrypted: String,
+        encrypted: String,
+    },
+    /// Protected secret. Carries (decrypted, encrypted). The API serialization layer
+    /// MUST mask the decrypted value before returning to callers.
+    Protected {
+        #[allow(dead_code)]
+        decrypted: String,
+        encrypted: String,
+    },
+}
+
+/// An environment variable to be injected into a deployment by an extension.
+pub struct InjectedEnvVar {
+    pub key: String,
+    pub value: InjectedEnvVarValue,
+}
+
 /// Extension trait for project resource provisioning
 #[async_trait]
 pub trait Extension: Send + Sync {
@@ -89,26 +117,34 @@ pub trait Extension: Send + Sync {
 
     /// Hook called before deployment creation
     ///
-    /// This is a synchronous hook that must complete before the deployment
-    /// proceeds. Extensions should use this to provision per-deployment resources
-    /// (e.g., create database for deployment group) and inject environment variables.
-    ///
-    /// Extensions write environment variables directly to the deployment_env_vars
-    /// table using the provided deployment_id.
+    /// Returns environment variables to inject into the deployment. May have side effects
+    /// (e.g., provisioning databases). The caller writes the returned vars to the DB.
     ///
     /// # Arguments
-    /// * `deployment_id` - UUID of the deployment being created
     /// * `project_id` - Project UUID
     /// * `deployment_group` - Deployment group name (e.g., "default", "staging")
     ///
     /// # Returns
-    /// Ok(()) if successful, Err if the deployment should be failed
+    /// Vec of environment variables to inject, or Err if the deployment should fail
     async fn before_deployment(
         &self,
-        deployment_id: Uuid,
         project_id: Uuid,
         deployment_group: &str,
-    ) -> Result<()>;
+    ) -> Result<Vec<InjectedEnvVar>>;
+
+    /// Preview environment variables that would be injected for a deployment.
+    ///
+    /// Pure computation with no side effects. Used by the preview endpoint
+    /// to show what env vars `rise run` would receive.
+    ///
+    /// Default implementation delegates to `before_deployment`.
+    async fn preview_env_vars(
+        &self,
+        project_id: Uuid,
+        deployment_group: &str,
+    ) -> Result<Vec<InjectedEnvVar>> {
+        self.before_deployment(project_id, deployment_group).await
+    }
 
     /// Format the extension status for human-readable display
     ///

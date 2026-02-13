@@ -4,6 +4,7 @@ import { marked } from 'marked';
 import { navigate } from '../lib/navigation';
 import { parseDocsSummary, slugFromDocPath } from '../lib/docs';
 import { ErrorState, LoadingState } from '../components/states';
+import { CONFIG } from '../lib/config';
 
 function resolveRelativePath(basePath, hrefPath) {
     const baseParts = basePath.split('/');
@@ -42,6 +43,12 @@ function rewriteMarkdownLinks(markdown, currentDocPath) {
     });
 
     return marked.parse(rewritten);
+}
+
+function ingressSuffix(template, lastPlaceholder) {
+    const idx = template.lastIndexOf(lastPlaceholder);
+    if (idx === -1) return null;
+    return template.substring(idx + lastPlaceholder.length);
 }
 
 function escapeHtml(value) {
@@ -167,7 +174,16 @@ export function DocsPage({ initialSlug }) {
             if (lowered.startsWith('<!doctype html') || lowered.startsWith('<html') || markdown.includes('src="/@vite/client"')) {
                 throw new Error('Documentation content is unavailable (received HTML fallback instead of markdown).');
             }
-            const html = rewriteMarkdownLinks(markdown, effectiveDocPath);
+            let processed = markdown.replaceAll('https://rise.example.com', CONFIG.backendUrl);
+            if (CONFIG.productionIngressUrlTemplate) {
+                const suffix = ingressSuffix(CONFIG.productionIngressUrlTemplate, '{project_name}');
+                if (suffix) processed = processed.replaceAll('.app.example.com', suffix);
+            }
+            if (CONFIG.stagingIngressUrlTemplate) {
+                const suffix = ingressSuffix(CONFIG.stagingIngressUrlTemplate, '{deployment_group}');
+                if (suffix) processed = processed.replaceAll('.preview.example.com', suffix);
+            }
+            const html = rewriteMarkdownLinks(processed, effectiveDocPath);
             setDocHtml(html);
             setHighlightVersion((v) => v + 1);
         } catch (err) {

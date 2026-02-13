@@ -642,6 +642,53 @@ impl KubernetesController {
         }
     }
 
+    /// Get fully resolved ingress URL for a deployment group (no Deployment object required)
+    fn resolved_ingress_url_for_group(&self, project: &Project, deployment_group: &str) -> String {
+        if deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            self.production_ingress_url_template
+                .replace("{project_name}", &project.name)
+        } else if let Some(ref staging_template) = self.staging_ingress_url_template {
+            staging_template
+                .replace("{project_name}", &project.name)
+                .replace(
+                    "{deployment_group}",
+                    &Self::escaped_group_name(deployment_group),
+                )
+        } else {
+            let base_url = self
+                .production_ingress_url_template
+                .replace("{project_name}", &project.name);
+            if let Some(dot_pos) = base_url.find('.') {
+                format!(
+                    "{}-{}{}",
+                    &base_url[..dot_pos],
+                    Self::escaped_group_name(deployment_group),
+                    &base_url[dot_pos..]
+                )
+            } else {
+                format!(
+                    "{}-{}",
+                    base_url,
+                    Self::escaped_group_name(deployment_group)
+                )
+            }
+        }
+    }
+
+    /// Apply port to a host URL string
+    fn full_ingress_url_from_host(&self, url: &str) -> String {
+        if let Some(port) = self.ingress_port {
+            let parsed = Self::parse_ingress_url(url);
+            let host_with_port = format!("{}:{}", parsed.host, port);
+            match parsed.path_prefix {
+                Some(path) => format!("{}{}", host_with_port, path),
+                None => host_with_port,
+            }
+        } else {
+            url.to_string()
+        }
+    }
+
     /// Get fully resolved ingress URL with placeholders replaced
     fn resolved_ingress_url(&self, project: &Project, deployment: &Deployment) -> String {
         if deployment.deployment_group
@@ -3760,6 +3807,59 @@ impl DeploymentBackend for KubernetesController {
                 // Non-default groups don't get custom domain URLs
                 (Vec::new(), default_url.clone())
             };
+
+        Ok(DeploymentUrls {
+            default_url,
+            primary_url,
+            custom_domain_urls,
+        })
+    }
+
+    async fn get_project_urls(
+        &self,
+        project: &Project,
+        deployment_group: &str,
+    ) -> Result<DeploymentUrls> {
+        // Build a URL using ingress templates and the deployment group
+        let url_host = self.resolved_ingress_url_for_group(project, deployment_group);
+        let full_host = self.full_ingress_url_from_host(&url_host);
+        let default_url = format!("{}://{}", self.ingress_schema, full_host);
+
+        // Custom domains only apply to the default group
+        let (custom_domain_urls, primary_url) = if deployment_group == DEFAULT_DEPLOYMENT_GROUP {
+            let custom_domains = crate::db::custom_domains::list_project_custom_domains(
+                &self.state.db_pool,
+                project.id,
+            )
+            .await?;
+
+            let custom_domains = self.filter_valid_custom_domains(custom_domains);
+
+            let starred = custom_domains.iter().find(|d| d.is_primary);
+            let primary = if let Some(starred) = starred {
+                let host = if let Some(port) = self.ingress_port {
+                    format!("{}:{}", starred.domain, port)
+                } else {
+                    starred.domain.clone()
+                };
+                format!("{}://{}", self.ingress_schema, host)
+            } else {
+                default_url.clone()
+            };
+
+            let mut urls = Vec::new();
+            for domain in custom_domains {
+                let url_host = if let Some(port) = self.ingress_port {
+                    format!("{}:{}", domain.domain, port)
+                } else {
+                    domain.domain
+                };
+                urls.push(format!("{}://{}", self.ingress_schema, url_host));
+            }
+            (urls, primary)
+        } else {
+            (Vec::new(), default_url.clone())
+        };
 
         Ok(DeploymentUrls {
             default_url,

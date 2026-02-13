@@ -55,7 +55,7 @@ alias = "br"
 [tasks."backend:run-container"]
 description = "Build and run the backend server in its container (host network). Useful to validate the containerized version works as intended."
 depends = ["backend:deps", "db:migrate"]
-run = "docker build . -t rise --target rise && docker run --rm --network host -v $PWD/config:/config:ro -v $HOME/.kube:/root/.kube:ro -v $HOME/.minikube:$HOME/.minikube:ro -e DATABASE_URL=$DATABASE_URL rise backend server"
+run = "docker build . -t rise --target rise && docker run --rm --network host -v $PWD/config:/config:ro -v $HOME/.kube:/root/.kube:ro -v $HOME/.minikube:$HOME/.minikube:ro -v $PWD/docs:/docs:ro -e DATABASE_URL=$DATABASE_URL rise backend server"
 
 [tasks."frontend:dev"]
 description = "Run the Vite frontend development server."

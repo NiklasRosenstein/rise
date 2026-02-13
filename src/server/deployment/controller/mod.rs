@@ -114,6 +114,16 @@ pub trait DeploymentBackend: Send + Sync {
         project: &Project,
     ) -> anyhow::Result<DeploymentUrls>;
 
+    /// Calculate URLs where a project would be accessed for a given deployment group.
+    ///
+    /// Similar to `get_deployment_urls` but takes a group name string instead of a Deployment object.
+    /// Used for preview endpoints where no deployment exists yet.
+    async fn get_project_urls(
+        &self,
+        project: &Project,
+        deployment_group: &str,
+    ) -> anyhow::Result<DeploymentUrls>;
+
     /// Stream logs from a deployment
     ///
     /// Returns a stream of log bytes from the deployment's runtime (pod/container).

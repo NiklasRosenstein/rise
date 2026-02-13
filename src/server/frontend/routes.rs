@@ -131,6 +131,8 @@ fn render_index(state: &AppState) -> Response {
         "authorizeUrl": state.oauth_client.authorize_url(),
         "clientId": state.auth_settings.client_id,
         "redirectUri": format!("{}/", state.server_settings.public_url.trim_end_matches('/')),
+        "productionIngressUrlTemplate": state.production_ingress_url_template,
+        "stagingIngressUrlTemplate": state.staging_ingress_url_template,
     });
 
     // Render template with config

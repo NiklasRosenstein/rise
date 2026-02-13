@@ -52,7 +52,7 @@ Add to your build-time configuration:
 ```javascript
 // config.js (or environment variables)
 const CONFIG = {
-  apiUrl: 'https://api.rise.dev',
+  apiUrl: 'https://rise.example.com',
   projectName: 'my-app',
   extensionName: 'oauth-google',
   // Client ID is deterministic: {projectName}-{extensionName}
@@ -81,7 +81,7 @@ async function login() {
 
   // Build authorization URL
   const authUrl = new URL(
-    `https://api.rise.dev/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`
+    `https://rise.example.com/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/authorize`
   );
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
@@ -100,7 +100,7 @@ async function handleCallback() {
   }
 
   // Exchange code for tokens
-  const tokenUrl = `https://api.rise.dev/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`;
+  const tokenUrl = `https://rise.example.com/oidc/${CONFIG.projectName}/${CONFIG.extensionName}/token`;
   const response = await fetch(tokenUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -130,81 +130,15 @@ async function handleCallback() {
 
 ### Token Endpoint Flow (For Backend Apps)
 
-Best for server-rendered applications (Ruby on Rails, Django, Express) where tokens should be handled server-side.
-
-**Security:** Authorization code (5-min TTL, single-use) passed in query param, backend exchanges for tokens via Rise's token endpoint.
-
-```
-┌──────────────┐                                           ┌──────────────┐
-│              │  1. GET /oauth/authorize                  │              │
-│   Browser    │──────────────────────────────────────────>│     Rise     │
-│              │                                           │   Backend    │
-└──────────────┘                                           └──────────────┘
-                                                                   │
-                  2. Generate state token                         │
-                     Store in cache: { redirect_uri, PKCE }       │
-                                                                   │
-┌──────────────┐                                           ┌──────────────┐
-│              │  3. Redirect to OAuth Provider            │              │
-│   Browser    │<──────────────────────────────────────────│     Rise     │
-│              │                                           │   Backend    │
-└──────────────┘                                           └──────────────┘
-       │
-       │  4. User authenticates
-       v
-┌──────────────┐
-│    OAuth     │
-│   Provider   │
-└──────────────┘
-       │
-       │  5. Redirect to callback
-       v
-┌──────────────┐                                           ┌──────────────┐
-│              │  6. GET /oauth/callback?code=...&state=...│              │
-│   Browser    │──────────────────────────────────────────>│     Rise     │
-│              │                                           │   Backend    │
-└──────────────┘                                           └──────────────┘
-                                                                   │
-                  7. Exchange upstream code for tokens            │
-                     Encrypt tokens                               │
-                     Generate authorization code                  │
-                     Store in cache (5-min TTL, single-use)       │
-                                                                   │
-┌──────────────┐                                           ┌──────────────┐
-│              │  8. Redirect with authorization code      │              │
-│   Browser    │<──────?code=abc123────────────────────────│     Rise     │
-│              │                                           │   Backend    │
-└──────────────┘                                           └──────────────┘
-       │
-       │  9. Pass code to backend
-       v
-┌──────────────┐
-│     App      │  10. POST /oauth/token (grant_type=authorization_code)
-│   Backend    │──────────────────────────────────────────>┌──────────────┐
-└──────────────┘                                           │     Rise     │
-                                                           │   Backend    │
-                  11. Validate code (single-use)           └──────────────┘
-                      Decrypt and return tokens                   │
-                                                                   │
-┌──────────────┐                                           ┌──────────────┐
-│     App      │  12. Return OAuth tokens                  │              │
-│   Backend    │<──────────────────────────────────────────│     Rise     │
-└──────────────┘                                           │   Backend    │
-       │                                                   └──────────────┘
-       │  13. Store tokens in session (HttpOnly cookie)
-       │      Client owns and manages refresh
-       v
-```
-
-**Usage Examples:**
+Best for server-rendered applications (Express, Django, Rails) where tokens should be handled server-side. The authorization code (5-min TTL, single-use) is passed in a query param; the backend exchanges it for tokens via Rise's token endpoint using `client_id` + `client_secret`.
 
 ```typescript
-// TypeScript (Express)
+// Express example
 app.get('/oauth/callback', async (req, res) => {
   const { code } = req.query;
 
   const tokens = await fetch(
-    `https://api.rise.dev/oidc/my-app/oauth-google/token`,
+    `${process.env.RISE_ISSUER}/oidc/my-app/oauth-google/token`,
     {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -220,57 +154,6 @@ app.get('/oauth/callback', async (req, res) => {
   req.session.tokens = tokens;  // Store in HttpOnly session
   res.redirect('/');
 });
-```
-
-```python
-# Python (FastAPI)
-import httpx
-from fastapi import FastAPI, Request
-
-@app.get("/oauth/callback")
-async def callback(code: str, request: Request):
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "https://api.rise.dev/oidc/my-app/oauth-google/token",
-            data={
-                "grant_type": "authorization_code",
-                "code": code,
-                "client_id": os.getenv("OAUTH_GOOGLE_CLIENT_ID"),
-                "client_secret": os.getenv("OAUTH_GOOGLE_CLIENT_SECRET"),
-            }
-        )
-        tokens = response.json()
-
-    request.session["tokens"] = tokens  # Store in session
-    return RedirectResponse("/")
-```
-
-```rust
-// Rust (Axum)
-use axum::{extract::Query, response::Redirect};
-use serde::Deserialize;
-
-#[derive(Deserialize)]
-struct Callback { code: String }
-
-async fn oauth_callback(Query(params): Query<Callback>) -> Redirect {
-    let client = reqwest::Client::new();
-    let tokens: serde_json::Value = client
-        .post("https://api.rise.dev/oidc/my-app/oauth-google/token")
-        .form(&[
-            ("grant_type", "authorization_code"),
-            ("code", &params.code),
-            ("client_id", &std::env::var("OAUTH_GOOGLE_CLIENT_ID").unwrap()),
-            ("client_secret", &std::env::var("OAUTH_GOOGLE_CLIENT_SECRET").unwrap()),
-        ])
-        .send()
-        .await.unwrap()
-        .json()
-        .await.unwrap();
-
-    // Store tokens in session (implementation depends on session middleware)
-    Redirect::to("/")
-}
 ```
 
 ## Configuration
@@ -400,167 +283,55 @@ rise extension create oauth-github -p my-app \
   }'
 ```
 
-### Provider-Specific Examples
-
-**Google (OIDC-compliant):**
-
-```bash
-rise extension create oauth-google -p my-app \
-  --type oauth \
-  --spec '{
-    "provider_name": "Google",
-    "description": "Sign in with Google",
-    "client_id": "123456789.apps.googleusercontent.com",
-    "client_secret_ref": "OAUTH_GOOGLE_SECRET",
-    "issuer_url": "https://accounts.google.com",
-    "scopes": ["openid", "email", "profile"]
-  }'
-```
-
-**Snowflake (non-OIDC):**
-
-```bash
-rise extension create oauth-snowflake -p analytics \
-  --type oauth \
-  --spec '{
-    "provider_name": "Snowflake Production",
-    "description": "Snowflake OAuth for analytics",
-    "client_id": "ABC123XYZ...",
-    "client_secret_ref": "OAUTH_SNOWFLAKE_SECRET",
-    "issuer_url": "https://myorg.snowflakecomputing.com",
-    "authorization_endpoint": "https://myorg.snowflakecomputing.com/oauth/authorize",
-    "token_endpoint": "https://myorg.snowflakecomputing.com/oauth/token-request",
-    "scopes": ["refresh_token"]
-  }'
-```
-
-**GitHub (non-OIDC):**
-
-```bash
-rise extension create oauth-github -p my-app \
-  --type oauth \
-  --spec '{
-    "provider_name": "GitHub",
-    "description": "Sign in with GitHub",
-    "client_id": "Iv1.abc123...",
-    "client_secret_ref": "OAUTH_GITHUB_SECRET",
-    "issuer_url": "https://github.com",
-    "authorization_endpoint": "https://github.com/login/oauth/authorize",
-    "token_endpoint": "https://github.com/login/oauth/access_token",
-    "scopes": ["read:user", "user:email"]
-  }'
-```
-
 ## Local Development
 
-For local development, pass a `redirect_uri` parameter to redirect back to localhost:
+`rise run` automatically injects OAuth extension environment variables into your local container, so OAuth flows work out of the box during local development.
 
-**PKCE Flow (SPA):**
+### How It Works
 
-```javascript
-// Generate PKCE verifier and challenge
-const codeVerifier = generateRandomString(128);
-const codeChallenge = await sha256Base64Url(codeVerifier);
-sessionStorage.setItem('pkce_verifier', codeVerifier);
+When you run `rise run --project my-app`, the CLI calls the preview endpoint to fetch the full set of environment variables your deployment would receive, including:
 
-// Initiate OAuth with PKCE
-const localCallbackUrl = 'http://localhost:3000/oauth/callback';
-const authUrl = `https://api.rise.dev/oidc/my-app/oauth-google/authorize?code_challenge=${codeChallenge}&code_challenge_method=S256&redirect_uri=${encodeURIComponent(localCallbackUrl)}`;
-window.location.href = authUrl;
+- `{EXTENSION}_CLIENT_ID` — Rise client ID (e.g., `OAUTH_GOOGLE_CLIENT_ID`)
+- `{EXTENSION}_CLIENT_SECRET` — Rise client secret (decrypted)
+- `{EXTENSION}_ISSUER` — Rise OIDC proxy URL
+- `RISE_ISSUER` — Rise server URL
+
+Your app uses the same OAuth credentials and OIDC proxy in both local dev and production. The Rise OIDC proxy handles the upstream provider interaction, so no provider-side redirect URI changes are needed.
+
+### Redirect URI Handling
+
+Pass a `redirect_uri` query parameter to redirect back to localhost after authentication:
+
+```
+GET {RISE_ISSUER}/oidc/my-app/oauth-google/authorize?redirect_uri=http://localhost:3000/callback
 ```
 
-**Token Endpoint Flow (Backend):**
+Rise allows redirects to:
+- **Localhost URLs** (any port) — for local development
+- **Project domain** (e.g., `https://my-app.app.example.com`) — for production
 
-```ruby
-# Initiate OAuth
-def login
-  redirect_uri = "http://localhost:3000/oauth/callback"
-  auth_url = "https://api.rise.dev/oidc/my-app/oauth-google/authorize?redirect_uri=#{CGI.escape(redirect_uri)}"
-  redirect_to auth_url
-end
+### Example Workflow
+
+```bash
+# Start your app locally with all project env vars (including OAuth)
+rise run --project my-app --http-port 3000
+
+# Your app now has OAUTH_GOOGLE_CLIENT_ID, OAUTH_GOOGLE_CLIENT_SECRET, etc.
+# User visits http://localhost:3000 → app redirects to Rise OIDC proxy →
+# Rise authenticates with upstream provider → callback to localhost
 ```
 
-**Redirect URI Validation:**
+## Security
 
-Rise only allows redirects to:
-- Localhost URLs (any port) - for local development
-- Project domain (e.g., `https://my-app.rise.dev`) - for production
-
-## Security Considerations
-
-### PKCE Flow Security
-
-**Why PKCE for SPAs?**
-
-PKCE (Proof Key for Code Exchange, RFC 7636) provides additional security for public clients:
-
-1. **Code Interception Protection**: Prevents attackers from stealing authorization codes
-2. **No Client Secret Needed**: SPAs can't securely store secrets - PKCE solves this
-3. **Standards-Based**: Works with any RFC 7636-compliant OAuth provider
-4. **Code Verifier Challenge**: Client proves it initiated the flow by providing the verifier
-
-### Token Endpoint Flow Security
-
-**Why authorization codes for backend apps?**
-
-Authorization code flow with client credentials provides security for confidential clients:
-
-1. **Short-lived codes**: 5-minute TTL reduces exposure window
-2. **Single-use**: Codes invalidated immediately after exchange
-3. **Client authentication**: Backend proves identity with client_secret
-4. **Backend-only**: Real tokens never touch browser
-5. **HttpOnly cookies**: Can store tokens in cookies inaccessible to JavaScript (XSS protection)
-
-### Token Storage
-
-**Rise Platform:**
-- Client secrets: Encrypted environment variables (AES-GCM or AWS KMS)
-- OAuth state: In-memory cache (10-minute TTL)
-- Authorization codes: In-memory cache with encrypted tokens (5-minute TTL, single-use)
-
-**Application (after token exchange, clients own their tokens):**
-- **SPAs (PKCE Flow)**:
-  - Memory (best security, lost on refresh)
-  - localStorage (persistent, vulnerable to XSS)
-  - Never use cookies (sent with all requests, CSRF risk)
-
-- **Backend Apps (Token Endpoint Flow)**:
-  - HttpOnly cookies (best security, XSS-safe)
-  - Backend session store (Redis, database)
-  - Never expose to frontend
-
-### CSRF Protection
-
-All OAuth flows include CSRF protection via state tokens:
-
-1. Rise generates random state token
-2. Stores in cache with flow context
-3. Passes to OAuth provider
-4. Validates on callback
-5. Rejects mismatched/expired states
+- **Client secrets**: Encrypted at rest (AES-GCM or AWS KMS), never exposed to frontends
+- **Authorization codes**: Single-use, 5-minute TTL
+- **CSRF protection**: Random state tokens validated on callback (10-minute TTL)
+- **PKCE**: Required for public clients (SPAs) — proves the client that initiated the flow
+- **Constant-time comparison**: All secret validation uses constant-time comparison
 
 ### Token Refresh
 
-Clients manage their own token refresh by calling the `/oauth/token` endpoint:
-
-```javascript
-const response = await fetch(
-  'https://api.rise.dev/oidc/my-app/oauth-google/token',
-  {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      grant_type: 'refresh_token',
-      refresh_token: storedRefreshToken,
-      client_id: clientId,
-      client_secret: clientSecret  // or omit for PKCE flows
-    })
-  }
-);
-const newTokens = await response.json();
-```
-
-Rise proxies the refresh request to the upstream OAuth provider and returns fresh tokens.
+Clients manage token refresh via the `/oidc/{project}/{extension}/token` endpoint with `grant_type=refresh_token`. Rise proxies the request to the upstream provider.
 
 ## Troubleshooting
 
@@ -623,7 +394,7 @@ GET /oidc/{project}/{extension}/callback?code=...&state=...
 **Response:**
 ```
 HTTP/1.1 302 Found
-Location: https://my-app.rise.dev/callback?code=abc123...
+Location: https://my-app.app.example.com/callback?code=abc123...
 ```
 
 The `code` parameter is an authorization code that can be exchanged for tokens at the token endpoint.
@@ -695,10 +466,10 @@ GET /oidc/{project}/{extension}/.well-known/openid-configuration
 
 ```json
 {
-  "issuer": "https://api.rise.dev/oidc/my-app/oauth-google",
-  "authorization_endpoint": "https://api.rise.dev/oidc/my-app/oauth-google/authorize",
-  "token_endpoint": "https://api.rise.dev/oidc/my-app/oauth-google/token",
-  "jwks_uri": "https://api.rise.dev/oidc/my-app/oauth-google/jwks",
+  "issuer": "https://rise.example.com/oidc/my-app/oauth-google",
+  "authorization_endpoint": "https://rise.example.com/oidc/my-app/oauth-google/authorize",
+  "token_endpoint": "https://rise.example.com/oidc/my-app/oauth-google/token",
+  "jwks_uri": "https://rise.example.com/oidc/my-app/oauth-google/jwks",
   "...": "other fields from upstream provider"
 }
 ```

@@ -86,7 +86,7 @@ Deploy preview or staging environments alongside production:
 rise deploy --group mr/123 --expire 7d
 ```
 
-Custom groups get their own URL (e.g., `https://my-app-mr-123.rise.dev`) and can auto-expire.
+Custom groups get their own URL (e.g., `https://my-app-mr-123.preview.example.com`) and can auto-expire.
 
 See [Deployments](deployments.md) for the full lifecycle, deployment groups, rollback, and more.
 
