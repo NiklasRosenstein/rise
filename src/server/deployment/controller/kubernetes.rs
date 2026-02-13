@@ -7,8 +7,9 @@ use k8s_openapi::api::core::v1::{
     Secret, Service, ServicePort, ServiceSpec,
 };
 use k8s_openapi::api::networking::v1::{
-    HTTPIngressPath, HTTPIngressRuleValue, Ingress, IngressBackend, IngressRule,
-    IngressServiceBackend, IngressSpec, ServiceBackendPort,
+    HTTPIngressPath, HTTPIngressRuleValue, IPBlock, Ingress, IngressBackend, IngressRule,
+    IngressServiceBackend, IngressSpec, NetworkPolicy, NetworkPolicyEgressRule, NetworkPolicyPeer,
+    NetworkPolicyPort, NetworkPolicySpec, ServiceBackendPort,
 };
 use k8s_openapi::apimachinery::pkg::apis::meta::v1::{LabelSelector, ObjectMeta};
 use kube::api::{Api, DeleteParams, Patch, PatchParams, PostParams};
@@ -606,6 +607,11 @@ impl KubernetesController {
         )
     }
 
+    /// Get NetworkPolicy name for a deployment group
+    fn network_policy_name(_project: &Project, deployment: &Deployment) -> String {
+        Self::escaped_group_name(&deployment.deployment_group)
+    }
+
     /// Get hostname (without path) for deployment
     #[allow(dead_code)]
     fn hostname(&self, project: &Project, deployment: &Deployment) -> String {
@@ -830,6 +836,17 @@ impl KubernetesController {
                     custom_domain_ingress_name
                 );
             }
+
+            // Delete NetworkPolicy
+            let np_name = Self::network_policy_name(&project, deployment);
+            let np_api: Api<NetworkPolicy> = Api::namespaced(self.kube_client.clone(), namespace);
+            if let Err(e) = np_api.delete(&np_name, &DeleteParams::default()).await {
+                if !e.to_string().contains("404") {
+                    warn!("Error deleting NetworkPolicy {}: {}", np_name, e);
+                }
+            } else {
+                info!("Deleted NetworkPolicy {} for empty group", np_name);
+            }
         } else {
             debug!(
                 "Group '{}' still has {} active deployment(s), keeping resources",
@@ -945,6 +962,17 @@ impl KubernetesController {
         labels
     }
 
+    /// Create deployment group labels (for resources shared across deployments in a group)
+    /// Used by NetworkPolicy podSelector to target all pods in a deployment group.
+    fn group_labels(project: &Project, deployment: &Deployment) -> BTreeMap<String, String> {
+        let mut labels = Self::common_labels(project);
+        labels.insert(
+            LABEL_DEPLOYMENT_GROUP.to_string(),
+            Self::sanitize_label_value(&deployment.deployment_group),
+        );
+        labels
+    }
+
     /// Create deployment-specific labels
     #[allow(dead_code)] // Will be used in reconciliation implementation
     fn deployment_labels(project: &Project, deployment: &Deployment) -> BTreeMap<String, String> {
@@ -1004,6 +1032,10 @@ impl KubernetesController {
 
         // 5. Apply Ingress
         self.apply_ingress(deployment.id, project, deployment, &namespace, metadata)
+            .await?;
+
+        // 6. Apply NetworkPolicy
+        self.apply_network_policy(deployment.id, project, deployment, &namespace)
             .await?;
 
         Ok(())
@@ -1594,6 +1626,56 @@ impl KubernetesController {
         Ok(())
     }
 
+    /// Apply NetworkPolicy with drift detection
+    async fn apply_network_policy(
+        &self,
+        deployment_id: uuid::Uuid,
+        project: &Project,
+        deployment: &Deployment,
+        namespace: &str,
+    ) -> Result<()> {
+        let np_name = Self::network_policy_name(project, deployment);
+        let np_api: Api<NetworkPolicy> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        match np_api.get(&np_name).await {
+            Ok(existing_np) => {
+                let current_version = existing_np.metadata.resource_version.as_deref();
+
+                if self.needs_apply(deployment_id, "network-policy", current_version) {
+                    let np = self.create_network_policy(project, deployment, namespace);
+                    let result = np_api
+                        .patch(
+                            &np_name,
+                            &PatchParams::apply("rise").force(),
+                            &Patch::Apply(&np),
+                        )
+                        .await?;
+                    self.update_version_cache(
+                        deployment_id,
+                        "network-policy",
+                        result.metadata.resource_version,
+                    );
+                    info!("Applied NetworkPolicy '{}' (drift detected)", np_name);
+                } else {
+                    debug!("NetworkPolicy '{}' is up-to-date", np_name);
+                }
+            }
+            Err(kube::Error::Api(err)) if err.code == 404 => {
+                let np = self.create_network_policy(project, deployment, namespace);
+                let result = np_api.create(&PostParams::default(), &np).await?;
+                self.update_version_cache(
+                    deployment_id,
+                    "network-policy",
+                    result.metadata.resource_version,
+                );
+                info!("Created NetworkPolicy '{}'", np_name);
+            }
+            Err(e) => return Err(e.into()),
+        }
+
+        Ok(())
+    }
+
     /// Create Namespace resource
     fn create_namespace(&self, project: &Project) -> Namespace {
         // Start with common labels and merge in configured namespace labels
@@ -1747,6 +1829,103 @@ impl KubernetesController {
                 }]),
                 ..Default::default()
             }]),
+        }
+    }
+
+    /// Create NetworkPolicy for a deployment group
+    /// Restricts in-cluster egress while allowing DNS, Rise backend, and external traffic
+    fn create_network_policy(
+        &self,
+        project: &Project,
+        deployment: &Deployment,
+        namespace: &str,
+    ) -> NetworkPolicy {
+        use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
+
+        let mut egress_rules = vec![];
+
+        // Rule 1: DNS resolution (UDP + TCP port 53 to kube-system namespace)
+        egress_rules.push(NetworkPolicyEgressRule {
+            to: Some(vec![NetworkPolicyPeer {
+                namespace_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert(
+                            "kubernetes.io/metadata.name".to_string(),
+                            "kube-system".to_string(),
+                        );
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]),
+            ports: Some(vec![
+                NetworkPolicyPort {
+                    protocol: Some("UDP".to_string()),
+                    port: Some(IntOrString::Int(53)),
+                    ..Default::default()
+                },
+                NetworkPolicyPort {
+                    protocol: Some("TCP".to_string()),
+                    port: Some(IntOrString::Int(53)),
+                    ..Default::default()
+                },
+            ]),
+        });
+
+        // Rule 2: Rise backend (only if backend address is IP-based)
+        if let Some(ref backend_address) = self.backend_address {
+            if backend_address.is_ip_address() {
+                egress_rules.push(NetworkPolicyEgressRule {
+                    to: Some(vec![NetworkPolicyPeer {
+                        ip_block: Some(IPBlock {
+                            cidr: format!("{}/32", backend_address.host),
+                            except: None,
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: Some(vec![NetworkPolicyPort {
+                        protocol: Some("TCP".to_string()),
+                        port: Some(IntOrString::Int(backend_address.port as i32)),
+                        ..Default::default()
+                    }]),
+                });
+            }
+        }
+
+        // Rule 3: External egress (0.0.0.0/0 excluding RFC1918 private ranges)
+        egress_rules.push(NetworkPolicyEgressRule {
+            to: Some(vec![NetworkPolicyPeer {
+                ip_block: Some(IPBlock {
+                    cidr: "0.0.0.0/0".to_string(),
+                    except: Some(vec![
+                        "10.0.0.0/8".to_string(),
+                        "172.16.0.0/12".to_string(),
+                        "192.168.0.0/16".to_string(),
+                    ]),
+                }),
+                ..Default::default()
+            }]),
+            ports: None, // Allow all ports for external traffic
+        });
+
+        NetworkPolicy {
+            metadata: ObjectMeta {
+                name: Some(Self::network_policy_name(project, deployment)),
+                namespace: Some(namespace.to_string()),
+                labels: Some(Self::common_labels(project)),
+                ..Default::default()
+            },
+            spec: Some(NetworkPolicySpec {
+                pod_selector: LabelSelector {
+                    match_labels: Some(Self::group_labels(project, deployment)),
+                    ..Default::default()
+                },
+                policy_types: Some(vec!["Egress".to_string()]),
+                egress: Some(egress_rules),
+                ingress: None,
+            }),
         }
     }
 
