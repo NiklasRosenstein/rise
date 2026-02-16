@@ -1025,7 +1025,8 @@ impl KubernetesController {
     async fn check_pod_errors(
         &self,
         namespace: &str,
-        deploy_name: &str,
+        _deploy_name: &str,
+        deployment_id: &str,
     ) -> Result<(bool, Option<String>)> {
         use k8s_openapi::api::core::v1::Pod;
 
@@ -1033,10 +1034,10 @@ impl KubernetesController {
 
         // List pods owned by this Deployment
         let pods = pod_api
-            .list(&kube::api::ListParams::default().labels(&format!(
-                "rise.dev/deployment-id={}",
-                deploy_name.rsplit_once('-').map(|(_, id)| id).unwrap_or(deploy_name)
-            )))
+            .list(
+                &kube::api::ListParams::default()
+                    .labels(&format!("{}={}", LABEL_DEPLOYMENT_ID, deployment_id)),
+            )
             .await?;
 
         for pod in pods.items {
@@ -1181,7 +1182,12 @@ impl KubernetesController {
     }
 
     /// Collect current Pod status for a deployment
-    async fn collect_pod_status(&self, namespace: &str, deploy_name: &str) -> Result<PodStatus> {
+    async fn collect_pod_status(
+        &self,
+        namespace: &str,
+        deploy_name: &str,
+        deployment_id: &str,
+    ) -> Result<PodStatus> {
         use k8s_openapi::api::{apps::v1::Deployment as K8sDeployment, core::v1::Pod};
         use std::collections::HashMap;
 
@@ -1193,10 +1199,10 @@ impl KubernetesController {
         // List pods owned by this Deployment
         let pod_api: Api<Pod> = Api::namespaced(self.kube_client.clone(), namespace);
         let pods = pod_api
-            .list(&kube::api::ListParams::default().labels(&format!(
-                "rise.dev/deployment-id={}",
-                deploy_name.rsplit_once('-').map(|(_, id)| id).unwrap_or(deploy_name)
-            )))
+            .list(
+                &kube::api::ListParams::default()
+                    .labels(&format!("{}={}", LABEL_DEPLOYMENT_ID, deployment_id)),
+            )
             .await?;
 
         // Fetch events for the namespace
@@ -1306,12 +1312,16 @@ impl KubernetesController {
                                     message: None,
                                     exit_code: None,
                                 })
-                            } else { cs.state.as_ref().and_then(|s| s.terminated.as_ref()).map(|terminated| ContainerState {
-                                    state_type: "terminated".to_string(),
-                                    reason: terminated.reason.clone(),
-                                    message: terminated.message.clone(),
-                                    exit_code: Some(terminated.exit_code),
-                                }) };
+                            } else {
+                                cs.state.as_ref().and_then(|s| s.terminated.as_ref()).map(
+                                    |terminated| ContainerState {
+                                        state_type: "terminated".to_string(),
+                                        reason: terminated.reason.clone(),
+                                        message: terminated.message.clone(),
+                                        exit_code: Some(terminated.exit_code),
+                                    },
+                                )
+                            };
 
                             ContainerStatusInfo {
                                 name: cs.name.clone(),
@@ -3696,7 +3706,10 @@ impl DeploymentBackend for KubernetesController {
                         .ok_or_else(|| anyhow::anyhow!("No Deployment name in metadata"))?;
 
                     // Collect and store pod status
-                    match self.collect_pod_status(namespace, deploy_name).await {
+                    match self
+                        .collect_pod_status(namespace, deploy_name, &deployment.deployment_id)
+                        .await
+                    {
                         Ok(pod_status) => {
                             metadata.pod_status = Some(pod_status.clone());
 
@@ -3729,7 +3742,7 @@ impl DeploymentBackend for KubernetesController {
 
                     // Check for irrecoverable pod errors first (fallback check)
                     let (has_errors, error_msg) = match self
-                        .check_pod_errors(namespace, deploy_name)
+                        .check_pod_errors(namespace, deploy_name, &deployment.deployment_id)
                         .await
                     {
                         Ok((errors, msg)) => (errors, msg),
@@ -4156,7 +4169,10 @@ impl DeploymentBackend for KubernetesController {
             .ok_or_else(|| anyhow::anyhow!("No namespace"))?;
 
         // Collect current pod status
-        let pod_status = match self.collect_pod_status(&namespace, &deploy_name).await {
+        let pod_status = match self
+            .collect_pod_status(&namespace, &deploy_name, &deployment.deployment_id)
+            .await
+        {
             Ok(ps) => Some(ps),
             Err(e) if is_namespace_not_found_error(&e) => {
                 warn!("Namespace missing during pod status collection in health check");
@@ -4171,7 +4187,10 @@ impl DeploymentBackend for KubernetesController {
         // 1. Check for pod-level errors FIRST
         // This prevents race conditions where Deployment reports ready_replicas
         // but pods are actually in CrashLoopBackOff or other error states
-        let (has_errors, error_msg) = match self.check_pod_errors(&namespace, &deploy_name).await {
+        let (has_errors, error_msg) = match self
+            .check_pod_errors(&namespace, &deploy_name, &deployment.deployment_id)
+            .await
+        {
             Ok((errors, msg)) => (errors, msg),
             Err(e) if is_namespace_not_found_error(&e) => {
                 // Namespace missing - return unhealthy status
