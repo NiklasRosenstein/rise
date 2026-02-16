@@ -3,8 +3,9 @@ use async_trait::async_trait;
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec, ReplicaSet};
 use k8s_openapi::api::core::v1::{
-    Container, ContainerPort, HostAlias, LocalObjectReference, Namespace, PodSpec, PodTemplateSpec,
-    Secret, Service, ServicePort, ServiceSpec,
+    Capabilities, Container, ContainerPort, HTTPGetAction, HostAlias, LocalObjectReference,
+    Namespace, PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ResourceRequirements,
+    SeccompProfile, Secret, SecurityContext, Service, ServicePort, ServiceSpec,
 };
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, IPBlock, Ingress, IngressBackend, IngressRule,
@@ -128,6 +129,9 @@ pub struct KubernetesControllerConfig {
     pub ingress_controller_namespace: String,
     pub ingress_controller_labels: std::collections::HashMap<String, String>,
     pub network_policy_egress_allow_cidrs: Vec<String>,
+    pub pod_security_enabled: bool,
+    pub pod_resources: Option<crate::server::settings::PodResourceLimits>,
+    pub health_probes: Option<crate::server::settings::HealthProbeConfig>,
 }
 
 /// Kubernetes controller implementation
@@ -162,6 +166,16 @@ pub struct KubernetesController {
     ingress_controller_namespace: String,
     ingress_controller_labels: std::collections::HashMap<String, String>,
     network_policy_egress_allow_cidrs: Vec<String>,
+    pod_security_enabled: bool,
+    pod_resources: Option<crate::server::settings::PodResourceLimits>,
+    health_probes: Option<crate::server::settings::HealthProbeConfig>,
+}
+
+/// Helper enum for probe type
+#[derive(Debug, Clone, Copy)]
+enum ProbeType {
+    Liveness,
+    Readiness,
 }
 
 impl KubernetesController {
@@ -196,6 +210,9 @@ impl KubernetesController {
             ingress_controller_namespace: config.ingress_controller_namespace,
             ingress_controller_labels: config.ingress_controller_labels,
             network_policy_egress_allow_cidrs: config.network_policy_egress_allow_cidrs,
+            pod_security_enabled: config.pod_security_enabled,
+            pod_resources: config.pod_resources,
+            health_probes: config.health_probes,
         })
     }
 
@@ -2083,6 +2100,123 @@ impl KubernetesController {
         Ok(k8s_env_vars)
     }
 
+    /// Create Pod-level security context with restricted profile
+    /// Returns None if pod_security_enabled is false
+    fn create_pod_security_context(&self) -> Option<PodSecurityContext> {
+        if !self.pod_security_enabled {
+            return None;
+        }
+
+        Some(PodSecurityContext {
+            run_as_non_root: Some(true), // Enforce non-root, but let image choose UID
+            seccomp_profile: Some(SeccompProfile {
+                type_: "RuntimeDefault".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+    }
+
+    /// Create Container-level security context with minimal privileges
+    /// Returns None if pod_security_enabled is false
+    fn create_container_security_context(&self) -> Option<SecurityContext> {
+        if !self.pod_security_enabled {
+            return None;
+        }
+
+        Some(SecurityContext {
+            allow_privilege_escalation: Some(false),
+            run_as_non_root: Some(true),
+            capabilities: Some(Capabilities {
+                drop: Some(vec!["ALL".to_string()]),
+                ..Default::default()
+            }),
+            read_only_root_filesystem: Some(false), // Writable filesystem for compatibility
+            ..Default::default()
+        })
+    }
+
+    /// Create resource requirements from configuration
+    /// Returns resource requirements with configured or default values
+    fn create_resource_requirements(&self) -> Option<ResourceRequirements> {
+        use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+
+        // Use configured values or defaults
+        let (cpu_request, memory_request, memory_limit) =
+            if let Some(ref config) = self.pod_resources {
+                (
+                    &config.cpu_request,
+                    &config.memory_request,
+                    &config.memory_limit,
+                )
+            } else {
+                // Use default values
+                (
+                    &"10m".to_string(),
+                    &"64Mi".to_string(),
+                    &"512Mi".to_string(),
+                )
+            };
+
+        Some(ResourceRequirements {
+            requests: Some({
+                let mut map = BTreeMap::new();
+                map.insert("cpu".to_string(), Quantity(cpu_request.clone()));
+                map.insert("memory".to_string(), Quantity(memory_request.clone()));
+                map
+            }),
+            limits: Some({
+                let mut map = BTreeMap::new();
+                map.insert("memory".to_string(), Quantity(memory_limit.clone()));
+                // No CPU limit - avoid throttling
+                map
+            }),
+            ..Default::default()
+        })
+    }
+
+    /// Create HTTP health probe for application port
+    /// Returns None if probes are disabled
+    fn create_http_probe(&self, port: i32, probe_type: ProbeType) -> Option<Probe> {
+        // Get config or use defaults
+        let config = self.health_probes.as_ref().cloned().unwrap_or_else(|| {
+            crate::server::settings::HealthProbeConfig {
+                liveness_enabled: true,
+                readiness_enabled: true,
+                path: "/".to_string(),
+                initial_delay_seconds: 10,
+                period_seconds: 10,
+                timeout_seconds: 5,
+                failure_threshold: 3,
+            }
+        });
+
+        // Check if this probe type is enabled
+        let enabled = match probe_type {
+            ProbeType::Liveness => config.liveness_enabled,
+            ProbeType::Readiness => config.readiness_enabled,
+        };
+
+        if !enabled {
+            return None;
+        }
+
+        Some(Probe {
+            http_get: Some(HTTPGetAction {
+                path: Some(config.path.clone()),
+                port: k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(port),
+                scheme: Some("HTTP".to_string()),
+                ..Default::default()
+            }),
+            initial_delay_seconds: Some(config.initial_delay_seconds),
+            period_seconds: Some(config.period_seconds),
+            timeout_seconds: Some(config.timeout_seconds),
+            failure_threshold: Some(config.failure_threshold),
+            success_threshold: Some(1),
+            ..Default::default()
+        })
+    }
+
     /// Create Deployment resource
     async fn create_deployment(
         &self,
@@ -2165,6 +2299,7 @@ impl KubernetesController {
                         ..Default::default()
                     }),
                     spec: Some(PodSpec {
+                        security_context: self.create_pod_security_context(),
                         image_pull_secrets: {
                             // Determine which secret to use (if any)
                             let secret_name = self
@@ -2187,6 +2322,12 @@ impl KubernetesController {
                             }]),
                             image_pull_policy: Some("Always".to_string()),
                             env: Some(env_vars), // Always set env vars (at minimum, PORT is injected)
+                            security_context: self.create_container_security_context(),
+                            resources: self.create_resource_requirements(),
+                            liveness_probe: self
+                                .create_http_probe(metadata.http_port as i32, ProbeType::Liveness),
+                            readiness_probe: self
+                                .create_http_probe(metadata.http_port as i32, ProbeType::Readiness),
                             ..Default::default()
                         }],
                         node_selector: if self.node_selector.is_empty() {
@@ -4346,6 +4487,9 @@ mod tests {
                 labels
             },
             network_policy_egress_allow_cidrs: vec![],
+            pod_security_enabled: true,
+            pod_resources: None,
+            health_probes: None,
         }
     }
 
@@ -4827,6 +4971,9 @@ mod tests {
                 labels
             },
             network_policy_egress_allow_cidrs: vec![],
+            pod_security_enabled: true,
+            pod_resources: None,
+            health_probes: None,
         }
     }
 }
