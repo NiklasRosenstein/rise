@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../docs/schemas/backend-settings.schema.json
 # Insecure development configuration - DO NOT USE IN PRODUCTION.
 #
 # Takes precedence over values in default.yaml.

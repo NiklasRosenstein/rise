@@ -19,7 +19,7 @@ The Rise CLI (`rise`) provides commands for managing projects, deployments, team
 | `rise service-account` | `sa` | `create` (`c`), `list` (`ls`), `show` (`s`), `delete` (`rm`) | [Authentication](authentication.md#service-accounts-workload-identity) |
 | `rise extension` | `ext` | `create` (`c`), `update` (`u`), `patch` (`p`), `list` (`ls`), `show` (`s`), `delete` (`rm`) | [OAuth Extensions](oauth.md) |
 | `rise encrypt` | | | [OAuth Extensions](oauth.md) |
-| `rise backend` | | `server`, `check-config`, `dev-oidc-issuer` | Operator commands |
+| `rise backend` | | `server`, `check-config`, `config-schema`, `dev-oidc-issuer` | Operator commands |
 
 `rise deploy` is a shortcut for `rise deployment create`.
 

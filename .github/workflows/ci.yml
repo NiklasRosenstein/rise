@@ -106,6 +106,9 @@ jobs:
       - name: Install mise tools
         run: mise use -g cargo:sqlx-cli cargo:cargo-all-features
 
+      - name: Verify backend config schema is up to date
+        run: mise config:schema:check
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 

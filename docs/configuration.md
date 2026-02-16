@@ -317,6 +317,20 @@ Checking backend configuration...
 ✓ Configuration is valid
 ```
 
+### JSON Schema
+
+Rise provides a JSON Schema for backend configuration at:
+
+- [`docs/schemas/backend-settings.schema.json`](schemas/backend-settings.schema.json)
+
+Generate it with:
+
+```bash
+cargo run --features cli,backend -- backend config-schema > docs/schemas/backend-settings.schema.json
+```
+
+CI verifies this file is up to date on every PR and push.
+
 ### Unknown Field Warnings
 
 Starting in v0.9.0, Rise warns about unrecognized configuration fields to help catch typos and outdated options:

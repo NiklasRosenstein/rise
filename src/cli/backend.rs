@@ -10,6 +10,9 @@ pub enum BackendCommands {
     /// Check backend configuration for errors and unused options
     #[cfg(feature = "backend")]
     CheckConfig,
+    /// Print backend settings JSON schema
+    #[cfg(feature = "backend")]
+    ConfigSchema,
     /// Run a local OIDC issuer for testing service accounts
     DevOidcIssuer {
         /// Port to listen on
@@ -41,6 +44,12 @@ pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
                     std::process::exit(1);
                 }
             }
+        }
+        #[cfg(feature = "backend")]
+        BackendCommands::ConfigSchema => {
+            let schema = crate::server::settings::Settings::json_schema_value()?;
+            println!("{}", serde_json::to_string_pretty(&schema)?);
+            Ok(())
         }
         BackendCommands::DevOidcIssuer { port, token } => dev_oidc_issuer::run(port, token).await,
     }

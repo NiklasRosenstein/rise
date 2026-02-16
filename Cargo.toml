@@ -60,6 +60,7 @@ backend = [
     "dep:serde_ignored",
     "dep:subtle",
     "dep:serde_urlencoded",
+    "dep:schemars",
     # Kubernetes (former "k8s" feature)
     "dep:kube",
     "dep:k8s-openapi",
@@ -154,6 +155,7 @@ snowflake-connector-rs = { version = "0.4", optional = true }
 # Server: OAuth2 token endpoint
 subtle = { version = "2.6.1", optional = true }
 serde_urlencoded = { version = "0.7.1", optional = true }
+schemars = { version = "0.8.22", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"
