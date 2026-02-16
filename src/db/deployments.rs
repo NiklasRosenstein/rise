@@ -1414,14 +1414,14 @@ mod tests {
         .await
         .unwrap();
 
-        // Create deployment in Pending status
+        // Create deployment in Pushed status so transition to Deploying is valid
         let deployment = create(
             &pool,
             CreateDeploymentParams {
                 deployment_id: "test-deploy",
                 project_id,
                 created_by_id: user_id,
-                status: DeploymentStatus::Pending,
+                status: DeploymentStatus::Pushed,
                 image: None,
                 image_digest: None,
                 rolled_back_from_deployment_id: None,
@@ -1449,20 +1449,20 @@ mod tests {
         // Wait a bit to ensure time has passed
         tokio::time::sleep(std::time::Duration::from_millis(10)).await;
 
-        // Transition to Unhealthy (still in Deploying phase logically, but status changes)
-        let deployment = update_status(&pool, deployment.id, DeploymentStatus::Unhealthy)
+        // Transition to Deploying again (same-state transition is valid and should not overwrite)
+        let deployment = update_status(&pool, deployment.id, DeploymentStatus::Deploying)
             .await
             .unwrap();
 
         // Verify deploying_started_at is unchanged
         assert_eq!(deployment.deploying_started_at, Some(first_timestamp));
 
-        // Transition back to Deploying (e.g., if retrying)
-        let deployment = update_status(&pool, deployment.id, DeploymentStatus::Deploying)
+        // Transition to Healthy (valid transition from Deploying)
+        let deployment = update_status(&pool, deployment.id, DeploymentStatus::Healthy)
             .await
             .unwrap();
 
-        // Verify deploying_started_at is still unchanged (not overwritten)
+        // Verify deploying_started_at remains unchanged across valid non-Deploying transitions
         assert_eq!(deployment.deploying_started_at, Some(first_timestamp));
     }
 }
