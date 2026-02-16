@@ -257,7 +257,7 @@ When Kubernetes deployment is configured (via `config.kubernetes`), Rise require
 
 ### Rise Configuration
 
-The chart mounts `config/production.yaml` from the repository as `/config/default.yaml`, and the `config` parameter is converted to YAML and mounted as `/config/production.yaml`. This allows for a production baseline plus environment-specific overrides without requiring Helm chart updates for new options.
+The image embeds `/etc/rise/default.yaml` at build time, and the `config` parameter is converted to YAML and mounted as `/etc/rise/production.yaml`. The backend loads `default` first and then applies required `production` overrides, without requiring Helm chart updates for new options.
 
 **Sensitive Values:** For sensitive configuration like secrets and passwords, leave them empty in the config and provide them via `envFrom` instead. See [Environment Variables](#environment-variables) below.
 

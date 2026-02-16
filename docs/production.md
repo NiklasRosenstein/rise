@@ -49,7 +49,7 @@ Key environment variables for production:
 DATABASE_URL="postgres://rise:password@rds-endpoint:5432/rise"
 
 # Configuration system
-RISE_CONFIG_DIR="/etc/rise/config"         # Path to config directory
+RISE_CONFIG_DIR="/etc/rise"                # Path to config directory
 RISE_CONFIG_RUN_MODE="production"          # Which config file to load (production.yaml)
 ```
 

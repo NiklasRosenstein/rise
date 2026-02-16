@@ -47,7 +47,7 @@ spec:
           protocol: TCP
         env:
         - name: RISE_CONFIG_DIR
-          value: "/config"
+          value: "/etc/rise"
         - name: RISE_CONFIG_RUN_MODE
           value: "production"
         {{- if .Values.postgresql.enabled }}
@@ -81,7 +81,8 @@ spec:
           {{- toYaml .Values.server.resources | nindent 12 }}
         volumeMounts:
         - name: config
-          mountPath: /config
+          mountPath: /etc/rise/production.yaml
+          subPath: production.yaml
           readOnly: true
         - name: tmp
           mountPath: /tmp

@@ -736,10 +736,13 @@ impl Settings {
         // Load config files in order, trying both .toml and .yaml/.yml extensions.
         // TOML takes precedence if both exist.
 
-        // 1. Load environment-specific config (required)
+        // 1. Load default config (optional)
+        Self::try_add_config_file(&mut builder, &config_dir, "default", false)?;
+
+        // 2. Load environment-specific config (required)
         Self::try_add_config_file(&mut builder, &config_dir, &run_mode, true)?;
 
-        // 2. Load local config (optional, not checked into git)
+        // 3. Load local config (optional, not checked into git)
         Self::try_add_config_file(&mut builder, &config_dir, "local", false)?;
 
         // Build config and substitute environment variables
@@ -986,6 +989,48 @@ unknown_top_level: "also unknown"
             result.is_ok(),
             "Config should load despite unknown fields: {:?}",
             result.err()
+        );
+    }
+
+    #[test]
+    fn test_run_mode_config_is_required_even_if_default_exists() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let default_path = temp_dir.path().join("default.yaml");
+
+        fs::write(
+            &default_path,
+            r#"
+server:
+  host: "0.0.0.0"
+  port: 3000
+  public_url: "http://localhost:3000"
+  jwt_signing_secret: "test-secret-key-for-testing-123456"
+
+database:
+  url: "postgres://test@localhost/test"
+
+auth:
+  issuer: "http://localhost:5556"
+  client_id: "test"
+  client_secret: "test"
+"#,
+        )
+        .unwrap();
+
+        env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
+        env::set_var("RISE_CONFIG_RUN_MODE", "production");
+
+        let result = Settings::new();
+
+        env::remove_var("RISE_CONFIG_DIR");
+        env::remove_var("RISE_CONFIG_RUN_MODE");
+
+        assert!(
+            result.is_err(),
+            "Config should fail without required run_mode file"
         );
     }
 }
