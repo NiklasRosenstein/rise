@@ -1,6 +1,6 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec, ReplicaSet};
 use k8s_openapi::api::core::v1::{
     Capabilities, Container, ContainerPort, HTTPGetAction, HostAlias, LocalObjectReference,
@@ -60,6 +60,51 @@ struct KubernetesMetadata {
     reconcile_phase: ReconcilePhase,
     #[serde(alias = "previous_replicaset")]
     previous_deployment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pod_status: Option<PodStatus>,
+}
+
+/// Detailed Pod status information
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct PodStatus {
+    /// Desired number of pods (from Deployment spec)
+    desired_replicas: i32,
+    /// Current number of ready pods
+    ready_replicas: i32,
+    /// Current number of pods (any state)
+    current_replicas: i32,
+    /// Aggregate pod phase
+    phase: PodPhase,
+    /// Container-level error details
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    container_errors: Vec<ContainerError>,
+    /// Timestamp of last pod status check
+    last_checked: DateTime<Utc>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "PascalCase")]
+enum PodPhase {
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Unknown,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ContainerError {
+    pod_name: String,
+    container_name: String,
+    /// Error reason (e.g., "CrashLoopBackOff", "ImagePullBackOff")
+    reason: String,
+    /// Detailed error message from Kubernetes
+    message: String,
+    /// Restart count for this container
+    restart_count: i32,
+    /// Exit code (if terminated)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i32>,
 }
 
 /// Reconciliation phases for Kubernetes deployments
@@ -1024,6 +1069,97 @@ impl KubernetesController {
         }
 
         Ok((false, None))
+    }
+
+    /// Collect current Pod status for a deployment
+    async fn collect_pod_status(&self, namespace: &str, deploy_name: &str) -> Result<PodStatus> {
+        use k8s_openapi::api::{apps::v1::Deployment as K8sDeployment, core::v1::Pod};
+
+        // Get Deployment to know desired replica count
+        let deploy_api: Api<K8sDeployment> = Api::namespaced(self.kube_client.clone(), namespace);
+        let deployment = deploy_api.get(deploy_name).await?;
+        let desired_replicas = deployment.spec.and_then(|s| s.replicas).unwrap_or(1);
+
+        // List pods owned by this Deployment
+        let pod_api: Api<Pod> = Api::namespaced(self.kube_client.clone(), namespace);
+        let pods = pod_api
+            .list(&kube::api::ListParams::default().labels(&format!(
+                "rise.dev/deployment-id={}",
+                deploy_name.rsplit_once('-').map(|(_, id)| id).unwrap_or(deploy_name)
+            )))
+            .await?;
+
+        let mut container_errors = Vec::new();
+        let mut ready_count = 0;
+        let mut phase_summary = PodPhase::Unknown;
+
+        for pod in &pods.items {
+            let pod_name = pod.metadata.name.clone().unwrap_or_default();
+
+            if let Some(status) = &pod.status {
+                // Track phase
+                if let Some(phase_str) = &status.phase {
+                    phase_summary = match phase_str.as_str() {
+                        "Running" => PodPhase::Running,
+                        "Pending" => PodPhase::Pending,
+                        "Failed" => PodPhase::Failed,
+                        "Succeeded" => PodPhase::Succeeded,
+                        _ => PodPhase::Unknown,
+                    };
+                }
+
+                // Check container statuses
+                if let Some(container_statuses) = &status.container_statuses {
+                    for cs in container_statuses {
+                        if cs.ready {
+                            ready_count += 1;
+                        }
+
+                        // Collect waiting state errors
+                        if let Some(waiting) = cs.state.as_ref().and_then(|s| s.waiting.as_ref()) {
+                            container_errors.push(ContainerError {
+                                pod_name: pod_name.clone(),
+                                container_name: cs.name.clone(),
+                                reason: waiting.reason.clone().unwrap_or_default(),
+                                message: waiting.message.clone().unwrap_or_default(),
+                                restart_count: cs.restart_count,
+                                exit_code: None,
+                            });
+                        }
+
+                        // Collect terminated state errors (non-zero exit)
+                        if let Some(terminated) =
+                            cs.state.as_ref().and_then(|s| s.terminated.as_ref())
+                        {
+                            if terminated.exit_code != 0 {
+                                container_errors.push(ContainerError {
+                                    pod_name: pod_name.clone(),
+                                    container_name: cs.name.clone(),
+                                    reason: terminated
+                                        .reason
+                                        .clone()
+                                        .unwrap_or_else(|| "ContainerFailed".to_string()),
+                                    message: terminated.message.clone().unwrap_or_else(|| {
+                                        format!("Exit code: {}", terminated.exit_code)
+                                    }),
+                                    restart_count: cs.restart_count,
+                                    exit_code: Some(terminated.exit_code),
+                                });
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(PodStatus {
+            desired_replicas,
+            ready_replicas: ready_count,
+            current_replicas: pods.items.len() as i32,
+            phase: phase_summary,
+            container_errors,
+            last_checked: Utc::now(),
+        })
     }
 
     /// Create common labels for all resources
@@ -3376,7 +3512,47 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No Deployment name in metadata"))?;
 
-                    // Check for irrecoverable pod errors first
+                    // Collect and store pod status
+                    match self.collect_pod_status(namespace, deploy_name).await {
+                        Ok(pod_status) => {
+                            metadata.pod_status = Some(pod_status.clone());
+
+                            // Check for container errors
+                            if !pod_status.container_errors.is_empty() {
+                                // Use first error for high-level message
+                                let error = &pod_status.container_errors[0];
+                                let error_msg = format!(
+                                    "{}: {}",
+                                    error.reason,
+                                    error.message.lines().next().unwrap_or("")
+                                );
+
+                                error!(
+                                    "Deployment {} has container errors: {}",
+                                    deployment.deployment_id, error_msg
+                                );
+
+                                // Mark deployment as Failed
+                                return Ok(ReconcileResult {
+                                    status: DeploymentStatus::Failed,
+                                    controller_metadata: serde_json::to_value(&metadata)?,
+                                    error_message: Some(error_msg),
+                                });
+                            }
+                        }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!("Namespace missing during pod status collection, resetting to CreatingNamespace");
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => {
+                            warn!("Failed to collect pod status: {:?}", e);
+                            // Continue reconciliation - don't fail if we can't get pod status
+                        }
+                    }
+
+                    // Check for irrecoverable pod errors first (fallback check)
                     let (has_errors, error_msg) = match self
                         .check_pod_errors(namespace, deploy_name)
                         .await
@@ -3804,6 +3980,19 @@ impl DeploymentBackend for KubernetesController {
             .namespace
             .ok_or_else(|| anyhow::anyhow!("No namespace"))?;
 
+        // Collect current pod status
+        let pod_status = match self.collect_pod_status(&namespace, &deploy_name).await {
+            Ok(ps) => Some(ps),
+            Err(e) if is_namespace_not_found_error(&e) => {
+                warn!("Namespace missing during pod status collection in health check");
+                None
+            }
+            Err(e) => {
+                warn!("Failed to collect pod status during health check: {:?}", e);
+                None
+            }
+        };
+
         // 1. Check for pod-level errors FIRST
         // This prevents race conditions where Deployment reports ready_replicas
         // but pods are actually in CrashLoopBackOff or other error states
@@ -3816,6 +4005,7 @@ impl DeploymentBackend for KubernetesController {
                     healthy: false,
                     message: Some("Namespace missing - recovery in progress".to_string()),
                     last_check: Utc::now(),
+                    pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
                 });
             }
             Err(e) => return Err(e),
@@ -3825,6 +4015,7 @@ impl DeploymentBackend for KubernetesController {
                 healthy: false,
                 message: error_msg,
                 last_check: Utc::now(),
+                pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
             });
         }
 
@@ -3851,6 +4042,7 @@ impl DeploymentBackend for KubernetesController {
                         None
                     },
                     last_check: Utc::now(),
+                    pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
                 })
             }
             Err(kube::Error::Api(ae)) if ae.code == 404 => {
@@ -3863,6 +4055,7 @@ impl DeploymentBackend for KubernetesController {
                     healthy: false,
                     message: Some(format!("Deployment {} not found", deploy_name)),
                     last_check: Utc::now(),
+                    pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
                 })
             }
             Err(e) if is_namespace_not_found_error(&e) => {
@@ -3872,6 +4065,7 @@ impl DeploymentBackend for KubernetesController {
                     healthy: false,
                     message: Some("Namespace missing - recovery in progress".to_string()),
                     last_check: Utc::now(),
+                    pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
                 })
             }
             Err(e) => Err(e.into()),
@@ -4689,6 +4883,7 @@ mod tests {
             http_port: 8080,
             reconcile_phase: ReconcilePhase::Completed,
             previous_deployment: None,
+            pod_status: None,
         };
 
         let ingress = controller.create_primary_ingress(&project, &deployment, &metadata);
@@ -4772,6 +4967,7 @@ mod tests {
             http_port: 8080,
             reconcile_phase: ReconcilePhase::Completed,
             previous_deployment: None,
+            pod_status: None,
         };
 
         let custom_domains = vec![CustomDomain {
@@ -4875,6 +5071,7 @@ mod tests {
             http_port: 8080,
             reconcile_phase: ReconcilePhase::Completed,
             previous_deployment: None,
+            pod_status: None,
         };
 
         let ingress = controller.create_primary_ingress(&project, &deployment, &metadata);
