@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { logout, login } from './lib/auth';
 import { api } from './lib/api';
 import { CONFIG } from './lib/config';
-import { parseDocsSummary, titleFromSlug } from './lib/docs';
+import { extensionTypeFromDocPath, parseDocsSummary, titleFromSlug } from './lib/docs';
 import { maybeMigrateLegacyHashRoute, navigate, usePathLocation } from './lib/navigation';
 import { Footer } from './components/ui';
 import { useToast } from './components/toast';
@@ -16,11 +16,17 @@ import { ExtensionDetailPage } from './features/resources';
 import { TeamDetail, TeamsList } from './features/teams';
 import { CommandPalette } from './components/command-palette';
 
-function Sidebar({ currentView, docsItems = [], currentDocSlug = '', docsDefaultSlug = '' }) {
+function Sidebar({ currentView, docsItems = [], availableExtensionTypes = [], currentDocSlug = '', docsDefaultSlug = '' }) {
     const isHomeActive = currentView === 'home';
     const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail' || currentView === 'extension-detail';
     const isTeamsActive = currentView === 'teams' || currentView === 'team-detail';
     const isDocsActive = currentView === 'docs';
+    const enabledExtensionTypes = new Set(availableExtensionTypes || []);
+    const visibleDocsItems = docsItems.filter((item) => {
+        const extensionType = extensionTypeFromDocPath(item.path);
+        if (!extensionType) return true;
+        return enabledExtensionTypes.has(extensionType);
+    });
 
     return (
         <aside className="mono-sidebar">
@@ -60,9 +66,9 @@ function Sidebar({ currentView, docsItems = [], currentDocSlug = '', docsDefault
                 >
                     Docs
                 </a>
-                {isDocsActive && docsItems.length > 0 && (
+                {isDocsActive && visibleDocsItems.length > 0 && (
                     <div className="mono-subnav" aria-label="Documentation pages">
-                        {docsItems.map((item) => (
+                        {visibleDocsItems.map((item) => (
                             <a
                                 key={item.slug}
                                 href={`/docs/${item.slug}`}
@@ -256,6 +262,7 @@ export function App() {
     const [paletteProjects, setPaletteProjects] = useState([]);
     const [paletteTeams, setPaletteTeams] = useState([]);
     const [docsItems, setDocsItems] = useState([]);
+    const [availableExtensionTypes, setAvailableExtensionTypes] = useState([]);
     const pathname = usePathLocation();
     const { showToast } = useToast();
     const defaultDocSlug = docsItems[0]?.slug || '';
@@ -338,10 +345,15 @@ export function App() {
     useEffect(() => {
         async function loadDocsSummary() {
             try {
-                const response = await fetch('/static/docs/FRONTEND_DOCS.md');
-                if (!response.ok) return;
-                const summary = await response.text();
+                const [summaryResponse, extensionTypesResponse] = await Promise.all([
+                    fetch('/static/docs/FRONTEND_DOCS.md'),
+                    api.getExtensionTypes().catch(() => ({ extension_types: [] })),
+                ]);
+                if (!summaryResponse.ok) return;
+
+                const summary = await summaryResponse.text();
                 setDocsItems(parseDocsSummary(summary));
+                setAvailableExtensionTypes((extensionTypesResponse.extension_types || []).map((ext) => ext.extension_type));
             } catch (err) {
                 console.error('Failed to load docs summary:', err);
             }
@@ -617,7 +629,13 @@ export function App() {
     return (
         <div className="mono-app">
             <div className="mono-shell">
-                <Sidebar currentView={view} docsItems={docsItems} currentDocSlug={params.docSlug || ''} docsDefaultSlug={defaultDocSlug} />
+                <Sidebar
+                    currentView={view}
+                    docsItems={docsItems}
+                    availableExtensionTypes={availableExtensionTypes}
+                    currentDocSlug={params.docSlug || ''}
+                    docsDefaultSlug={defaultDocSlug}
+                />
                 <div className="mono-main-shell">
                     <TopBar
                         user={user}

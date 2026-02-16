@@ -61,3 +61,19 @@ export function parseDocsSummary(summaryMarkdown) {
 
     return entries;
 }
+
+export function extensionTypeFromDocPath(docPath) {
+    const normalized = normalizeDocPath(docPath);
+    if (normalized.toLowerCase() === 'extensions/index.md') return '';
+    const match = normalized.match(/^extensions\/([a-z0-9-]+)\.md$/i);
+    return match ? match[1] : '';
+}
+
+export function filterDocsByExtensionTypes(entries, extensionTypes) {
+    const allowed = new Set((extensionTypes || []).filter(Boolean));
+    return (entries || []).filter((entry) => {
+        const extensionType = extensionTypeFromDocPath(entry.path);
+        if (!extensionType) return true;
+        return allowed.has(extensionType);
+    });
+}

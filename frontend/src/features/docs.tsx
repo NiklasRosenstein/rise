@@ -2,9 +2,10 @@
 import { useEffect, useMemo, useState } from 'react';
 import { marked } from 'marked';
 import { navigate } from '../lib/navigation';
-import { parseDocsSummary, slugFromDocPath } from '../lib/docs';
+import { extensionTypeFromDocPath, parseDocsSummary, slugFromDocPath } from '../lib/docs';
 import { ErrorState, LoadingState } from '../components/states';
 import { CONFIG } from '../lib/config';
+import { api } from '../lib/api';
 
 function resolveRelativePath(basePath, hrefPath) {
     const baseParts = basePath.split('/');
@@ -110,6 +111,7 @@ function highlightCode(code, language) {
 
 export function DocsPage({ initialSlug }) {
     const [summaryItems, setSummaryItems] = useState([]);
+    const [availableExtensionTypes, setAvailableExtensionTypes] = useState<string[]>([]);
     const [summaryLoading, setSummaryLoading] = useState(true);
     const [summaryError, setSummaryError] = useState(null);
     const [docHtml, setDocHtml] = useState('');
@@ -128,11 +130,15 @@ export function DocsPage({ initialSlug }) {
         setSummaryLoading(true);
         setSummaryError(null);
         try {
-            const response = await fetch(`${docsBasePath}/FRONTEND_DOCS.md`);
-            if (!response.ok) throw new Error(`Failed to load summary (${response.status})`);
-            const markdown = await response.text();
-            const items = parseDocsSummary(markdown);
-            setSummaryItems(items);
+            const [summaryResponse, extensionTypesResponse] = await Promise.all([
+                fetch(`${docsBasePath}/FRONTEND_DOCS.md`),
+                api.getExtensionTypes().catch(() => ({ extension_types: [] })),
+            ]);
+            if (!summaryResponse.ok) throw new Error(`Failed to load summary (${summaryResponse.status})`);
+
+            const markdown = await summaryResponse.text();
+            setSummaryItems(parseDocsSummary(markdown));
+            setAvailableExtensionTypes((extensionTypesResponse.extension_types || []).map((ext) => ext.extension_type));
         } catch (err) {
             setSummaryError(err.message);
         } finally {
@@ -144,30 +150,58 @@ export function DocsPage({ initialSlug }) {
         loadSummary();
     }, []);
 
+    const hasExplicitSlug = Boolean((activeSlug || '').trim());
     const effectiveSlug = useMemo(() => {
         if (!summaryItems.length) return activeSlug || '';
-        if (activeSlug && summaryItems.some((item) => item.slug === activeSlug)) return activeSlug;
+        if (hasExplicitSlug) return activeSlug;
         return summaryItems[0].slug;
-    }, [activeSlug, summaryItems]);
+    }, [activeSlug, hasExplicitSlug, summaryItems]);
 
-    const effectiveDocPath = useMemo(() => {
-        if (!effectiveSlug) return '';
-        const fromSummary = summaryItems.find((item) => item.slug === effectiveSlug);
-        if (!fromSummary) return summaryItems[0]?.path || '';
-        return fromSummary.path;
+    const effectiveDocEntry = useMemo(() => {
+        if (!effectiveSlug) return null;
+        return summaryItems.find((item) => item.slug === effectiveSlug) || null;
     }, [effectiveSlug, summaryItems]);
 
+    const extensionDocEntries = useMemo(() => {
+        const available = new Set(availableExtensionTypes);
+        return summaryItems
+            .filter((item) => extensionTypeFromDocPath(item.path))
+            .map((item) => {
+                const extensionType = extensionTypeFromDocPath(item.path);
+                return {
+                    ...item,
+                    extensionType,
+                    available: available.has(extensionType),
+                };
+            });
+    }, [summaryItems, availableExtensionTypes]);
+
     const loadDoc = async () => {
-        if (!effectiveDocPath) {
+        if (!effectiveSlug) {
             setDocHtml('');
             setDocLoading(false);
             setDocError('No User Guide pages found in docs summary.');
             return;
         }
+        if (!effectiveDocEntry) {
+            setDocHtml('');
+            setDocLoading(false);
+            setDocError('Documentation page not found.');
+            return;
+        }
+
+        const extensionType = extensionTypeFromDocPath(effectiveDocEntry.path);
+        if (extensionType && !availableExtensionTypes.includes(extensionType)) {
+            setDocHtml('');
+            setDocLoading(false);
+            setDocError('Documentation for this extension is not enabled.');
+            return;
+        }
+
         setDocLoading(true);
         setDocError(null);
         try {
-            const response = await fetch(`${docsBasePath}/${effectiveDocPath}`);
+            const response = await fetch(`${docsBasePath}/${effectiveDocEntry.path}`);
             if (!response.ok) throw new Error(`Failed to load document (${response.status})`);
             const markdown = await response.text();
             const lowered = markdown.trimStart().toLowerCase();
@@ -183,7 +217,7 @@ export function DocsPage({ initialSlug }) {
                 const suffix = ingressSuffix(CONFIG.stagingIngressUrlTemplate, '{deployment_group}');
                 if (suffix) processed = processed.replaceAll('.preview.example.com', suffix);
             }
-            const html = rewriteMarkdownLinks(processed, effectiveDocPath);
+            const html = rewriteMarkdownLinks(processed, effectiveDocEntry.path);
             setDocHtml(html);
             setHighlightVersion((v) => v + 1);
         } catch (err) {
@@ -195,7 +229,7 @@ export function DocsPage({ initialSlug }) {
 
     useEffect(() => {
         loadDoc();
-    }, [effectiveDocPath]);
+    }, [effectiveSlug, effectiveDocEntry, availableExtensionTypes.join(',')]);
 
     useEffect(() => {
         if (!docHtml) return;
@@ -229,7 +263,36 @@ export function DocsPage({ initialSlug }) {
                 ) : docError ? (
                     <ErrorState message={`Error loading document: ${docError}`} onRetry={loadDoc} />
                 ) : (
-                    <div className="prose max-w-none" onClick={onDocContentClick} dangerouslySetInnerHTML={{ __html: docHtml }} />
+                    <>
+                        <div className="prose max-w-none" onClick={onDocContentClick} dangerouslySetInnerHTML={{ __html: docHtml }} />
+                        {effectiveSlug === 'extensions' && extensionDocEntries.length > 0 && (
+                            <div className="mt-6 pt-4 border-t border-gray-300 dark:border-gray-700">
+                                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-200 mb-3">Extension Documentation</h3>
+                                <ul className="list-disc list-inside space-y-2">
+                                    {extensionDocEntries.map((item) => (
+                                        <li key={item.slug} className="text-sm">
+                                            {item.available ? (
+                                                <a
+                                                    href={`/docs/${item.slug}`}
+                                                    onClick={(e) => {
+                                                        e.preventDefault();
+                                                        navigate(`/docs/${item.slug}`);
+                                                    }}
+                                                    className="underline"
+                                                >
+                                                    {item.title}
+                                                </a>
+                                            ) : (
+                                                <span className="text-gray-500 dark:text-gray-500">
+                                                    {item.title} <span className="text-xs">(Not enabled)</span>
+                                                </span>
+                                            )}
+                                        </li>
+                                    ))}
+                                </ul>
+                            </div>
+                        )}
+                    </>
                 )}
             </article>
         </section>

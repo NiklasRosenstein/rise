@@ -13,3 +13,7 @@
 - [SSL & Proxy Configuration](user-guide/ssl-proxy.md)
 - [CLI Reference](user-guide/cli-reference.md)
 - [Troubleshooting](user-guide/troubleshooting.md)
+- [Project Extensions](extensions/index.md)
+  - [AWS RDS Provisioner](extensions/aws-rds-provisioner.md)
+  - [OAuth Provider](extensions/oauth.md)
+  - [Snowflake OAuth Provisioner](extensions/snowflake-oauth-provisioner.md)
