@@ -90,8 +90,8 @@ tolerations: []
 
 affinity: {}
 
-# Rise backend configuration
-# Converted to YAML and mounted as /config/default.yaml
+# Rise backend configuration overrides
+# Converted to YAML and mounted as /config/production.yaml
 # The backend supports both TOML and YAML - this chart outputs YAML by default
 config:
   server:

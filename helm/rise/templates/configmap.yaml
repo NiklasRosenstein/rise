@@ -5,7 +5,7 @@ metadata:
   labels:
     {{- include "rise.labels" . | nindent 4 }}
 data:
-  # Base configuration from config/default.yaml
+  # Base configuration from config/production.yaml
   default.yaml: |
 {{ .Files.Get "files/default.yaml" | nindent 4 }}
   # Production overrides from values.yaml
