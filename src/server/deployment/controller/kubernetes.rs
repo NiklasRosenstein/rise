@@ -3,7 +3,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec, ReplicaSet};
 use k8s_openapi::api::core::v1::{
-    Capabilities, Container, ContainerPort, HTTPGetAction, HostAlias, LocalObjectReference,
+    Capabilities, Container, ContainerPort, Event, HTTPGetAction, HostAlias, LocalObjectReference,
     Namespace, PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ResourceRequirements,
     SeccompProfile, Secret, SecurityContext, Service, ServicePort, ServiceSpec,
 };
@@ -73,13 +73,27 @@ struct PodStatus {
     ready_replicas: i32,
     /// Current number of pods (any state)
     current_replicas: i32,
-    /// Aggregate pod phase
-    phase: PodPhase,
-    /// Container-level error details
+    /// Per-pod details
     #[serde(skip_serializing_if = "Vec::is_empty", default)]
-    container_errors: Vec<ContainerError>,
+    pods: Vec<PodInfo>,
     /// Timestamp of last pod status check
     last_checked: DateTime<Utc>,
+}
+
+/// Per-pod information
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct PodInfo {
+    name: String,
+    phase: PodPhase,
+    /// Pod conditions (Ready, ContainersReady, etc.)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    conditions: Vec<PodCondition>,
+    /// Container statuses
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    containers: Vec<ContainerStatusInfo>,
+    /// Recent warning/error events
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    events: Vec<PodEvent>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -92,19 +106,50 @@ enum PodPhase {
     Unknown,
 }
 
+/// Pod condition (e.g., Ready, ContainersReady)
 #[derive(Serialize, Deserialize, Clone, Debug)]
-struct ContainerError {
-    pod_name: String,
-    container_name: String,
-    /// Error reason (e.g., "CrashLoopBackOff", "ImagePullBackOff")
-    reason: String,
-    /// Detailed error message from Kubernetes
-    message: String,
-    /// Restart count for this container
+struct PodCondition {
+    #[serde(rename = "type")]
+    type_: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+/// Container status within a pod
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ContainerStatusInfo {
+    name: String,
+    ready: bool,
     restart_count: i32,
-    /// Exit code (if terminated)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<ContainerState>,
+}
+
+/// Container state (waiting, running, or terminated)
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ContainerState {
+    /// "waiting", "running", or "terminated"
+    state_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     exit_code: Option<i32>,
+}
+
+/// Pod event (from Kubernetes events API)
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct PodEvent {
+    #[serde(rename = "type")]
+    type_: String,
+    reason: String,
+    message: String,
+    count: i32,
+    last_timestamp: DateTime<Utc>,
 }
 
 /// Reconciliation phases for Kubernetes deployments
@@ -1071,9 +1116,74 @@ impl KubernetesController {
         Ok((false, None))
     }
 
+    /// Extract error message from pod status if there's an irrecoverable error
+    fn extract_pod_error(pod_status: &PodStatus) -> Option<String> {
+        for pod in &pod_status.pods {
+            // Check for container errors (waiting state with bad reasons)
+            for container in &pod.containers {
+                if let Some(state) = &container.state {
+                    if state.state_type == "waiting" {
+                        if let Some(reason) = &state.reason {
+                            // Check for irrecoverable errors
+                            let is_irrecoverable = matches!(
+                                reason.as_str(),
+                                "InvalidImageName"
+                                    | "ErrImagePull"
+                                    | "ImagePullBackOff"
+                                    | "ImageInspectError"
+                                    | "CrashLoopBackOff"
+                                    | "CreateContainerConfigError"
+                                    | "CreateContainerError"
+                                    | "RunContainerError"
+                            );
+
+                            if is_irrecoverable {
+                                let message = state
+                                    .message
+                                    .as_ref()
+                                    .and_then(|m| m.lines().next())
+                                    .unwrap_or(reason);
+                                return Some(format!("{}: {}", reason, message));
+                            }
+                        }
+                    } else if state.state_type == "terminated" {
+                        // Check for repeated failures (3+ restarts with non-zero exit)
+                        if let Some(exit_code) = state.exit_code {
+                            if exit_code != 0 && container.restart_count >= 3 {
+                                let reason = state.reason.as_deref().unwrap_or("ContainerFailed");
+                                let default_msg = format!("Exit code: {}", exit_code);
+                                let message = state.message.as_deref().unwrap_or(&default_msg);
+                                return Some(format!(
+                                    "{}: {} (restarts: {})",
+                                    reason, message, container.restart_count
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for critical events
+            for event in &pod.events {
+                if event.type_ == "Error" || event.type_ == "Warning" {
+                    // Look for security policy violations and other critical errors
+                    if event.reason.contains("Failed")
+                        || event.reason.contains("Error")
+                        || event.reason.contains("BackOff")
+                    {
+                        return Some(format!("{}: {}", event.reason, event.message));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
     /// Collect current Pod status for a deployment
     async fn collect_pod_status(&self, namespace: &str, deploy_name: &str) -> Result<PodStatus> {
         use k8s_openapi::api::{apps::v1::Deployment as K8sDeployment, core::v1::Pod};
+        use std::collections::HashMap;
 
         // Get Deployment to know desired replica count
         let deploy_api: Api<K8sDeployment> = Api::namespaced(self.kube_client.clone(), namespace);
@@ -1089,75 +1199,148 @@ impl KubernetesController {
             )))
             .await?;
 
-        let mut container_errors = Vec::new();
-        let mut ready_count = 0;
-        let mut phase_summary = PodPhase::Unknown;
+        // Fetch events for the namespace
+        let event_api: Api<Event> = Api::namespaced(self.kube_client.clone(), namespace);
+        let all_events = event_api.list(&kube::api::ListParams::default()).await?;
 
-        for pod in &pods.items {
-            let pod_name = pod.metadata.name.clone().unwrap_or_default();
-
-            if let Some(status) = &pod.status {
-                // Track phase
-                if let Some(phase_str) = &status.phase {
-                    phase_summary = match phase_str.as_str() {
-                        "Running" => PodPhase::Running,
-                        "Pending" => PodPhase::Pending,
-                        "Failed" => PodPhase::Failed,
-                        "Succeeded" => PodPhase::Succeeded,
-                        _ => PodPhase::Unknown,
-                    };
-                }
-
-                // Check container statuses
-                if let Some(container_statuses) = &status.container_statuses {
-                    for cs in container_statuses {
-                        if cs.ready {
-                            ready_count += 1;
-                        }
-
-                        // Collect waiting state errors
-                        if let Some(waiting) = cs.state.as_ref().and_then(|s| s.waiting.as_ref()) {
-                            container_errors.push(ContainerError {
-                                pod_name: pod_name.clone(),
-                                container_name: cs.name.clone(),
-                                reason: waiting.reason.clone().unwrap_or_default(),
-                                message: waiting.message.clone().unwrap_or_default(),
-                                restart_count: cs.restart_count,
-                                exit_code: None,
-                            });
-                        }
-
-                        // Collect terminated state errors (non-zero exit)
-                        if let Some(terminated) =
-                            cs.state.as_ref().and_then(|s| s.terminated.as_ref())
-                        {
-                            if terminated.exit_code != 0 {
-                                container_errors.push(ContainerError {
-                                    pod_name: pod_name.clone(),
-                                    container_name: cs.name.clone(),
-                                    reason: terminated
-                                        .reason
-                                        .clone()
-                                        .unwrap_or_else(|| "ContainerFailed".to_string()),
-                                    message: terminated.message.clone().unwrap_or_else(|| {
-                                        format!("Exit code: {}", terminated.exit_code)
-                                    }),
-                                    restart_count: cs.restart_count,
-                                    exit_code: Some(terminated.exit_code),
-                                });
-                            }
+        // Group events by pod name (only Warning/Error events, sorted by timestamp)
+        let mut events_by_pod: HashMap<String, Vec<PodEvent>> = HashMap::new();
+        for event in all_events.items {
+            if let Some(event_type) = &event.type_ {
+                let involved_obj = &event.involved_object;
+                if involved_obj.kind.as_deref() == Some("Pod") {
+                    if let Some(pod_name) = &involved_obj.name {
+                        // Only include Warning and Error events
+                        if event_type == "Warning" || event_type == "Error" {
+                            let pod_event = PodEvent {
+                                type_: event_type.clone(),
+                                reason: event.reason.clone().unwrap_or_default(),
+                                message: event.message.clone().unwrap_or_default(),
+                                count: event.count.unwrap_or(1),
+                                last_timestamp: event
+                                    .last_timestamp
+                                    .as_ref()
+                                    .map(|ts| ts.0)
+                                    .unwrap_or_else(Utc::now),
+                            };
+                            events_by_pod
+                                .entry(pod_name.clone())
+                                .or_default()
+                                .push(pod_event);
                         }
                     }
                 }
             }
         }
 
+        // Sort events by timestamp (most recent first) and limit to 5 per pod
+        for events in events_by_pod.values_mut() {
+            events.sort_by(|a, b| b.last_timestamp.cmp(&a.last_timestamp));
+            events.truncate(5);
+        }
+
+        let mut ready_count = 0;
+        let mut pod_infos = Vec::new();
+
+        for pod in &pods.items {
+            let pod_name = pod.metadata.name.clone().unwrap_or_default();
+
+            let phase = pod
+                .status
+                .as_ref()
+                .and_then(|s| s.phase.as_ref())
+                .map(|p| match p.as_str() {
+                    "Running" => PodPhase::Running,
+                    "Pending" => PodPhase::Pending,
+                    "Failed" => PodPhase::Failed,
+                    "Succeeded" => PodPhase::Succeeded,
+                    _ => PodPhase::Unknown,
+                })
+                .unwrap_or(PodPhase::Unknown);
+
+            // Collect pod conditions
+            let conditions: Vec<PodCondition> = pod
+                .status
+                .as_ref()
+                .and_then(|s| s.conditions.as_ref())
+                .map(|conds| {
+                    conds
+                        .iter()
+                        .map(|c| PodCondition {
+                            type_: c.type_.clone(),
+                            status: c.status.clone(),
+                            reason: c.reason.clone(),
+                            message: c.message.clone(),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // Collect container statuses
+            let containers: Vec<ContainerStatusInfo> = pod
+                .status
+                .as_ref()
+                .and_then(|s| s.container_statuses.as_ref())
+                .map(|css| {
+                    css.iter()
+                        .map(|cs| {
+                            if cs.ready {
+                                ready_count += 1;
+                            }
+
+                            let state = if let Some(waiting) =
+                                cs.state.as_ref().and_then(|s| s.waiting.as_ref())
+                            {
+                                Some(ContainerState {
+                                    state_type: "waiting".to_string(),
+                                    reason: waiting.reason.clone(),
+                                    message: waiting.message.clone(),
+                                    exit_code: None,
+                                })
+                            } else if let Some(_running) =
+                                cs.state.as_ref().and_then(|s| s.running.as_ref())
+                            {
+                                Some(ContainerState {
+                                    state_type: "running".to_string(),
+                                    reason: None,
+                                    message: None,
+                                    exit_code: None,
+                                })
+                            } else { cs.state.as_ref().and_then(|s| s.terminated.as_ref()).map(|terminated| ContainerState {
+                                    state_type: "terminated".to_string(),
+                                    reason: terminated.reason.clone(),
+                                    message: terminated.message.clone(),
+                                    exit_code: Some(terminated.exit_code),
+                                }) };
+
+                            ContainerStatusInfo {
+                                name: cs.name.clone(),
+                                ready: cs.ready,
+                                restart_count: cs.restart_count,
+                                state,
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // Get events for this pod
+            let events = events_by_pod.remove(&pod_name).unwrap_or_default();
+
+            pod_infos.push(PodInfo {
+                name: pod_name,
+                phase,
+                conditions,
+                containers,
+                events,
+            });
+        }
+
         Ok(PodStatus {
             desired_replicas,
             ready_replicas: ready_count,
             current_replicas: pods.items.len() as i32,
-            phase: phase_summary,
-            container_errors,
+            pods: pod_infos,
             last_checked: Utc::now(),
         })
     }
@@ -3517,18 +3700,10 @@ impl DeploymentBackend for KubernetesController {
                         Ok(pod_status) => {
                             metadata.pod_status = Some(pod_status.clone());
 
-                            // Check for container errors
-                            if !pod_status.container_errors.is_empty() {
-                                // Use first error for high-level message
-                                let error = &pod_status.container_errors[0];
-                                let error_msg = format!(
-                                    "{}: {}",
-                                    error.reason,
-                                    error.message.lines().next().unwrap_or("")
-                                );
-
+                            // Check for irrecoverable errors in pods
+                            if let Some(error_msg) = Self::extract_pod_error(&pod_status) {
                                 error!(
-                                    "Deployment {} has container errors: {}",
+                                    "Deployment {} has pod errors: {}",
                                     deployment.deployment_id, error_msg
                                 );
 

@@ -986,48 +986,147 @@ function buildDeploymentTimeline(deployment: any) {
     });
 }
 
-function ContainerErrorRow({ error }) {
+function PodInfoRow({ pod }) {
     const [expanded, setExpanded] = useState(false);
 
+    // Check if pod has issues
+    const hasIssues = pod.events?.length > 0 ||
+                      pod.containers?.some(c => !c.ready || c.restart_count > 0) ||
+                      pod.conditions?.some(c => c.status === 'False');
+
+    const phaseTone = {
+        Running: '#b7ffce',
+        Pending: '#ffe3a8',
+        Failed: '#ffc0c0',
+        Succeeded: '#b7ffce',
+        Unknown: '#888',
+    };
+
     return (
-        <div className="p-3">
-            <div className="flex items-start justify-between gap-2 cursor-pointer" onClick={() => setExpanded(!expanded)}>
-                <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                        <span className="text-xs font-mono" style={{ color: '#ffc0c0' }}>
-                            {error.reason}
-                        </span>
-                        {error.restart_count > 0 && (
+        <div className="border-b" style={{ borderColor: '#7d4b4b' }}>
+            <div className="p-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+                <div className="flex items-center justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-mono font-semibold" style={{ color: '#e8e8e8' }}>
+                                {pod.name}
+                            </span>
                             <span className="text-xs px-1.5 py-0.5" style={{
-                                color: 'var(--mono-warn)',
-                                background: 'rgba(139, 112, 57, 0.22)',
-                                border: '1px solid #7b6333'
+                                color: phaseTone[pod.phase] || '#888',
+                                border: `1px solid ${phaseTone[pod.phase] || '#888'}`,
+                                background: 'rgba(0, 0, 0, 0.3)'
                             }}>
-                                {error.restart_count} restarts
+                                {pod.phase}
                             </span>
-                        )}
-                        {error.exit_code !== undefined && (
-                            <span className="text-xs" style={{ color: 'var(--mono-muted)' }}>
-                                Exit code: {error.exit_code}
-                            </span>
-                        )}
+                            {hasIssues && (
+                                <span className="text-xs" style={{ color: '#ffc0c0' }}>
+                                    ⚠
+                                </span>
+                            )}
+                        </div>
+                        <div className="text-xs" style={{ color: 'var(--mono-muted)' }}>
+                            {pod.containers?.length || 0} container(s) •{' '}
+                            {pod.containers?.filter(c => c.ready).length || 0} ready
+                        </div>
                     </div>
-                    <div className="text-xs" style={{ color: 'var(--mono-muted)' }}>
-                        Pod: {error.pod_name} / Container: {error.container_name}
-                    </div>
+                    <button className="text-xs" style={{ color: 'var(--mono-muted)' }}>
+                        {expanded ? '▼' : '▶'}
+                    </button>
                 </div>
-                <button className="text-xs" style={{ color: 'var(--mono-muted)' }}>
-                    {expanded ? '▼' : '▶'}
-                </button>
             </div>
 
-            {expanded && error.message && (
-                <div className="mt-2 p-2 text-xs font-mono" style={{
-                    background: '#0f0f0f',
-                    border: '1px solid var(--mono-line)',
-                    color: '#e8e8e8'
-                }}>
-                    {error.message}
+            {expanded && (
+                <div className="p-3 pt-0" style={{ background: '#0a0a0a' }}>
+                    {/* Container statuses */}
+                    {pod.containers && pod.containers.length > 0 && (
+                        <div className="mb-3">
+                            <h6 className="text-xs font-semibold mb-2" style={{ color: 'var(--mono-muted)' }}>
+                                Containers
+                            </h6>
+                            <div className="space-y-2">
+                                {pod.containers.map((container, idx) => (
+                                    <div key={idx} className="text-xs p-2" style={{ background: '#0f0f0f', border: '1px solid var(--mono-line)' }}>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="font-mono" style={{ color: '#e8e8e8' }}>{container.name}</span>
+                                            <span style={{ color: container.ready ? '#b7ffce' : '#ffc0c0' }}>
+                                                {container.ready ? '✓ Ready' : '✗ Not ready'}
+                                            </span>
+                                        </div>
+                                        {container.restart_count > 0 && (
+                                            <div style={{ color: 'var(--mono-warn)' }}>
+                                                Restarts: {container.restart_count}
+                                            </div>
+                                        )}
+                                        {container.state && (
+                                            <div style={{ color: 'var(--mono-muted)' }}>
+                                                State: {container.state.state_type}
+                                                {container.state.reason && ` (${container.state.reason})`}
+                                            </div>
+                                        )}
+                                        {container.state?.message && (
+                                            <div className="mt-1 font-mono" style={{ color: '#ffc0c0' }}>
+                                                {container.state.message}
+                                            </div>
+                                        )}
+                                        {container.state?.exit_code !== undefined && (
+                                            <div style={{ color: 'var(--mono-muted)' }}>
+                                                Exit code: {container.state.exit_code}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Pod conditions */}
+                    {pod.conditions && pod.conditions.length > 0 && (
+                        <div className="mb-3">
+                            <h6 className="text-xs font-semibold mb-2" style={{ color: 'var(--mono-muted)' }}>
+                                Conditions
+                            </h6>
+                            <div className="space-y-1">
+                                {pod.conditions.map((condition, idx) => (
+                                    <div key={idx} className="text-xs flex items-center justify-between">
+                                        <span style={{ color: '#e8e8e8' }}>{condition.type}</span>
+                                        <span style={{ color: condition.status === 'True' ? '#b7ffce' : '#ffc0c0' }}>
+                                            {condition.status}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Recent events */}
+                    {pod.events && pod.events.length > 0 && (
+                        <div>
+                            <h6 className="text-xs font-semibold mb-2" style={{ color: 'var(--mono-muted)' }}>
+                                Recent Events
+                            </h6>
+                            <div className="space-y-2">
+                                {pod.events.map((event, idx) => (
+                                    <div key={idx} className="text-xs p-2" style={{
+                                        background: event.type === 'Error' ? 'rgba(125, 75, 75, 0.24)' : 'rgba(139, 112, 57, 0.22)',
+                                        border: `1px solid ${event.type === 'Error' ? '#7d4b4b' : '#7b6333'}`
+                                    }}>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="font-semibold" style={{ color: event.type === 'Error' ? '#ffc0c0' : 'var(--mono-warn)' }}>
+                                                {event.reason}
+                                            </span>
+                                            <span style={{ color: 'var(--mono-muted)' }}>
+                                                {event.count > 1 && `${event.count}× `}
+                                                {formatRelativeTimeRounded(event.last_timestamp)}
+                                            </span>
+                                        </div>
+                                        <div className="font-mono" style={{ color: '#e8e8e8' }}>
+                                            {event.message}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -1035,17 +1134,18 @@ function ContainerErrorRow({ error }) {
 }
 
 function PodStatusSection({ podStatus }) {
-    const hasErrors = podStatus.container_errors && podStatus.container_errors.length > 0;
-    const isHealthy = podStatus.ready_replicas === podStatus.desired_replicas && !hasErrors;
+    const isHealthy = podStatus.ready_replicas === podStatus.desired_replicas &&
+                      (!podStatus.pods || podStatus.pods.length === 0 ||
+                       podStatus.pods.every(p => !p.events || p.events.length === 0));
 
     // Don't show if everything is healthy
     if (isHealthy) return null;
 
     // Determine tone
     let tone = 'warn';
-    if (hasErrors) {
+    if (podStatus.ready_replicas === 0) {
         tone = 'bad';
-    } else if (podStatus.ready_replicas > 0) {
+    } else if (podStatus.ready_replicas < podStatus.desired_replicas) {
         tone = 'warn';
     }
 
@@ -1066,22 +1166,22 @@ function PodStatusSection({ podStatus }) {
                 <div className="flex items-center justify-between">
                     <span>Pods: {podStatus.ready_replicas}/{podStatus.desired_replicas} ready</span>
                     <span className="text-xs" style={{ color: 'var(--mono-muted)' }}>
-                        Phase: {podStatus.phase}
+                        {podStatus.current_replicas} total
                     </span>
                 </div>
             </div>
 
-            {/* Container errors */}
-            {hasErrors && (
+            {/* Per-pod details */}
+            {podStatus.pods && podStatus.pods.length > 0 && (
                 <div className="border border-solid" style={{ borderColor: '#7d4b4b', background: '#1a1212' }}>
                     <div className="p-3" style={{ borderBottom: '1px solid #7d4b4b' }}>
                         <h5 className="text-xs font-semibold" style={{ color: '#ffc0c0' }}>
-                            Container Errors ({podStatus.container_errors.length})
+                            Pods ({podStatus.pods.length})
                         </h5>
                     </div>
-                    <div className="divide-y" style={{ borderColor: '#7d4b4b' }}>
-                        {podStatus.container_errors.map((err, idx) => (
-                            <ContainerErrorRow key={idx} error={err} />
+                    <div>
+                        {podStatus.pods.map((pod, idx) => (
+                            <PodInfoRow key={idx} pod={pod} />
                         ))}
                     </div>
                 </div>
