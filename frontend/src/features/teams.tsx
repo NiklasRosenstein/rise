@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
 import { formatDate } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, Modal, FormField, ConfirmDialog, ModalActions, ModalSection } from '../components/ui';
+import { AutocompleteInput, Button, Modal, FormField, ConfirmDialog, ModalActions, ModalSection } from '../components/ui';
 import { ProjectTable } from '../components/project-table';
 import { MonoSortButton, MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
@@ -186,29 +186,37 @@ export function TeamsList({ currentUser, openCreate = false }) {
                         required
                     />
 
-                    <FormField
-                        label="Owners (emails, comma-separated)"
-                        id="team-owners"
-                        type="textarea"
-                        value={formData.owners}
-                        onChange={(e) => setFormData({ ...formData, owners: e.target.value })}
-                        placeholder="alice@example.com, bob@example.com"
-                        required
-                        rows={3}
-                    />
+                    <div className="form-field">
+                        <label htmlFor="team-owners" className="mono-label">
+                            Owners (emails, comma-separated)
+                            <span className="text-red-300 ml-1">*</span>
+                        </label>
+                        <AutocompleteInput
+                            id="team-owners"
+                            value={formData.owners}
+                            onChange={(next) => setFormData({ ...formData, owners: next })}
+                            options={currentUser?.email ? [currentUser.email] : []}
+                            placeholder="alice@example.com, bob@example.com"
+                            multiValue
+                        />
+                    </div>
                     <p className="text-sm text-gray-600 dark:text-gray-500 -mt-2">
                         Owners can manage the team. At least one owner is required.
                     </p>
 
-                    <FormField
-                        label="Members (emails, comma-separated)"
-                        id="team-members"
-                        type="textarea"
-                        value={formData.members}
-                        onChange={(e) => setFormData({ ...formData, members: e.target.value })}
-                        placeholder="charlie@example.com, dana@example.com"
-                        rows={3}
-                    />
+                    <div className="form-field">
+                        <label htmlFor="team-members" className="mono-label">
+                            Members (emails, comma-separated)
+                        </label>
+                        <AutocompleteInput
+                            id="team-members"
+                            value={formData.members}
+                            onChange={(next) => setFormData({ ...formData, members: next })}
+                            options={currentUser?.email ? [currentUser.email] : []}
+                            placeholder="charlie@example.com, dana@example.com"
+                            multiValue
+                        />
+                    </div>
                     <p className="text-sm text-gray-600 dark:text-gray-500 -mt-2">
                         Members can use the team for project ownership.
                     </p>
@@ -486,13 +494,13 @@ export function TeamDetail({ teamName, currentUser }) {
                     {canEdit && (
                         <div className="flex justify-end">
                             <div className="flex gap-2">
-                                <input
-                                    type="email"
-                                    placeholder="owner@example.com"
+                                <AutocompleteInput
                                     value={newOwnerEmail}
-                                    onChange={(e) => setNewOwnerEmail(e.target.value)}
-                                    onKeyPress={(e) => e.key === 'Enter' && handleAddOwner()}
-                                    className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                                    onChange={setNewOwnerEmail}
+                                    options={currentUser?.email ? [currentUser.email] : []}
+                                    placeholder="owner@example.com"
+                                    className="w-64"
+                                    onEnter={handleAddOwner}
                                 />
                                 <Button variant="primary" size="sm" onClick={handleAddOwner}>
                                     Add
@@ -543,13 +551,13 @@ export function TeamDetail({ teamName, currentUser }) {
                     {canEdit && (
                         <div className="flex justify-end">
                             <div className="flex gap-2">
-                                <input
-                                    type="email"
-                                    placeholder="member@example.com"
+                                <AutocompleteInput
                                     value={newMemberEmail}
-                                    onChange={(e) => setNewMemberEmail(e.target.value)}
-                                    onKeyPress={(e) => e.key === 'Enter' && handleAddMember()}
-                                    className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                                    onChange={setNewMemberEmail}
+                                    options={currentUser?.email ? [currentUser.email] : []}
+                                    placeholder="member@example.com"
+                                    className="w-64"
+                                    onEnter={handleAddMember}
                                 />
                                 <Button variant="primary" size="sm" onClick={handleAddMember}>
                                     Add

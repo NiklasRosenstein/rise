@@ -3504,6 +3504,7 @@ dependencies = [
  "rsa",
  "rust-embed",
  "rustls 0.23.35",
+ "schemars",
  "serde",
  "serde_ignored",
  "serde_json",

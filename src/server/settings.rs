@@ -1,8 +1,9 @@
 use config::{Config, ConfigError};
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::env;
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct Settings {
     pub server: ServerSettings,
     pub auth: AuthSettings,
@@ -19,7 +20,7 @@ pub struct Settings {
     pub extensions: Option<ExtensionsSettings>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct ServerSettings {
     pub host: String,
     pub port: u16,
@@ -110,7 +111,7 @@ fn default_idp_group_sync_enabled() -> bool {
     true
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct ControllerSettings {
     /// Interval in seconds for checking deployments to reconcile (default: 5)
     #[serde(default = "default_reconcile_interval")]
@@ -151,7 +152,7 @@ impl Default for ControllerSettings {
     }
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct AuthSettings {
     pub issuer: String,
     pub client_id: String,
@@ -178,7 +179,7 @@ pub struct AuthSettings {
     pub idp_group_sync_enabled: bool,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct DatabaseSettings {
     #[serde(default)]
     pub url: String,
@@ -243,7 +244,7 @@ impl BackendAddress {
 }
 
 /// TLS mode for custom domains
-#[derive(Debug, Clone, serde::Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CustomDomainTlsMode {
     /// All hosts (primary + custom domains) share the same TLS secret
@@ -270,7 +271,7 @@ fn default_ingress_controller_labels() -> std::collections::HashMap<String, Stri
 }
 
 /// Access requirement level for project ingress
-#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
 pub enum AccessRequirement {
     /// No authentication required - fully public access
@@ -282,7 +283,7 @@ pub enum AccessRequirement {
 }
 
 /// Access class configuration for ingress authentication
-#[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct AccessClass {
     /// Display name for UI (e.g., "Public")
     pub display_name: String,
@@ -312,7 +313,7 @@ pub struct AccessClass {
 }
 
 /// Resource limits for pods
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct PodResourceLimits {
     /// CPU request (e.g., "10m", "100m", "1")
     #[serde(default = "default_cpu_request")]
@@ -329,7 +330,7 @@ pub struct PodResourceLimits {
 }
 
 /// Health probe configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct HealthProbeConfig {
     /// Enable liveness probes (default: true)
     #[serde(default = "default_true")]
@@ -402,7 +403,7 @@ fn default_failure_threshold() -> i32 {
 }
 
 /// Deployment controller configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum DeploymentControllerSettings {
     /// Kubernetes deployment controller
@@ -567,7 +568,7 @@ pub enum DeploymentControllerSettings {
 }
 
 /// Registry provider configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum RegistrySettings {
     Ecr {
@@ -605,7 +606,7 @@ pub enum RegistrySettings {
 }
 
 /// Encryption provider configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum EncryptionSettings {
     /// Local AES-256-GCM encryption using a symmetric key
@@ -634,6 +635,11 @@ pub enum EncryptionSettings {
 }
 
 impl Settings {
+    pub fn json_schema_value() -> Result<serde_json::Value, anyhow::Error> {
+        let schema = schemars::schema_for!(Settings);
+        Ok(serde_json::to_value(schema)?)
+    }
+
     /// Substitute environment variables in a string value
     /// Replaces ${VAR_NAME} or ${VAR_NAME:-default} with environment variable values
     fn substitute_env_vars_in_string(s: &str) -> String {
@@ -727,19 +733,14 @@ impl Settings {
 
         let mut builder = Config::builder();
 
-        // Load config files in order, trying both .toml and .yaml/.yml extensions
-        // TOML takes precedence if both exist
+        // Load config files in order, trying both .toml and .yaml/.yml extensions.
+        // TOML takes precedence if both exist.
 
-        // 1. Load default config (required)
-        let default_loaded = Self::try_add_config_file(&mut builder, &config_dir, "default", true)?;
-        if !default_loaded {
-            return Err(ConfigError::Message(
-                format!("Required default config not found in {} (tried default.toml, default.yaml, default.yml)", config_dir)
-            ));
-        }
+        // 1. Load default config (optional)
+        Self::try_add_config_file(&mut builder, &config_dir, "default", false)?;
 
-        // 2. Load environment-specific config (optional)
-        Self::try_add_config_file(&mut builder, &config_dir, &run_mode, false)?;
+        // 2. Load environment-specific config (required)
+        Self::try_add_config_file(&mut builder, &config_dir, &run_mode, true)?;
 
         // 3. Load local config (optional, not checked into git)
         Self::try_add_config_file(&mut builder, &config_dir, "local", false)?;
@@ -930,9 +931,9 @@ mod tests {
         use std::fs;
         use tempfile::TempDir;
 
-        // Create a temporary directory with a default.yaml config
+        // Create a temporary directory with a development.yaml config
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("default.yaml");
+        let config_path = temp_dir.path().join("development.yaml");
 
         fs::write(
             &config_path,
@@ -973,7 +974,7 @@ unknown_top_level: "also unknown"
 
         // Set environment variables to point to our test config
         env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
-        env::set_var("RISE_CONFIG_RUN_MODE", "production"); // Use a mode that doesn't exist
+        env::set_var("RISE_CONFIG_RUN_MODE", "development");
 
         // This should load successfully despite unknown fields
         // (The warnings would appear in logs)
@@ -990,10 +991,52 @@ unknown_top_level: "also unknown"
             result.err()
         );
     }
+
+    #[test]
+    fn test_run_mode_config_is_required_even_if_default_exists() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let default_path = temp_dir.path().join("default.yaml");
+
+        fs::write(
+            &default_path,
+            r#"
+server:
+  host: "0.0.0.0"
+  port: 3000
+  public_url: "http://localhost:3000"
+  jwt_signing_secret: "test-secret-key-for-testing-123456"
+
+database:
+  url: "postgres://test@localhost/test"
+
+auth:
+  issuer: "http://localhost:5556"
+  client_id: "test"
+  client_secret: "test"
+"#,
+        )
+        .unwrap();
+
+        env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
+        env::set_var("RISE_CONFIG_RUN_MODE", "production");
+
+        let result = Settings::new();
+
+        env::remove_var("RISE_CONFIG_DIR");
+        env::remove_var("RISE_CONFIG_RUN_MODE");
+
+        assert!(
+            result.is_err(),
+            "Config should fail without required run_mode file"
+        );
+    }
 }
 
 /// Extensions configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct ExtensionsSettings {
     #[serde(default)]
     pub providers: Vec<ExtensionProviderConfig>,
@@ -1001,7 +1044,7 @@ pub struct ExtensionsSettings {
 
 /// Snowflake authentication configuration
 #[cfg(feature = "backend")]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(tag = "auth_type", rename_all = "snake_case")]
 pub enum SnowflakeAuth {
     Password {
@@ -1017,7 +1060,7 @@ pub enum SnowflakeAuth {
 
 /// Private key source (path or inline PEM)
 #[cfg(feature = "backend")]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(untagged)]
 pub enum PrivateKeySource {
     Path { private_key_path: String },
@@ -1025,7 +1068,7 @@ pub enum PrivateKeySource {
 }
 
 /// Extension provider configuration
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
 pub enum ExtensionProviderConfig {
     #[cfg(feature = "backend")]
@@ -1146,7 +1189,7 @@ fn default_refresh_token_validity_seconds() -> i64 {
 }
 
 /// Platform access control configuration
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct PlatformAccessConfig {
     /// Policy: "allow_all" (default) or "restrictive"
     #[serde(default = "default_platform_access_policy")]
@@ -1162,7 +1205,7 @@ pub struct PlatformAccessConfig {
 }
 
 /// Platform access policy enum
-#[derive(Debug, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Deserialize, Clone, PartialEq, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum PlatformAccessPolicy {
     AllowAll,    // Default: all authenticated users can use platform

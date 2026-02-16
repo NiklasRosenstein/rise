@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 function cx(...parts: Array<string | false | null | undefined>) {
     return parts.filter(Boolean).join(' ');
@@ -198,6 +198,7 @@ export function FormField({
     disabled = false,
     options = [],
     rows = 3,
+    list = undefined,
     children = null,
 }) {
     const inputClasses = `mono-input ${error ? 'mono-input-error' : ''}`;
@@ -244,11 +245,97 @@ export function FormField({
                     onChange={onChange}
                     placeholder={placeholder}
                     disabled={disabled}
+                    list={list}
                     className={inputClasses}
                 />
             )}
 
             {error && <p className="mt-2 text-sm text-red-300">{error}</p>}
+        </div>
+    );
+}
+
+export function AutocompleteInput({
+    id,
+    value,
+    onChange,
+    options = [],
+    placeholder = '',
+    disabled = false,
+    loading = false,
+    multiValue = false,
+    noMatchesText = 'No matches',
+    className = '',
+    onEnter,
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const ref = useRef<HTMLDivElement | null>(null);
+
+    useEffect(() => {
+        function handleClickOutside(e: MouseEvent) {
+            if (ref.current && !ref.current.contains(e.target as Node)) {
+                setIsOpen(false);
+            }
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const rawQuery = multiValue ? (value || '').split(',').pop() || '' : (value || '');
+    const query = rawQuery.trim().toLowerCase();
+    const uniqueOptions = Array.from(new Set((options || []).filter(Boolean)));
+    const filteredOptions = uniqueOptions.filter((opt) => opt.toLowerCase().includes(query));
+
+    const handleSelect = (selected: string) => {
+        if (multiValue) {
+            const chunks = (value || '').split(',');
+            const prefix = chunks.slice(0, -1).map((p) => p.trim()).filter(Boolean).join(', ');
+            onChange(prefix ? `${prefix}, ${selected}` : selected);
+        } else {
+            onChange(selected);
+        }
+        setIsOpen(false);
+    };
+
+    return (
+        <div ref={ref} className={cx('relative', className)}>
+            <input
+                type="text"
+                id={id}
+                className="mono-input w-full"
+                placeholder={placeholder}
+                value={value}
+                onChange={(e) => {
+                    onChange(e.target.value);
+                    if (!isOpen) setIsOpen(true);
+                }}
+                onKeyDown={(e) => {
+                    if (e.key === 'Enter' && onEnter) onEnter();
+                }}
+                onFocus={() => setIsOpen(true)}
+                onClick={() => setIsOpen(true)}
+                disabled={disabled || loading}
+            />
+            {isOpen && (
+                <div className="absolute z-10 w-full mt-1 bg-white dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded shadow-lg max-h-48 overflow-y-auto">
+                    {loading ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">Loading...</div>
+                    ) : filteredOptions.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">{noMatchesText}</div>
+                    ) : (
+                        filteredOptions.map((opt) => (
+                            <button
+                                key={opt}
+                                type="button"
+                                className="w-full text-left px-3 py-2 text-sm hover:bg-gray-100 dark:hover:bg-gray-700"
+                                onClick={() => handleSelect(opt)}
+                            >
+                                {opt}
+                            </button>
+                        ))
+                    )}
+                </div>
+            )}
         </div>
     );
 }

@@ -6,15 +6,17 @@ Rise backend uses YAML configuration files with environment variable substitutio
 
 Configuration files are located in `config/` and loaded in this order:
 
-1. `default.{toml,yaml,yml}` - Base configuration with sensible defaults
-2. `{RISE_CONFIG_RUN_MODE}.{toml,yaml,yml}` - Environment-specific config (optional)
+1. `default.{toml,yaml,yml}` - Base configuration (optional)
+2. `{RISE_CONFIG_RUN_MODE}.{toml,yaml,yml}` - Environment-specific config (**required**)
    - `development.toml` or `development.yaml` when `RISE_CONFIG_RUN_MODE=development`
    - `production.toml` or `production.yaml` when `RISE_CONFIG_RUN_MODE=production`
-3. `local.{toml,yaml,yml}` - Local overrides (not checked into git)
+3. `local.{toml,yaml,yml}` - Local overrides (not checked into git, optional)
 
 Later files override earlier ones.
 
-**File Format**: The backend supports both YAML and TOML formats. When multiple formats exist for the same config file (e.g., both `default.yaml` and `default.toml`), TOML takes precedence. YAML is the recommended format as it integrates seamlessly with Kubernetes/Helm deployments.
+In container deployments, `RISE_CONFIG_DIR` is typically `/etc/rise`.
+
+**File Format**: The backend supports both YAML and TOML formats. When multiple formats exist for the same config file name (for example `development.yaml` and `development.toml`), TOML takes precedence. YAML is the recommended format as it integrates seamlessly with Kubernetes/Helm deployments.
 
 ## Environment Variable Substitution
 
@@ -58,9 +60,9 @@ This happens **after** TOML/YAML parsing but **before** deserialization, so:
 
 Configuration is loaded in this order (later values override earlier ones):
 
-1. `default.{toml,yaml,yml}` - Base configuration with defaults
-2. `{RISE_CONFIG_RUN_MODE}.{toml,yaml,yml}` - Environment-specific (e.g., production.yaml)
-3. `local.{toml,yaml,yml}` - Local overrides (not in git)
+1. `default.{toml,yaml,yml}` - Base configuration (optional)
+2. `{RISE_CONFIG_RUN_MODE}.{toml,yaml,yml}` - Active environment config (required)
+3. `local.{toml,yaml,yml}` - Local overrides (not in git, optional)
 4. Environment variable substitution - `${VAR}` patterns are replaced
 5. DATABASE_URL special case - Overrides `[database] url` if set
 
@@ -69,10 +71,10 @@ Configuration is loaded in this order (later values override earlier ones):
 Example (TOML):
 ```toml
 # In default.toml
-client_secret = "${AUTH_SECRET:-default-secret}"
+client_secret = "${AUTH_SECRET:-dev-secret}"
 
 # In production.toml
-client_secret = "${AUTH_SECRET}"  # Override: no default, required
+client_secret = "${AUTH_SECRET}" # Required in production
 
 # In local.toml
 client_secret = "my-local-secret"  # Override: hardcoded value
@@ -80,13 +82,9 @@ client_secret = "my-local-secret"  # Override: hardcoded value
 
 Example (YAML):
 ```yaml
-# In default.yaml
+# In production.yaml
 auth:
-  client_secret: "${AUTH_SECRET:-default-secret}"
-
-# In production.yaml (overrides default.yaml)
-auth:
-  client_secret: "${AUTH_SECRET}"  # No default, required
+  client_secret: "${AUTH_SECRET}"  # Required
 ```
 
 ### Special Cases
@@ -107,7 +105,7 @@ url = "${DATABASE_URL}"
 
 ## Examples
 
-### Development (default.toml)
+### Development (development.toml)
 
 ```toml
 [server]
@@ -316,6 +314,20 @@ Checking backend configuration...
 ⚠️  WARN: Unknown configuration field in backend config: unknown_section
 ✓ Configuration is valid
 ```
+
+### JSON Schema
+
+Rise provides a JSON Schema for backend configuration at:
+
+- [`docs/schemas/backend-settings.schema.json`](schemas/backend-settings.schema.json)
+
+Generate it with:
+
+```bash
+cargo run --features cli,backend -- backend config-schema > docs/schemas/backend-settings.schema.json
+```
+
+CI verifies this file is up to date on every PR and push.
 
 ### Unknown Field Warnings
 

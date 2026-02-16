@@ -1,44 +1,64 @@
-# Production Configuration Example
+# yaml-language-server: $schema=../docs/schemas/backend-settings.schema.json
+# Production configuration example.
 #
-# This file shows how to use environment variable substitution for production deployments.
-# Copy this to local.yaml and customize, or set environment variables directly.
-#
-# Takes precedence over values in default.yaml.
+# This file is intentionally complete (not layered on a base config).
+# Copy to local.yaml if you need machine-specific overrides.
 
-auth:
-  issuer: "${DEX_ISSUER:-http://dex:5556/dex}"
-  # IMPORTANT: Use environment variables for secrets in production!
-  client_secret: "${RISE_AUTH_CLIENT_SECRET}"  # No default - must be set
+server:
+  host: "0.0.0.0"
+  port: 3000
+  public_url: "${PUBLIC_URL}"
+  cookie_domain: "${COOKIE_DOMAIN:-}"
+  cookie_secure: true
+  jwt_signing_secret: "${RISE_JWT_SIGNING_SECRET}" # Generate with: openssl rand -base64 32
+  jwt_claims: ["sub", "email", "name"]
 
 database:
-  # DATABASE_URL is always read directly, no ${} needed
-  # But you can also use substitution if you prefer:
-  # url: "${DATABASE_URL}"
-  url: "${DATABASE_URL:-postgres://rise:rise123@postgres:5432/rise}"
+  url: "${DATABASE_URL}"
 
-# Example: Docker registry with environment variables
-# registry:
-#   type: "oci-client-auth"
-#   registry_url: "${REGISTRY_URL:-registry:5000}"
-#   namespace: "${REGISTRY_NAMESPACE:-rise-apps}"
+auth:
+  issuer: "${OIDC_ISSUER:-${PUBLIC_URL}/dex}"
+  client_id: "${OIDC_CLIENT_ID:-rise-backend}"
+  client_secret: "${OIDC_CLIENT_SECRET}"
+  admin_users:
+    - "${ADMIN_EMAIL:-admin@example.com}"
 
-# Example: AWS ECR with environment variables
+controller: {}
+
 registry:
   type: "ecr"
   region: "${AWS_REGION:-us-east-1}"
-  account_id: "${AWS_ACCOUNT_ID}"  # No default - must be set
+  account_id: "${AWS_ACCOUNT_ID}"
   repo_prefix: "${ECR_REPO_PREFIX:-rise/}"
-  role_arn: "${ECR_CONTROLLER_ROLE_ARN}"  # No default - must be set
-  push_role_arn: "${ECR_PUSH_ROLE_ARN}"  # No default - must be set
+  role_arn: "${ECR_CONTROLLER_ROLE_ARN}"
+  push_role_arn: "${ECR_PUSH_ROLE_ARN}"
   auto_remove: false
 
-# Example: AWS KMS encryption (recommended for production)
 encryption:
   type: "aws-kms"
   region: "${AWS_REGION:-us-east-1}"
-  key_id: "${KMS_KEY_ID}"  # No default - must be set (KMS key ARN)
+  key_id: "${KMS_KEY_ID}"
 
-# Example: Local encryption (for development/testing)
-# encryption:
-#   type: "aes-gcm-256"
-#   key: "${RISE_ENCRYPTION_KEY}"  # Generate with: openssl rand -base64 32
+deployment_controller:
+  type: "kubernetes"
+  production_ingress_url_template: "${RISE_PRODUCTION_INGRESS_URL_TEMPLATE:-{project_name}.apps.rise.dev}"
+  staging_ingress_url_template: "${RISE_STAGING_INGRESS_URL_TEMPLATE:-{project_name}-{deployment_group}.preview.rise.dev}"
+  namespace_format: "${RISE_NAMESPACE_FORMAT:-rise-{project_name}}"
+  auth_backend_url: "${RISE_AUTH_BACKEND_URL}"
+  auth_signin_url: "${PUBLIC_URL}"
+  access_classes:
+    public:
+      display_name: "Public"
+      description: "Fully public - no authentication required."
+      ingress_class: "${RISE_INGRESS_CLASS_PUBLIC:-nginx}"
+      access_requirement: None
+    authenticated:
+      display_name: "Authenticated"
+      description: "Requires authentication but not project membership."
+      ingress_class: "${RISE_INGRESS_CLASS_AUTHENTICATED:-nginx}"
+      access_requirement: Authenticated
+    private:
+      display_name: "Private"
+      description: "Requires authentication and project membership."
+      ingress_class: "${RISE_INGRESS_CLASS_PRIVATE:-nginx}"
+      access_requirement: Member

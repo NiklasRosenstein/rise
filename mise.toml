@@ -26,6 +26,14 @@ mise sqlx:check
 helm lint helm/rise
 """
 
+[tasks."config:schema:generate"]
+description = "Generate the backend settings JSON schema."
+run = "cargo run --features cli,backend -- backend config-schema > docs/schemas/backend-settings.schema.json"
+
+[tasks."config:schema:check"]
+description = "Verify the committed backend settings JSON schema is up to date."
+run = "mise config:schema:generate && git --no-pager diff --exit-code -- docs/schemas/backend-settings.schema.json"
+
 [tasks."docs:serve"]
 description = "Serve documentation with live reload in port 3001."
 run = "mdbook serve -p 3001 --open"
@@ -55,7 +63,7 @@ alias = "br"
 [tasks."backend:run-container"]
 description = "Build and run the backend server in its container (host network). Useful to validate the containerized version works as intended."
 depends = ["backend:deps", "db:migrate"]
-run = "docker build . -t rise --target rise && docker run --rm --network host -v $PWD/config:/config:ro -v $HOME/.kube:/root/.kube:ro -v $HOME/.minikube:$HOME/.minikube:ro -v $PWD/docs:/docs:ro -e DATABASE_URL=$DATABASE_URL rise backend server"
+run = "docker build . -t rise --target rise && docker run --rm --network host -v $PWD/config:/etc/rise:ro -v $HOME/.kube:/root/.kube:ro -v $HOME/.minikube:$HOME/.minikube:ro -v $PWD/docs:/docs:ro -e DATABASE_URL=$DATABASE_URL rise backend server"
 
 [tasks."frontend:dev"]
 description = "Run the Vite frontend development server."

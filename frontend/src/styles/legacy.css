@@ -1733,6 +1733,11 @@ textarea:focus-visible {
     margin-bottom: 0.2rem;
 }
 
+.mono-status-strip.mono-status-strip-normalcase > div > span {
+    text-transform: none;
+    letter-spacing: normal;
+}
+
 .mono-status-strip strong {
     font-size: 0.86rem;
     word-break: break-word;

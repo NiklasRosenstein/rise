@@ -1362,7 +1362,7 @@ export function DeploymentDetail({ projectName, deploymentId }) {
 
             {detailActionStatus && <p className="mono-inline-status mb-4">{detailActionStatus}</p>}
 
-            <div className="mono-status-strip mb-6">
+            <div className="mono-status-strip mono-status-strip-normalcase mb-6">
                 <div className={`mono-status-card mono-status-card-${getStatusTone(deployment.status)}`}>
                     <span>status</span>
                     <strong>{deployment.status}</strong>
@@ -1432,7 +1432,7 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                     <strong className="mono-copyable-value">
                         <span>
                             {deployment.primary_url ? (
-                                <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="underline uppercase">
+                                <a href={deployment.primary_url} target="_blank" rel="noopener noreferrer" className="underline">
                                     {deployment.primary_url}
                                 </a>
                             ) : '-'}
@@ -1460,7 +1460,7 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                             ? deployment.custom_domain_urls.map((url, idx) => (
                                 <Fragment key={url}>
                                     {idx > 0 ? ', ' : ''}
-                                    <a href={url} target="_blank" rel="noopener noreferrer" className="underline uppercase">
+                                    <a href={url} target="_blank" rel="noopener noreferrer" className="underline">
                                         {url}
                                     </a>
                                 </Fragment>
