@@ -256,6 +256,19 @@ fn default_custom_domain_tls_mode() -> CustomDomainTlsMode {
     CustomDomainTlsMode::PerDomain
 }
 
+fn default_ingress_controller_namespace() -> String {
+    "ingress-nginx".to_string()
+}
+
+fn default_ingress_controller_labels() -> std::collections::HashMap<String, String> {
+    let mut labels = std::collections::HashMap::new();
+    labels.insert(
+        "app.kubernetes.io/name".to_string(),
+        "ingress-nginx".to_string(),
+    );
+    labels
+}
+
 /// Access requirement level for project ingress
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "PascalCase")]
@@ -286,6 +299,16 @@ pub struct AccessClass {
     /// Optional custom nginx annotations
     #[serde(default)]
     pub custom_annotations: std::collections::HashMap<String, String>,
+
+    /// Optional override for ingress controller namespace (for NetworkPolicy ingress rules)
+    /// If not set, uses the global ingress_controller_namespace from deployment_controller
+    #[serde(default)]
+    pub ingress_controller_namespace: Option<String>,
+
+    /// Optional override for ingress controller pod labels (for NetworkPolicy ingress rules)
+    /// If not set, uses the global ingress_controller_labels from deployment_controller
+    #[serde(default)]
+    pub ingress_controller_labels: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Deployment controller configuration
@@ -420,6 +443,15 @@ pub enum DeploymentControllerSettings {
         /// Example: {"rise.local": "192.168.49.1"}
         #[serde(default)]
         host_aliases: std::collections::HashMap<String, String>,
+
+        /// Ingress controller namespace for NetworkPolicy ingress rules (default: "ingress-nginx")
+        #[serde(default = "default_ingress_controller_namespace")]
+        ingress_controller_namespace: String,
+
+        /// Ingress controller pod selector labels for NetworkPolicy ingress rules
+        /// Default: {"app.kubernetes.io/name": "ingress-nginx"}
+        #[serde(default = "default_ingress_controller_labels")]
+        ingress_controller_labels: std::collections::HashMap<String, String>,
     },
 }
 

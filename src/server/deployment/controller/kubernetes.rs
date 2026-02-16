@@ -125,6 +125,8 @@ pub struct KubernetesControllerConfig {
     pub access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
     /// Host aliases to inject into pod specs (hostname -> IP address)
     pub host_aliases: std::collections::HashMap<String, String>,
+    pub ingress_controller_namespace: String,
+    pub ingress_controller_labels: std::collections::HashMap<String, String>,
 }
 
 /// Kubernetes controller implementation
@@ -156,6 +158,8 @@ pub struct KubernetesController {
     resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     /// Host aliases to inject into pod specs (hostname -> IP address)
     host_aliases: std::collections::HashMap<String, String>,
+    ingress_controller_namespace: String,
+    ingress_controller_labels: std::collections::HashMap<String, String>,
 }
 
 impl KubernetesController {
@@ -187,6 +191,8 @@ impl KubernetesController {
             access_classes: config.access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: config.host_aliases,
+            ingress_controller_namespace: config.ingress_controller_namespace,
+            ingress_controller_labels: config.ingress_controller_labels,
         })
     }
 
@@ -1889,6 +1895,56 @@ impl KubernetesController {
     ) -> NetworkPolicy {
         use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 
+        let mut ingress_rules = vec![];
+
+        // Determine ingress controller configuration (per-access-class override or global default)
+        let (ingress_controller_namespace, ingress_controller_labels) =
+            if let Some(access_class) = self.access_classes.get(&project.access_class) {
+                let namespace = access_class
+                    .ingress_controller_namespace
+                    .as_ref()
+                    .unwrap_or(&self.ingress_controller_namespace);
+                let labels = access_class
+                    .ingress_controller_labels
+                    .as_ref()
+                    .unwrap_or(&self.ingress_controller_labels);
+                (namespace.clone(), labels.clone())
+            } else {
+                // Fallback to global defaults if access class not found
+                (
+                    self.ingress_controller_namespace.clone(),
+                    self.ingress_controller_labels.clone(),
+                )
+            };
+
+        // Rule: Allow traffic from ingress controller
+        ingress_rules.push(k8s_openapi::api::networking::v1::NetworkPolicyIngressRule {
+            from: Some(vec![NetworkPolicyPeer {
+                namespace_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert(
+                            "kubernetes.io/metadata.name".to_string(),
+                            ingress_controller_namespace,
+                        );
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some(
+                        ingress_controller_labels
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect::<BTreeMap<String, String>>(),
+                    ),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]),
+            ports: None, // Allow all ports from ingress controller
+        });
+
         let mut egress_rules = vec![];
 
         // Rule 1: DNS resolution (UDP + TCP port 53 to kube-system namespace)
@@ -1941,15 +1997,17 @@ impl KubernetesController {
             }
         }
 
-        // Rule 3: External egress (0.0.0.0/0 excluding RFC1918 private ranges)
+        // Rule 3: External egress (0.0.0.0/0 excluding RFC1918 private ranges, link-local, and CGNAT)
         egress_rules.push(NetworkPolicyEgressRule {
             to: Some(vec![NetworkPolicyPeer {
                 ip_block: Some(IPBlock {
                     cidr: "0.0.0.0/0".to_string(),
                     except: Some(vec![
-                        "10.0.0.0/8".to_string(),
-                        "172.16.0.0/12".to_string(),
-                        "192.168.0.0/16".to_string(),
+                        "10.0.0.0/8".to_string(),     // RFC1918 private
+                        "172.16.0.0/12".to_string(),  // RFC1918 private
+                        "192.168.0.0/16".to_string(), // RFC1918 private
+                        "169.254.0.0/16".to_string(), // Link-local + AWS IMDS
+                        "100.64.0.0/10".to_string(),  // CGNAT shared address space
                     ]),
                 }),
                 ..Default::default()
@@ -1969,9 +2027,9 @@ impl KubernetesController {
                     match_labels: Some(Self::group_labels(project, deployment)),
                     ..Default::default()
                 },
-                policy_types: Some(vec!["Egress".to_string()]),
+                policy_types: Some(vec!["Ingress".to_string(), "Egress".to_string()]),
                 egress: Some(egress_rules),
-                ingress: None,
+                ingress: Some(ingress_rules),
             }),
         }
     }
@@ -4233,6 +4291,8 @@ mod tests {
                 ingress_class: "nginx".to_string(),
                 access_requirement: crate::server::settings::AccessRequirement::None,
                 custom_annotations: std::collections::HashMap::new(),
+                ingress_controller_namespace: None,
+                ingress_controller_labels: None,
             },
         );
 
@@ -4258,6 +4318,15 @@ mod tests {
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
+            ingress_controller_namespace: "ingress-nginx".to_string(),
+            ingress_controller_labels: {
+                let mut labels = std::collections::HashMap::new();
+                labels.insert(
+                    "app.kubernetes.io/name".to_string(),
+                    "ingress-nginx".to_string(),
+                );
+                labels
+            },
         }
     }
 
@@ -4701,6 +4770,8 @@ mod tests {
                 ingress_class: "nginx".to_string(),
                 access_requirement: crate::server::settings::AccessRequirement::None,
                 custom_annotations: std::collections::HashMap::new(),
+                ingress_controller_namespace: None,
+                ingress_controller_labels: None,
             },
         );
 
@@ -4727,6 +4798,15 @@ mod tests {
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
+            ingress_controller_namespace: "ingress-nginx".to_string(),
+            ingress_controller_labels: {
+                let mut labels = std::collections::HashMap::new();
+                labels.insert(
+                    "app.kubernetes.io/name".to_string(),
+                    "ingress-nginx".to_string(),
+                );
+                labels
+            },
         }
     }
 }

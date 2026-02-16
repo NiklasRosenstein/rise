@@ -180,6 +180,8 @@ async fn init_kubernetes_backend(
         image_pull_secret_name,
         access_classes,
         host_aliases,
+        ingress_controller_namespace,
+        ingress_controller_labels,
         ..
     }) = &settings.deployment_controller
     {
@@ -234,6 +236,8 @@ async fn init_kubernetes_backend(
                 image_pull_secret_name: image_pull_secret_name.clone(),
                 access_classes: filtered_access_classes,
                 host_aliases: host_aliases.clone(),
+                ingress_controller_namespace: ingress_controller_namespace.clone(),
+                ingress_controller_labels: ingress_controller_labels.clone(),
             },
         )?;
 
