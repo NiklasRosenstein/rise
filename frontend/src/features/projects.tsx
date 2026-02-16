@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
 import { copyToClipboard, formatISO8601, formatRelativeTimeRounded } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, SegmentedRadioGroup } from '../components/ui';
+import { AutocompleteInput, Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, SegmentedRadioGroup } from '../components/ui';
 import { ProjectTable } from '../components/project-table';
 import { ActiveDeploymentsSummary, DeploymentDetail, DeploymentsList } from './deployments';
 import { DomainsList, EnvVarsList, ExtensionDetailPage, ExtensionsList, ServiceAccountsList } from './resources';
@@ -250,6 +250,7 @@ export function ProjectDetail({ projectName, initialTab }) {
     const [ownerUserEmail, setOwnerUserEmail] = useState('');
     const [ownerTeamId, setOwnerTeamId] = useState('');
     const [teams, setTeams] = useState([]);
+    const [currentUserEmail, setCurrentUserEmail] = useState('');
     const [updatingOwner, setUpdatingOwner] = useState(false);
     const [detailActionStatus, setDetailActionStatus] = useState('');
     const { showToast } = useToast();
@@ -329,6 +330,18 @@ export function ProjectDetail({ projectName, initialTab }) {
             }
         }
         loadTeams();
+    }, []);
+
+    useEffect(() => {
+        async function loadCurrentUser() {
+            try {
+                const user = await api.getMe();
+                setCurrentUserEmail(user?.email || '');
+            } catch (err) {
+                console.error('Failed to load current user:', err);
+            }
+        }
+        loadCurrentUser();
     }, []);
 
     // Update activeTab when initialTab changes (e.g., browser back/forward)
@@ -431,6 +444,27 @@ export function ProjectDetail({ projectName, initialTab }) {
     if (!project) return <EmptyState message="Project not found." />;
 
     const ownerInfo = getOwnerInfo(project);
+    const appUsers = project.app_users || [];
+    const appTeams = project.app_teams || [];
+    const owner = project.owner || null;
+    const ownerAccessUserEmail = owner?.email ? owner.email.trim().toLowerCase() : null;
+    const ownerAccessTeamName = owner?.name ? owner.name.trim().toLowerCase() : null;
+    const ownerAccessTeamId = owner?.id || null;
+
+    const userCount = (() => {
+        if (!ownerAccessUserEmail) return appUsers.length;
+        const ownerAlreadyIncluded = appUsers.some((u) => (u.email || '').trim().toLowerCase() === ownerAccessUserEmail);
+        return ownerAlreadyIncluded ? appUsers.length : appUsers.length + 1;
+    })();
+
+    const teamCount = (() => {
+        if (!ownerAccessTeamName) return appTeams.length;
+        const ownerAlreadyIncluded = appTeams.some((t) => {
+            if (ownerAccessTeamId && t.id) return t.id === ownerAccessTeamId;
+            return (t.name || '').trim().toLowerCase() === ownerAccessTeamName;
+        });
+        return ownerAlreadyIncluded ? appTeams.length : appTeams.length + 1;
+    })();
 
     return (
         <section>
@@ -446,7 +480,7 @@ export function ProjectDetail({ projectName, initialTab }) {
 
             {detailActionStatus && <p className="mono-inline-status mb-4">{detailActionStatus}</p>}
 
-            <div className="mono-status-strip mb-6">
+            <div className="mono-status-strip mono-status-strip-normalcase mb-6">
                 <div className={`mono-status-card mono-status-card-${getStatusTone(project.status)}`}>
                     <span>status</span>
                     <strong>{project.status}</strong>
@@ -509,7 +543,7 @@ export function ProjectDetail({ projectName, initialTab }) {
                             <svg className="w-3 h-3" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
                                 <path d="M7 10a3 3 0 1 0-3-3 3 3 0 0 0 3 3Zm6 0a3 3 0 1 0-3-3 3 3 0 0 0 3 3ZM1.5 16.5a5.5 5.5 0 0 1 11 0v.5h-11Zm12 0a5.5 5.5 0 0 1 5-5.48 5.53 5.53 0 0 1 .5.02V17h-5.5Z" />
                             </svg>
-                            {project.app_teams?.length || 0}
+                            {teamCount}
                         </span>
                         <span className="inline-flex items-center gap-1">
                             <span
@@ -520,7 +554,7 @@ export function ProjectDetail({ projectName, initialTab }) {
                                     WebkitMaskImage: 'url(/assets/user.svg)',
                                 }}
                             />
-                            {project.app_users?.length || 0}
+                            {userCount}
                         </span>
                     </strong>
                 </div>
@@ -551,7 +585,7 @@ export function ProjectDetail({ projectName, initialTab }) {
                     <strong className="mono-copyable-value">
                         <span>
                             {project.primary_url ? (
-                                <a href={project.primary_url} target="_blank" rel="noopener noreferrer" className="underline uppercase"
+                                <a href={project.primary_url} target="_blank" rel="noopener noreferrer" className="underline"
                                     onClick={(e) => e.stopPropagation()}
                                 >
                                     {project.primary_url}
@@ -657,7 +691,13 @@ export function ProjectDetail({ projectName, initialTab }) {
                 )}
                 {activeTab === 'access' && (
                     <div>
-                        <AppUsersList projectName={projectName} project={project} accessClasses={accessClasses} onProjectUpdated={loadProject} />
+                        <AppUsersList
+                            projectName={projectName}
+                            project={project}
+                            accessClasses={accessClasses}
+                            currentUserEmail={currentUserEmail}
+                            onProjectUpdated={loadProject}
+                        />
                     </div>
                 )}
             </div>
@@ -694,14 +734,20 @@ export function ProjectDetail({ projectName, initialTab }) {
                     />
 
                     {ownerType === 'user' ? (
-                        <FormField
-                            label="Owner User Email"
-                            id="project-owner-user-email"
-                            value={ownerUserEmail}
-                            onChange={(e) => setOwnerUserEmail(e.target.value)}
-                            placeholder="owner@example.com"
-                            required
-                        />
+                        <div className="form-field">
+                            <label htmlFor="project-owner-user-email" className="mono-label">
+                                Owner User Email
+                                <span className="text-red-300 ml-1">*</span>
+                            </label>
+                            <AutocompleteInput
+                                id="project-owner-user-email"
+                                value={ownerUserEmail}
+                                onChange={setOwnerUserEmail}
+                                options={currentUserEmail ? [currentUserEmail] : []}
+                                placeholder="owner@example.com"
+                                onEnter={handleSaveOwner}
+                            />
+                        </div>
                     ) : (
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
@@ -810,7 +856,7 @@ function Combobox({ value, onChange, options, placeholder = '', disabled = false
 }
 
 // Access tab component - manages access class and app-level user/team access
-function AppUsersList({ projectName, project, accessClasses, onProjectUpdated }) {
+function AppUsersList({ projectName, project, accessClasses, currentUserEmail, onProjectUpdated }) {
     const [newUserEmail, setNewUserEmail] = useState('');
     const [selectedTeamId, setSelectedTeamId] = useState('');
     const [teams, setTeams] = useState([]);
@@ -999,13 +1045,13 @@ function AppUsersList({ projectName, project, accessClasses, onProjectUpdated })
                     )}
                     <div className="flex justify-end">
                         <div className="flex gap-2">
-                            <input
-                                type="email"
-                                placeholder="user@example.com"
+                            <AutocompleteInput
                                 value={newUserEmail}
-                                onChange={(e) => setNewUserEmail(e.target.value)}
-                                onKeyPress={(e) => e.key === 'Enter' && handleAddUser()}
-                                className="w-64 bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-200 placeholder-gray-500 focus:outline-none focus:border-indigo-500"
+                                onChange={setNewUserEmail}
+                                options={currentUserEmail ? [currentUserEmail] : []}
+                                placeholder="user@example.com"
+                                className="w-64"
+                                onEnter={handleAddUser}
                             />
                             <Button variant="primary" size="sm" onClick={handleAddUser}>
                                 Add
