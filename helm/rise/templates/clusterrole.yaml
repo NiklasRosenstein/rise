@@ -47,6 +47,11 @@ rules:
   resources: ["ingresses"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
+# NetworkPolicy management (for network isolation)
+- apiGroups: ["networking.k8s.io"]
+  resources: ["networkpolicies"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
 # ConfigMap management (for application configs)
 - apiGroups: [""]
   resources: ["configmaps"]
