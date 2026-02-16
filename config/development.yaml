@@ -1,16 +1,20 @@
 # yaml-language-server: $schema=../docs/schemas/backend-settings.schema.json
 # Insecure development configuration - DO NOT USE IN PRODUCTION.
-#
-# Takes precedence over values in default.yaml.
 
 server:
-  public_url: http://rise.local:3000
-  frontend_dev_proxy_url: http://localhost:5173
+  host: "0.0.0.0"
+  port: 3000
+  public_url: "http://rise.local:3000"
+  frontend_dev_proxy_url: "http://localhost:5173"
+  cookie_domain: "" # Empty = current host only (for localhost:3000 access)
   cookie_secure: false
-  docs_dir: "docs"  # Serve docs from repo's docs/ directory
-  cookie_domain: ""  # Empty = current host only (for localhost:3000 access)
-  # If you access via rise.local:3000, use ".rise.local" instead
   jwt_signing_secret: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=" # Generate with: openssl rand -base64 32
+  jwt_claims: ["sub", "email", "name"]
+  docs_dir: "docs" # Serve docs from repo's docs/ directory
+
+database:
+  # DATABASE_URL environment variable is always used if set
+  url: "${DATABASE_URLA:-foobar}"
 
 encryption:
   type: "aes-gcm-256"
@@ -19,7 +23,7 @@ encryption:
 auth:
   issuer: "http://localhost:5556/dex"
   client_id: "rise-backend"
-  client_secret: rise-backend-secret
+  client_secret: "rise-backend-secret"
   admin_users:
     - "admin@example.com"
   platform_access:
@@ -28,24 +32,42 @@ auth:
       - "admin@example.com"
       - "dev@example.com"
 
+controller: {}
+
 registry:
   type: "oci-client-auth"
-  registry_url: "rise-registry:5000"      # Internal URL for deployment controllers
+  registry_url: "rise-registry:5000" # Internal URL for deployment controllers
   namespace: "rise-apps"
-  client_registry_url: "rise-registry:5000"   # Client-facing URL for CLI push operations
+  client_registry_url: "rise-registry:5000" # Client-facing URL for CLI push operations
 
 deployment_controller:
-  auth_backend_url: "http://host.minikube.internal:3000"  # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host)
-  auth_signin_url: "http://rise.local:3000"  # Domain for user-facing OAuth redirects
+  type: "kubernetes"
+  production_ingress_url_template: "{project_name}.rise.local"
+  staging_ingress_url_template: "{project_name}-{deployment_group}.preview.rise.local"
+  namespace_format: "rise-{project_name}"
+  auth_backend_url: "http://host.minikube.internal:3000" # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host)
+  auth_signin_url: "http://rise.local:3000" # Domain for user-facing OAuth redirects
   ingress_annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
-  ingress_port: 8080 # `mise minikube:launch` port-forwards the ingress controller to this port
-  ingress_schema: "http" # Use http for local development (defaults to https in production)
-  # Host aliases for pods to resolve custom hostnames (useful for OIDC issuer URLs)
-  # Get minikube host IP with: minikube ssh -- ip route | awk '/default/ { print $3 }'
+  ingress_port: 8080 # `mise minikube:launch` port-forwards ingress to this port
+  ingress_schema: "http" # Use http for local development
   host_aliases:
-    rise.local: "192.168.49.1"  # Minikube host IP
-  # NetworkPolicy egress allow list - CIDR ranges that pods can reach despite default blocks
-  # Needed for Minikube host IP (192.168.49.1) which falls in the blocked 192.168.0.0/16 range
+    rise.local: "192.168.49.1" # Minikube host IP
   network_policy_egress_allow_cidrs:
-    - "192.168.49.0/24"  # Minikube host network
+    - "192.168.49.0/24" # Minikube host network
+  access_classes:
+    public:
+      display_name: "Public"
+      description: "Fully public - no authentication required."
+      ingress_class: "nginx"
+      access_requirement: None
+    authenticated:
+      display_name: "Authenticated"
+      description: "Requires authentication but not project membership."
+      ingress_class: "nginx"
+      access_requirement: Authenticated
+    private:
+      display_name: "Private"
+      description: "Requires authentication and project membership."
+      ingress_class: "nginx"
+      access_requirement: Member

@@ -18,7 +18,7 @@ use uuid::Uuid;
 use snowflake_connector_rs::{SnowflakeAuthMethod, SnowflakeClient, SnowflakeClientConfig};
 
 /// User-facing extension spec - minimal configuration
-/// Backend connection credentials are configured in config/default.yaml
+/// Backend connection credentials are configured in config/{RISE_CONFIG_RUN_MODE}.yaml
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SnowflakeOAuthProvisionerSpec {
     /// Additional blocked roles (unioned with backend defaults)
@@ -109,7 +109,7 @@ pub struct SnowflakeOAuthProvisionerConfig {
     pub api_domain: String,
     pub oauth_provider: Option<Arc<dyn Extension>>,
 
-    // Backend configuration (from config/default.yaml)
+    // Backend configuration (from config/{RISE_CONFIG_RUN_MODE}.yaml)
     pub account: String,
     pub user: String,
     pub role: Option<String>,
@@ -258,7 +258,7 @@ impl SnowflakeOAuthProvisioner {
                 );
                 Err(anyhow!(
                     "Snowflake credential validation failed for account '{}' (user: '{}'): {}. \
-                     Please verify your Snowflake configuration in config/default.yaml. \
+                     Please verify your Snowflake configuration in config/{{RISE_CONFIG_RUN_MODE}}.yaml. \
                      The user must have CREATE INTEGRATION privilege.",
                     self.account,
                     self.user,
@@ -357,7 +357,7 @@ impl SnowflakeOAuthProvisioner {
                          Please encrypt your private key using:\n\
                          openssl pkcs8 -topk8 -v2 aes256 -in unencrypted_key.pem -out encrypted_key.p8\n\
                          \n\
-                         Then update your config/default.yaml:\n\
+                         Then update your config/{{RISE_CONFIG_RUN_MODE}}.yaml:\n\
                          auth_type: private_key\n\
                          private_key: \"$${{SNOWFLAKE_PRIVATE_KEY}}\"  # encrypted key\n\
                          private_key_password: \"$${{SNOWFLAKE_PRIVATE_KEY_PASSWORD}}\"\n\
@@ -419,7 +419,7 @@ impl SnowflakeOAuthProvisioner {
                      Or generate a new encrypted key pair:\n\
                      openssl genrsa 2048 | openssl pkcs8 -topk8 -v2 aes256 -out rsa_key.p8\n\
                      \n\
-                     Then configure the encrypted key and password in config/default.yaml:\n\
+                     Then configure the encrypted key and password in config/{{RISE_CONFIG_RUN_MODE}}.yaml:\n\
                      auth_type: private_key\n\
                      private_key: \"$${{SNOWFLAKE_PRIVATE_KEY}}\"\n\
                      private_key_password: \"$${{SNOWFLAKE_PRIVATE_KEY_PASSWORD}}\"\n\
@@ -1327,7 +1327,7 @@ Automatically provisions Snowflake SECURITY INTEGRATIONs and creates Generic OAu
 
 ## Configuration
 
-Backend credentials are configured in `config/default.yaml`:
+Backend credentials are configured in `config/{RISE_CONFIG_RUN_MODE}.yaml`:
 
 ```yaml
 extensions:

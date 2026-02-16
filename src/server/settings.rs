@@ -733,21 +733,13 @@ impl Settings {
 
         let mut builder = Config::builder();
 
-        // Load config files in order, trying both .toml and .yaml/.yml extensions
-        // TOML takes precedence if both exist
+        // Load config files in order, trying both .toml and .yaml/.yml extensions.
+        // TOML takes precedence if both exist.
 
-        // 1. Load default config (required)
-        let default_loaded = Self::try_add_config_file(&mut builder, &config_dir, "default", true)?;
-        if !default_loaded {
-            return Err(ConfigError::Message(
-                format!("Required default config not found in {} (tried default.toml, default.yaml, default.yml)", config_dir)
-            ));
-        }
+        // 1. Load environment-specific config (required)
+        Self::try_add_config_file(&mut builder, &config_dir, &run_mode, true)?;
 
-        // 2. Load environment-specific config (optional)
-        Self::try_add_config_file(&mut builder, &config_dir, &run_mode, false)?;
-
-        // 3. Load local config (optional, not checked into git)
+        // 2. Load local config (optional, not checked into git)
         Self::try_add_config_file(&mut builder, &config_dir, "local", false)?;
 
         // Build config and substitute environment variables
@@ -936,9 +928,9 @@ mod tests {
         use std::fs;
         use tempfile::TempDir;
 
-        // Create a temporary directory with a default.yaml config
+        // Create a temporary directory with a development.yaml config
         let temp_dir = TempDir::new().unwrap();
-        let config_path = temp_dir.path().join("default.yaml");
+        let config_path = temp_dir.path().join("development.yaml");
 
         fs::write(
             &config_path,
@@ -979,7 +971,7 @@ unknown_top_level: "also unknown"
 
         // Set environment variables to point to our test config
         env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
-        env::set_var("RISE_CONFIG_RUN_MODE", "production"); // Use a mode that doesn't exist
+        env::set_var("RISE_CONFIG_RUN_MODE", "development");
 
         // This should load successfully despite unknown fields
         // (The warnings would appear in logs)

@@ -53,8 +53,7 @@ Registry configuration is loaded from backend config files under `config/`.
 
 Typical precedence:
 1. `local.yaml`
-2. `{RISE_CONFIG_RUN_MODE}.yaml`
-3. `default.yaml`
+2. `{RISE_CONFIG_RUN_MODE}.yaml` (required)
 
 Use environment variable substitution for secrets and environment-specific values.
 

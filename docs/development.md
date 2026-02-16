@@ -56,7 +56,7 @@ When using Docker Compose with Minikube, you may need different registry URLs fo
 - **Deployment controllers** (running in Minikube): `rise-registry:5000` (Docker internal network)
 - **CLI** (running on host): `localhost:5000` (host network)
 
-Configure this in `config/default.yaml`:
+Configure this in `config/development.yaml`:
 
 ```yaml
 registry:
@@ -78,7 +78,7 @@ cargo build --bin rise
 
 `.envrc` (loaded by direnv): `DATABASE_URL`, `RISE_CONFIG_RUN_MODE`, `PATH`
 
-Server config in `config/default.toml`.
+Server config in `config/development.yaml` (or `config/production.yaml` with `RISE_CONFIG_RUN_MODE=production`).
 
 ## Development Workflow
 
