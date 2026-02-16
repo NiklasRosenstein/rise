@@ -1002,8 +1002,11 @@ function PodInfoRow({ pod }) {
         Unknown: '#888',
     };
 
+    // Use appropriate border color based on issues
+    const borderColor = hasIssues ? '#7d4b4b' : 'var(--mono-line)';
+
     return (
-        <div className="border-b" style={{ borderColor: '#7d4b4b' }}>
+        <div className="border-b" style={{ borderColor }}>
             <div className="p-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
                 <div className="flex items-center justify-between gap-2">
                     <div className="flex-1 min-w-0">
@@ -1134,15 +1137,11 @@ function PodInfoRow({ pod }) {
 }
 
 function PodStatusSection({ podStatus }) {
-    const isHealthy = podStatus.ready_replicas === podStatus.desired_replicas &&
-                      (!podStatus.pods || podStatus.pods.length === 0 ||
-                       podStatus.pods.every(p => !p.events || p.events.length === 0));
-
-    // Don't show if everything is healthy
-    if (isHealthy) return null;
+    const hasIssues = podStatus.ready_replicas < podStatus.desired_replicas ||
+                      (podStatus.pods && podStatus.pods.some(p => p.events && p.events.length > 0));
 
     // Determine tone
-    let tone = 'warn';
+    let tone = 'ok';
     if (podStatus.ready_replicas === 0) {
         tone = 'bad';
     } else if (podStatus.ready_replicas < podStatus.desired_replicas) {
@@ -1153,6 +1152,18 @@ function PodStatusSection({ podStatus }) {
         ok: { color: '#b7ffce', borderColor: '#2e6c44', background: 'rgba(44, 105, 66, 0.2)' },
         warn: { color: '#ffe3a8', borderColor: '#7b6333', background: 'rgba(139, 112, 57, 0.22)' },
         bad: { color: '#ffc0c0', borderColor: '#7d4b4b', background: 'rgba(125, 75, 75, 0.24)' },
+    };
+
+    const borderColors = {
+        ok: '#2e6c44',
+        warn: '#7b6333',
+        bad: '#7d4b4b',
+    };
+
+    const headerColors = {
+        ok: '#b7ffce',
+        warn: '#ffe3a8',
+        bad: '#ffc0c0',
     };
 
     return (
@@ -1173,9 +1184,9 @@ function PodStatusSection({ podStatus }) {
 
             {/* Per-pod details */}
             {podStatus.pods && podStatus.pods.length > 0 && (
-                <div className="border border-solid" style={{ borderColor: '#7d4b4b', background: '#1a1212' }}>
-                    <div className="p-3" style={{ borderBottom: '1px solid #7d4b4b' }}>
-                        <h5 className="text-xs font-semibold" style={{ color: '#ffc0c0' }}>
+                <div className="border border-solid" style={{ borderColor: borderColors[tone], background: tone === 'ok' ? '#0a1210' : '#1a1212' }}>
+                    <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
+                        <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
                             Pods ({podStatus.pods.length})
                         </h5>
                     </div>
