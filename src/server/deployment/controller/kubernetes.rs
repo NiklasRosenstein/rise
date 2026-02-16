@@ -127,6 +127,7 @@ pub struct KubernetesControllerConfig {
     pub host_aliases: std::collections::HashMap<String, String>,
     pub ingress_controller_namespace: String,
     pub ingress_controller_labels: std::collections::HashMap<String, String>,
+    pub network_policy_egress_allow_cidrs: Vec<String>,
 }
 
 /// Kubernetes controller implementation
@@ -160,6 +161,7 @@ pub struct KubernetesController {
     host_aliases: std::collections::HashMap<String, String>,
     ingress_controller_namespace: String,
     ingress_controller_labels: std::collections::HashMap<String, String>,
+    network_policy_egress_allow_cidrs: Vec<String>,
 }
 
 impl KubernetesController {
@@ -193,6 +195,7 @@ impl KubernetesController {
             host_aliases: config.host_aliases,
             ingress_controller_namespace: config.ingress_controller_namespace,
             ingress_controller_labels: config.ingress_controller_labels,
+            network_policy_egress_allow_cidrs: config.network_policy_egress_allow_cidrs,
         })
     }
 
@@ -1995,6 +1998,21 @@ impl KubernetesController {
                     }]),
                 });
             }
+        }
+
+        // Rule 2.5: Additional allowed CIDR ranges (for development environments)
+        // These are explicitly allowed destinations, useful for reaching host IPs in Minikube
+        for cidr in &self.network_policy_egress_allow_cidrs {
+            egress_rules.push(NetworkPolicyEgressRule {
+                to: Some(vec![NetworkPolicyPeer {
+                    ip_block: Some(IPBlock {
+                        cidr: cidr.clone(),
+                        except: None,
+                    }),
+                    ..Default::default()
+                }]),
+                ports: None, // Allow all ports to these destinations
+            });
         }
 
         // Rule 3: External egress (0.0.0.0/0 excluding RFC1918 private ranges, link-local, and CGNAT)
@@ -4327,6 +4345,7 @@ mod tests {
                 );
                 labels
             },
+            network_policy_egress_allow_cidrs: vec![],
         }
     }
 
@@ -4807,6 +4826,7 @@ mod tests {
                 );
                 labels
             },
+            network_policy_egress_allow_cidrs: vec![],
         }
     }
 }

@@ -116,6 +116,26 @@ deployment_controller:
   # ingress_controller_namespace: "kube-system"
   # ingress_controller_labels:
   #   k8s-app: "nginx-ingress-controller"
+  #
+  # NetworkPolicy egress allow list - CIDR ranges that pods can reach despite default blocks
+  # REQUIRED for production if your Rise backend is accessed via a load balancer with RFC1918 IP
+  #
+  # Why needed:
+  # - Application pods call Rise backend for OAuth/OIDC flows (RISE_ISSUER)
+  # - Public URL (e.g., rise.example.com) resolves to LB IP (e.g., 10.200.155.97)
+  # - LB IP is in 10.0.0.0/8 range, blocked by default NetworkPolicy
+  # - Without this exception, OAuth extension and authentication will fail
+  #
+  # Examples:
+  #   Development (Minikube):
+  #     - "192.168.49.0/24"  # Minikube host network
+  #
+  #   Production (AWS ALB/NLB):
+  #     - "10.200.155.97/32"  # Specific LB IP
+  #     - "10.200.0.0/16"     # LB subnet (if IP changes)
+  #
+  # network_policy_egress_allow_cidrs:
+  #   - "10.200.0.0/16"  # Example: AWS VPC subnet with load balancers
 
   # Optional: Ingress annotations (e.g., for cert-manager TLS certificates)
   # ingress_annotations:

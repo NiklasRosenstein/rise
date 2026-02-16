@@ -182,6 +182,7 @@ async fn init_kubernetes_backend(
         host_aliases,
         ingress_controller_namespace,
         ingress_controller_labels,
+        network_policy_egress_allow_cidrs,
         ..
     }) = &settings.deployment_controller
     {
@@ -238,6 +239,7 @@ async fn init_kubernetes_backend(
                 host_aliases: host_aliases.clone(),
                 ingress_controller_namespace: ingress_controller_namespace.clone(),
                 ingress_controller_labels: ingress_controller_labels.clone(),
+                network_policy_egress_allow_cidrs: network_policy_egress_allow_cidrs.clone(),
             },
         )?;
 

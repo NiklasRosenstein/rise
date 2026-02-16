@@ -44,3 +44,7 @@ deployment_controller:
   # Get minikube host IP with: minikube ssh -- ip route | awk '/default/ { print $3 }'
   host_aliases:
     rise.local: "192.168.49.1"  # Minikube host IP
+  # NetworkPolicy egress allow list - CIDR ranges that pods can reach despite default blocks
+  # Needed for Minikube host IP (192.168.49.1) which falls in the blocked 192.168.0.0/16 range
+  network_policy_egress_allow_cidrs:
+    - "192.168.49.0/24"  # Minikube host network

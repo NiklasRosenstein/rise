@@ -452,6 +452,12 @@ pub enum DeploymentControllerSettings {
         /// Default: {"app.kubernetes.io/name": "ingress-nginx"}
         #[serde(default = "default_ingress_controller_labels")]
         ingress_controller_labels: std::collections::HashMap<String, String>,
+
+        /// Additional CIDR ranges to allow egress to (exempted from default blocks)
+        /// Useful for development environments where pods need to reach host IPs
+        /// Example: ["192.168.49.1/32"] for Minikube host IP
+        #[serde(default)]
+        network_policy_egress_allow_cidrs: Vec<String>,
     },
 }
 
