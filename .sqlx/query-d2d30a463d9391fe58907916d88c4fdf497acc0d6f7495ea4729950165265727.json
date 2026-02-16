@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n                        deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            created_at, updated_at\n        FROM deployments\n        WHERE expires_at IS NOT NULL\n          AND expires_at <= NOW()\n          AND NOT is_terminal(status)\n        ORDER BY expires_at ASC\n        LIMIT $1\n        ",
+  "query": "\n        UPDATE deployments\n        SET\n            status = 'Terminating',\n            termination_reason = $2,\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -108,18 +108,37 @@
       },
       {
         "ordinal": 18,
-        "name": "created_at",
+        "name": "deploying_started_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Int8"
+        "Uuid",
+        {
+          "Custom": {
+            "name": "termination_reason",
+            "kind": {
+              "Enum": [
+                "UserStopped",
+                "Superseded",
+                "Cancelled",
+                "Failed",
+                "Expired"
+              ]
+            }
+          }
+        }
       ]
     },
     "nullable": [
@@ -141,9 +160,10 @@
       false,
       false,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "208b7c0ed771a834215227335ea38d810ba7f64e15ae6b9c18ceb13bbf667aa7"
+  "hash": "d2d30a463d9391fe58907916d88c4fdf497acc0d6f7495ea4729950165265727"
 }

@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT\n                id, deployment_id, project_id, created_by_id,\n                status as \"status: DeploymentStatus\",\n                deployment_group, expires_at,\n                termination_reason as \"termination_reason: _\",\n                completed_at, error_message, build_logs,\n                controller_metadata as \"controller_metadata: serde_json::Value\",\n                image, image_digest, rolled_back_from_deployment_id,\n                http_port, needs_reconcile, is_active,\n                created_at, updated_at\n            FROM deployments\n            WHERE project_id = $1 AND deployment_group = $2\n            ORDER BY created_at DESC\n            LIMIT $3 OFFSET $4\n            ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            created_at, updated_at\n        FROM deployments\n        WHERE needs_reconcile = TRUE\n          AND status IN ('Healthy', 'Unhealthy')\n        ORDER BY updated_at ASC\n        LIMIT $1\n        ",
   "describe": {
     "columns": [
       {
@@ -108,20 +108,22 @@
       },
       {
         "ordinal": 18,
-        "name": "created_at",
+        "name": "deploying_started_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text",
-        "Int8",
         "Int8"
       ]
     },
@@ -144,9 +146,10 @@
       false,
       false,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "a83a071c9da9e964f52785b8f33f9adcc80e46bcccaea860d61a082a75cc6b0c"
+  "hash": "ab73ea995f1386c7a55dc78662f46976e6acf4b9f32001a1d1e097f5c1beace6"
 }
