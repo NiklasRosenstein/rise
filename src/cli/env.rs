@@ -63,47 +63,21 @@ async fn fetch_env_vars_response(
     Ok(env_vars_response)
 }
 
-/// Fetch non-secret environment variables from a project (for use by other modules)
-#[allow(dead_code)]
-pub async fn fetch_non_secret_env_vars(
+/// Fetch preview environment variables — the full set a deployment would receive.
+///
+/// Returns:
+/// - Loadable vars (non-secret + unprotected secrets, with decrypted values)
+/// - Protected keys (value masked, cannot be loaded locally)
+pub async fn fetch_preview_env_vars(
     http_client: &Client,
     backend_url: &str,
     token: &str,
     project: &str,
-) -> Result<Vec<(String, String)>> {
-    let env_response = fetch_env_vars_response(http_client, backend_url, token, project).await?;
-
-    // Filter out secret variables (they'll have masked values)
-    let env_vars: Vec<(String, String)> = env_response
-        .env_vars
-        .into_iter()
-        .filter_map(|var| {
-            if var.is_secret {
-                // Skip secrets as we cannot retrieve their actual values
-                None
-            } else {
-                Some((var.key, var.value))
-            }
-        })
-        .collect();
-
-    Ok(env_vars)
-}
-
-/// Fetch environment variables from a project, returning:
-/// - Non-secret vars (always available)
-/// - Unprotected secret vars (decrypted values)
-/// - Protected secret keys (cannot be loaded)
-pub async fn fetch_env_vars_with_secret_list(
-    http_client: &Client,
-    backend_url: &str,
-    token: &str,
-    project: &str,
-) -> Result<(Vec<(String, String)>, Vec<(String, String)>, Vec<String>)> {
-    // Fetch with unprotected values included
+    deployment_group: &str,
+) -> Result<(Vec<(String, String)>, Vec<String>)> {
     let url = format!(
-        "{}/api/v1/projects/{}/env?include_unprotected_values=true",
-        backend_url, project
+        "{}/api/v1/projects/{}/env/preview?deployment_group={}",
+        backend_url, project, deployment_group
     );
 
     let response = http_client
@@ -111,7 +85,7 @@ pub async fn fetch_env_vars_with_secret_list(
         .header("Authorization", format!("Bearer {}", token))
         .send()
         .await
-        .context("Failed to fetch environment variables")?;
+        .context("Failed to fetch preview environment variables")?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -120,7 +94,7 @@ pub async fn fetch_env_vars_with_secret_list(
             .await
             .unwrap_or_else(|_| "Unknown error".to_string());
         anyhow::bail!(
-            "Failed to fetch environment variables (status {}): {}",
+            "Failed to fetch preview environment variables (status {}): {}",
             status,
             error_text
         );
@@ -129,28 +103,20 @@ pub async fn fetch_env_vars_with_secret_list(
     let env_response: EnvVarsResponse = response
         .json()
         .await
-        .context("Failed to parse environment variables response")?;
+        .context("Failed to parse preview environment variables response")?;
 
-    let mut non_secret_vars = Vec::new();
-    let mut unprotected_secrets = Vec::new();
+    let mut loadable_vars = Vec::new();
     let mut protected_keys = Vec::new();
 
     for var in env_response.env_vars {
-        if var.is_secret {
-            if !var.is_protected {
-                // Unprotected secret with decrypted value
-                unprotected_secrets.push((var.key, var.value));
-            } else {
-                // Protected secret (value is masked)
-                protected_keys.push(var.key);
-            }
+        if var.is_protected {
+            protected_keys.push(var.key);
         } else {
-            // Non-secret variable
-            non_secret_vars.push((var.key, var.value));
+            loadable_vars.push((var.key, var.value));
         }
     }
 
-    Ok((non_secret_vars, unprotected_secrets, protected_keys))
+    Ok((loadable_vars, protected_keys))
 }
 
 /// Set an environment variable for a project

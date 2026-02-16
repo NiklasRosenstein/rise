@@ -1,9 +1,9 @@
 use crate::db::{
-    self, deployments as db_deployments, env_vars as db_env_vars, extensions as db_extensions,
-    postgres_admin, projects as db_projects,
+    self, deployments as db_deployments, extensions as db_extensions, postgres_admin,
+    projects as db_projects,
 };
 use crate::server::encryption::EncryptionProvider;
-use crate::server::extensions::Extension;
+use crate::server::extensions::{Extension, InjectedEnvVar, InjectedEnvVarValue};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use aws_sdk_rds::Client as RdsClient;
@@ -1159,6 +1159,85 @@ impl AwsRdsProvisioner {
             .collect()
     }
 
+    /// Build InjectedEnvVar list from database credentials.
+    /// Shared by both `before_deployment` and `preview_env_vars`.
+    async fn build_injected_env_vars(
+        &self,
+        spec: &AwsRdsSpec,
+        endpoint: &str,
+        database_name: &str,
+        db_username: &str,
+        db_password: &str,
+    ) -> Result<Vec<InjectedEnvVar>> {
+        // Parse endpoint to extract host and port
+        let (host, port) = if let Some(colon_pos) = endpoint.rfind(':') {
+            let h = &endpoint[..colon_pos];
+            let p = &endpoint[colon_pos + 1..];
+            (h.to_string(), p.to_string())
+        } else {
+            (endpoint.to_string(), "5432".to_string())
+        };
+
+        let mut result = Vec::new();
+
+        // Inject database URL environment variable if requested
+        if let Some(ref env_var_name) = spec.database_url_env_var {
+            if !env_var_name.is_empty() {
+                let database_url = format!(
+                    "postgres://{}:{}@{}/{}",
+                    db_username, db_password, endpoint, database_name
+                );
+
+                let encrypted_database_url = self
+                    .encryption_provider
+                    .encrypt(&database_url)
+                    .await
+                    .context(format!("Failed to encrypt {}", env_var_name))?;
+
+                result.push(InjectedEnvVar {
+                    key: env_var_name.clone(),
+                    value: InjectedEnvVarValue::Protected {
+                        decrypted: database_url,
+                        encrypted: encrypted_database_url,
+                    },
+                });
+            }
+        }
+
+        // Inject PG* environment variables if requested
+        if spec.inject_pg_vars {
+            // Non-secret connection parameters use Plain variant
+            for (key, value) in [
+                ("PGHOST", host.as_str()),
+                ("PGPORT", port.as_str()),
+                ("PGDATABASE", database_name),
+                ("PGUSER", db_username),
+            ] {
+                result.push(InjectedEnvVar {
+                    key: key.to_string(),
+                    value: InjectedEnvVarValue::Plain(value.to_string()),
+                });
+            }
+
+            // Only the password is a protected secret
+            let encrypted_password = self
+                .encryption_provider
+                .encrypt(db_password)
+                .await
+                .context("Failed to encrypt password")?;
+
+            result.push(InjectedEnvVar {
+                key: "PGPASSWORD".to_string(),
+                value: InjectedEnvVarValue::Protected {
+                    decrypted: db_password.to_string(),
+                    encrypted: encrypted_password,
+                },
+            });
+        }
+
+        Ok(result)
+    }
+
     /// Compute expected database name for a deployment group
     ///
     /// This uses the same logic as before_deployment() to determine database names,
@@ -1353,10 +1432,9 @@ impl Extension for AwsRdsProvisioner {
 
     async fn before_deployment(
         &self,
-        deployment_id: Uuid,
         project_id: Uuid,
         deployment_group: &str,
-    ) -> Result<()> {
+    ) -> Result<Vec<InjectedEnvVar>> {
         // Find all extensions of this type for this project
         let extensions =
             db_extensions::list_by_extension_type(&self.db_pool, self.extension_type())
@@ -1372,7 +1450,7 @@ impl Extension for AwsRdsProvisioner {
                 self.extension_type(),
                 project_id
             );
-            return Ok(());
+            return Ok(vec![]);
         }
 
         // For RDS, we expect at most one instance per project
@@ -1630,90 +1708,28 @@ impl Extension for AwsRdsProvisioner {
             (username, password)
         };
 
-        // Parse endpoint to extract host and port
-        // RDS endpoints are in format: instance-id.region.rds.amazonaws.com:5432
-        let (host, port) = if let Some(colon_pos) = endpoint.rfind(':') {
-            let host = &endpoint[..colon_pos];
-            let port = &endpoint[colon_pos + 1..];
-            (host.to_string(), port.to_string())
-        } else {
-            (endpoint.clone(), "5432".to_string())
-        };
+        // Build the InjectedEnvVar results
+        let result = self
+            .build_injected_env_vars(&spec, endpoint, &database_name, &db_username, &db_password)
+            .await?;
 
-        // Encrypt sensitive values before storing
-        let encrypted_password = self
-            .encryption_provider
-            .encrypt(&db_password)
-            .await
-            .context("Failed to encrypt password")?;
-
-        let mut injected_vars = Vec::new();
-
-        // Inject database URL environment variable if requested
-        if let Some(ref env_var_name) = spec.database_url_env_var {
-            if !env_var_name.is_empty() {
-                let database_url = format!(
-                    "postgres://{}:{}@{}/{}",
-                    db_username, db_password, endpoint, database_name
-                );
-
-                let encrypted_database_url = self
-                    .encryption_provider
-                    .encrypt(&database_url)
-                    .await
-                    .context(format!("Failed to encrypt {}", env_var_name))?;
-
-                db_env_vars::upsert_deployment_env_var(
-                    &self.db_pool,
-                    deployment_id,
-                    env_var_name,
-                    &encrypted_database_url,
-                    true, // is_secret
-                    true, // is_protected (system-generated secrets are protected by default)
-                )
-                .await
-                .context(format!(
-                    "Failed to write {} to deployment_env_vars",
-                    env_var_name
-                ))?;
-
-                injected_vars.push(env_var_name.as_str());
-            }
-        }
-
-        // Inject PG* environment variables if requested
-        // These are recognized by psql and most PostgreSQL client libraries
-        if spec.inject_pg_vars {
-            let env_vars = vec![
-                ("PGHOST", host.as_str(), false),
-                ("PGPORT", port.as_str(), false),
-                ("PGDATABASE", database_name.as_str(), false),
-                ("PGUSER", db_username.as_str(), false),
-                ("PGPASSWORD", encrypted_password.as_str(), true),
-            ];
-
-            for (key, value, is_secret) in env_vars {
-                db_env_vars::upsert_deployment_env_var(
-                    &self.db_pool,
-                    deployment_id,
-                    key,
-                    value,
-                    is_secret,
-                    true, // is_protected (system-generated secrets are protected by default)
-                )
-                .await
-                .with_context(|| format!("Failed to write {} to deployment_env_vars", key))?;
-
-                injected_vars.push(key);
-            }
-        }
-
+        let var_keys: Vec<&str> = result.iter().map(|v| v.key.as_str()).collect();
         info!(
-            "Injected env vars for deployment {} (group: {}, database: {}): {:?}",
-            deployment_id, deployment_group, database_name, injected_vars
+            "Prepared env vars for project {} (group: {}, database: {}): {:?}",
+            project.name, deployment_group, database_name, var_keys
         );
 
-        Ok(())
+        Ok(result)
+    }
+
+    async fn preview_env_vars(
+        &self,
+        _project_id: Uuid,
+        _deployment_group: &str,
+    ) -> Result<Vec<InjectedEnvVar>> {
+        // RDS credentials are protected secrets that should not be used in local development.
+        // They are provisioned automatically during deployment via before_deployment().
+        Ok(vec![])
     }
 
     fn format_status(&self, status: &Value) -> String {

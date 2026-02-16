@@ -138,78 +138,6 @@ async function verifyRiseJwt(req: Request, res: Response, next: NextFunction) {
 
 Install: `npm install jose cookie-parser`
 
-### Example: Python/Flask
-
-Using `joserfc` which handles JWKS fetching and JWT validation:
-
-```python
-from typing import TypedDict, Optional
-from joserfc import jwt
-from joserfc.jwk import JWKRegistry
-import requests
-from flask import request, jsonify, g
-import os
-
-class RiseClaims(TypedDict):
-    sub: str
-    email: str
-    name: Optional[str]
-    groups: list[str]
-    iat: int
-    exp: int
-    iss: str
-    aud: str
-
-class UserInfo(TypedDict):
-    id: str
-    email: str
-    name: Optional[str]
-    groups: list[str]
-
-RISE_ISSUER = os.environ.get('RISE_ISSUER', 'http://rise.local:3000')
-RISE_APP_URL = os.environ.get('RISE_APP_URL')
-
-# Fetch JWKS once at startup (or cache with TTL)
-def get_jwks_registry():
-    config_url = f'{RISE_ISSUER}/.well-known/openid-configuration'
-    config = requests.get(config_url).json()
-    jwks = requests.get(config['jwks_uri']).json()
-    return JWKRegistry.import_key_set(jwks)
-
-jwks_registry = get_jwks_registry()
-
-@app.before_request
-def authenticate():
-    """Middleware to authenticate requests using Rise JWT"""
-    token = request.cookies.get('rise_jwt')
-
-    if not token:
-        return jsonify({'error': 'No authentication token'}), 401
-
-    try:
-        # Verify and decode JWT (including issuer and audience validation)
-        claims: RiseClaims = jwt.decode(
-            token,
-            jwks_registry,
-            claims_options={
-                "iss": {"value": RISE_ISSUER},
-                "aud": {"value": RISE_APP_URL},
-            },
-        )
-
-        user_info: UserInfo = {
-            'id': claims['sub'],
-            'email': claims['email'],
-            'name': claims.get('name'),
-            'groups': claims.get('groups', [])
-        }
-        g.user = user_info
-    except Exception as e:
-        return jsonify({'error': 'Invalid token'}), 401
-```
-
-Install: `pip install joserfc requests`
-
 ## Authorization Based on Groups
 
 You can use the `groups` claim to implement team-based authorization:
@@ -276,6 +204,8 @@ app.get('/admin', requireTeam('admin'), (req: Request, res: Response) => {
 
 ## Additional Resources
 
-- [JWT.io](https://jwt.io/) - JWT debugger and documentation
-- [JWKS Specification](https://datatracker.ietf.org/doc/html/rfc7517) - JSON Web Key Set standard
-- [RS256 vs HS256](https://stackoverflow.com/questions/39239051/rs256-vs-hs256-whats-the-difference) - Understanding signature algorithms
+- [Authentication](authentication.md) — user login, service accounts, app users
+- [OAuth Extensions](oauth.md) — OAuth proxy for third-party providers
+- [Environment Variables](environment-variables.md) — auto-injected variables reference
+- [JWT.io](https://jwt.io/) — JWT debugger and documentation
+- [JWKS Specification](https://datatracker.ietf.org/doc/html/rfc7517) — JSON Web Key Set standard

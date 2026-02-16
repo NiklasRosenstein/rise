@@ -338,7 +338,7 @@ export function App() {
     useEffect(() => {
         async function loadDocsSummary() {
             try {
-                const response = await fetch('/static/docs/SUMMARY.md');
+                const response = await fetch('/static/docs/FRONTEND_DOCS.md');
                 if (!response.ok) return;
                 const summary = await response.text();
                 setDocsItems(parseDocsSummary(summary));
@@ -488,14 +488,32 @@ export function App() {
             : view === 'teams'
             ? [{ label: 'Teams' }]
             : view === 'docs'
-            ? [
-                  { label: 'Docs', href: defaultDocSlug ? `/docs/${defaultDocSlug}` : '/docs' },
-                  ...(params.docSlug
-                      ? [{ label: docsItems.find((item) => item.slug === params.docSlug)?.title || titleFromSlug(params.docSlug) }]
-                      : defaultDocSlug
-                      ? [{ label: docsItems.find((item) => item.slug === defaultDocSlug)?.title || titleFromSlug(defaultDocSlug) }]
-                      : []),
-              ]
+            ? (() => {
+                  const slug = params.docSlug || defaultDocSlug || '';
+                  const crumbs = [{ label: 'Docs', href: defaultDocSlug ? `/docs/${defaultDocSlug}` : '/docs' }];
+                  if (slug) {
+                      const idx = docsItems.findIndex((item) => item.slug === slug);
+                      if (idx >= 0) {
+                          const item = docsItems[idx];
+                          // Walk backward to collect ancestors at each shallower depth
+                          const ancestors = [];
+                          let targetDepth = (item.depth || 0) - 1;
+                          for (let i = idx - 1; i >= 0 && targetDepth >= 0; i--) {
+                              if ((docsItems[i].depth || 0) === targetDepth) {
+                                  ancestors.unshift(docsItems[i]);
+                                  targetDepth--;
+                              }
+                          }
+                          for (const anc of ancestors) {
+                              crumbs.push({ label: anc.title, href: `/docs/${anc.slug}` });
+                          }
+                          crumbs.push({ label: item.title });
+                      } else {
+                          crumbs.push({ label: titleFromSlug(slug) });
+                      }
+                  }
+                  return crumbs;
+              })()
             : view === 'project-detail'
             ? [
                   { label: 'Projects', href: '/projects' },

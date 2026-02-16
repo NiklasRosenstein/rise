@@ -3,7 +3,7 @@ use crate::server::encryption::EncryptionProvider;
 use crate::server::extensions::providers::oauth::models::{
     OAuthExtensionSpec, OAuthExtensionStatus, TokenResponse,
 };
-use crate::server::extensions::Extension;
+use crate::server::extensions::{Extension, InjectedEnvVar, InjectedEnvVarValue};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
 use serde_json::{json, Value};
@@ -483,10 +483,9 @@ impl Extension for OAuthProvider {
 
     async fn before_deployment(
         &self,
-        deployment_id: Uuid,
         project_id: Uuid,
         _deployment_group: &str,
-    ) -> Result<()> {
+    ) -> Result<Vec<InjectedEnvVar>> {
         use crate::db::{extensions as db_extensions, projects as db_projects};
 
         // Find all OAuth extensions for this project
@@ -501,7 +500,7 @@ impl Extension for OAuthProvider {
                 "No OAuth extensions found for project {}, skipping before_deployment hook",
                 project_id
             );
-            return Ok(());
+            return Ok(vec![]);
         }
 
         // Get project info
@@ -509,7 +508,9 @@ impl Extension for OAuthProvider {
             .await?
             .ok_or_else(|| anyhow!("Project not found"))?;
 
-        // Inject env vars for each OAuth extension
+        let mut result = Vec::new();
+
+        // Build env vars for each OAuth extension
         for ext in extensions {
             // Parse status to get credentials
             let status: OAuthExtensionStatus =
@@ -542,68 +543,43 @@ impl Extension for OAuthProvider {
                 ext.extension
             );
 
-            // Inject CLIENT_ID (plaintext)
-            db_env_vars::upsert_deployment_env_var(
-                &self.db_pool,
-                deployment_id,
-                &client_id_key,
-                rise_client_id,
-                false, // not secret - client ID is public
-                false, // not protected - managed by extension
-            )
-            .await
-            .context(format!(
-                "Failed to inject {} for deployment {}",
-                client_id_key, deployment_id
-            ))?;
+            // CLIENT_ID (plaintext)
+            result.push(InjectedEnvVar {
+                key: client_id_key.clone(),
+                value: InjectedEnvVarValue::Plain(rise_client_id.clone()),
+            });
 
-            // Inject CLIENT_SECRET (encrypted secret, unprotected)
-            // Encrypt the client secret for deployment storage
+            // CLIENT_SECRET (encrypted secret, unprotected — safe for local dev)
             let encrypted_client_secret = self
                 .encryption_provider
                 .encrypt(rise_client_secret)
                 .await
                 .context(format!(
-                    "Failed to encrypt {} for deployment {}",
-                    client_secret_key, deployment_id
+                    "Failed to encrypt {} for project {}",
+                    client_secret_key, project.name
                 ))?;
 
-            db_env_vars::upsert_deployment_env_var(
-                &self.db_pool,
-                deployment_id,
-                &client_secret_key,
-                &encrypted_client_secret,
-                true,  // is_secret - encrypted, hidden from API
-                false, // is_protected false - users can modify/delete if needed
-            )
-            .await
-            .context(format!(
-                "Failed to inject {} for deployment {}",
-                client_secret_key, deployment_id
-            ))?;
+            result.push(InjectedEnvVar {
+                key: client_secret_key.clone(),
+                value: InjectedEnvVarValue::Secret {
+                    decrypted: rise_client_secret.clone(),
+                    encrypted: encrypted_client_secret,
+                },
+            });
 
-            // Inject ISSUER (plaintext)
-            db_env_vars::upsert_deployment_env_var(
-                &self.db_pool,
-                deployment_id,
-                &issuer_key,
-                &rise_issuer,
-                false, // not secret
-                false, // not protected - managed by extension
-            )
-            .await
-            .context(format!(
-                "Failed to inject {} for deployment {}",
-                issuer_key, deployment_id
-            ))?;
+            // ISSUER (plaintext)
+            result.push(InjectedEnvVar {
+                key: issuer_key.clone(),
+                value: InjectedEnvVarValue::Plain(rise_issuer),
+            });
 
             info!(
-                "Injected OAuth env vars for extension {} into deployment {} ({}, {}, {})",
-                ext.extension, deployment_id, client_id_key, client_secret_key, issuer_key
+                "Prepared OAuth env vars for extension {} ({}, {}, {})",
+                ext.extension, client_id_key, client_secret_key, issuer_key
             );
         }
 
-        Ok(())
+        Ok(result)
     }
 
     fn format_status(&self, status: &Value) -> String {
