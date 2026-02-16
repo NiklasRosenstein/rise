@@ -1148,6 +1148,44 @@ pub async fn get_active_deployments_for_project(
     Ok(deployments)
 }
 
+/// Find deployments stuck in pre-Pushed states (Pending, Building, Pushing)
+/// that were created before the given threshold timestamp
+#[cfg(feature = "backend")]
+pub async fn find_stuck_pre_pushed_before(
+    pool: &PgPool,
+    threshold: DateTime<Utc>,
+    limit: i64,
+) -> Result<Vec<Deployment>> {
+    let deployments = sqlx::query_as!(
+        Deployment,
+        r#"
+        SELECT
+            id, deployment_id, project_id, created_by_id,
+            status as "status: DeploymentStatus",
+            deployment_group, expires_at,
+            error_message, completed_at, build_logs,
+            controller_metadata as "controller_metadata: serde_json::Value",
+            image, image_digest, rolled_back_from_deployment_id,
+            http_port, needs_reconcile, is_active,
+            deploying_started_at,
+            termination_reason as "termination_reason: _",
+            created_at, updated_at
+        FROM deployments
+        WHERE status IN ('Pending', 'Building', 'Pushing')
+          AND created_at < $1
+          AND NOT is_protected(status)
+        LIMIT $2
+        "#,
+        threshold,
+        limit
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to find stuck pre-pushed deployments")?;
+
+    Ok(deployments)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1342,5 +1380,89 @@ mod tests {
                 status_str, result, expected
             );
         }
+    }
+
+    /// Test that deploying_started_at is set on first transition to Deploying and not overwritten
+    #[sqlx::test]
+    async fn deploying_started_at_set_once_on_deploying_transition(pool: PgPool) {
+        use uuid::Uuid;
+
+        // Create a test project and user
+        let project_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+
+        // Create user first
+        sqlx::query!(
+            "INSERT INTO users (id, email) VALUES ($1, $2)",
+            user_id,
+            "test@example.com"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Create project
+        sqlx::query!(
+            "INSERT INTO projects (id, name, owner_user_id, access_class, status) VALUES ($1, $2, $3, $4, $5)",
+            project_id,
+            "test-project",
+            user_id,
+            "public",
+            "Stopped"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        // Create deployment in Pending status
+        let deployment = create(
+            &pool,
+            CreateDeploymentParams {
+                deployment_id: "test-deploy",
+                project_id,
+                created_by_id: user_id,
+                status: DeploymentStatus::Pending,
+                image: None,
+                image_digest: None,
+                rolled_back_from_deployment_id: None,
+                deployment_group: "default",
+                expires_at: None,
+                http_port: 8080,
+                is_active: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        // Verify deploying_started_at is NULL initially
+        assert!(deployment.deploying_started_at.is_none());
+
+        // Transition to Deploying
+        let deployment = update_status(&pool, deployment.id, DeploymentStatus::Deploying)
+            .await
+            .unwrap();
+
+        // Verify deploying_started_at is now set
+        assert!(deployment.deploying_started_at.is_some());
+        let first_timestamp = deployment.deploying_started_at.unwrap();
+
+        // Wait a bit to ensure time has passed
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+        // Transition to Unhealthy (still in Deploying phase logically, but status changes)
+        let deployment = update_status(&pool, deployment.id, DeploymentStatus::Unhealthy)
+            .await
+            .unwrap();
+
+        // Verify deploying_started_at is unchanged
+        assert_eq!(deployment.deploying_started_at, Some(first_timestamp));
+
+        // Transition back to Deploying (e.g., if retrying)
+        let deployment = update_status(&pool, deployment.id, DeploymentStatus::Deploying)
+            .await
+            .unwrap();
+
+        // Verify deploying_started_at is still unchanged (not overwritten)
+        assert_eq!(deployment.deploying_started_at, Some(first_timestamp));
     }
 }

@@ -794,26 +794,11 @@ impl DeploymentController {
         // Find deployments stuck in pre-Pushed states for >10 minutes
         let timeout_threshold = Utc::now() - chrono::Duration::minutes(10);
 
-        let stuck_deployments = sqlx::query_as!(
-            Deployment,
-            r#"
-            SELECT id, deployment_id, project_id, created_by_id,
-                   status as "status: DeploymentStatus",
-                   deployment_group, expires_at, error_message, completed_at,
-                   build_logs, controller_metadata,
-                   image, image_digest, rolled_back_from_deployment_id, http_port, needs_reconcile, is_active,
-                   deploying_started_at,
-                   created_at, updated_at,
-                   termination_reason as "termination_reason: _"
-            FROM deployments
-            WHERE status IN ('Pending', 'Building', 'Pushing')
-              AND created_at < $1
-              AND NOT is_protected(status)
-            LIMIT 50
-            "#,
-            timeout_threshold
+        let stuck_deployments = db_deployments::find_stuck_pre_pushed_before(
+            &self.state.db_pool,
+            timeout_threshold,
+            50,
         )
-        .fetch_all(&self.state.db_pool)
         .await?;
 
         for deployment in stuck_deployments {
