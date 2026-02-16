@@ -13,8 +13,7 @@ server:
   docs_dir: "docs" # Serve docs from repo's docs/ directory
 
 database:
-  # DATABASE_URL environment variable is always used if set
-  url: "${DATABASE_URLA:-foobar}"
+  url: "${DATABASE_URL}"
 
 encryption:
   type: "aes-gcm-256"

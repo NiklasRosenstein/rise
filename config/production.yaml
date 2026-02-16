@@ -6,7 +6,7 @@
 
 server:
   host: "0.0.0.0"
-  port: "${PORT:-3000}"
+  port: 3000
   public_url: "${PUBLIC_URL}"
   cookie_domain: "${COOKIE_DOMAIN:-}"
   cookie_secure: true
@@ -14,12 +14,10 @@ server:
   jwt_claims: ["sub", "email", "name"]
 
 database:
-  # DATABASE_URL is always read directly when set.
-  # This fallback keeps config self-contained for local validation.
-  url: "${DATABASE_URL:-postgres://rise:rise123@postgres:5432/rise}"
+  url: "${DATABASE_URL}"
 
 auth:
-  issuer: "${DEX_ISSUER}"
+  issuer: "${OIDC_ISSUER:-${PUBLIC_URL}/dex}"
   client_id: "${OIDC_CLIENT_ID:-rise-backend}"
   client_secret: "${OIDC_CLIENT_SECRET}"
   admin_users:
