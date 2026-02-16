@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET\n            status = 'Unhealthy',\n            error_message = $2,\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n                        deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n          AND deployment_group = $2\n          AND status = 'Healthy'\n        ORDER BY created_at DESC\n        LIMIT 1\n        ",
   "describe": {
     "columns": [
       {
@@ -108,11 +108,16 @@
       },
       {
         "ordinal": 18,
-        "name": "created_at",
+        "name": "deploying_started_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -142,9 +147,10 @@
       false,
       false,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "c206bd4801f57e290f52e1b4bc1773fbccc5ba8796b1ae5c16f319e8ef36405d"
+  "hash": "b96b686763d9c9ff00ae1af78d46df690a35d64c155e7c8fb962b55ac8c56a7d"
 }

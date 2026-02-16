@@ -312,27 +312,31 @@ impl DeploymentController {
 
         // Check for deployment timeout (5 minutes in Deploying state)
         if deployment.status == DeploymentStatus::Deploying {
-            let elapsed = Utc::now().signed_duration_since(deployment.created_at);
-            let timeout_duration = chrono::Duration::minutes(5);
+            // Only check timeout if deploying_started_at is set
+            // Deployments without this timestamp (created before this feature) won't be timed out
+            if let Some(deploying_started_at) = deployment.deploying_started_at {
+                let elapsed = Utc::now().signed_duration_since(deploying_started_at);
+                let timeout_duration = chrono::Duration::minutes(5);
 
-            if elapsed > timeout_duration {
-                warn!(
-                    "Deployment {} timed out after {} seconds in Deploying state, marking as Terminating",
-                    deployment.deployment_id, elapsed.num_seconds()
-                );
+                if elapsed > timeout_duration {
+                    warn!(
+                        "Deployment {} timed out after {} seconds in Deploying state, marking as Terminating",
+                        deployment.deployment_id, elapsed.num_seconds()
+                    );
 
-                db_deployments::mark_terminating(
-                    &self.state.db_pool,
-                    deployment.id,
-                    crate::db::models::TerminationReason::Failed,
-                )
-                .await?;
-
-                // Update project status after marking deployment as terminating
-                projects::update_calculated_status(&self.state.db_pool, deployment.project_id)
+                    db_deployments::mark_terminating(
+                        &self.state.db_pool,
+                        deployment.id,
+                        crate::db::models::TerminationReason::Failed,
+                    )
                     .await?;
 
-                return Ok(());
+                    // Update project status after marking deployment as terminating
+                    projects::update_calculated_status(&self.state.db_pool, deployment.project_id)
+                        .await?;
+
+                    return Ok(());
+                }
             }
         }
 
@@ -798,6 +802,7 @@ impl DeploymentController {
                    deployment_group, expires_at, error_message, completed_at,
                    build_logs, controller_metadata,
                    image, image_digest, rolled_back_from_deployment_id, http_port, needs_reconcile, is_active,
+                   deploying_started_at,
                    created_at, updated_at,
                    termination_reason as "termination_reason: _"
             FROM deployments

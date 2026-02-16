@@ -4410,6 +4410,7 @@ mod tests {
             http_port: 8080,
             needs_reconcile: false,
             is_active: false,
+            deploying_started_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -4480,6 +4481,7 @@ mod tests {
             http_port: 8080,
             needs_reconcile: false,
             is_active: false,
+            deploying_started_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -4532,6 +4534,7 @@ mod tests {
             http_port: 8080,
             needs_reconcile: false,
             is_active: false,
+            deploying_started_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -4615,6 +4618,7 @@ mod tests {
             http_port: 8080,
             needs_reconcile: false,
             is_active: false,
+            deploying_started_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -4718,6 +4722,7 @@ mod tests {
             http_port: 8080,
             needs_reconcile: false,
             is_active: false,
+            deploying_started_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };

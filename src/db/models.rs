@@ -128,6 +128,7 @@ pub struct Deployment {
     pub http_port: i32,
     pub needs_reconcile: bool,
     pub is_active: bool,
+    pub deploying_started_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

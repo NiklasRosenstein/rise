@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n                        deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n          AND deployment_group = $2\n          AND status = 'Healthy'\n        ORDER BY created_at DESC\n        LIMIT 1\n        ",
+  "query": "\n        UPDATE deployments\n        SET\n            status = 'Superseded',\n            termination_reason = 'Superseded',\n            controller_metadata = '{}',\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -108,19 +108,23 @@
       },
       {
         "ordinal": 18,
-        "name": "created_at",
+        "name": "deploying_started_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 19,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 20,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -142,9 +146,10 @@
       false,
       false,
       false,
+      true,
       false,
       false
     ]
   },
-  "hash": "646231a398183a1cbff495afc28c3ceeeb2b79e7dc2b2441a2b555bb4ca93157"
+  "hash": "1778867848593fe193bacb6e9b2e16c0846695cf2ffe360467d786920cc252dc"
 }

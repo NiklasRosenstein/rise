@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET\n            status = 'Cancelling',\n            termination_reason = 'Cancelled',\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE status = $1\n        ORDER BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -40,6 +40,61 @@
       },
       {
         "ordinal": 7,
+        "name": "completed_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "error_message",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 9,
+        "name": "build_logs",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 10,
+        "name": "controller_metadata: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 11,
+        "name": "image",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 12,
+        "name": "image_digest",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 13,
+        "name": "rolled_back_from_deployment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 14,
+        "name": "http_port",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 15,
+        "name": "needs_reconcile",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 16,
+        "name": "is_active",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 17,
+        "name": "deploying_started_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 18,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -57,69 +112,19 @@
         }
       },
       {
-        "ordinal": 8,
-        "name": "completed_at",
-        "type_info": "Timestamptz"
-      },
-      {
-        "ordinal": 9,
-        "name": "error_message",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 10,
-        "name": "build_logs",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 11,
-        "name": "controller_metadata: serde_json::Value",
-        "type_info": "Jsonb"
-      },
-      {
-        "ordinal": 12,
-        "name": "image",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 13,
-        "name": "image_digest",
-        "type_info": "Text"
-      },
-      {
-        "ordinal": 14,
-        "name": "rolled_back_from_deployment_id",
-        "type_info": "Uuid"
-      },
-      {
-        "ordinal": 15,
-        "name": "http_port",
-        "type_info": "Int4"
-      },
-      {
-        "ordinal": 16,
-        "name": "needs_reconcile",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 17,
-        "name": "is_active",
-        "type_info": "Bool"
-      },
-      {
-        "ordinal": 18,
+        "ordinal": 19,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "Text"
       ]
     },
     "nullable": [
@@ -137,13 +142,14 @@
       true,
       true,
       true,
+      false,
+      false,
+      false,
       true,
-      false,
-      false,
-      false,
+      true,
       false,
       false
     ]
   },
-  "hash": "c862c2e266e341d5d5a0ceb1b78bc6af36de166dfa4308923bd1c84958b606ee"
+  "hash": "3050384c3c97d46ae37496ce39bf016629c7f91658dfbc85e4c0945cc1f1b2f5"
 }
