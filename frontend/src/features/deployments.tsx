@@ -986,7 +986,53 @@ function buildDeploymentTimeline(deployment: any) {
     });
 }
 
-function PodInfoRow({ pod }) {
+// TypeScript interfaces matching Rust backend structs
+interface PodEvent {
+    type: string;
+    reason: string;
+    message: string;
+    count: number;
+    last_timestamp: string;
+}
+
+interface ContainerState {
+    state_type: 'waiting' | 'running' | 'terminated';
+    reason?: string;
+    message?: string;
+    exit_code?: number;
+}
+
+interface ContainerStatusInfo {
+    name: string;
+    ready: boolean;
+    restart_count: number;
+    state?: ContainerState;
+}
+
+interface PodCondition {
+    type: string;
+    status: string;
+    reason?: string;
+    message?: string;
+}
+
+interface PodInfo {
+    name: string;
+    phase: 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown';
+    conditions: PodCondition[];
+    containers: ContainerStatusInfo[];
+    events: PodEvent[];
+}
+
+interface PodStatus {
+    desired_replicas: number;
+    ready_replicas: number;
+    current_replicas: number;
+    pods: PodInfo[];
+    last_checked: string;
+}
+
+function PodInfoRow({ pod }: { pod: PodInfo }) {
     const [expanded, setExpanded] = useState(false);
 
     // Check if pod has issues
@@ -1136,15 +1182,23 @@ function PodInfoRow({ pod }) {
     );
 }
 
-function PodStatusSection({ podStatus }) {
-    const hasIssues = podStatus.ready_replicas < podStatus.desired_replicas ||
-                      (podStatus.pods && podStatus.pods.some(p => p.events && p.events.length > 0));
+function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
+    const replicasMismatch = podStatus.ready_replicas < podStatus.desired_replicas;
+    const hasPodIssues =
+        podStatus.pods &&
+        podStatus.pods.some(
+            (p) =>
+                (p.containers && p.containers.some(c => c.restart_count > 0)) ||
+                (p.events && p.events.length > 0)
+        );
 
-    // Determine tone
+    const hasIssues = replicasMismatch || hasPodIssues;
+
+    // Determine tone based on replica counts and pod-level issues
     let tone = 'ok';
     if (podStatus.ready_replicas === 0) {
         tone = 'bad';
-    } else if (podStatus.ready_replicas < podStatus.desired_replicas) {
+    } else if (replicasMismatch || hasPodIssues) {
         tone = 'warn';
     }
 

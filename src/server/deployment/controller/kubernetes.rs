@@ -46,6 +46,32 @@ const IMAGE_PULL_SECRET_NAME: &str = "rise-registry-creds";
 /// Added when a namespace is created for a project, removed when namespace cleanup is complete.
 pub const KUBERNETES_NAMESPACE_FINALIZER: &str = "kubernetes.rise.dev/namespace";
 
+/// Container waiting state reasons that indicate irrecoverable errors
+/// These errors require user intervention and won't resolve automatically
+const IRRECOVERABLE_CONTAINER_REASONS: &[&str] = &[
+    "InvalidImageName",
+    "ErrImagePull",
+    "ImagePullBackOff",
+    "ImageInspectError",
+    "CrashLoopBackOff",
+    "CreateContainerConfigError",
+    "CreateContainerError",
+    "RunContainerError",
+];
+
+/// Critical event reasons that indicate deployment should fail
+/// These are specific event reasons that won't resolve without user intervention
+const CRITICAL_EVENT_REASONS: &[&str] = &[
+    "FailedCreate",
+    "FailedKillPod",
+    "FailedPostStartHook",
+    "FailedPreStopHook",
+];
+
+/// Minimum event count to consider a Warning event as critical
+/// This helps filter out transient warnings (e.g., FailedScheduling)
+const MIN_EVENT_COUNT_FOR_CRITICAL: i32 = 3;
+
 /// Kubernetes-specific metadata stored in deployment.controller_metadata
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct KubernetesMetadata {
@@ -1052,17 +1078,9 @@ impl KubernetesController {
                         {
                             let reason = waiting.reason.as_deref().unwrap_or("");
 
-                            // Check for irrecoverable errors
-                            let is_irrecoverable = matches!(
-                                reason,
-                                "InvalidImageName"
-                                    | "ErrImagePull"
-                                    | "ImageInspectError"
-                                    | "CrashLoopBackOff"
-                                    | "CreateContainerConfigError"
-                                    | "CreateContainerError"
-                                    | "RunContainerError"
-                            );
+                            // Check for irrecoverable errors using shared constant
+                            let is_irrecoverable =
+                                IRRECOVERABLE_CONTAINER_REASONS.contains(&reason);
 
                             if is_irrecoverable {
                                 let message = waiting.message.as_deref().unwrap_or(reason);
@@ -1125,18 +1143,9 @@ impl KubernetesController {
                 if let Some(state) = &container.state {
                     if state.state_type == "waiting" {
                         if let Some(reason) = &state.reason {
-                            // Check for irrecoverable errors
-                            let is_irrecoverable = matches!(
-                                reason.as_str(),
-                                "InvalidImageName"
-                                    | "ErrImagePull"
-                                    | "ImagePullBackOff"
-                                    | "ImageInspectError"
-                                    | "CrashLoopBackOff"
-                                    | "CreateContainerConfigError"
-                                    | "CreateContainerError"
-                                    | "RunContainerError"
-                            );
+                            // Check for irrecoverable errors using shared constant
+                            let is_irrecoverable =
+                                IRRECOVERABLE_CONTAINER_REASONS.contains(&reason.as_str());
 
                             if is_irrecoverable {
                                 let message = state
@@ -1166,12 +1175,19 @@ impl KubernetesController {
 
             // Check for critical events
             for event in &pod.events {
-                if event.type_ == "Error" || event.type_ == "Warning" {
-                    // Look for security policy violations and other critical errors
-                    if event.reason.contains("Failed")
-                        || event.reason.contains("Error")
-                        || event.reason.contains("BackOff")
-                    {
+                // Error events are always critical
+                if event.type_ == "Error" {
+                    return Some(format!("{}: {}", event.reason, event.message));
+                }
+
+                // Warning events are only critical if they're specific known issues
+                // or repeated multiple times (to filter out transient warnings)
+                if event.type_ == "Warning" {
+                    let is_critical_reason =
+                        CRITICAL_EVENT_REASONS.contains(&event.reason.as_str());
+                    let is_repeated = event.count >= MIN_EVENT_COUNT_FOR_CRITICAL;
+
+                    if is_critical_reason || is_repeated {
                         return Some(format!("{}: {}", event.reason, event.message));
                     }
                 }
@@ -2474,29 +2490,29 @@ impl KubernetesController {
         let (cpu_request, memory_request, memory_limit) =
             if let Some(ref config) = self.pod_resources {
                 (
-                    &config.cpu_request,
-                    &config.memory_request,
-                    &config.memory_limit,
+                    config.cpu_request.clone(),
+                    config.memory_request.clone(),
+                    config.memory_limit.clone(),
                 )
             } else {
                 // Use default values
                 (
-                    &"10m".to_string(),
-                    &"64Mi".to_string(),
-                    &"512Mi".to_string(),
+                    String::from("10m"),
+                    String::from("64Mi"),
+                    String::from("512Mi"),
                 )
             };
 
         Some(ResourceRequirements {
             requests: Some({
                 let mut map = BTreeMap::new();
-                map.insert("cpu".to_string(), Quantity(cpu_request.clone()));
-                map.insert("memory".to_string(), Quantity(memory_request.clone()));
+                map.insert("cpu".to_string(), Quantity(cpu_request));
+                map.insert("memory".to_string(), Quantity(memory_request));
                 map
             }),
             limits: Some({
                 let mut map = BTreeMap::new();
-                map.insert("memory".to_string(), Quantity(memory_limit.clone()));
+                map.insert("memory".to_string(), Quantity(memory_limit));
                 // No CPU limit - avoid throttling
                 map
             }),
@@ -2530,9 +2546,20 @@ impl KubernetesController {
             return None;
         }
 
+        // Validate and normalize probe path
+        let path = if config.path.is_empty() || !config.path.starts_with('/') {
+            warn!(
+                "Invalid health probe path '{}', using default '/'",
+                config.path
+            );
+            "/".to_string()
+        } else {
+            config.path.clone()
+        };
+
         Some(Probe {
             http_get: Some(HTTPGetAction {
-                path: Some(config.path.clone()),
+                path: Some(path),
                 port: k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(port),
                 scheme: Some("HTTP".to_string()),
                 ..Default::default()
