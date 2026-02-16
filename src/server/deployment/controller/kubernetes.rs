@@ -1,10 +1,11 @@
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec, ReplicaSet};
 use k8s_openapi::api::core::v1::{
-    Container, ContainerPort, HostAlias, LocalObjectReference, Namespace, PodSpec, PodTemplateSpec,
-    Secret, Service, ServicePort, ServiceSpec,
+    Capabilities, Container, ContainerPort, Event, HTTPGetAction, HostAlias, LocalObjectReference,
+    Namespace, PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ResourceRequirements,
+    SeccompProfile, Secret, SecurityContext, Service, ServicePort, ServiceSpec,
 };
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, IPBlock, Ingress, IngressBackend, IngressRule,
@@ -45,6 +46,51 @@ const IMAGE_PULL_SECRET_NAME: &str = "rise-registry-creds";
 /// Added when a namespace is created for a project, removed when namespace cleanup is complete.
 pub const KUBERNETES_NAMESPACE_FINALIZER: &str = "kubernetes.rise.dev/namespace";
 
+/// Container waiting state reasons that indicate irrecoverable errors
+/// These errors require user intervention and won't resolve automatically
+const IRRECOVERABLE_CONTAINER_REASONS: &[&str] = &[
+    "InvalidImageName",
+    "ErrImagePull",
+    "ImagePullBackOff",
+    "ImageInspectError",
+    "CrashLoopBackOff",
+    "CreateContainerConfigError",
+    "CreateContainerError",
+    "RunContainerError",
+];
+
+/// Critical event reasons that indicate deployment should fail
+/// These are specific event reasons that won't resolve without user intervention
+const CRITICAL_EVENT_REASONS: &[&str] = &[
+    "FailedCreate",
+    "FailedKillPod",
+    "FailedPostStartHook",
+    "FailedPreStopHook",
+];
+
+/// Minimum event count to consider a Warning event as critical
+/// This helps filter out transient warnings (e.g., FailedScheduling)
+const MIN_EVENT_COUNT_FOR_CRITICAL: i32 = 3;
+const MAX_EVENT_QUERY_LIMIT: u32 = 200;
+const MAX_EVENTS_PER_POD: usize = 5;
+const MAX_PODS_IN_STATUS: usize = 20;
+const MAX_CONDITIONS_PER_POD: usize = 10;
+const MAX_CONTAINERS_PER_POD: usize = 10;
+const MAX_POD_TEXT_CHARS: usize = 500;
+
+fn truncate_text(input: &str, max_chars: usize) -> String {
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    let mut truncated: String = input.chars().take(max_chars).collect();
+    truncated.push_str("...");
+    truncated
+}
+
+fn truncate_optional_text(input: Option<String>, max_chars: usize) -> Option<String> {
+    input.map(|text| truncate_text(&text, max_chars))
+}
+
 /// Kubernetes-specific metadata stored in deployment.controller_metadata
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct KubernetesMetadata {
@@ -59,6 +105,96 @@ struct KubernetesMetadata {
     reconcile_phase: ReconcilePhase,
     #[serde(alias = "previous_replicaset")]
     previous_deployment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none", default)]
+    pod_status: Option<PodStatus>,
+}
+
+/// Detailed Pod status information
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct PodStatus {
+    /// Desired number of pods (from Deployment spec)
+    desired_replicas: i32,
+    /// Current number of ready pods
+    ready_replicas: i32,
+    /// Current number of pods (any state)
+    current_replicas: i32,
+    /// Per-pod details
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    pods: Vec<PodInfo>,
+    /// Timestamp of last pod status check
+    last_checked: DateTime<Utc>,
+}
+
+/// Per-pod information
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct PodInfo {
+    name: String,
+    phase: PodPhase,
+    /// Pod conditions (Ready, ContainersReady, etc.)
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    conditions: Vec<PodCondition>,
+    /// Container statuses
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    containers: Vec<ContainerStatusInfo>,
+    /// Recent warning/error events
+    #[serde(skip_serializing_if = "Vec::is_empty", default)]
+    events: Vec<PodEvent>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+#[serde(rename_all = "PascalCase")]
+enum PodPhase {
+    Pending,
+    Running,
+    Succeeded,
+    Failed,
+    Unknown,
+}
+
+/// Pod condition (e.g., Ready, ContainersReady)
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct PodCondition {
+    #[serde(rename = "type")]
+    type_: String,
+    status: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+}
+
+/// Container status within a pod
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ContainerStatusInfo {
+    name: String,
+    ready: bool,
+    restart_count: i32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    state: Option<ContainerState>,
+}
+
+/// Container state (waiting, running, or terminated)
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct ContainerState {
+    /// "waiting", "running", or "terminated"
+    state_type: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    message: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    exit_code: Option<i32>,
+}
+
+/// Pod event (from Kubernetes events API)
+#[derive(Serialize, Deserialize, Clone, Debug)]
+struct PodEvent {
+    #[serde(rename = "type")]
+    type_: String,
+    reason: String,
+    message: String,
+    count: i32,
+    last_timestamp: DateTime<Utc>,
 }
 
 /// Reconciliation phases for Kubernetes deployments
@@ -128,6 +264,9 @@ pub struct KubernetesControllerConfig {
     pub ingress_controller_namespace: String,
     pub ingress_controller_labels: std::collections::HashMap<String, String>,
     pub network_policy_egress_allow_cidrs: Vec<String>,
+    pub pod_security_enabled: bool,
+    pub pod_resources: Option<crate::server::settings::PodResourceLimits>,
+    pub health_probes: Option<crate::server::settings::HealthProbeConfig>,
 }
 
 /// Kubernetes controller implementation
@@ -162,6 +301,16 @@ pub struct KubernetesController {
     ingress_controller_namespace: String,
     ingress_controller_labels: std::collections::HashMap<String, String>,
     network_policy_egress_allow_cidrs: Vec<String>,
+    pod_security_enabled: bool,
+    pod_resources: Option<crate::server::settings::PodResourceLimits>,
+    health_probes: Option<crate::server::settings::HealthProbeConfig>,
+}
+
+/// Helper enum for probe type
+#[derive(Debug, Clone, Copy)]
+enum ProbeType {
+    Liveness,
+    Readiness,
 }
 
 impl KubernetesController {
@@ -196,6 +345,9 @@ impl KubernetesController {
             ingress_controller_namespace: config.ingress_controller_namespace,
             ingress_controller_labels: config.ingress_controller_labels,
             network_policy_egress_allow_cidrs: config.network_policy_egress_allow_cidrs,
+            pod_security_enabled: config.pod_security_enabled,
+            pod_resources: config.pod_resources,
+            health_probes: config.health_probes,
         })
     }
 
@@ -918,7 +1070,8 @@ impl KubernetesController {
     async fn check_pod_errors(
         &self,
         namespace: &str,
-        deploy_name: &str,
+        _deploy_name: &str,
+        deployment_id: &str,
     ) -> Result<(bool, Option<String>)> {
         use k8s_openapi::api::core::v1::Pod;
 
@@ -926,10 +1079,10 @@ impl KubernetesController {
 
         // List pods owned by this Deployment
         let pods = pod_api
-            .list(&kube::api::ListParams::default().labels(&format!(
-                "rise.dev/deployment-id={}",
-                deploy_name.rsplit_once('-').map(|(_, id)| id).unwrap_or(deploy_name)
-            )))
+            .list(
+                &kube::api::ListParams::default()
+                    .labels(&format!("{}={}", LABEL_DEPLOYMENT_ID, deployment_id)),
+            )
             .await?;
 
         for pod in pods.items {
@@ -944,17 +1097,9 @@ impl KubernetesController {
                         {
                             let reason = waiting.reason.as_deref().unwrap_or("");
 
-                            // Check for irrecoverable errors
-                            let is_irrecoverable = matches!(
-                                reason,
-                                "InvalidImageName"
-                                    | "ErrImagePull"
-                                    | "ImageInspectError"
-                                    | "CrashLoopBackOff"
-                                    | "CreateContainerConfigError"
-                                    | "CreateContainerError"
-                                    | "RunContainerError"
-                            );
+                            // Check for irrecoverable errors using shared constant
+                            let is_irrecoverable =
+                                IRRECOVERABLE_CONTAINER_REASONS.contains(&reason);
 
                             if is_irrecoverable {
                                 let message = waiting.message.as_deref().unwrap_or(reason);
@@ -1007,6 +1152,290 @@ impl KubernetesController {
         }
 
         Ok((false, None))
+    }
+
+    /// Extract error message from pod status if there's an irrecoverable error
+    fn extract_pod_error(pod_status: &PodStatus) -> Option<String> {
+        for pod in &pod_status.pods {
+            // Check for container errors (waiting state with bad reasons)
+            for container in &pod.containers {
+                if let Some(state) = &container.state {
+                    if state.state_type == "waiting" {
+                        if let Some(reason) = &state.reason {
+                            // Check for irrecoverable errors using shared constant
+                            let is_irrecoverable =
+                                IRRECOVERABLE_CONTAINER_REASONS.contains(&reason.as_str());
+
+                            if is_irrecoverable {
+                                let message = state
+                                    .message
+                                    .as_ref()
+                                    .and_then(|m| m.lines().next())
+                                    .unwrap_or(reason);
+                                return Some(format!("{}: {}", reason, message));
+                            }
+                        }
+                    } else if state.state_type == "terminated" {
+                        // Check for repeated failures (3+ restarts with non-zero exit)
+                        if let Some(exit_code) = state.exit_code {
+                            if exit_code != 0 && container.restart_count >= 3 {
+                                let reason = state.reason.as_deref().unwrap_or("ContainerFailed");
+                                let default_msg = format!("Exit code: {}", exit_code);
+                                let message = state.message.as_deref().unwrap_or(&default_msg);
+                                return Some(format!(
+                                    "{}: {} (restarts: {})",
+                                    reason, message, container.restart_count
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Check for critical events
+            for event in &pod.events {
+                // Error events are always critical
+                if event.type_ == "Error" {
+                    return Some(format!("{}: {}", event.reason, event.message));
+                }
+
+                // Warning events are only critical if they're specific known issues
+                // or repeated multiple times (to filter out transient warnings)
+                if event.type_ == "Warning" {
+                    let is_critical_reason =
+                        CRITICAL_EVENT_REASONS.contains(&event.reason.as_str());
+                    let is_repeated = event.count >= MIN_EVENT_COUNT_FOR_CRITICAL;
+
+                    if is_critical_reason || is_repeated {
+                        return Some(format!("{}: {}", event.reason, event.message));
+                    }
+                }
+            }
+        }
+
+        None
+    }
+
+    /// Collect current Pod status for a deployment
+    async fn collect_pod_status(
+        &self,
+        namespace: &str,
+        deploy_name: &str,
+        deployment_id: &str,
+    ) -> Result<PodStatus> {
+        use k8s_openapi::api::{apps::v1::Deployment as K8sDeployment, core::v1::Pod};
+        use std::collections::{HashMap, HashSet};
+
+        // Get Deployment to know desired replica count
+        let deploy_api: Api<K8sDeployment> = Api::namespaced(self.kube_client.clone(), namespace);
+        let deployment = deploy_api.get(deploy_name).await?;
+        let desired_replicas = deployment.spec.and_then(|s| s.replicas).unwrap_or(1);
+
+        // List pods owned by this Deployment
+        let pod_api: Api<Pod> = Api::namespaced(self.kube_client.clone(), namespace);
+        let pods = pod_api
+            .list(
+                &kube::api::ListParams::default()
+                    .labels(&format!("{}={}", LABEL_DEPLOYMENT_ID, deployment_id)),
+            )
+            .await?;
+        let current_replicas = pods.items.len() as i32;
+        let pod_names: HashSet<String> = pods
+            .items
+            .iter()
+            .filter_map(|pod| pod.metadata.name.clone())
+            .collect();
+
+        let ready_count = pods
+            .items
+            .iter()
+            .filter(|pod| {
+                let conditions = pod
+                    .status
+                    .as_ref()
+                    .and_then(|s| s.conditions.as_ref())
+                    .map(|conds| {
+                        conds
+                            .iter()
+                            .any(|c| c.type_ == "Ready" && c.status == "True")
+                    })
+                    .unwrap_or(false);
+                let all_containers_ready = pod
+                    .status
+                    .as_ref()
+                    .and_then(|s| s.container_statuses.as_ref())
+                    .map(|statuses| !statuses.is_empty() && statuses.iter().all(|cs| cs.ready))
+                    .unwrap_or(false);
+                conditions || all_containers_ready
+            })
+            .count() as i32;
+
+        // Fetch Pod events (server-side filtered by kind to avoid listing all namespace events)
+        let event_api: Api<Event> = Api::namespaced(self.kube_client.clone(), namespace);
+        let all_events = event_api
+            .list(
+                &kube::api::ListParams::default()
+                    .fields("involvedObject.kind=Pod")
+                    .limit(MAX_EVENT_QUERY_LIMIT),
+            )
+            .await?;
+
+        // Group events by pod name (only Warning/Error events for matching pods)
+        let mut events_by_pod: HashMap<String, Vec<PodEvent>> = HashMap::new();
+        for event in all_events.items {
+            if let Some(event_type) = &event.type_ {
+                let involved_obj = &event.involved_object;
+                if involved_obj.kind.as_deref() == Some("Pod") {
+                    if let Some(pod_name) = &involved_obj.name {
+                        if !pod_names.contains(pod_name) {
+                            continue;
+                        }
+                        // Only include Warning and Error events
+                        if event_type == "Warning" || event_type == "Error" {
+                            let pod_event = PodEvent {
+                                type_: event_type.clone(),
+                                reason: truncate_text(
+                                    &event.reason.clone().unwrap_or_default(),
+                                    MAX_POD_TEXT_CHARS,
+                                ),
+                                message: truncate_text(
+                                    &event.message.clone().unwrap_or_default(),
+                                    MAX_POD_TEXT_CHARS,
+                                ),
+                                count: event.count.unwrap_or(1),
+                                last_timestamp: event
+                                    .last_timestamp
+                                    .as_ref()
+                                    .map(|ts| ts.0)
+                                    .unwrap_or_else(Utc::now),
+                            };
+                            events_by_pod
+                                .entry(pod_name.clone())
+                                .or_default()
+                                .push(pod_event);
+                        }
+                    }
+                }
+            }
+        }
+
+        // Sort events by timestamp (most recent first) and cap per pod
+        for events in events_by_pod.values_mut() {
+            events.sort_by(|a, b| b.last_timestamp.cmp(&a.last_timestamp));
+            events.truncate(MAX_EVENTS_PER_POD);
+        }
+
+        let mut pod_infos = Vec::new();
+
+        for pod in pods.items.iter().take(MAX_PODS_IN_STATUS) {
+            let pod_name = pod.metadata.name.clone().unwrap_or_default();
+
+            let phase = pod
+                .status
+                .as_ref()
+                .and_then(|s| s.phase.as_ref())
+                .map(|p| match p.as_str() {
+                    "Running" => PodPhase::Running,
+                    "Pending" => PodPhase::Pending,
+                    "Failed" => PodPhase::Failed,
+                    "Succeeded" => PodPhase::Succeeded,
+                    _ => PodPhase::Unknown,
+                })
+                .unwrap_or(PodPhase::Unknown);
+
+            // Collect pod conditions
+            let conditions: Vec<PodCondition> = pod
+                .status
+                .as_ref()
+                .and_then(|s| s.conditions.as_ref())
+                .map(|conds| {
+                    conds
+                        .iter()
+                        .take(MAX_CONDITIONS_PER_POD)
+                        .map(|c| PodCondition {
+                            type_: c.type_.clone(),
+                            status: c.status.clone(),
+                            reason: c.reason.clone(),
+                            message: truncate_optional_text(c.message.clone(), MAX_POD_TEXT_CHARS),
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // Collect container statuses
+            let containers: Vec<ContainerStatusInfo> = pod
+                .status
+                .as_ref()
+                .and_then(|s| s.container_statuses.as_ref())
+                .map(|css| {
+                    css.iter()
+                        .take(MAX_CONTAINERS_PER_POD)
+                        .map(|cs| {
+                            let state = if let Some(waiting) =
+                                cs.state.as_ref().and_then(|s| s.waiting.as_ref())
+                            {
+                                Some(ContainerState {
+                                    state_type: "waiting".to_string(),
+                                    reason: waiting.reason.clone(),
+                                    message: truncate_optional_text(
+                                        waiting.message.clone(),
+                                        MAX_POD_TEXT_CHARS,
+                                    ),
+                                    exit_code: None,
+                                })
+                            } else if let Some(_running) =
+                                cs.state.as_ref().and_then(|s| s.running.as_ref())
+                            {
+                                Some(ContainerState {
+                                    state_type: "running".to_string(),
+                                    reason: None,
+                                    message: None,
+                                    exit_code: None,
+                                })
+                            } else {
+                                cs.state.as_ref().and_then(|s| s.terminated.as_ref()).map(
+                                    |terminated| ContainerState {
+                                        state_type: "terminated".to_string(),
+                                        reason: terminated.reason.clone(),
+                                        message: truncate_optional_text(
+                                            terminated.message.clone(),
+                                            MAX_POD_TEXT_CHARS,
+                                        ),
+                                        exit_code: Some(terminated.exit_code),
+                                    },
+                                )
+                            };
+
+                            ContainerStatusInfo {
+                                name: cs.name.clone(),
+                                ready: cs.ready,
+                                restart_count: cs.restart_count,
+                                state,
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+
+            // Get events for this pod
+            let events = events_by_pod.remove(&pod_name).unwrap_or_default();
+
+            pod_infos.push(PodInfo {
+                name: pod_name,
+                phase,
+                conditions,
+                containers,
+                events,
+            });
+        }
+
+        Ok(PodStatus {
+            desired_replicas,
+            ready_replicas: ready_count,
+            current_replicas,
+            pods: pod_infos,
+            last_checked: Utc::now(),
+        })
     }
 
     /// Create common labels for all resources
@@ -2083,6 +2512,134 @@ impl KubernetesController {
         Ok(k8s_env_vars)
     }
 
+    /// Create Pod-level security context with restricted profile
+    /// Returns None if pod_security_enabled is false
+    fn create_pod_security_context(&self) -> Option<PodSecurityContext> {
+        if !self.pod_security_enabled {
+            return None;
+        }
+
+        Some(PodSecurityContext {
+            run_as_non_root: Some(true), // Enforce non-root, but let image choose UID
+            seccomp_profile: Some(SeccompProfile {
+                type_: "RuntimeDefault".to_string(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+    }
+
+    /// Create Container-level security context with minimal privileges
+    /// Returns None if pod_security_enabled is false
+    fn create_container_security_context(&self) -> Option<SecurityContext> {
+        if !self.pod_security_enabled {
+            return None;
+        }
+
+        Some(SecurityContext {
+            allow_privilege_escalation: Some(false),
+            run_as_non_root: Some(true),
+            capabilities: Some(Capabilities {
+                drop: Some(vec!["ALL".to_string()]),
+                ..Default::default()
+            }),
+            read_only_root_filesystem: Some(false), // Writable filesystem for compatibility
+            ..Default::default()
+        })
+    }
+
+    /// Create resource requirements from configuration
+    /// Returns resource requirements with configured or default values
+    fn create_resource_requirements(&self) -> Option<ResourceRequirements> {
+        use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
+
+        // Use configured values or defaults
+        let (cpu_request, memory_request, memory_limit) =
+            if let Some(ref config) = self.pod_resources {
+                (
+                    config.cpu_request.clone(),
+                    config.memory_request.clone(),
+                    config.memory_limit.clone(),
+                )
+            } else {
+                // Use default values
+                (
+                    String::from("10m"),
+                    String::from("64Mi"),
+                    String::from("512Mi"),
+                )
+            };
+
+        Some(ResourceRequirements {
+            requests: Some({
+                let mut map = BTreeMap::new();
+                map.insert("cpu".to_string(), Quantity(cpu_request));
+                map.insert("memory".to_string(), Quantity(memory_request));
+                map
+            }),
+            limits: Some({
+                let mut map = BTreeMap::new();
+                map.insert("memory".to_string(), Quantity(memory_limit));
+                // No CPU limit - avoid throttling
+                map
+            }),
+            ..Default::default()
+        })
+    }
+
+    /// Create HTTP health probe for application port
+    /// Returns None if probes are disabled
+    fn create_http_probe(&self, port: i32, probe_type: ProbeType) -> Option<Probe> {
+        // Get config or use defaults
+        let config = self.health_probes.as_ref().cloned().unwrap_or_else(|| {
+            crate::server::settings::HealthProbeConfig {
+                liveness_enabled: true,
+                readiness_enabled: true,
+                path: "/".to_string(),
+                initial_delay_seconds: 10,
+                period_seconds: 10,
+                timeout_seconds: 5,
+                failure_threshold: 3,
+            }
+        });
+
+        // Check if this probe type is enabled
+        let enabled = match probe_type {
+            ProbeType::Liveness => config.liveness_enabled,
+            ProbeType::Readiness => config.readiness_enabled,
+        };
+
+        if !enabled {
+            return None;
+        }
+
+        // Validate and normalize probe path
+        let path = if config.path.is_empty() || !config.path.starts_with('/') {
+            warn!(
+                "Invalid health probe path '{}', using default '/'",
+                config.path
+            );
+            "/".to_string()
+        } else {
+            config.path.clone()
+        };
+
+        Some(Probe {
+            http_get: Some(HTTPGetAction {
+                path: Some(path),
+                port: k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(port),
+                scheme: Some("HTTP".to_string()),
+                ..Default::default()
+            }),
+            initial_delay_seconds: Some(config.initial_delay_seconds),
+            period_seconds: Some(config.period_seconds),
+            timeout_seconds: Some(config.timeout_seconds),
+            failure_threshold: Some(config.failure_threshold),
+            success_threshold: Some(1),
+            ..Default::default()
+        })
+    }
+
     /// Create Deployment resource
     async fn create_deployment(
         &self,
@@ -2165,6 +2722,7 @@ impl KubernetesController {
                         ..Default::default()
                     }),
                     spec: Some(PodSpec {
+                        security_context: self.create_pod_security_context(),
                         image_pull_secrets: {
                             // Determine which secret to use (if any)
                             let secret_name = self
@@ -2187,6 +2745,12 @@ impl KubernetesController {
                             }]),
                             image_pull_policy: Some("Always".to_string()),
                             env: Some(env_vars), // Always set env vars (at minimum, PORT is injected)
+                            security_context: self.create_container_security_context(),
+                            resources: self.create_resource_requirements(),
+                            liveness_probe: self
+                                .create_http_probe(metadata.http_port as i32, ProbeType::Liveness),
+                            readiness_probe: self
+                                .create_http_probe(metadata.http_port as i32, ProbeType::Readiness),
                             ..Default::default()
                         }],
                         node_selector: if self.node_selector.is_empty() {
@@ -3235,9 +3799,44 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No Deployment name in metadata"))?;
 
-                    // Check for irrecoverable pod errors first
+                    // Collect and store pod status
+                    match self
+                        .collect_pod_status(namespace, deploy_name, &deployment.deployment_id)
+                        .await
+                    {
+                        Ok(pod_status) => {
+                            metadata.pod_status = Some(pod_status.clone());
+
+                            // Check for irrecoverable errors in pods
+                            if let Some(error_msg) = Self::extract_pod_error(&pod_status) {
+                                error!(
+                                    "Deployment {} has pod errors: {}",
+                                    deployment.deployment_id, error_msg
+                                );
+
+                                // Mark deployment as Failed
+                                return Ok(ReconcileResult {
+                                    status: DeploymentStatus::Failed,
+                                    controller_metadata: serde_json::to_value(&metadata)?,
+                                    error_message: Some(error_msg),
+                                });
+                            }
+                        }
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!("Namespace missing during pod status collection, resetting to CreatingNamespace");
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => {
+                            warn!("Failed to collect pod status: {:?}", e);
+                            // Continue reconciliation - don't fail if we can't get pod status
+                        }
+                    }
+
+                    // Check for irrecoverable pod errors first (fallback check)
                     let (has_errors, error_msg) = match self
-                        .check_pod_errors(namespace, deploy_name)
+                        .check_pod_errors(namespace, deploy_name, &deployment.deployment_id)
                         .await
                     {
                         Ok((errors, msg)) => (errors, msg),
@@ -3663,10 +4262,29 @@ impl DeploymentBackend for KubernetesController {
             .namespace
             .ok_or_else(|| anyhow::anyhow!("No namespace"))?;
 
+        // Collect current pod status
+        let pod_status = match self
+            .collect_pod_status(&namespace, &deploy_name, &deployment.deployment_id)
+            .await
+        {
+            Ok(ps) => Some(ps),
+            Err(e) if is_namespace_not_found_error(&e) => {
+                warn!("Namespace missing during pod status collection in health check");
+                None
+            }
+            Err(e) => {
+                warn!("Failed to collect pod status during health check: {:?}", e);
+                None
+            }
+        };
+
         // 1. Check for pod-level errors FIRST
         // This prevents race conditions where Deployment reports ready_replicas
         // but pods are actually in CrashLoopBackOff or other error states
-        let (has_errors, error_msg) = match self.check_pod_errors(&namespace, &deploy_name).await {
+        let (has_errors, error_msg) = match self
+            .check_pod_errors(&namespace, &deploy_name, &deployment.deployment_id)
+            .await
+        {
             Ok((errors, msg)) => (errors, msg),
             Err(e) if is_namespace_not_found_error(&e) => {
                 // Namespace missing - return unhealthy status
@@ -3675,6 +4293,7 @@ impl DeploymentBackend for KubernetesController {
                     healthy: false,
                     message: Some("Namespace missing - recovery in progress".to_string()),
                     last_check: Utc::now(),
+                    pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
                 });
             }
             Err(e) => return Err(e),
@@ -3684,6 +4303,7 @@ impl DeploymentBackend for KubernetesController {
                 healthy: false,
                 message: error_msg,
                 last_check: Utc::now(),
+                pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
             });
         }
 
@@ -3710,6 +4330,7 @@ impl DeploymentBackend for KubernetesController {
                         None
                     },
                     last_check: Utc::now(),
+                    pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
                 })
             }
             Err(kube::Error::Api(ae)) if ae.code == 404 => {
@@ -3722,6 +4343,7 @@ impl DeploymentBackend for KubernetesController {
                     healthy: false,
                     message: Some(format!("Deployment {} not found", deploy_name)),
                     last_check: Utc::now(),
+                    pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
                 })
             }
             Err(e) if is_namespace_not_found_error(&e) => {
@@ -3731,6 +4353,7 @@ impl DeploymentBackend for KubernetesController {
                     healthy: false,
                     message: Some("Namespace missing - recovery in progress".to_string()),
                     last_check: Utc::now(),
+                    pod_status: pod_status.and_then(|ps| serde_json::to_value(ps).ok()),
                 })
             }
             Err(e) => Err(e.into()),
@@ -4269,6 +4892,107 @@ mod tests {
         assert!(controller.deployment_has_drifted(&d1, &d2));
     }
 
+    fn pod_status_with_pod(pod: PodInfo) -> PodStatus {
+        PodStatus {
+            desired_replicas: 1,
+            ready_replicas: 0,
+            current_replicas: 1,
+            pods: vec![pod],
+            last_checked: Utc::now(),
+        }
+    }
+
+    fn empty_pod() -> PodInfo {
+        PodInfo {
+            name: "pod-1".to_string(),
+            phase: PodPhase::Pending,
+            conditions: vec![],
+            containers: vec![],
+            events: vec![],
+        }
+    }
+
+    #[test]
+    fn test_extract_pod_error_waiting_irrecoverable_reason() {
+        let mut pod = empty_pod();
+        pod.containers.push(ContainerStatusInfo {
+            name: "app".to_string(),
+            ready: false,
+            restart_count: 0,
+            state: Some(ContainerState {
+                state_type: "waiting".to_string(),
+                reason: Some("ImagePullBackOff".to_string()),
+                message: Some("Back-off pulling image \"bad/image:latest\"".to_string()),
+                exit_code: None,
+            }),
+        });
+        let status = pod_status_with_pod(pod);
+
+        let error = KubernetesController::extract_pod_error(&status);
+        assert_eq!(
+            error,
+            Some("ImagePullBackOff: Back-off pulling image \"bad/image:latest\"".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_pod_error_terminated_with_restart_threshold() {
+        let mut pod = empty_pod();
+        pod.containers.push(ContainerStatusInfo {
+            name: "app".to_string(),
+            ready: false,
+            restart_count: 3,
+            state: Some(ContainerState {
+                state_type: "terminated".to_string(),
+                reason: Some("Error".to_string()),
+                message: Some("process exited".to_string()),
+                exit_code: Some(137),
+            }),
+        });
+        let status = pod_status_with_pod(pod);
+
+        let error = KubernetesController::extract_pod_error(&status);
+        assert_eq!(
+            error,
+            Some("Error: process exited (restarts: 3)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_pod_error_repeated_warning_event() {
+        let mut pod = empty_pod();
+        pod.events.push(PodEvent {
+            type_: "Warning".to_string(),
+            reason: "FailedScheduling".to_string(),
+            message: "0/3 nodes are available".to_string(),
+            count: MIN_EVENT_COUNT_FOR_CRITICAL,
+            last_timestamp: Utc::now(),
+        });
+        let status = pod_status_with_pod(pod);
+
+        let error = KubernetesController::extract_pod_error(&status);
+        assert_eq!(
+            error,
+            Some("FailedScheduling: 0/3 nodes are available".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_pod_error_ignores_transient_warning_event() {
+        let mut pod = empty_pod();
+        pod.events.push(PodEvent {
+            type_: "Warning".to_string(),
+            reason: "FailedScheduling".to_string(),
+            message: "0/3 nodes are available".to_string(),
+            count: 1,
+            last_timestamp: Utc::now(),
+        });
+        let status = pod_status_with_pod(pod);
+
+        let error = KubernetesController::extract_pod_error(&status);
+        assert_eq!(error, None);
+    }
+
     // Helper function to create a mock controller for testing
     fn create_mock_controller() -> KubernetesController {
         use crate::server::state::ControllerState;
@@ -4346,6 +5070,9 @@ mod tests {
                 labels
             },
             network_policy_egress_allow_cidrs: vec![],
+            pod_security_enabled: true,
+            pod_resources: None,
+            health_probes: None,
         }
     }
 
@@ -4548,6 +5275,7 @@ mod tests {
             http_port: 8080,
             reconcile_phase: ReconcilePhase::Completed,
             previous_deployment: None,
+            pod_status: None,
         };
 
         let ingress = controller.create_primary_ingress(&project, &deployment, &metadata);
@@ -4632,6 +5360,7 @@ mod tests {
             http_port: 8080,
             reconcile_phase: ReconcilePhase::Completed,
             previous_deployment: None,
+            pod_status: None,
         };
 
         let custom_domains = vec![CustomDomain {
@@ -4736,6 +5465,7 @@ mod tests {
             http_port: 8080,
             reconcile_phase: ReconcilePhase::Completed,
             previous_deployment: None,
+            pod_status: None,
         };
 
         let ingress = controller.create_primary_ingress(&project, &deployment, &metadata);
@@ -4832,6 +5562,9 @@ mod tests {
                 labels
             },
             network_policy_egress_allow_cidrs: vec![],
+            pod_security_enabled: true,
+            pod_resources: None,
+            health_probes: None,
         }
     }
 }

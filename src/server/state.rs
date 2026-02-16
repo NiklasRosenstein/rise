@@ -183,6 +183,9 @@ async fn init_kubernetes_backend(
         ingress_controller_namespace,
         ingress_controller_labels,
         network_policy_egress_allow_cidrs,
+        pod_security_enabled,
+        pod_resources,
+        health_probes,
         ..
     }) = &settings.deployment_controller
     {
@@ -240,6 +243,9 @@ async fn init_kubernetes_backend(
                 ingress_controller_namespace: ingress_controller_namespace.clone(),
                 ingress_controller_labels: ingress_controller_labels.clone(),
                 network_policy_egress_allow_cidrs: network_policy_egress_allow_cidrs.clone(),
+                pod_security_enabled: *pod_security_enabled,
+                pod_resources: pod_resources.clone(),
+                health_probes: health_probes.clone(),
             },
         )?;
 

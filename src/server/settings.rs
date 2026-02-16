@@ -311,6 +311,96 @@ pub struct AccessClass {
     pub ingress_controller_labels: Option<std::collections::HashMap<String, String>>,
 }
 
+/// Resource limits for pods
+#[derive(Debug, Clone, Deserialize)]
+pub struct PodResourceLimits {
+    /// CPU request (e.g., "10m", "100m", "1")
+    #[serde(default = "default_cpu_request")]
+    pub cpu_request: String,
+
+    /// Memory request (e.g., "64Mi", "128Mi", "1Gi")
+    #[serde(default = "default_memory_request")]
+    pub memory_request: String,
+
+    /// Memory limit (e.g., "512Mi", "1Gi", "2Gi")
+    /// CPU limit intentionally omitted to avoid throttling
+    #[serde(default = "default_memory_limit")]
+    pub memory_limit: String,
+}
+
+/// Health probe configuration
+#[derive(Debug, Clone, Deserialize)]
+pub struct HealthProbeConfig {
+    /// Enable liveness probes (default: true)
+    #[serde(default = "default_true")]
+    pub liveness_enabled: bool,
+
+    /// Enable readiness probes (default: true)
+    #[serde(default = "default_true")]
+    pub readiness_enabled: bool,
+
+    /// Path for HTTP probes (default: "/")
+    #[serde(default = "default_probe_path")]
+    pub path: String,
+
+    /// Initial delay in seconds (default: 10)
+    #[serde(default = "default_initial_delay")]
+    pub initial_delay_seconds: i32,
+
+    /// Period in seconds (default: 10)
+    #[serde(default = "default_period_seconds")]
+    pub period_seconds: i32,
+
+    /// Timeout in seconds (default: 5)
+    #[serde(default = "default_timeout_seconds")]
+    pub timeout_seconds: i32,
+
+    /// Failure threshold (default: 3)
+    #[serde(default = "default_failure_threshold")]
+    pub failure_threshold: i32,
+}
+
+// Default functions for pod security settings
+fn default_pod_security_enabled() -> bool {
+    true
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_cpu_request() -> String {
+    "10m".to_string()
+}
+
+fn default_memory_request() -> String {
+    "64Mi".to_string()
+}
+
+fn default_memory_limit() -> String {
+    "512Mi".to_string()
+}
+
+fn default_probe_path() -> String {
+    "/".to_string()
+}
+
+fn default_initial_delay() -> i32 {
+    10
+}
+
+fn default_period_seconds() -> i32 {
+    10
+}
+
+fn default_timeout_seconds() -> i32 {
+    5
+}
+
+fn default_failure_threshold() -> i32 {
+    3
+}
+
 /// Deployment controller configuration
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -458,6 +548,21 @@ pub enum DeploymentControllerSettings {
         /// Example: ["192.168.49.1/32"] for Minikube host IP
         #[serde(default)]
         network_policy_egress_allow_cidrs: Vec<String>,
+
+        /// Pod security settings (enabled by default)
+        /// Set to false to disable security context enforcement
+        #[serde(default = "default_pod_security_enabled")]
+        pod_security_enabled: bool,
+
+        /// Resource limits for deployed containers
+        /// If not set, uses default conservative limits (10m CPU request, 64Mi memory request, 512Mi memory limit)
+        #[serde(default)]
+        pod_resources: Option<PodResourceLimits>,
+
+        /// Health probe configuration
+        /// If not set, uses defaults (HTTP probes on app port at "/" path)
+        #[serde(default)]
+        health_probes: Option<HealthProbeConfig>,
     },
 }
 
