@@ -1019,9 +1019,9 @@ interface PodCondition {
 interface PodInfo {
     name: string;
     phase: 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown';
-    conditions: PodCondition[];
-    containers: ContainerStatusInfo[];
-    events: PodEvent[];
+    conditions?: PodCondition[];
+    containers?: ContainerStatusInfo[];
+    events?: PodEvent[];
 }
 
 interface PodStatus {
@@ -1034,6 +1034,7 @@ interface PodStatus {
 
 function PodInfoRow({ pod }: { pod: PodInfo }) {
     const [expanded, setExpanded] = useState(false);
+    const detailsId = `pod-details-${pod.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
 
     // Check if pod has issues
     const hasIssues = pod.events?.length > 0 ||
@@ -1053,7 +1054,13 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
 
     return (
         <div className="border-b" style={{ borderColor }}>
-            <div className="p-3 cursor-pointer" onClick={() => setExpanded(!expanded)}>
+            <button
+                type="button"
+                className="w-full p-3 text-left cursor-pointer"
+                onClick={() => setExpanded(!expanded)}
+                aria-expanded={expanded}
+                aria-controls={detailsId}
+            >
                 <div className="flex items-center justify-between gap-2">
                     <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1">
@@ -1078,14 +1085,14 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
                             {pod.containers?.filter(c => c.ready).length || 0} ready
                         </div>
                     </div>
-                    <button className="text-xs" style={{ color: 'var(--mono-muted)' }}>
+                    <span className="text-xs" style={{ color: 'var(--mono-muted)' }} aria-hidden="true">
                         {expanded ? '▼' : '▶'}
-                    </button>
+                    </span>
                 </div>
-            </div>
+            </button>
 
             {expanded && (
-                <div className="p-3 pt-0" style={{ background: '#0a0a0a' }}>
+                <div id={detailsId} className="p-3 pt-0" style={{ background: '#0a0a0a' }}>
                     {/* Container statuses */}
                     {pod.containers && pod.containers.length > 0 && (
                         <div className="mb-3">
@@ -1246,7 +1253,7 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
                     </div>
                     <div>
                         {podStatus.pods.map((pod, idx) => (
-                            <PodInfoRow key={idx} pod={pod} />
+                            <PodInfoRow key={pod.name || `pod-${idx}`} pod={pod} />
                         ))}
                     </div>
                 </div>

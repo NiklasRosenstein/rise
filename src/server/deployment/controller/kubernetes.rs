@@ -71,6 +71,25 @@ const CRITICAL_EVENT_REASONS: &[&str] = &[
 /// Minimum event count to consider a Warning event as critical
 /// This helps filter out transient warnings (e.g., FailedScheduling)
 const MIN_EVENT_COUNT_FOR_CRITICAL: i32 = 3;
+const MAX_EVENT_QUERY_LIMIT: u32 = 200;
+const MAX_EVENTS_PER_POD: usize = 5;
+const MAX_PODS_IN_STATUS: usize = 20;
+const MAX_CONDITIONS_PER_POD: usize = 10;
+const MAX_CONTAINERS_PER_POD: usize = 10;
+const MAX_POD_TEXT_CHARS: usize = 500;
+
+fn truncate_text(input: &str, max_chars: usize) -> String {
+    if input.chars().count() <= max_chars {
+        return input.to_string();
+    }
+    let mut truncated: String = input.chars().take(max_chars).collect();
+    truncated.push_str("...");
+    truncated
+}
+
+fn truncate_optional_text(input: Option<String>, max_chars: usize) -> Option<String> {
+    input.map(|text| truncate_text(&text, max_chars))
+}
 
 /// Kubernetes-specific metadata stored in deployment.controller_metadata
 #[derive(Serialize, Deserialize, Default, Clone)]
@@ -1205,7 +1224,7 @@ impl KubernetesController {
         deployment_id: &str,
     ) -> Result<PodStatus> {
         use k8s_openapi::api::{apps::v1::Deployment as K8sDeployment, core::v1::Pod};
-        use std::collections::HashMap;
+        use std::collections::{HashMap, HashSet};
 
         // Get Deployment to know desired replica count
         let deploy_api: Api<K8sDeployment> = Api::namespaced(self.kube_client.clone(), namespace);
@@ -1220,24 +1239,69 @@ impl KubernetesController {
                     .labels(&format!("{}={}", LABEL_DEPLOYMENT_ID, deployment_id)),
             )
             .await?;
+        let current_replicas = pods.items.len() as i32;
+        let pod_names: HashSet<String> = pods
+            .items
+            .iter()
+            .filter_map(|pod| pod.metadata.name.clone())
+            .collect();
 
-        // Fetch events for the namespace
+        let ready_count = pods
+            .items
+            .iter()
+            .filter(|pod| {
+                let conditions = pod
+                    .status
+                    .as_ref()
+                    .and_then(|s| s.conditions.as_ref())
+                    .map(|conds| {
+                        conds
+                            .iter()
+                            .any(|c| c.type_ == "Ready" && c.status == "True")
+                    })
+                    .unwrap_or(false);
+                let all_containers_ready = pod
+                    .status
+                    .as_ref()
+                    .and_then(|s| s.container_statuses.as_ref())
+                    .map(|statuses| !statuses.is_empty() && statuses.iter().all(|cs| cs.ready))
+                    .unwrap_or(false);
+                conditions || all_containers_ready
+            })
+            .count() as i32;
+
+        // Fetch Pod events (server-side filtered by kind to avoid listing all namespace events)
         let event_api: Api<Event> = Api::namespaced(self.kube_client.clone(), namespace);
-        let all_events = event_api.list(&kube::api::ListParams::default()).await?;
+        let all_events = event_api
+            .list(
+                &kube::api::ListParams::default()
+                    .fields("involvedObject.kind=Pod")
+                    .limit(MAX_EVENT_QUERY_LIMIT),
+            )
+            .await?;
 
-        // Group events by pod name (only Warning/Error events, sorted by timestamp)
+        // Group events by pod name (only Warning/Error events for matching pods)
         let mut events_by_pod: HashMap<String, Vec<PodEvent>> = HashMap::new();
         for event in all_events.items {
             if let Some(event_type) = &event.type_ {
                 let involved_obj = &event.involved_object;
                 if involved_obj.kind.as_deref() == Some("Pod") {
                     if let Some(pod_name) = &involved_obj.name {
+                        if !pod_names.contains(pod_name) {
+                            continue;
+                        }
                         // Only include Warning and Error events
                         if event_type == "Warning" || event_type == "Error" {
                             let pod_event = PodEvent {
                                 type_: event_type.clone(),
-                                reason: event.reason.clone().unwrap_or_default(),
-                                message: event.message.clone().unwrap_or_default(),
+                                reason: truncate_text(
+                                    &event.reason.clone().unwrap_or_default(),
+                                    MAX_POD_TEXT_CHARS,
+                                ),
+                                message: truncate_text(
+                                    &event.message.clone().unwrap_or_default(),
+                                    MAX_POD_TEXT_CHARS,
+                                ),
                                 count: event.count.unwrap_or(1),
                                 last_timestamp: event
                                     .last_timestamp
@@ -1255,16 +1319,15 @@ impl KubernetesController {
             }
         }
 
-        // Sort events by timestamp (most recent first) and limit to 5 per pod
+        // Sort events by timestamp (most recent first) and cap per pod
         for events in events_by_pod.values_mut() {
             events.sort_by(|a, b| b.last_timestamp.cmp(&a.last_timestamp));
-            events.truncate(5);
+            events.truncate(MAX_EVENTS_PER_POD);
         }
 
-        let mut ready_count = 0;
         let mut pod_infos = Vec::new();
 
-        for pod in &pods.items {
+        for pod in pods.items.iter().take(MAX_PODS_IN_STATUS) {
             let pod_name = pod.metadata.name.clone().unwrap_or_default();
 
             let phase = pod
@@ -1288,11 +1351,12 @@ impl KubernetesController {
                 .map(|conds| {
                     conds
                         .iter()
+                        .take(MAX_CONDITIONS_PER_POD)
                         .map(|c| PodCondition {
                             type_: c.type_.clone(),
                             status: c.status.clone(),
                             reason: c.reason.clone(),
-                            message: c.message.clone(),
+                            message: truncate_optional_text(c.message.clone(), MAX_POD_TEXT_CHARS),
                         })
                         .collect()
                 })
@@ -1305,18 +1369,18 @@ impl KubernetesController {
                 .and_then(|s| s.container_statuses.as_ref())
                 .map(|css| {
                     css.iter()
+                        .take(MAX_CONTAINERS_PER_POD)
                         .map(|cs| {
-                            if cs.ready {
-                                ready_count += 1;
-                            }
-
                             let state = if let Some(waiting) =
                                 cs.state.as_ref().and_then(|s| s.waiting.as_ref())
                             {
                                 Some(ContainerState {
                                     state_type: "waiting".to_string(),
                                     reason: waiting.reason.clone(),
-                                    message: waiting.message.clone(),
+                                    message: truncate_optional_text(
+                                        waiting.message.clone(),
+                                        MAX_POD_TEXT_CHARS,
+                                    ),
                                     exit_code: None,
                                 })
                             } else if let Some(_running) =
@@ -1333,7 +1397,10 @@ impl KubernetesController {
                                     |terminated| ContainerState {
                                         state_type: "terminated".to_string(),
                                         reason: terminated.reason.clone(),
-                                        message: terminated.message.clone(),
+                                        message: truncate_optional_text(
+                                            terminated.message.clone(),
+                                            MAX_POD_TEXT_CHARS,
+                                        ),
                                         exit_code: Some(terminated.exit_code),
                                     },
                                 )
@@ -1365,7 +1432,7 @@ impl KubernetesController {
         Ok(PodStatus {
             desired_replicas,
             ready_replicas: ready_count,
-            current_replicas: pods.items.len() as i32,
+            current_replicas,
             pods: pod_infos,
             last_checked: Utc::now(),
         })
@@ -4823,6 +4890,107 @@ mod tests {
         let d2 = create_test_deployment("test-deploy", 1, "nginx:1.0", labels2);
 
         assert!(controller.deployment_has_drifted(&d1, &d2));
+    }
+
+    fn pod_status_with_pod(pod: PodInfo) -> PodStatus {
+        PodStatus {
+            desired_replicas: 1,
+            ready_replicas: 0,
+            current_replicas: 1,
+            pods: vec![pod],
+            last_checked: Utc::now(),
+        }
+    }
+
+    fn empty_pod() -> PodInfo {
+        PodInfo {
+            name: "pod-1".to_string(),
+            phase: PodPhase::Pending,
+            conditions: vec![],
+            containers: vec![],
+            events: vec![],
+        }
+    }
+
+    #[test]
+    fn test_extract_pod_error_waiting_irrecoverable_reason() {
+        let mut pod = empty_pod();
+        pod.containers.push(ContainerStatusInfo {
+            name: "app".to_string(),
+            ready: false,
+            restart_count: 0,
+            state: Some(ContainerState {
+                state_type: "waiting".to_string(),
+                reason: Some("ImagePullBackOff".to_string()),
+                message: Some("Back-off pulling image \"bad/image:latest\"".to_string()),
+                exit_code: None,
+            }),
+        });
+        let status = pod_status_with_pod(pod);
+
+        let error = KubernetesController::extract_pod_error(&status);
+        assert_eq!(
+            error,
+            Some("ImagePullBackOff: Back-off pulling image \"bad/image:latest\"".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_pod_error_terminated_with_restart_threshold() {
+        let mut pod = empty_pod();
+        pod.containers.push(ContainerStatusInfo {
+            name: "app".to_string(),
+            ready: false,
+            restart_count: 3,
+            state: Some(ContainerState {
+                state_type: "terminated".to_string(),
+                reason: Some("Error".to_string()),
+                message: Some("process exited".to_string()),
+                exit_code: Some(137),
+            }),
+        });
+        let status = pod_status_with_pod(pod);
+
+        let error = KubernetesController::extract_pod_error(&status);
+        assert_eq!(
+            error,
+            Some("Error: process exited (restarts: 3)".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_pod_error_repeated_warning_event() {
+        let mut pod = empty_pod();
+        pod.events.push(PodEvent {
+            type_: "Warning".to_string(),
+            reason: "FailedScheduling".to_string(),
+            message: "0/3 nodes are available".to_string(),
+            count: MIN_EVENT_COUNT_FOR_CRITICAL,
+            last_timestamp: Utc::now(),
+        });
+        let status = pod_status_with_pod(pod);
+
+        let error = KubernetesController::extract_pod_error(&status);
+        assert_eq!(
+            error,
+            Some("FailedScheduling: 0/3 nodes are available".to_string())
+        );
+    }
+
+    #[test]
+    fn test_extract_pod_error_ignores_transient_warning_event() {
+        let mut pod = empty_pod();
+        pod.events.push(PodEvent {
+            type_: "Warning".to_string(),
+            reason: "FailedScheduling".to_string(),
+            message: "0/3 nodes are available".to_string(),
+            count: 1,
+            last_timestamp: Utc::now(),
+        });
+        let status = pod_status_with_pod(pod);
+
+        let error = KubernetesController::extract_pod_error(&status);
+        assert_eq!(error, None);
     }
 
     // Helper function to create a mock controller for testing
