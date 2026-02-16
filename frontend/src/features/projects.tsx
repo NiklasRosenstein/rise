@@ -818,6 +818,29 @@ function AppUsersList({ projectName, project, accessClasses, onProjectUpdated })
 
     const appUsers = project?.app_users || [];
     const appTeams = project?.app_teams || [];
+    const owner = project?.owner || null;
+
+    const ownerUserEmail = owner?.email ? owner.email.trim() : null;
+    const ownerTeamName = owner?.name ? owner.name.trim() : null;
+    const ownerTeamId = owner?.id || null;
+
+    const displayedUsers = (() => {
+        if (!ownerUserEmail) return appUsers;
+        const ownerEmailLower = ownerUserEmail.toLowerCase();
+        const nonOwnerUsers = appUsers.filter((u) => (u.email || '').toLowerCase() !== ownerEmailLower);
+        return [{ id: owner?.id || `owner-user-${ownerUserEmail}`, email: ownerUserEmail, isOwnerFixed: true }, ...nonOwnerUsers];
+    })();
+
+    const displayedTeams = (() => {
+        if (!ownerTeamName) return appTeams;
+
+        const nonOwnerTeams = appTeams.filter((t) => {
+            if (ownerTeamId && t.id) return t.id !== ownerTeamId;
+            return (t.name || '').toLowerCase() !== ownerTeamName.toLowerCase();
+        });
+
+        return [{ id: ownerTeamId || `owner-team-${ownerTeamName}`, name: ownerTeamName, isOwnerFixed: true }, ...nonOwnerTeams];
+    })();
 
     useEffect(() => {
         async function loadTeams() {
@@ -920,13 +943,16 @@ function AppUsersList({ projectName, project, accessClasses, onProjectUpdated })
                     </span>
                 )}
             </div>
+            <p className="text-sm text-gray-500 mb-4">
+                The project owner always has access and is shown as a fixed entry.
+            </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div>
                     <div className="flex justify-between items-center mb-4">
-                        <h4 className="text-lg font-bold">Users ({appUsers.length})</h4>
+                        <h4 className="text-lg font-bold">Users ({displayedUsers.length})</h4>
                     </div>
-                    {appUsers.length > 0 ? (
+                    {displayedUsers.length > 0 ? (
                         <MonoTableFrame className="mb-4">
                             <MonoTable>
                                 <MonoTableHead>
@@ -936,18 +962,31 @@ function AppUsersList({ projectName, project, accessClasses, onProjectUpdated })
                                     </tr>
                                 </MonoTableHead>
                                 <MonoTableBody>
-                                    {appUsers.map(user => (
+                                    {displayedUsers.map(user => (
                                         <MonoTableRow key={user.id} interactive className="transition-colors">
-                                            <MonoTd className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">{user.email}</MonoTd>
+                                            <MonoTd className="px-6 py-4 text-sm text-gray-900 dark:text-gray-200">
+                                                <span className="inline-flex items-center gap-2">
+                                                    <span>{user.email}</span>
+                                                    {user.isOwnerFixed && (
+                                                        <span className="px-2 py-0.5 rounded text-xs border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300">
+                                                            Owner
+                                                        </span>
+                                                    )}
+                                                </span>
+                                            </MonoTd>
                                             <MonoTd className="px-6 py-4">
                                                 <div className="flex justify-end">
-                                                    <Button
-                                                        variant="danger"
-                                                        size="sm"
-                                                        onClick={() => handleRemoveUser(user.email)}
-                                                    >
-                                                        Remove
-                                                    </Button>
+                                                    {user.isOwnerFixed ? (
+                                                        <span className="text-xs text-gray-500">Always has access</span>
+                                                    ) : (
+                                                        <Button
+                                                            variant="danger"
+                                                            size="sm"
+                                                            onClick={() => handleRemoveUser(user.email)}
+                                                        >
+                                                            Remove
+                                                        </Button>
+                                                    )}
                                                 </div>
                                             </MonoTd>
                                         </MonoTableRow>
@@ -977,9 +1016,9 @@ function AppUsersList({ projectName, project, accessClasses, onProjectUpdated })
 
                 <div>
                     <div className="flex justify-between items-center mb-4">
-                        <h4 className="text-lg font-bold">Teams ({appTeams.length})</h4>
+                        <h4 className="text-lg font-bold">Teams ({displayedTeams.length})</h4>
                     </div>
-                    {appTeams.length > 0 ? (
+                    {displayedTeams.length > 0 ? (
                         <MonoTableFrame className="mb-4">
                             <MonoTable>
                                 <MonoTableHead>
@@ -989,26 +1028,37 @@ function AppUsersList({ projectName, project, accessClasses, onProjectUpdated })
                                     </tr>
                                 </MonoTableHead>
                                 <MonoTableBody>
-                                    {appTeams.map(team => (
+                                    {displayedTeams.map(team => (
                                         <MonoTableRow key={team.id} interactive className="transition-colors">
                                             <MonoTd className="px-6 py-4 text-sm">
-                                                <button
-                                                    type="button"
-                                                    className="text-gray-900 dark:text-gray-200 underline"
-                                                    onClick={() => navigate(`/team/${team.name}`)}
-                                                >
-                                                    {team.name}
-                                                </button>
+                                                <span className="inline-flex items-center gap-2">
+                                                    <button
+                                                        type="button"
+                                                        className="text-gray-900 dark:text-gray-200 underline"
+                                                        onClick={() => navigate(`/team/${team.name}`)}
+                                                    >
+                                                        {team.name}
+                                                    </button>
+                                                    {team.isOwnerFixed && (
+                                                        <span className="px-2 py-0.5 rounded text-xs border border-gray-300 dark:border-gray-700 text-gray-600 dark:text-gray-300">
+                                                            Owner
+                                                        </span>
+                                                    )}
+                                                </span>
                                             </MonoTd>
                                             <MonoTd className="px-6 py-4">
                                                 <div className="flex justify-end">
-                                                    <Button
-                                                        variant="danger"
-                                                        size="sm"
-                                                        onClick={() => handleRemoveTeam(team.id, team.name)}
-                                                    >
-                                                        Remove
-                                                    </Button>
+                                                    {team.isOwnerFixed ? (
+                                                        <span className="text-xs text-gray-500">Always has access</span>
+                                                    ) : (
+                                                        <Button
+                                                            variant="danger"
+                                                            size="sm"
+                                                            onClick={() => handleRemoveTeam(team.id, team.name)}
+                                                        >
+                                                            Remove
+                                                        </Button>
+                                                    )}
                                                 </div>
                                             </MonoTd>
                                         </MonoTableRow>
