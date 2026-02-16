@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../docs/schemas/backend-settings.schema.json
 # Rise Backend Configuration
 #
 # This configuration file supports environment variable substitution using the syntax:

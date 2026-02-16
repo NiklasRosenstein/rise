@@ -1,3 +1,4 @@
+# yaml-language-server: $schema=../docs/schemas/backend-settings.schema.json
 # Production Configuration Example
 #
 # This file shows how to use environment variable substitution for production deployments.
