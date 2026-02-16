@@ -28,6 +28,7 @@ pub struct HealthStatus {
     pub healthy: bool,
     pub message: Option<String>,
     pub last_check: DateTime<Utc>,
+    pub pod_status: Option<serde_json::Value>,
 }
 
 /// URLs where a deployment can be accessed
@@ -501,6 +502,11 @@ impl DeploymentController {
                                 "last_check": health.last_check.to_rfc3339(),
                             }),
                         );
+
+                        // Store pod_status if available
+                        if let Some(pod_status) = health.pod_status {
+                            obj.insert("pod_status".to_string(), pod_status);
+                        }
                     }
                     db_deployments::update_controller_metadata(
                         &self.state.db_pool,

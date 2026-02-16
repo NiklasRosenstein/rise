@@ -728,6 +728,89 @@ spec:
                   number: 80
 ```
 
+## Pod Security Settings
+
+Rise enforces secure-by-default Pod Security Standards for all deployed applications:
+
+**Security context:**
+- Containers must run as non-root (enforced, but image chooses UID)
+- All Linux capabilities dropped
+- Privilege escalation blocked
+- Seccomp RuntimeDefault profile applied
+- Writable root filesystem (for compatibility)
+
+**Resource limits (configurable):**
+- CPU request: 10m, Memory request: 64Mi, Memory limit: 512Mi
+- No CPU limit to avoid throttling
+
+**Health probes (configurable):**
+- HTTP GET on application port at `/` path
+- Initial delay: 10s, period: 10s, timeout: 5s, failure threshold: 3
+
+### Configuration Examples
+
+**Custom resource limits:**
+```toml
+[deployment_controller]
+type = "kubernetes"
+# ... other fields ...
+
+[deployment_controller.pod_resources]
+cpu_request = "50m"
+memory_request = "128Mi"
+memory_limit = "1Gi"
+```
+
+**Custom health probes:**
+```toml
+[deployment_controller.health_probes]
+path = "/health"
+initial_delay_seconds = 15
+liveness_enabled = true
+readiness_enabled = true
+```
+
+**Disable security context** (not recommended):
+```toml
+[deployment_controller]
+type = "kubernetes"
+pod_security_enabled = false
+```
+
+### Troubleshooting
+
+**Error: "container has runAsNonRoot and image will run as root"**
+
+Your image runs as root (UID 0). Add a USER directive to your Dockerfile:
+
+```dockerfile
+# Node.js
+USER node
+
+# Python
+USER nobody
+
+# Or specific UID
+USER 1000:1000
+```
+
+Verify with: `docker run --rm <image> id` (should show uid != 0)
+
+**Note:** Railpack doesn't currently support non-root images ([railpack#286](https://github.com/railwayapp/railpack/issues/286)). Use Docker or Pack build backends, or disable pod security.
+
+**Permission denied errors:**
+- Ensure files are owned by the non-root user: `COPY --chown=node:node . /app`
+- Use `/tmp` for temporary files
+
+**Health probe failures:**
+- Check logs: `kubectl logs -n rise-{project} {pod-name}`
+- Increase `initial_delay_seconds` if app starts slowly
+- Verify app responds at the configured path
+
+**OOMKilled pods:**
+- Check events: `kubectl describe pod -n rise-{project} {pod-name}`
+- Increase `memory_limit` in configuration
+
 ## Running the Controller
 
 ### Starting the Controller

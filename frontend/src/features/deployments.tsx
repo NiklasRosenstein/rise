@@ -986,6 +986,286 @@ function buildDeploymentTimeline(deployment: any) {
     });
 }
 
+// TypeScript interfaces matching Rust backend structs
+interface PodEvent {
+    type: string;
+    reason: string;
+    message: string;
+    count: number;
+    last_timestamp: string;
+}
+
+interface ContainerState {
+    state_type: 'waiting' | 'running' | 'terminated';
+    reason?: string;
+    message?: string;
+    exit_code?: number;
+}
+
+interface ContainerStatusInfo {
+    name: string;
+    ready: boolean;
+    restart_count: number;
+    state?: ContainerState;
+}
+
+interface PodCondition {
+    type: string;
+    status: string;
+    reason?: string;
+    message?: string;
+}
+
+interface PodInfo {
+    name: string;
+    phase: 'Pending' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown';
+    conditions?: PodCondition[];
+    containers?: ContainerStatusInfo[];
+    events?: PodEvent[];
+}
+
+interface PodStatus {
+    desired_replicas: number;
+    ready_replicas: number;
+    current_replicas: number;
+    pods: PodInfo[];
+    last_checked: string;
+}
+
+function PodInfoRow({ pod }: { pod: PodInfo }) {
+    const [expanded, setExpanded] = useState(false);
+    const detailsId = `pod-details-${pod.name.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+
+    // Check if pod has issues
+    const hasIssues = pod.events?.length > 0 ||
+                      pod.containers?.some(c => !c.ready || c.restart_count > 0) ||
+                      pod.conditions?.some(c => c.status === 'False');
+
+    const phaseTone = {
+        Running: '#b7ffce',
+        Pending: '#ffe3a8',
+        Failed: '#ffc0c0',
+        Succeeded: '#b7ffce',
+        Unknown: '#888',
+    };
+
+    // Use appropriate border color based on issues
+    const borderColor = hasIssues ? '#7d4b4b' : 'var(--mono-line)';
+
+    return (
+        <div className="border-b" style={{ borderColor }}>
+            <button
+                type="button"
+                className="w-full p-3 text-left cursor-pointer"
+                onClick={() => setExpanded(!expanded)}
+                aria-expanded={expanded}
+                aria-controls={detailsId}
+            >
+                <div className="flex items-center justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                            <span className="text-xs font-mono font-semibold" style={{ color: '#e8e8e8' }}>
+                                {pod.name}
+                            </span>
+                            <span className="text-xs px-1.5 py-0.5" style={{
+                                color: phaseTone[pod.phase] || '#888',
+                                border: `1px solid ${phaseTone[pod.phase] || '#888'}`,
+                                background: 'rgba(0, 0, 0, 0.3)'
+                            }}>
+                                {pod.phase}
+                            </span>
+                            {hasIssues && (
+                                <span className="text-xs" style={{ color: '#ffc0c0' }}>
+                                    ⚠
+                                </span>
+                            )}
+                        </div>
+                        <div className="text-xs" style={{ color: 'var(--mono-muted)' }}>
+                            {pod.containers?.length || 0} container(s) •{' '}
+                            {pod.containers?.filter(c => c.ready).length || 0} ready
+                        </div>
+                    </div>
+                    <span className="text-xs" style={{ color: 'var(--mono-muted)' }} aria-hidden="true">
+                        {expanded ? '▼' : '▶'}
+                    </span>
+                </div>
+            </button>
+
+            {expanded && (
+                <div id={detailsId} className="p-3 pt-0" style={{ background: '#0a0a0a' }}>
+                    {/* Container statuses */}
+                    {pod.containers && pod.containers.length > 0 && (
+                        <div className="mb-3">
+                            <h6 className="text-xs font-semibold mb-2" style={{ color: 'var(--mono-muted)' }}>
+                                Containers
+                            </h6>
+                            <div className="space-y-2">
+                                {pod.containers.map((container, idx) => (
+                                    <div key={idx} className="text-xs p-2" style={{ background: '#0f0f0f', border: '1px solid var(--mono-line)' }}>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="font-mono" style={{ color: '#e8e8e8' }}>{container.name}</span>
+                                            <span style={{ color: container.ready ? '#b7ffce' : '#ffc0c0' }}>
+                                                {container.ready ? '✓ Ready' : '✗ Not ready'}
+                                            </span>
+                                        </div>
+                                        {container.restart_count > 0 && (
+                                            <div style={{ color: 'var(--mono-warn)' }}>
+                                                Restarts: {container.restart_count}
+                                            </div>
+                                        )}
+                                        {container.state && (
+                                            <div style={{ color: 'var(--mono-muted)' }}>
+                                                State: {container.state.state_type}
+                                                {container.state.reason && ` (${container.state.reason})`}
+                                            </div>
+                                        )}
+                                        {container.state?.message && (
+                                            <div className="mt-1 font-mono" style={{ color: '#ffc0c0' }}>
+                                                {container.state.message}
+                                            </div>
+                                        )}
+                                        {container.state?.exit_code !== undefined && (
+                                            <div style={{ color: 'var(--mono-muted)' }}>
+                                                Exit code: {container.state.exit_code}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Pod conditions */}
+                    {pod.conditions && pod.conditions.length > 0 && (
+                        <div className="mb-3">
+                            <h6 className="text-xs font-semibold mb-2" style={{ color: 'var(--mono-muted)' }}>
+                                Conditions
+                            </h6>
+                            <div className="space-y-1">
+                                {pod.conditions.map((condition, idx) => (
+                                    <div key={idx} className="text-xs flex items-center justify-between">
+                                        <span style={{ color: '#e8e8e8' }}>{condition.type}</span>
+                                        <span style={{ color: condition.status === 'True' ? '#b7ffce' : '#ffc0c0' }}>
+                                            {condition.status}
+                                        </span>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Recent events */}
+                    {pod.events && pod.events.length > 0 && (
+                        <div>
+                            <h6 className="text-xs font-semibold mb-2" style={{ color: 'var(--mono-muted)' }}>
+                                Recent Events
+                            </h6>
+                            <div className="space-y-2">
+                                {pod.events.map((event, idx) => (
+                                    <div key={idx} className="text-xs p-2" style={{
+                                        background: event.type === 'Error' ? 'rgba(125, 75, 75, 0.24)' : 'rgba(139, 112, 57, 0.22)',
+                                        border: `1px solid ${event.type === 'Error' ? '#7d4b4b' : '#7b6333'}`
+                                    }}>
+                                        <div className="flex items-center justify-between mb-1">
+                                            <span className="font-semibold" style={{ color: event.type === 'Error' ? '#ffc0c0' : 'var(--mono-warn)' }}>
+                                                {event.reason}
+                                            </span>
+                                            <span style={{ color: 'var(--mono-muted)' }}>
+                                                {event.count > 1 && `${event.count}× `}
+                                                {formatRelativeTimeRounded(event.last_timestamp)}
+                                            </span>
+                                        </div>
+                                        <div className="font-mono" style={{ color: '#e8e8e8' }}>
+                                            {event.message}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+                </div>
+            )}
+        </div>
+    );
+}
+
+function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
+    const replicasMismatch = podStatus.ready_replicas < podStatus.desired_replicas;
+    const hasPodIssues =
+        podStatus.pods &&
+        podStatus.pods.some(
+            (p) =>
+                (p.containers && p.containers.some(c => c.restart_count > 0)) ||
+                (p.events && p.events.length > 0)
+        );
+
+    const hasIssues = replicasMismatch || hasPodIssues;
+
+    // Determine tone based on replica counts and pod-level issues
+    let tone = 'ok';
+    if (podStatus.ready_replicas === 0) {
+        tone = 'bad';
+    } else if (replicasMismatch || hasPodIssues) {
+        tone = 'warn';
+    }
+
+    const toneColors = {
+        ok: { color: '#b7ffce', borderColor: '#2e6c44', background: 'rgba(44, 105, 66, 0.2)' },
+        warn: { color: '#ffe3a8', borderColor: '#7b6333', background: 'rgba(139, 112, 57, 0.22)' },
+        bad: { color: '#ffc0c0', borderColor: '#7d4b4b', background: 'rgba(125, 75, 75, 0.24)' },
+    };
+
+    const borderColors = {
+        ok: '#2e6c44',
+        warn: '#7b6333',
+        bad: '#7d4b4b',
+    };
+
+    const headerColors = {
+        ok: '#b7ffce',
+        warn: '#ffe3a8',
+        bad: '#ffc0c0',
+    };
+
+    return (
+        <div className="mb-6">
+            <h4 className="text-sm font-semibold mb-2" style={{ color: 'var(--mono-muted)' }}>
+                Pod Status
+            </h4>
+
+            {/* Replica summary */}
+            <div className="mono-inline-status mb-3" style={toneColors[tone]}>
+                <div className="flex items-center justify-between">
+                    <span>Pods: {podStatus.ready_replicas}/{podStatus.desired_replicas} ready</span>
+                    <span className="text-xs" style={{ color: 'var(--mono-muted)' }}>
+                        {podStatus.current_replicas} total
+                    </span>
+                </div>
+            </div>
+
+            {/* Per-pod details */}
+            {podStatus.pods && podStatus.pods.length > 0 && (
+                <div className="border border-solid" style={{ borderColor: borderColors[tone], background: tone === 'ok' ? '#0a1210' : '#1a1212' }}>
+                    <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
+                        <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
+                            Pods ({podStatus.pods.length})
+                        </h5>
+                    </div>
+                    <div>
+                        {podStatus.pods.map((pod, idx) => (
+                            <PodInfoRow key={pod.name || `pod-${idx}`} pod={pod} />
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            <p className="text-xs mt-2" style={{ color: 'var(--mono-muted)' }}>
+                Last checked: {formatRelativeTimeRounded(podStatus.last_checked)}
+            </p>
+        </div>
+    );
+}
+
 export function DeploymentDetail({ projectName, deploymentId }) {
     const [deployment, setDeployment] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1196,6 +1476,10 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                 <div className="mono-inline-status mb-6" style={{ color: '#ffc0c0', borderColor: '#7d4b4b', background: '#1a1212' }}>
                     Error: {deployment.error_message}
                 </div>
+            )}
+
+            {deployment.controller_metadata?.pod_status && (
+                <PodStatusSection podStatus={deployment.controller_metadata.pod_status} />
             )}
 
             {deployment.build_logs && (

@@ -338,6 +338,9 @@ async fn run_kubernetes_controller_loop(
         ingress_controller_namespace,
         ingress_controller_labels,
         network_policy_egress_allow_cidrs,
+        pod_security_enabled,
+        pod_resources,
+        health_probes,
     ) = match settings.deployment_controller.clone() {
         Some(settings::DeploymentControllerSettings::Kubernetes {
             kubeconfig,
@@ -361,6 +364,9 @@ async fn run_kubernetes_controller_loop(
             ingress_controller_namespace,
             ingress_controller_labels,
             network_policy_egress_allow_cidrs,
+            pod_security_enabled,
+            pod_resources,
+            health_probes,
         }) => (
             kubeconfig,
             production_ingress_url_template,
@@ -383,6 +389,9 @@ async fn run_kubernetes_controller_loop(
             ingress_controller_namespace,
             ingress_controller_labels,
             network_policy_egress_allow_cidrs,
+            pod_security_enabled,
+            pod_resources,
+            health_probes,
         ),
         None => {
             anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
@@ -439,6 +448,9 @@ async fn run_kubernetes_controller_loop(
             ingress_controller_namespace,
             ingress_controller_labels,
             network_policy_egress_allow_cidrs,
+            pod_security_enabled,
+            pod_resources,
+            health_probes,
         },
     )?);
 
