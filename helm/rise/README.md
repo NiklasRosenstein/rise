@@ -220,7 +220,7 @@ The backend can optionally be deployed alongside:
 When Kubernetes deployment is configured (via `config.kubernetes`), Rise requires cluster-wide permissions via ClusterRole and ClusterRoleBinding to:
 
 - Create, manage, and delete namespaces
-- Deploy applications (Deployments, Services, Ingresses) within those namespaces
+- Deploy applications (Deployments, Services, Ingresses, NetworkPolicies) within those namespaces
 
 **Important Security Notes:**
 
