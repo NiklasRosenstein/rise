@@ -138,7 +138,7 @@ extensions:
       region: eu-west-1
       instance_size: db.t3.micro
       disk_size: 20
-      default_engine_version: "16.4"  # Default PostgreSQL version
+      default_engine_version: "18.2"  # Default PostgreSQL version
       # VPC configuration from Terraform outputs:
       vpc_security_group_ids:         # From rise_config.rds.vpc_security_group_ids
         - sg-0123456789abcdef0

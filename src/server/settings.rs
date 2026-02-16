@@ -970,7 +970,7 @@ fn default_instance_id_prefix() -> String {
 
 #[allow(dead_code)]
 fn default_engine_version() -> String {
-    "16.4".to_string() // PostgreSQL 16.4 (widely available as of late 2024)
+    "18.2".to_string()
 }
 
 #[allow(dead_code)]
