@@ -3,7 +3,9 @@ use chrono::Utc;
 use tracing::error;
 
 use crate::db::deployments as db_deployments;
+use crate::db::env_vars as db_env_vars;
 use crate::db::models::{Deployment, Project};
+use crate::server::extensions::InjectedEnvVarValue;
 use crate::server::state::AppState;
 
 /// Generate deployment ID in format YYYYMMDD-HHMMSS
@@ -113,37 +115,71 @@ pub async fn create_deployment_with_hooks(
 
     // Call before_deployment hooks for all registered extensions
     for (_, extension) in state.extension_registry.iter() {
-        if let Err(e) = extension
-            .before_deployment(
-                deployment.id, // Use the UUID from the database record
-                project.id,
-                &deployment_group,
-            )
+        let vars = match extension
+            .before_deployment(project.id, &deployment_group)
             .await
         {
-            error!(
-                "Extension type '{}' before_deployment hook failed: {:?}",
-                extension.extension_type(),
-                e
-            );
+            Ok(vars) => vars,
+            Err(e) => {
+                error!(
+                    "Extension type '{}' before_deployment hook failed: {:?}",
+                    extension.extension_type(),
+                    e
+                );
 
-            // Mark deployment as failed
-            // Note: The error message from the extension provider should include the specific instance name
-            let error_msg = format!(
-                "Extension type '{}' failed: {}",
-                extension.extension_type(),
-                e
-            );
-            if let Err(mark_err) =
-                db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
+                let error_msg = format!(
+                    "Extension type '{}' failed: {}",
+                    extension.extension_type(),
+                    e
+                );
+                if let Err(mark_err) =
+                    db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
+                {
+                    error!(
+                        "Failed to mark deployment as failed after extension error: {:?}",
+                        mark_err
+                    );
+                }
+
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
+            }
+        };
+
+        // Write returned env vars to deployment_env_vars
+        for var in vars {
+            let (value, is_secret, is_protected) = match var.value {
+                InjectedEnvVarValue::Plain(v) => (v, false, false),
+                InjectedEnvVarValue::Secret { encrypted, .. } => (encrypted, true, false),
+                InjectedEnvVarValue::Protected { encrypted, .. } => (encrypted, true, true),
+            };
+
+            if let Err(e) = db_env_vars::upsert_deployment_env_var(
+                &state.db_pool,
+                deployment.id,
+                &var.key,
+                &value,
+                is_secret,
+                is_protected,
+            )
+            .await
             {
                 error!(
-                    "Failed to mark deployment as failed after extension error: {:?}",
-                    mark_err
+                    "Failed to write env var '{}' for deployment {}: {:?}",
+                    var.key, deployment.deployment_id, e
                 );
-            }
 
-            return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
+                let error_msg = format!("Failed to write env var '{}': {}", var.key, e);
+                if let Err(mark_err) =
+                    db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
+                {
+                    error!(
+                        "Failed to mark deployment as failed after env var write error: {:?}",
+                        mark_err
+                    );
+                }
+
+                return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
+            }
         }
     }
 

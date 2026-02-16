@@ -1,75 +1,105 @@
 # Deployments
 
-Deployments in Rise represent immutable instances of your application running in the container runtime.
+A deployment is an immutable, timestamped instance of your application running in the container runtime. Each deployment has a unique ID (e.g., `my-app:20241205-1234`), tracks its own status, and can be rolled back to.
 
-## What is a Deployment?
+## Creating a Deployment
 
-A **deployment** is a specific version of your project that has been built, pushed to a container registry, and deployed to the Kubernetes runtime.
+The primary command is `rise deploy`:
 
-Key characteristics:
-- **Immutable**: Once created, a deployment's configuration cannot be changed
-- **Timestamped**: Each deployment has a unique timestamp ID (e.g., `my-app:20241205-1234`)
-- **Tracked**: Deployments have status, health checks, and logs
-- **Rollback-able**: You can rollback to any previous deployment
+```bash
+# Deploy from current directory (builds, pushes, deploys)
+rise deploy
+
+# Deploy from a specific directory
+rise deploy ./path/to/app
+
+# Specify a project explicitly
+rise deploy -p my-app
+```
+
+`rise deploy` is a shortcut for `rise deployment create` (`rise d c`). After creating the deployment, Rise automatically follows its progress.
+
+### Pre-Built Images
+
+Skip the build step by providing an image directly:
+
+```bash
+rise deploy --image nginx:latest --http-port 80
+rise deploy --image myregistry.io/my-app:v1.2.3
+```
+
+When using `--image`, no build occurs and `--http-port` is required.
+
+> **Note:** Private images from external registries may not be pullable by the container runtime due to missing credentials. Contact your Rise platform administrator for guidance.
+
+### Deploying from an Existing Deployment
+
+Reuse the image from a previous deployment:
+
+```bash
+rise deploy --from 20241205-1234
+```
+
+By default, the new deployment uses the project's current environment variables. To copy environment variables from the source deployment instead:
+
+```bash
+rise deploy --from 20241205-1234 --use-source-env-vars
+```
 
 ## Deployment Lifecycle
 
-### 1. Creation
+Deployments progress through the following states:
 
-When you run `rise deployment create my-app`, the following happens:
+### Build & Deploy States
 
-1. **Build** (optional): If no `--image` is provided, Rise builds a container image from your application
-2. **Push**: The image is pushed to the configured container registry
-3. **Store**: Deployment metadata is saved to the database with a digest-pinned image reference
-4. **Deploy**: The deployment controller creates/updates the container in the runtime
+| Status | Description |
+|--------|-------------|
+| `Pending` | Deployment created, waiting to start |
+| `Building` | Container image is being built |
+| `Pushing` | Image is being pushed to the registry |
+| `Pushed` | Image pushed; handoff to the deployment controller |
+| `Deploying` | Controller is creating the container in the runtime |
 
-### 2. Running
+### Running States
 
-Once deployed, the deployment enters the `running` state. The deployment controller:
+| Status | Description |
+|--------|-------------|
+| `Healthy` | Running and passing health checks |
+| `Unhealthy` | Running but failing health checks |
 
-- **Monitors health**: Periodically checks container health
-- **Updates status**: Reflects actual runtime state in the database
-- **Handles failures**: Marks deployments as `failed` if containers crash
+### Cancellation States (Before Infrastructure)
 
-### 3. Stopping
+| Status | Description |
+|--------|-------------|
+| `Cancelling` | Being cancelled before infrastructure was provisioned |
+| `Cancelled` | Cancelled before infrastructure was provisioned (terminal) |
 
-Deployments can be stopped manually or automatically:
+### Termination States (After Infrastructure)
 
-```bash
-# Stop all deployments in a group
-rise deployment stop my-app --group default
-```
+| Status | Description |
+|--------|-------------|
+| `Terminating` | Being gracefully terminated |
+| `Stopped` | User-initiated termination (terminal) |
+| `Superseded` | Replaced by a newer deployment in the same group (terminal) |
 
-Stopped deployments:
-- Remain in the database
-- Can be rolled back to
-- Don't consume runtime resources
+### Other Terminal States
 
-### 4. Expiration
-
-Deployments can auto-delete after a specified duration:
-
-```bash
-# Delete automatically after 7 days
-rise d c my-app --group mr/123 --expire 7d
-```
-
-This is useful for:
-- Preview deployments for merge requests
-- Staging environments
-- Temporary testing environments
+| Status | Description |
+|--------|-------------|
+| `Failed` | Could not reach Healthy state (terminal) |
+| `Expired` | Auto-deleted after reaching Healthy (terminal) |
 
 ## Deployment Groups
 
-Projects can have multiple active deployments using **deployment groups**:
+Projects can have multiple active deployments using deployment groups.
 
 ### Default Group
 
-The **`default`** group represents the primary deployment:
+The `default` group represents the primary deployment:
 
 ```bash
-rise deployment create my-app
-# Accessible at: https://my-app.rise.dev
+rise deploy
+# Accessible at: https://my-app.app.example.com
 ```
 
 ### Custom Groups
@@ -78,149 +108,111 @@ Create additional deployments with custom group names:
 
 ```bash
 # Merge request preview
-rise d c my-app --group mr/123 --expire 7d
+rise deploy --group mr/123 --expire 7d
 
 # Staging environment
-rise d c my-app --group staging
-
-# Feature branch
-rise d c my-app --group feature/new-auth
+rise deploy --group staging
 ```
 
-Custom groups allow:
-- **Multiple concurrent deployments** of the same project
-- **Isolated testing** without affecting production
-- **Preview environments** for code review
+Each custom group gets its own URL: `https://{project}-{group}.preview.example.com`
 
-Each custom group deployment gets its own URL in the format: `https://{project}-{group}.rise.dev`
+Group names must match `[a-z0-9][a-z0-9/-]*[a-z0-9]` (max 100 characters). When a new deployment in a group reaches `Healthy`, the previous deployment in that group is `Superseded`.
 
-## Pre-built Images
+### Auto-Expiration
 
-Skip the build step by deploying pre-built images:
+Set deployments to expire automatically:
 
 ```bash
-# Deploy from Docker Hub
-rise d c my-app --image nginx:latest
-
-# Deploy from private registry
-rise d c my-app --image myregistry.io/my-app:v1.2.3
-
-# Deploy from AWS ECR
-rise d c my-app --image 123456789.dkr.ecr.us-east-1.amazonaws.com/my-app:sha256-abc123
+rise deploy --group mr/123 --expire 7d   # Days
+rise deploy --group preview --expire 24h  # Hours
+rise deploy --group temp --expire 1w      # Weeks
 ```
 
-When using `--image`:
-- No build occurs
-- The image is pulled directly from the specified registry
-- The deployment is pinned to the exact digest of the image
+Expired deployments are automatically cleaned up.
 
-## Following Deployments
+## Monitoring Deployments
 
-Monitor deployment progress in real-time:
+### Following a Deployment
+
+`rise deploy` follows automatically. You can also follow an existing deployment:
 
 ```bash
-# Follow until deployment reaches terminal state
-rise d s my-app:latest --follow
-
-# Follow with timeout
+rise deployment show my-app:20241205-1234 --follow
 rise d s my-app:latest --follow --timeout 10m
 ```
 
-The `--follow` flag auto-refreshes the deployment status and shows:
-- Current state (`pending`, `running`, `failed`, `stopped`)
-- Health status
-- Deployment events (future)
+### Listing Deployments
+
+```bash
+rise deployment list my-app
+rise d ls my-app --group staging
+```
+
+### Viewing Deployment Details
+
+```bash
+rise deployment show my-app:20241205-1234
+rise d s my-app:latest
+```
+
+### Deployment Logs
+
+```bash
+# Show recent logs
+rise deployment logs my-app 20241205-1234
+
+# Follow logs in real-time
+rise deployment logs my-app 20241205-1234 --follow
+
+# Show last 100 lines
+rise deployment logs my-app 20241205-1234 --tail 100
+
+# Show logs since a duration ago
+rise deployment logs my-app 20241205-1234 --since 5m
+
+# Show timestamps
+rise deployment logs my-app 20241205-1234 --timestamps
+```
+
+Note that logs are currently only available for active deployments (`Healthy` or `Unhealthy`) and can not be accessed
+for past deployments.
 
 ## Rollback
 
-Rollback creates a new deployment with the same configuration as a previous one:
+Rollback creates a new deployment using the same image as a previous one:
 
 ```bash
-# Rollback to specific deployment
 rise deployment rollback my-app:20241205-1234
 ```
 
-How it works:
-1. Fetches the configuration of the target deployment (image digest, env vars, etc.)
-2. Creates a **new deployment** with the same configuration
-3. Deploys to the runtime
+This fetches the target deployment's image digest and creates a new deployment with it. The original deployment is not modified.
 
-**Important**: Rollback creates a new deployment; it doesn't modify the original.
+## Stopping Deployments
 
-## Deployment Status
-
-Deployments can be in one of these states:
-
-| Status | Description |
-|--------|-------------|
-| `pending` | Deployment created, waiting to start |
-| `running` | Container is running and healthy |
-| `unhealthy` | Container is running but health check fails |
-| `failed` | Container failed to start or crashed |
-| `stopped` | Deployment was manually stopped |
-| `expired` | Deployment was auto-deleted due to expiration |
-
-## Best Practices
-
-### Use Expiration for Preview Environments
+Stop all deployments in a group:
 
 ```bash
-# Auto-cleanup after 7 days
-rise d c my-app --group mr/123 --expire 7d
+rise deployment stop my-app --group default
+rise d stop my-app --group mr/123
 ```
 
-### Pin to Specific Image Tags
-
-```bash
-# Good: Specific version
-rise d c my-app --image myapp:v1.2.3
-
-# Avoid: Mutable tags in production
-rise d c my-app --image myapp:latest
-```
-
-Rise automatically pins deployments to image digests for reproducibility.
-
-### Use Deployment Groups for Staging
-
-```bash
-# Staging deployment
-rise d c my-app --group staging
-
-# Production deployment
-rise d c my-app --group default
-```
-
-### Follow Deployments in CI/CD
-
-```bash
-# Wait for deployment to succeed
-rise d c my-app --follow --timeout 5m || exit 1
-```
+Stopped deployments remain in the database for rollback purposes.
 
 ## Auto-Injected Environment Variables
 
-Rise automatically injects the following environment variables into every deployment:
+Rise automatically injects these variables into every deployment:
 
-| Variable | Description | Example Value |
-|----------|-------------|---------------|
+| Variable | Description | Example |
+|----------|-------------|---------|
 | `PORT` | HTTP port the container should listen on | `8080` |
-| `RISE_ISSUER` | Rise server URL (base URL for all Rise endpoints) and JWT issuer | `https://rise.example.com` |
-| `RISE_APP_URL` | Canonical URL where your app is accessible (primary custom domain or default project URL) | `https://myapp.example.com` |
-| `RISE_APP_URLS` | JSON array of all URLs where your app can be accessed | `["https://myapp.rise.dev", "https://myapp.example.com"]` |
+| `RISE_ISSUER` | Rise server URL and JWT issuer | `https://rise.example.com` |
+| `RISE_APP_URL` | Canonical URL where your app is accessible | `https://myapp.example.com` |
+| `RISE_APP_URLS` | JSON array of all URLs where your app is accessible | `["https://myapp.app.example.com", "https://myapp.example.com"]` |
 
-### Using RISE_ISSUER for JWT Validation
+`PORT` defaults to 8080 and can be overridden per-deployment with `--http-port`, or set permanently with `rise env set`. `RISE_APP_URL` is your primary custom domain if set, otherwise the default project URL.
 
-To validate Rise-issued JWTs, applications should:
+For JWT validation using `RISE_ISSUER`, see [Authentication for Applications](authentication-for-apps.md).
 
-1. Fetch OpenID configuration from `${RISE_ISSUER}/.well-known/openid-configuration`
-2. Extract the `jwks_uri` from the configuration
-3. Fetch the JWKS from `jwks_uri`
-4. Use the JWKS to validate JWT signatures
+## CI/CD Deployments
 
-See [Authentication for Apps](./authentication-for-apps.md) for detailed examples.
-
-## Next Steps
-
-- **Use service accounts in CI/CD**: See [Authentication](authentication.md#service-accounts-workload-identity)
-- **Learn CLI commands**: See [CLI Guide](cli.md)
+For automated deployments from CI/CD pipelines, use service accounts with OIDC workload identity. See [Authentication](authentication.md#service-accounts-workload-identity) for setup instructions and examples for GitLab CI and GitHub Actions.

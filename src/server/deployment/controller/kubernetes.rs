@@ -125,6 +125,8 @@ pub struct KubernetesControllerConfig {
     pub access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
     /// Host aliases to inject into pod specs (hostname -> IP address)
     pub host_aliases: std::collections::HashMap<String, String>,
+    pub ingress_controller_namespace: String,
+    pub ingress_controller_labels: std::collections::HashMap<String, String>,
 }
 
 /// Kubernetes controller implementation
@@ -156,6 +158,8 @@ pub struct KubernetesController {
     resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     /// Host aliases to inject into pod specs (hostname -> IP address)
     host_aliases: std::collections::HashMap<String, String>,
+    ingress_controller_namespace: String,
+    ingress_controller_labels: std::collections::HashMap<String, String>,
 }
 
 impl KubernetesController {
@@ -187,6 +191,8 @@ impl KubernetesController {
             access_classes: config.access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: config.host_aliases,
+            ingress_controller_namespace: config.ingress_controller_namespace,
+            ingress_controller_labels: config.ingress_controller_labels,
         })
     }
 
@@ -639,6 +645,53 @@ impl KubernetesController {
                 host: url.to_string(),
                 path_prefix: None,
             },
+        }
+    }
+
+    /// Get fully resolved ingress URL for a deployment group (no Deployment object required)
+    fn resolved_ingress_url_for_group(&self, project: &Project, deployment_group: &str) -> String {
+        if deployment_group == crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP {
+            self.production_ingress_url_template
+                .replace("{project_name}", &project.name)
+        } else if let Some(ref staging_template) = self.staging_ingress_url_template {
+            staging_template
+                .replace("{project_name}", &project.name)
+                .replace(
+                    "{deployment_group}",
+                    &Self::escaped_group_name(deployment_group),
+                )
+        } else {
+            let base_url = self
+                .production_ingress_url_template
+                .replace("{project_name}", &project.name);
+            if let Some(dot_pos) = base_url.find('.') {
+                format!(
+                    "{}-{}{}",
+                    &base_url[..dot_pos],
+                    Self::escaped_group_name(deployment_group),
+                    &base_url[dot_pos..]
+                )
+            } else {
+                format!(
+                    "{}-{}",
+                    base_url,
+                    Self::escaped_group_name(deployment_group)
+                )
+            }
+        }
+    }
+
+    /// Apply port to a host URL string
+    fn full_ingress_url_from_host(&self, url: &str) -> String {
+        if let Some(port) = self.ingress_port {
+            let parsed = Self::parse_ingress_url(url);
+            let host_with_port = format!("{}:{}", parsed.host, port);
+            match parsed.path_prefix {
+                Some(path) => format!("{}{}", host_with_port, path),
+                None => host_with_port,
+            }
+        } else {
+            url.to_string()
         }
     }
 
@@ -1842,6 +1895,56 @@ impl KubernetesController {
     ) -> NetworkPolicy {
         use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 
+        let mut ingress_rules = vec![];
+
+        // Determine ingress controller configuration (per-access-class override or global default)
+        let (ingress_controller_namespace, ingress_controller_labels) =
+            if let Some(access_class) = self.access_classes.get(&project.access_class) {
+                let namespace = access_class
+                    .ingress_controller_namespace
+                    .as_ref()
+                    .unwrap_or(&self.ingress_controller_namespace);
+                let labels = access_class
+                    .ingress_controller_labels
+                    .as_ref()
+                    .unwrap_or(&self.ingress_controller_labels);
+                (namespace.clone(), labels.clone())
+            } else {
+                // Fallback to global defaults if access class not found
+                (
+                    self.ingress_controller_namespace.clone(),
+                    self.ingress_controller_labels.clone(),
+                )
+            };
+
+        // Rule: Allow traffic from ingress controller
+        ingress_rules.push(k8s_openapi::api::networking::v1::NetworkPolicyIngressRule {
+            from: Some(vec![NetworkPolicyPeer {
+                namespace_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert(
+                            "kubernetes.io/metadata.name".to_string(),
+                            ingress_controller_namespace,
+                        );
+                        labels
+                    }),
+                    ..Default::default()
+                }),
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some(
+                        ingress_controller_labels
+                            .iter()
+                            .map(|(k, v)| (k.clone(), v.clone()))
+                            .collect::<BTreeMap<String, String>>(),
+                    ),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }]),
+            ports: None, // Allow all ports from ingress controller
+        });
+
         let mut egress_rules = vec![];
 
         // Rule 1: DNS resolution (UDP + TCP port 53 to kube-system namespace)
@@ -1894,15 +1997,17 @@ impl KubernetesController {
             }
         }
 
-        // Rule 3: External egress (0.0.0.0/0 excluding RFC1918 private ranges)
+        // Rule 3: External egress (0.0.0.0/0 excluding RFC1918 private ranges, link-local, and CGNAT)
         egress_rules.push(NetworkPolicyEgressRule {
             to: Some(vec![NetworkPolicyPeer {
                 ip_block: Some(IPBlock {
                     cidr: "0.0.0.0/0".to_string(),
                     except: Some(vec![
-                        "10.0.0.0/8".to_string(),
-                        "172.16.0.0/12".to_string(),
-                        "192.168.0.0/16".to_string(),
+                        "10.0.0.0/8".to_string(),     // RFC1918 private
+                        "172.16.0.0/12".to_string(),  // RFC1918 private
+                        "192.168.0.0/16".to_string(), // RFC1918 private
+                        "169.254.0.0/16".to_string(), // Link-local + AWS IMDS
+                        "100.64.0.0/10".to_string(),  // CGNAT shared address space
                     ]),
                 }),
                 ..Default::default()
@@ -1922,9 +2027,9 @@ impl KubernetesController {
                     match_labels: Some(Self::group_labels(project, deployment)),
                     ..Default::default()
                 },
-                policy_types: Some(vec!["Egress".to_string()]),
+                policy_types: Some(vec!["Ingress".to_string(), "Egress".to_string()]),
                 egress: Some(egress_rules),
-                ingress: None,
+                ingress: Some(ingress_rules),
             }),
         }
     }
@@ -3768,6 +3873,59 @@ impl DeploymentBackend for KubernetesController {
         })
     }
 
+    async fn get_project_urls(
+        &self,
+        project: &Project,
+        deployment_group: &str,
+    ) -> Result<DeploymentUrls> {
+        // Build a URL using ingress templates and the deployment group
+        let url_host = self.resolved_ingress_url_for_group(project, deployment_group);
+        let full_host = self.full_ingress_url_from_host(&url_host);
+        let default_url = format!("{}://{}", self.ingress_schema, full_host);
+
+        // Custom domains only apply to the default group
+        let (custom_domain_urls, primary_url) = if deployment_group == DEFAULT_DEPLOYMENT_GROUP {
+            let custom_domains = crate::db::custom_domains::list_project_custom_domains(
+                &self.state.db_pool,
+                project.id,
+            )
+            .await?;
+
+            let custom_domains = self.filter_valid_custom_domains(custom_domains);
+
+            let starred = custom_domains.iter().find(|d| d.is_primary);
+            let primary = if let Some(starred) = starred {
+                let host = if let Some(port) = self.ingress_port {
+                    format!("{}:{}", starred.domain, port)
+                } else {
+                    starred.domain.clone()
+                };
+                format!("{}://{}", self.ingress_schema, host)
+            } else {
+                default_url.clone()
+            };
+
+            let mut urls = Vec::new();
+            for domain in custom_domains {
+                let url_host = if let Some(port) = self.ingress_port {
+                    format!("{}:{}", domain.domain, port)
+                } else {
+                    domain.domain
+                };
+                urls.push(format!("{}://{}", self.ingress_schema, url_host));
+            }
+            (urls, primary)
+        } else {
+            (Vec::new(), default_url.clone())
+        };
+
+        Ok(DeploymentUrls {
+            default_url,
+            primary_url,
+            custom_domain_urls,
+        })
+    }
+
     async fn stream_logs(
         &self,
         deployment: &Deployment,
@@ -4133,6 +4291,8 @@ mod tests {
                 ingress_class: "nginx".to_string(),
                 access_requirement: crate::server::settings::AccessRequirement::None,
                 custom_annotations: std::collections::HashMap::new(),
+                ingress_controller_namespace: None,
+                ingress_controller_labels: None,
             },
         );
 
@@ -4158,6 +4318,15 @@ mod tests {
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
+            ingress_controller_namespace: "ingress-nginx".to_string(),
+            ingress_controller_labels: {
+                let mut labels = std::collections::HashMap::new();
+                labels.insert(
+                    "app.kubernetes.io/name".to_string(),
+                    "ingress-nginx".to_string(),
+                );
+                labels
+            },
         }
     }
 
@@ -4601,6 +4770,8 @@ mod tests {
                 ingress_class: "nginx".to_string(),
                 access_requirement: crate::server::settings::AccessRequirement::None,
                 custom_annotations: std::collections::HashMap::new(),
+                ingress_controller_namespace: None,
+                ingress_controller_labels: None,
             },
         );
 
@@ -4627,6 +4798,15 @@ mod tests {
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
+            ingress_controller_namespace: "ingress-nginx".to_string(),
+            ingress_controller_labels: {
+                let mut labels = std::collections::HashMap::new();
+                labels.insert(
+                    "app.kubernetes.io/name".to_string(),
+                    "ingress-nginx".to_string(),
+                );
+                labels
+            },
         }
     }
 }

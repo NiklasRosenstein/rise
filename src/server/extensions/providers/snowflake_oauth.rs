@@ -1,6 +1,6 @@
 use crate::db::{env_vars as db_env_vars, extensions as db_extensions, projects as db_projects};
 use crate::server::encryption::EncryptionProvider;
-use crate::server::extensions::Extension;
+use crate::server::extensions::{Extension, InjectedEnvVar};
 use crate::server::settings::{PrivateKeySource, SnowflakeAuth};
 use anyhow::{anyhow, Context, Result};
 use async_trait::async_trait;
@@ -1426,12 +1426,11 @@ Deletion removes all resources: Snowflake integration, OAuth extension, and envi
 
     async fn before_deployment(
         &self,
-        _deployment_id: Uuid,
         _project_id: Uuid,
         _deployment_group: &str,
-    ) -> Result<()> {
+    ) -> Result<Vec<InjectedEnvVar>> {
         // No-op: this extension doesn't inject deployment-specific resources
-        Ok(())
+        Ok(vec![])
     }
 
     fn start(&self) {

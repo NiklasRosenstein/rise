@@ -4,6 +4,8 @@ export type RiseConfig = {
   authorizeUrl?: string;
   clientId: string;
   redirectUri: string;
+  productionIngressUrlTemplate?: string;
+  stagingIngressUrlTemplate?: string;
 };
 
 declare global {

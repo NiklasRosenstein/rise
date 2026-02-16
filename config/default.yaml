@@ -28,6 +28,7 @@ server:
   cookie_secure: true
   jwt_signing_secret: "${RISE_JWT_SIGNING_SECRET}" # Generate with openssl rand -base64 32
   jwt_claims: ["sub", "email", "name"]
+  # docs_dir: "/var/rise/docs"  # Directory to serve documentation from
 
 database:
   # DATABASE_URL environment variable is always used if set
@@ -104,6 +105,18 @@ deployment_controller:
   #   company.com/team: "platform"
   #   cost-center: "engineering"
 
+  # NetworkPolicy ingress controller configuration (default: ingress-nginx)
+  # Configures which ingress controller pods can send traffic to deployed applications
+  # Override per access class if using multiple ingress controllers
+  # ingress_controller_namespace: "ingress-nginx"
+  # ingress_controller_labels:
+  #   app.kubernetes.io/name: "ingress-nginx"
+  #
+  # For alternative ingress controllers (e.g., older nginx-ingress-controller):
+  # ingress_controller_namespace: "kube-system"
+  # ingress_controller_labels:
+  #   k8s-app: "nginx-ingress-controller"
+
   # Optional: Ingress annotations (e.g., for cert-manager TLS certificates)
   # ingress_annotations:
   #   cert-manager.io/cluster-issuer: "letsencrypt-prod"
@@ -141,15 +154,22 @@ deployment_controller:
   # Each project must be assigned to one of these access classes
   # Each access class specifies its own ingress_class (e.g., "nginx", "nginx-internal")
   #
+  # Optional per-access-class ingress controller configuration:
+  # If your access classes use different ingress controllers (in different namespaces/labels),
+  # you can override the global ingress_controller_namespace and ingress_controller_labels:
+  #   internal:
+  #     display_name: "Internal"
+  #     description: "Internal access only"
+  #     ingress_class: "nginx-internal"
+  #     access_requirement: Authenticated
+  #     ingress_controller_namespace: "kube-system"
+  #     ingress_controller_labels:
+  #       k8s-app: "nginx-ingress-internal"
+  #
   # To remove an inherited access class in environment-specific configs, set it to null:
   #   access_classes:
   #     authenticated: null  # Remove this class
   #     private: null        # Remove this class
-  #     internal:            # Add a new class
-  #       display_name: "Internal"
-  #       description: "Internal access only"
-  #       ingress_class: "nginx-internal"
-  #       access_requirement: Authenticated
   access_classes:
     public:
       display_name: "Public"

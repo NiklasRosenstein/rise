@@ -335,6 +335,8 @@ async fn run_kubernetes_controller_loop(
         image_pull_secret_name,
         access_classes,
         host_aliases,
+        ingress_controller_namespace,
+        ingress_controller_labels,
     ) = match settings.deployment_controller.clone() {
         Some(settings::DeploymentControllerSettings::Kubernetes {
             kubeconfig,
@@ -355,6 +357,8 @@ async fn run_kubernetes_controller_loop(
             image_pull_secret_name,
             access_classes,
             host_aliases,
+            ingress_controller_namespace,
+            ingress_controller_labels,
         }) => (
             kubeconfig,
             production_ingress_url_template,
@@ -374,6 +378,8 @@ async fn run_kubernetes_controller_loop(
             image_pull_secret_name,
             access_classes,
             host_aliases,
+            ingress_controller_namespace,
+            ingress_controller_labels,
         ),
         None => {
             anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
@@ -427,6 +433,8 @@ async fn run_kubernetes_controller_loop(
             image_pull_secret_name,
             access_classes,
             host_aliases,
+            ingress_controller_namespace,
+            ingress_controller_labels,
         },
     )?);
 

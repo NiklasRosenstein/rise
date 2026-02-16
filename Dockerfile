@@ -69,6 +69,9 @@ COPY --from=builder /usr/local/bin/rise /usr/local/bin/rise
 # Copy the configuration files
 COPY /config /config
 
+# Copy documentation files for serving via docs_dir
+COPY docs /var/rise/docs
+
 # Expose the application port
 EXPOSE 3000
 
