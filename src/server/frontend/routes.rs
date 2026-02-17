@@ -8,7 +8,6 @@ use axum::{
 };
 use serde_json::json;
 use std::path::{Component, PathBuf};
-use tera::Tera;
 
 use crate::server::settings::ServerSettings;
 use crate::server::state::AppState;
@@ -101,28 +100,20 @@ async fn load_docs_content_from_filesystem(
 }
 
 fn render_index(state: &AppState) -> Response {
-    // Load template from embedded assets
-    let template_content = match StaticAssets::get("index.html.tera") {
+    // Load the Vite-generated index.html from embedded assets
+    let html_content = match StaticAssets::get("index.html") {
         Some(content) => match std::str::from_utf8(&content.data) {
             Ok(s) => s.to_string(),
             Err(e) => {
-                tracing::error!("Failed to parse index.html.tera as UTF-8: {:#}", e);
-                return (StatusCode::INTERNAL_SERVER_ERROR, "Template encoding error")
-                    .into_response();
+                tracing::error!("Failed to parse index.html as UTF-8: {:?}", e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, "HTML encoding error").into_response();
             }
         },
         None => {
-            tracing::error!("index.html.tera template not found in embedded assets");
-            return (StatusCode::INTERNAL_SERVER_ERROR, "Template not found").into_response();
+            tracing::error!("index.html not found in embedded assets");
+            return (StatusCode::INTERNAL_SERVER_ERROR, "HTML not found").into_response();
         }
     };
-
-    // Create Tera instance and add template
-    let mut tera = Tera::default();
-    if let Err(e) = tera.add_raw_template("index.html.tera", &template_content) {
-        tracing::error!("Failed to parse index.html.tera template: {:#}", e);
-        return (StatusCode::INTERNAL_SERVER_ERROR, "Template error").into_response();
-    }
 
     // Build config object from backend settings
     let config = json!({
@@ -135,21 +126,11 @@ fn render_index(state: &AppState) -> Response {
         "stagingIngressUrlTemplate": state.staging_ingress_url_template,
     });
 
-    // Render template with config
-    let mut context = tera::Context::new();
-    context.insert("config", &config.to_string());
+    // Inject config by replacing the placeholder comment
+    let config_injection = format!("window.CONFIG = {};", config);
+    let html_with_config = html_content.replace("/*__RISE_CONFIG_INJECTION__*/", &config_injection);
 
-    match tera.render("index.html.tera", &context) {
-        Ok(html) => Html(html).into_response(),
-        Err(e) => {
-            tracing::error!("Failed to render index.html template: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Template rendering error",
-            )
-                .into_response()
-        }
-    }
+    Html(html_with_config).into_response()
 }
 
 async fn proxy_to_vite(

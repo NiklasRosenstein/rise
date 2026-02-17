@@ -14,8 +14,8 @@ mod tests {
     fn test_static_assets_embedded() {
         // Verify critical static assets are embedded
         assert!(
-            StaticAssets::get("index.html.tera").is_some(),
-            "index.html.tera should be embedded"
+            StaticAssets::get("index.html").is_some(),
+            "index.html should be embedded from Vite build"
         );
         assert!(
             StaticAssets::get("auth-signin.html.tera").is_some(),
@@ -32,10 +32,6 @@ mod tests {
         assert!(
             StaticAssets::get("auth-warning.html.tera").is_some(),
             "auth-warning.html.tera should be embedded"
-        );
-        assert!(
-            StaticAssets::get("ui/assets/.gitkeep").is_some(),
-            "ui/assets placeholder should be embedded"
         );
         assert!(
             StaticAssets::get("assets/favicon.ico").is_some(),

@@ -75,9 +75,8 @@ run = """
 cd frontend
 npm install
 npm run build
-rm -rf ../static/ui
-mkdir -p ../static/ui
-cp -r dist/* ../static/ui/
+cp dist/index.html ../static/
+cp -r dist/assets/* ../static/assets/
 """
 
 [tasks."dist:build"]

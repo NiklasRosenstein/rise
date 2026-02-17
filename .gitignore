@@ -13,9 +13,9 @@ pb_data
 example/**/node_modules
 frontend/node_modules
 frontend/dist
-static/ui/assets/*.js
-static/ui/assets/*.css
-static/ui/index.html
+static/index.html
+static/assets/app.js
+static/assets/app.css
 
 # Helm packages
 .helm-packages/
