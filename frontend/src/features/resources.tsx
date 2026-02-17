@@ -1,12 +1,11 @@
 // @ts-nocheck
 import { createElement, useCallback, useEffect, useMemo, useState } from 'react';
-import { marked } from 'marked';
 import { api } from '../lib/api';
 import { CONFIG } from '../lib/config';
 import { navigate } from '../lib/navigation';
 import { copyToClipboard, formatDate } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, ModalTabs, SegmentedRadioGroup } from '../components/ui';
+import { Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, ModalTabs, MonoStatusPill, MonoTabButton, SegmentedRadioGroup } from '../components/ui';
 import { MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import {
   AwsRdsDetailView,
@@ -23,6 +22,107 @@ import {
   hasExtensionDetailView,
   hasExtensionUI,
 } from './extension-ui';
+
+function extensionDocsHref(extensionType) {
+    return `/docs/extensions/${extensionType}`;
+}
+
+const PREVIEW_EXTENSIONS_STORAGE_KEY = 'rise.previewExtensions';
+const PREVIEW_EXTENSION_CATALOG = [
+    {
+        extension_type: 'aws-rds-provisioner',
+        display_name: 'AWS RDS',
+        description: 'AWS RDS provisioner extension',
+        spec_schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+                engine: { type: 'string', enum: ['postgres'], default: 'postgres' },
+                engine_version: { type: 'string', default: '' },
+                database_isolation: { type: 'string', enum: ['shared', 'isolated'], default: 'shared' },
+                database_url_env_var: { type: 'string', default: 'DATABASE_URL' },
+                inject_pg_vars: { type: 'boolean', default: true },
+            },
+            required: ['engine'],
+        },
+    },
+    {
+        extension_type: 'snowflake-oauth-provisioner',
+        display_name: 'Snowflake OAuth',
+        description: 'Snowflake OAuth provisioner extension',
+        spec_schema: {
+            type: 'object',
+            additionalProperties: false,
+            properties: {
+                oauth_extension_name: { type: 'string' },
+                snowflake_account_locator: { type: 'string' },
+                allowed_roles: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['oauth_extension_name', 'snowflake_account_locator'],
+        },
+    },
+];
+
+function resolvePreviewExtensionIds() {
+    const catalogIds = PREVIEW_EXTENSION_CATALOG.map(ext => ext.extension_type);
+    const parseRawValue = (raw) => {
+        if (!raw) return [];
+        const normalized = raw.trim().toLowerCase();
+        if (!normalized) return [];
+        if (['1', 'true', 'all', '*'].includes(normalized)) return catalogIds;
+        if (['0', 'false', 'none', 'off'].includes(normalized)) return [];
+        return raw.split(',').map(value => value.trim()).filter(Boolean);
+    };
+
+    try {
+        const params = new URLSearchParams(window.location.search);
+        const queryValue = params.get('preview_extensions');
+        if (queryValue !== null) {
+            const ids = parseRawValue(queryValue);
+            window.localStorage.setItem(PREVIEW_EXTENSIONS_STORAGE_KEY, ids.join(','));
+            return new Set(ids);
+        }
+    } catch (err) {
+        // Ignore URL parsing errors and fall back to storage/default.
+    }
+
+    try {
+        const storedValue = window.localStorage.getItem(PREVIEW_EXTENSIONS_STORAGE_KEY) || '';
+        return new Set(parseRawValue(storedValue));
+    } catch (err) {
+        return new Set();
+    }
+}
+
+function mergeExtensionTypesWithPreview(backendExtensionTypes) {
+    const previewIds = resolvePreviewExtensionIds();
+    if (previewIds.size === 0) {
+        return backendExtensionTypes || [];
+    }
+
+    const merged = [...(backendExtensionTypes || [])];
+    const existingIds = new Set(merged.map(ext => ext.extension_type));
+
+    PREVIEW_EXTENSION_CATALOG
+        .filter(ext => previewIds.has(ext.extension_type))
+        .forEach(ext => {
+            if (!existingIds.has(ext.extension_type)) {
+                merged.push(ext);
+            }
+        });
+
+    return merged;
+}
+
+function disablePreviewExtensions(projectName) {
+    try {
+        window.localStorage.removeItem(PREVIEW_EXTENSIONS_STORAGE_KEY);
+    } catch (err) {
+        // Ignore storage errors.
+    }
+
+    navigate(`/project/${projectName}/extensions`);
+}
 
 
 // Helper function to normalize JSON for comparison (sorts keys recursively)
@@ -903,7 +1003,7 @@ export function ExtensionsList({ projectName }) {
                 api.getProjectExtensions(projectName)
             ]);
 
-            setAvailableExtensions(typesResponse.extension_types || []);
+            setAvailableExtensions(mergeExtensionTypesWithPreview(typesResponse.extension_types || []));
             setEnabledExtensions(enabledResponse.extensions || []);
             setLoading(false);
         } catch (err) {
@@ -1142,45 +1242,24 @@ export function ExtensionsList({ projectName }) {
                             {/* Tab Navigation */}
                             <ModalTabs className="px-2">
                                     {hasExtensionUI(selectedExtension.extension_type) && (
-                                        <button
-                                            className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'ui' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                            onClick={() => setModalTab('ui')}
-                                        >
+                                        <MonoTabButton className="mr-4" active={modalTab === 'ui'} onClick={() => setModalTab('ui')}>
                                             Configure
-                                        </button>
+                                        </MonoTabButton>
                                     )}
-                                    <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'config' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                        onClick={() => setModalTab('config')}
-                                    >
+                                    <MonoTabButton className="mr-4" active={modalTab === 'config'} onClick={() => setModalTab('config')}>
                                         {hasExtensionUI(selectedExtension.extension_type) ? 'JSON' : 'Configuration'}
-                                    </button>
-                                    <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'schema' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                        onClick={() => setModalTab('schema')}
-                                    >
+                                    </MonoTabButton>
+                                    <MonoTabButton className="mr-4" active={modalTab === 'schema'} onClick={() => setModalTab('schema')}>
                                         Schema
-                                    </button>
-                                    <button
-                                        className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'docs' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                        onClick={() => setModalTab('docs')}
-                                    >
-                                        Documentation
-                                    </button>
+                                    </MonoTabButton>
                                     {editMode && selectedExtensionData && (
                                         <>
-                                            <button
-                                                className={`pb-3 px-2 border-b-2 transition-colors mr-4 ${modalTab === 'status' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                                onClick={() => setModalTab('status')}
-                                            >
+                                            <MonoTabButton className="mr-4" active={modalTab === 'status'} onClick={() => setModalTab('status')}>
                                                 Status
-                                            </button>
-                                            <button
-                                                className={`pb-3 px-2 border-b-2 transition-colors ${modalTab === 'delete' ? 'border-red-500 text-red-400' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                                onClick={() => setModalTab('delete')}
-                                            >
+                                            </MonoTabButton>
+                                            <MonoTabButton tone="danger" active={modalTab === 'delete'} onClick={() => setModalTab('delete')}>
                                                 Delete
-                                            </button>
+                                            </MonoTabButton>
                                         </>
                                     )}
                             </ModalTabs>
@@ -1191,7 +1270,10 @@ export function ExtensionsList({ projectName }) {
                                     {createElement(getExtensionUI(selectedExtension.extension_type), {
                                         spec: uiSpec,
                                         schema: selectedExtension.spec_schema,
-                                        onChange: handleUiSpecChange
+                                        onChange: handleUiSpecChange,
+                                        projectName,
+                                        instanceName: selectedExtension.name,
+                                        isEnabled: editMode,
                                     })}
                                 </div>
                             )}
@@ -1209,8 +1291,14 @@ export function ExtensionsList({ projectName }) {
                                         rows={15}
                                     />
                                     <p className="text-sm text-gray-600 dark:text-gray-500">
-                                        Enter the extension configuration as a JSON object. See the Schema and Documentation tabs for valid fields and examples.
+                                        Enter the extension configuration as a JSON object. See the Schema tab and Project Extensions docs for valid fields and examples.
                                         {hasExtensionUI(selectedExtension.extension_type) && <span> Use the Configure tab for a form-based interface.</span>}
+                                    </p>
+                                    <p className="text-sm text-gray-600 dark:text-gray-500">
+                                        Extension docs: <a href={extensionDocsHref(selectedExtension.extension_type)} onClick={(e) => {
+                                            e.preventDefault();
+                                            navigate(extensionDocsHref(selectedExtension.extension_type));
+                                        }} className="underline">Open {selectedExtension.extension_type} documentation</a>
                                     </p>
                                 </div>
                             )}
@@ -1224,18 +1312,6 @@ export function ExtensionsList({ projectName }) {
                                     <p className="text-sm text-gray-600 dark:text-gray-500">
                                         This JSON schema defines the valid structure for the extension configuration.
                                     </p>
-                                </div>
-                            )}
-
-                            {modalTab === 'docs' && (
-                                <div className="space-y-4">
-                                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Documentation</h4>
-                                    <div
-                                        className="prose prose-sm prose-invert max-w-none bg-gray-100 dark:bg-gray-800 p-4 rounded max-h-96 overflow-y-auto"
-                                        dangerouslySetInnerHTML={{
-                                            __html: marked.parse(selectedExtension.documentation)
-                                        }}
-                                    />
                                 </div>
                             )}
 
@@ -1344,7 +1420,7 @@ function renderExtensionStatusBadge(extension) {
     }
 
     // Fallback to generic status badge using status_summary
-    let badgeColor = 'bg-gray-600';  // Default
+    let badgeTone = 'muted';
     let statusText = extension.status_summary || 'Unknown';
 
     // Parse status JSON to determine color and text
@@ -1354,29 +1430,25 @@ function renderExtensionStatusBadge(extension) {
 
         switch (state) {
             case 'available':
-                badgeColor = 'bg-green-600';
+                badgeTone = 'ok';
                 break;
             case 'creating':
             case 'pending':
-                badgeColor = 'bg-yellow-600';
+                badgeTone = 'warn';
                 break;
             case 'failed':
-                badgeColor = 'bg-red-600';
+                badgeTone = 'bad';
                 break;
             case 'deleting':
             case 'deleted':
-                badgeColor = 'bg-gray-600';
+                badgeTone = 'muted';
                 break;
             default:
-                badgeColor = 'bg-gray-600';
+                badgeTone = 'muted';
         }
     }
 
-    return (
-        <span className={`${badgeColor} text-white text-xs font-semibold px-3 py-1 rounded-full uppercase`}>
-            {statusText}
-        </span>
-    );
+    return <MonoStatusPill tone={badgeTone}>{statusText}</MonoStatusPill>;
 }
 
 // Generic Extension Detail View (fallback for extensions without custom UI)
@@ -1447,6 +1519,7 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
     };
 
     const [extensionType, setExtensionType] = useState(null);
+    const [backendExtensionTypeIds, setBackendExtensionTypeIds] = useState([]);
     const [enabledExtension, setEnabledExtension] = useState(null);
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState(null);
@@ -1461,6 +1534,7 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
     const { showToast } = useToast();
 
     const isEnabled = enabledExtension !== null;
+    const isPreviewOnly = !!(extensionType && !backendExtensionTypeIds.includes(extensionType.extension_type));
 
     // Check if there are unsaved changes (normalize JSON to ignore key order)
     const hasUnsavedChanges = normalizeJSON(formData.spec) !== normalizeJSON(originalSpec);
@@ -1478,6 +1552,9 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                     api.getExtensionTypes(),
                     api.getProjectExtensions(projectName)
                 ]);
+                const backendTypes = typesResponse.extension_types || [];
+                const mergedTypes = mergeExtensionTypesWithPreview(backendTypes);
+                setBackendExtensionTypeIds(backendTypes.map(t => t.extension_type));
 
                 let enabled = null;
                 let extType = null;
@@ -1491,7 +1568,7 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                         return;
                     }
                     // Find the type for this instance
-                    extType = typesResponse.extension_types.find(t => t.extension_type === enabled.extension_type);
+                    extType = mergedTypes.find(t => t.extension_type === enabled.extension_type);
                     if (!extType) {
                         setError('Extension type not found for this instance');
                         setLoading(false);
@@ -1499,7 +1576,7 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                     }
                 } else if (extensionTypeProp) {
                     // We're creating a new instance of a specific type
-                    extType = typesResponse.extension_types.find(t => t.extension_type === extensionTypeProp);
+                    extType = mergedTypes.find(t => t.extension_type === extensionTypeProp);
                     if (!extType) {
                         setError('Extension type not found');
                         setLoading(false);
@@ -1559,6 +1636,11 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
     }, []);
 
     const handleSave = async () => {
+        if (isPreviewOnly) {
+            showToast(`"${extensionType.display_name}" is in preview mode only. Install the provider in the backend to enable saving.`, 'error');
+            return;
+        }
+
         // Validate instance name for new extensions
         if (!isEnabled && !instanceName.trim()) {
             showToast('Extension name is required', 'error');
@@ -1675,74 +1757,70 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                         </div>
                     </div>
                     <div className="flex items-center gap-3">
+                        <Button
+                            variant="secondary"
+                            size="sm"
+                            onClick={() => navigate(extensionDocsHref(extensionType.extension_type))}
+                        >
+                            Extension Docs
+                        </Button>
                         {isEnabled ? (
                             renderExtensionStatusBadge(enabledExtension)
                         ) : (
-                            <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
-                                Not Enabled
-                            </span>
+                            <MonoStatusPill tone="muted">Not Enabled</MonoStatusPill>
                         )}
                     </div>
                 </div>
+
+                {isPreviewOnly && (
+                    <div className="mb-6 rounded-lg border border-amber-400/40 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-500/40 dark:bg-amber-900/20 dark:text-amber-100">
+                        <div className="flex items-center justify-between gap-3">
+                            <span>Preview mode: this extension UI is available for configuration testing only. Install the backend provider to enable create and update actions.</span>
+                            <Button
+                                variant="secondary"
+                                size="sm"
+                                onClick={() => disablePreviewExtensions(projectName)}
+                            >
+                                Disable Preview Mode
+                            </Button>
+                        </div>
+                    </div>
+                )}
 
                 {/* Tab Navigation */}
                 <div className="border-b border-gray-300 dark:border-gray-700 mb-6">
                     <div className="flex gap-6">
                         {/* Left-aligned: Extension-specific tabs */}
                         {isEnabled && (
-                            <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'overview' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                onClick={() => setActiveTab('overview')}
-                            >
+                            <MonoTabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
                                 Overview
-                            </button>
+                            </MonoTabButton>
                         )}
                         {hasExtensionUI(extensionType.extension_type) && (
-                            <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'configure' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                onClick={() => setActiveTab('configure')}
-                            >
+                            <MonoTabButton active={activeTab === 'configure'} onClick={() => setActiveTab('configure')}>
                                 Configure{hasUnsavedChanges && ' *'}
-                            </button>
+                            </MonoTabButton>
                         )}
 
                         {/* Spacer to push common tabs to the right */}
                         <div className="flex-1"></div>
 
                         {/* Right-aligned: Common tabs */}
-                        <button
-                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'config' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                            onClick={() => setActiveTab('config')}
-                        >
+                        <MonoTabButton active={activeTab === 'config'} onClick={() => setActiveTab('config')}>
                             Spec{hasUnsavedChanges && ' *'}
-                        </button>
+                        </MonoTabButton>
                         {isEnabled && (
-                            <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'status' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                onClick={() => setActiveTab('status')}
-                            >
+                            <MonoTabButton active={activeTab === 'status'} onClick={() => setActiveTab('status')}>
                                 Status
-                            </button>
+                            </MonoTabButton>
                         )}
-                        <button
-                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'schema' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                            onClick={() => setActiveTab('schema')}
-                        >
+                        <MonoTabButton active={activeTab === 'schema'} onClick={() => setActiveTab('schema')}>
                             Schema
-                        </button>
-                        <button
-                            className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'docs' ? 'border-indigo-500 text-gray-900 dark:text-white' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                            onClick={() => setActiveTab('docs')}
-                        >
-                            Documentation
-                        </button>
+                        </MonoTabButton>
                         {isEnabled && (
-                            <button
-                                className={`pb-3 px-2 border-b-2 transition-colors ${activeTab === 'delete' ? 'border-red-500 text-red-400' : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'}`}
-                                onClick={() => setActiveTab('delete')}
-                            >
+                            <MonoTabButton tone="danger" active={activeTab === 'delete'} onClick={() => setActiveTab('delete')}>
                                 Delete
-                            </button>
+                            </MonoTabButton>
                         )}
                     </div>
                 </div>
@@ -1768,7 +1846,7 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                                     placeholder={getDefaultExtensionName(extensionTypeProp)}
                                     required
                                 />
-                                <p className="text-sm text-gray-600 dark:text-gray-500 mt-2">
+                                <p className="text-xs text-gray-600 dark:text-gray-500 mt-2">
                                     Give this extension instance a unique name. You can create multiple instances of the same extension type with different names.
                                 </p>
                             </div>
@@ -1779,8 +1857,10 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                                 variant="primary"
                                 onClick={handleSave}
                                 loading={saving}
+                                disabled={isPreviewOnly}
+                                className={!isEnabled ? 'mono-btn-cta' : ''}
                             >
-                                {isEnabled ? 'Update' : 'Enable'}
+                                {isPreviewOnly ? 'Preview Only' : (isEnabled ? 'Update' : 'Enable')}
                             </Button>
                         </div>
                     </div>
@@ -1798,7 +1878,7 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                                     placeholder={getDefaultExtensionName(extensionTypeProp)}
                                     required
                                 />
-                                <p className="text-sm text-gray-600 dark:text-gray-500 mt-2">
+                                <p className="text-xs text-gray-600 dark:text-gray-500 mt-2">
                                     Give this extension instance a unique name. You can create multiple instances of the same extension type with different names.
                                 </p>
                             </div>
@@ -1814,16 +1894,24 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                             rows={15}
                         />
                         <p className="text-sm text-gray-600 dark:text-gray-500">
-                            Enter the extension configuration as a JSON object. See the Schema and Documentation tabs for valid fields and examples.
+                            Enter the extension configuration as a JSON object. See the Schema tab and Project Extensions docs for valid fields and examples.
                             {hasExtensionUI(extensionType.extension_type) && <span> Use the Configure tab for a form-based interface.</span>}
+                        </p>
+                        <p className="text-sm text-gray-600 dark:text-gray-500">
+                            Extension docs: <a href={extensionDocsHref(extensionType.extension_type)} onClick={(e) => {
+                                e.preventDefault();
+                                navigate(extensionDocsHref(extensionType.extension_type));
+                            }} className="underline">Open {extensionType.extension_type} documentation</a>
                         </p>
                         <div className="flex justify-end gap-3 pt-4 border-t border-gray-300 dark:border-gray-700">
                             <Button
                                 variant="primary"
                                 onClick={handleSave}
                                 loading={saving}
+                                disabled={isPreviewOnly}
+                                className={!isEnabled ? 'mono-btn-cta' : ''}
                             >
-                                {isEnabled ? 'Update' : 'Enable'}
+                                {isPreviewOnly ? 'Preview Only' : (isEnabled ? 'Update' : 'Enable')}
                             </Button>
                         </div>
                     </div>
@@ -1867,15 +1955,6 @@ export function ExtensionDetailPage({ projectName, extensionType: extensionTypeP
                             This JSON schema defines the valid structure for the extension configuration.
                         </p>
                     </div>
-                )}
-
-                {activeTab === 'docs' && (
-                    <div
-                        className="prose prose-invert max-w-none"
-                        dangerouslySetInnerHTML={{
-                            __html: marked.parse(extensionType.documentation)
-                        }}
-                    />
                 )}
 
                 {activeTab === 'delete' && isEnabled && (

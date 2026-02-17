@@ -4,8 +4,24 @@ import { api } from '../lib/api';
 import { CONFIG } from '../lib/config';
 import { copyToClipboard, formatDate } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, FormField, Modal, ModalTabs } from '../components/ui';
+import { Button, FormField, Modal, ModalTabs, MonoCodeBlock, MonoNotice, MonoStatusPill, MonoTabButton } from '../components/ui';
 import { MonoTable, MonoTableBody, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
+
+function statusToneFromState(state) {
+    if (!state) return 'muted';
+    const normalized = String(state).toLowerCase();
+
+    if (['available', 'configured', 'running'].includes(normalized)) return 'ok';
+    if (['creating', 'pending', 'testingconnection', 'creatingintegration', 'retrievingcredentials', 'creatingoauthextension', 'waiting for auth', 'deploying', 'building', 'pushing'].includes(normalized)) return 'warn';
+    if (['failed', 'error', 'terminating'].includes(normalized)) return 'bad';
+    return 'muted';
+}
+
+function renderStatePill(label, forceTone) {
+    if (!label) return null;
+    const tone = forceTone || statusToneFromState(label);
+    return <MonoStatusPill tone={tone}>{label}</MonoStatusPill>;
+}
 
 
 // AWS RDS Extension UI Component
@@ -48,88 +64,66 @@ export function AwsRdsExtensionUI({ spec, schema, onChange }) {
     }, [engine, engineVersion, databaseIsolation, databaseUrlEnvVar, injectPgVars]);
 
     return (
-        <div className="space-y-4">
-            <FormField
-                label="Database Engine"
-                id="rds-engine"
-                type="select"
-                value={engine}
-                onChange={(e) => setEngine(e.target.value)}
-                required
-            >
-                <option value="postgres">PostgreSQL</option>
-            </FormField>
-
-            <FormField
-                label="Engine Version (Optional)"
-                id="rds-engine-version"
-                value={engineVersion}
-                onChange={(e) => setEngineVersion(e.target.value)}
-                placeholder={defaultEngineVersion || "e.g., 16.2"}
-            />
-
-            <FormField
-                label="Database Isolation"
-                id="rds-database-isolation"
-                type="select"
-                value={databaseIsolation}
-                onChange={(e) => setDatabaseIsolation(e.target.value)}
-                required
-            >
-                <option value="shared">Shared (All deployment groups use same database)</option>
-                <option value="isolated">Isolated (Each deployment group gets own database)</option>
-            </FormField>
-
-            <div className="space-y-3">
-                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Environment Variables</h4>
+        <div className="space-y-6">
+            <div className="space-y-4">
                 <FormField
-                    label="Database URL Environment Variable"
-                    id="rds-database-url-env-var"
-                    value={databaseUrlEnvVar}
-                    onChange={(e) => setDatabaseUrlEnvVar(e.target.value)}
-                    placeholder="DATABASE_URL"
-                    helperText="Environment variable name for the database connection string (e.g., DATABASE_URL, POSTGRES_URL). Leave empty to disable. This allows multiple RDS instances to use different variable names."
+                    label="Database Engine"
+                    id="rds-engine"
+                    type="select"
+                    value={engine}
+                    onChange={(e) => setEngine(e.target.value)}
+                    required
+                >
+                    <option value="postgres">PostgreSQL</option>
+                </FormField>
+
+                <FormField
+                    label="Engine Version (Optional)"
+                    id="rds-engine-version"
+                    value={engineVersion}
+                    onChange={(e) => setEngineVersion(e.target.value)}
+                    placeholder={defaultEngineVersion || "e.g., 16.2"}
                 />
-                <label className="flex items-center space-x-3">
-                    <input
-                        type="checkbox"
-                        checked={injectPgVars}
-                        onChange={(e) => setInjectPgVars(e.target.checked)}
-                        className="w-4 h-4 text-indigo-600 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 rounded focus:ring-indigo-500 focus:ring-2"
+
+                <FormField
+                    label="Database Isolation"
+                    id="rds-database-isolation"
+                    type="select"
+                    value={databaseIsolation}
+                    onChange={(e) => setDatabaseIsolation(e.target.value)}
+                    required
+                >
+                    <option value="shared">Shared (All deployment groups use same database)</option>
+                    <option value="isolated">Isolated (Each deployment group gets own database)</option>
+                </FormField>
+
+                <div className="space-y-3">
+                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300">Environment Variables</h4>
+                    <FormField
+                        label="Database URL Environment Variable"
+                        id="rds-database-url-env-var"
+                        value={databaseUrlEnvVar}
+                        onChange={(e) => setDatabaseUrlEnvVar(e.target.value)}
+                        placeholder="DATABASE_URL"
+                        helperText="Environment variable name for the database connection string (e.g., DATABASE_URL, POSTGRES_URL). Leave empty to disable."
                     />
-                    <span className="text-sm text-gray-700 dark:text-gray-300">
-                        Inject <code className="bg-gray-200 dark:bg-gray-700 px-1 rounded text-gray-900 dark:text-gray-200">PG*</code> variables
-                        <span className="text-gray-600 dark:text-gray-500 ml-2">(PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)</span>
-                    </span>
-                </label>
-                <p className="text-xs text-gray-600 dark:text-gray-500">
-                    Note: Only one RDS extension should have PG* variables enabled per project, as they will override each other.
-                </p>
-            </div>
+                    <label className="flex items-center space-x-3">
+                        <input
+                            type="checkbox"
+                            checked={injectPgVars}
+                            onChange={(e) => setInjectPgVars(e.target.checked)}
+                            className="mono-checkbox"
+                        />
+                        <span className="text-sm text-gray-700 dark:text-gray-300">
+                            Inject <code className="mono-token-accent">PG*</code> variables
+                        </span>
+                    </label>
+                </div>
 
-            <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">About This Extension</h4>
-                <p className="text-sm text-gray-600 dark:text-gray-400">
-                    This extension provisions a PostgreSQL database on AWS RDS. The instance size, disk size,
-                    and other infrastructure settings are configured at the server level.
-                </p>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                    <strong>Shared mode:</strong> All deployment groups (default, staging, etc.) use the same database.
-                    This means staging deployments use the same database as production.
-                </p>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                    <strong>Isolated mode:</strong> Each deployment group gets its own empty database.
-                    This is useful for staging environments to have their own clean database instead of working with the production database.
-                </p>
-            </div>
-
-            <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
-                <h4 className="text-sm font-semibold text-yellow-900 dark:text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
-                <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                    Creating a new RDS instance typically takes <strong>5-15 minutes</strong>.
-                    No new deployments can be created until the RDS instance is available.
-                    You can monitor the provisioning status in the Extensions tab.
-                </p>
+                <MonoNotice tone="muted" title="Isolation Modes">
+                    <p><strong>Shared:</strong> all deployment groups (default, staging, etc.) use the same database.</p>
+                    <p><strong>Isolated:</strong> each deployment group gets its own database.</p>
+                </MonoNotice>
             </div>
         </div>
     );
@@ -148,34 +142,7 @@ const AwsRdsExtensionAPI = {
     renderStatusBadge(extension) {
         const status = extension.status || {};
         if (!status.state) return null;
-
-        let badgeColor;
-        const state = status.state.toLowerCase();
-
-        switch (state) {
-            case 'available':
-                badgeColor = 'bg-green-600';
-                break;
-            case 'creating':
-            case 'pending':
-                badgeColor = 'bg-yellow-600';
-                break;
-            case 'failed':
-                badgeColor = 'bg-red-600';
-                break;
-            case 'deleting':
-            case 'deleted':
-                badgeColor = 'bg-gray-600';
-                break;
-            default:
-                badgeColor = 'bg-gray-600';
-        }
-
-        return (
-            <span className={`${badgeColor} text-white text-xs font-semibold px-3 py-1 rounded-full uppercase`}>
-                {status.state}
-            </span>
-        );
+        return renderStatePill(status.state);
     },
 
     renderOverviewTab(extension, projectName) {
@@ -202,6 +169,7 @@ export function OAuthExtensionUI({ spec, schema, onChange, projectName, instance
     const [tokenEndpoint, setTokenEndpoint] = useState(spec?.token_endpoint || '');
     const [showAdvanced, setShowAdvanced] = useState(!!(spec?.authorization_endpoint || spec?.token_endpoint));
     const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
+    const [setupStep, setSetupStep] = useState(1);
     const { showToast } = useToast();
 
     // Build the redirect URI for display
@@ -279,200 +247,110 @@ export function OAuthExtensionUI({ spec, schema, onChange, projectName, instance
         onChangeRef.current(newSpec);
     }, [providerName, description, clientId, clientSecretEncrypted, issuerUrl, authorizationEndpoint, tokenEndpoint, scopes]);
 
-    // Common provider templates
-    // - OIDC-compliant providers (Google): use issuer_url, endpoints auto-discovered
-    // - Non-OIDC providers (GitHub, Snowflake): need manual endpoints
-    const providerTemplates = {
-        snowflake: {
-            name: 'Snowflake',
-            issuerUrl: 'https://YOUR_ACCOUNT.snowflakecomputing.com',
-            authEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/authorize',
-            tokenEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/token-request',
-            needsEndpoints: true, // Snowflake doesn't support OIDC discovery
-            scopes: 'refresh_token'
-        },
+    const exampleConfigs = {
         google: {
-            name: 'Google',
-            issuerUrl: 'https://accounts.google.com',
-            authEndpoint: '',  // Auto-discovered via OIDC
-            tokenEndpoint: '', // Auto-discovered via OIDC
-            needsEndpoints: false,
-            scopes: 'openid, email, profile'
+            title: 'Google (OIDC discovery)',
+            apply: {
+                providerName: 'Google',
+                issuerUrl: 'https://accounts.google.com',
+                authorizationEndpoint: '',
+                tokenEndpoint: '',
+                scopes: 'openid, email, profile',
+                needsEndpoints: false,
+            },
+            spec: `{
+  "provider_name": "Google",
+  "client_id": "your-client-id",
+  "issuer_url": "https://accounts.google.com",
+  "scopes": ["openid", "email", "profile"]
+}`
         },
         github: {
-            name: 'GitHub',
-            issuerUrl: 'https://github.com',
-            authEndpoint: 'https://github.com/login/oauth/authorize',
-            tokenEndpoint: 'https://github.com/login/oauth/access_token',
-            needsEndpoints: true, // GitHub is not OIDC-compliant
-            scopes: 'read:user, user:email'
+            title: 'GitHub (manual endpoints)',
+            apply: {
+                providerName: 'GitHub',
+                issuerUrl: 'https://github.com',
+                authorizationEndpoint: 'https://github.com/login/oauth/authorize',
+                tokenEndpoint: 'https://github.com/login/oauth/access_token',
+                scopes: 'read:user, user:email',
+                needsEndpoints: true,
+            },
+            spec: `{
+  "provider_name": "GitHub",
+  "client_id": "your-client-id",
+  "issuer_url": "https://github.com",
+  "authorization_endpoint": "https://github.com/login/oauth/authorize",
+  "token_endpoint": "https://github.com/login/oauth/access_token",
+  "scopes": ["read:user", "user:email"]
+}`
+        },
+        snowflake: {
+            title: 'Snowflake (manual endpoints)',
+            apply: {
+                providerName: 'Snowflake',
+                issuerUrl: 'https://YOUR_ACCOUNT.snowflakecomputing.com',
+                authorizationEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/authorize',
+                tokenEndpoint: 'https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/token-request',
+                scopes: 'refresh_token',
+                needsEndpoints: true,
+            },
+            spec: `{
+  "provider_name": "Snowflake",
+  "client_id": "your-client-id",
+  "issuer_url": "https://YOUR_ACCOUNT.snowflakecomputing.com",
+  "authorization_endpoint": "https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/authorize",
+  "token_endpoint": "https://YOUR_ACCOUNT.snowflakecomputing.com/oauth/token-request",
+  "scopes": ["refresh_token"]
+}`
         }
     };
 
-    const applyTemplate = (templateKey) => {
-        const template = providerTemplates[templateKey];
-        if (template) {
-            setProviderName(template.name);
-            setIssuerUrl(template.issuerUrl);
-            setAuthorizationEndpoint(template.authEndpoint);
-            setTokenEndpoint(template.tokenEndpoint);
-            setScopes(template.scopes);
-            // Show advanced settings if endpoints are needed
-            if (template.needsEndpoints) {
-                setShowAdvanced(true);
-            }
-            showToast(`Applied ${template.name} template`, 'success');
-        }
+    const applyExampleConfig = (key) => {
+        const example = exampleConfigs[key];
+        if (!example) return;
+
+        setProviderName(example.apply.providerName);
+        setIssuerUrl(example.apply.issuerUrl);
+        setAuthorizationEndpoint(example.apply.authorizationEndpoint);
+        setTokenEndpoint(example.apply.tokenEndpoint);
+        setScopes(example.apply.scopes);
+        setShowAdvanced(Boolean(example.apply.needsEndpoints));
+        setSetupStep(2);
+        showToast(`Applied ${example.apply.providerName} example`, 'success');
     };
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left column - Main configuration form */}
-            <div className="lg:col-span-2 space-y-4">
-                <FormField
-                    label="Provider Name"
-                    id="oauth-provider-name"
-                    value={providerName}
-                    onChange={(e) => setProviderName(e.target.value)}
-                    placeholder="e.g., Snowflake Production"
-                    required
-                    helperText="Display name for this OAuth provider"
-                />
+        <div className="space-y-6">
+            <ModalTabs className="px-2">
+                <MonoTabButton active={setupStep === 1} onClick={() => setSetupStep(1)}>
+                    1. Upstream Provider Setup
+                </MonoTabButton>
+                <MonoTabButton active={setupStep === 2} onClick={() => setSetupStep(2)}>
+                    2. Configuration Inputs
+                </MonoTabButton>
+            </ModalTabs>
 
-                <FormField
-                    label="Description (Optional)"
-                    id="oauth-description"
-                    value={description}
-                    onChange={(e) => setDescription(e.target.value)}
-                    placeholder="e.g., OAuth authentication for analytics access"
-                    helperText="Human-readable description of this OAuth configuration"
-                />
-
-                <FormField
-                    label="Client ID"
-                    id="oauth-client-id"
-                    value={clientId}
-                    onChange={(e) => setClientId(e.target.value)}
-                    placeholder="e.g., ABC123XYZ..."
-                    required
-                    helperText="OAuth client identifier from your provider"
-                />
-
-                <div className="space-y-2">
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                        Client Secret <span className="text-red-500">*</span> {hasExistingSecret && !clientSecretPlaintext && <span className="text-gray-500 dark:text-gray-400">(configured)</span>}
-                        {clientSecretPlaintext && <span className="text-blue-600 dark:text-blue-400">(will be updated)</span>}
-                    </label>
-                    <div className="flex gap-2">
-                        <div className="flex-1 relative">
-                            <input
-                                type={showSecret ? "text" : "password"}
-                                id="oauth-client-secret"
-                                value={clientSecretPlaintext}
-                                onChange={(e) => setClientSecretPlaintext(e.target.value)}
-                                placeholder={clientSecretEncrypted ? "••••••••" : "Enter client secret"}
-                                disabled={isEncrypting}
-                                className="w-full px-3 py-2 pr-10 border border-gray-300 dark:border-gray-600 rounded-md shadow-sm focus:outline-none focus:ring-indigo-500 focus:border-indigo-500 dark:bg-gray-700 dark:text-gray-100 disabled:opacity-50"
-                            />
-                            <button
-                                type="button"
-                                onClick={() => setShowSecret(!showSecret)}
-                                className="absolute right-2 top-1/2 transform -translate-y-1/2 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
-                            >
-                                {showSecret ? '👁️' : '👁️‍🗨️'}
-                            </button>
-                        </div>
-                        <button
-                            type="button"
-                            onClick={handleEncryptSecret}
-                            disabled={!clientSecretPlaintext || clientSecretPlaintext.trim() === '' || isEncrypting}
-                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed"
-                        >
-                            {isEncrypting ? 'Encrypting...' : 'Encrypt'}
-                        </button>
-                    </div>
-                    <p className="text-sm text-gray-600 dark:text-gray-400">
-                        {hasExistingSecret
-                            ? "Secret is configured. Leave blank to keep current secret, or enter a new value and click Encrypt to update it."
-                            : "Enter the OAuth client secret from your provider and click Encrypt to securely store it"}
-                    </p>
-                </div>
-
-                <FormField
-                    label="Issuer URL"
-                    id="oauth-issuer-url"
-                    value={issuerUrl}
-                    onChange={(e) => setIssuerUrl(e.target.value)}
-                    placeholder="https://accounts.google.com"
-                    required
-                    helperText="OIDC issuer URL. For OIDC-compliant providers, endpoints are auto-discovered. For non-OIDC providers (GitHub), also set endpoints below."
-                />
-
-                <FormField
-                    label="Scopes"
-                    id="oauth-scopes"
-                    value={scopes}
-                    onChange={(e) => setScopes(e.target.value)}
-                    placeholder="openid, email, profile"
-                    required
-                    helperText="Comma-separated list of OAuth scopes to request"
-                />
-
-                {/* Advanced: Manual endpoint overrides */}
-                <div className="border-t border-gray-300 dark:border-gray-700 pt-4 mt-4">
-                    <button
-                        type="button"
-                        onClick={() => setShowAdvanced(!showAdvanced)}
-                        className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400"
-                    >
-                        <span className="mr-2">{showAdvanced ? '▼' : '▶'}</span>
-                        Advanced: Manual Endpoint Overrides
-                    </button>
-                    <p className="text-xs text-gray-600 dark:text-gray-500 mt-1">
-                        Only needed for non-OIDC providers (GitHub) or if OIDC discovery fails
-                    </p>
-                </div>
-
-                {showAdvanced && (
-                    <div className="space-y-4 pl-4 border-l-2 border-gray-300 dark:border-gray-700">
-                        <FormField
-                            label="Authorization Endpoint (Optional)"
-                            id="oauth-authorization-endpoint"
-                            value={authorizationEndpoint}
-                            onChange={(e) => setAuthorizationEndpoint(e.target.value)}
-                            placeholder="https://github.com/login/oauth/authorize"
-                            helperText="Override authorization URL (leave empty to use OIDC discovery)"
-                        />
-
-                        <FormField
-                            label="Token Endpoint (Optional)"
-                            id="oauth-token-endpoint"
-                            value={tokenEndpoint}
-                            onChange={(e) => setTokenEndpoint(e.target.value)}
-                            placeholder="https://github.com/login/oauth/access_token"
-                            helperText="Override token URL (leave empty to use OIDC discovery)"
-                        />
-                    </div>
-                )}
-
-            </div>
-
-            {/* Right column - Redirect URI and Quick Start */}
-            <div className="lg:col-span-1 space-y-6">
-                {/* Redirect URI Configuration - Must be set in provider FIRST */}
-                <section>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Redirect URI</h2>
-                    <div className="bg-blue-50 dark:bg-blue-900/20 border-2 border-blue-600 dark:border-blue-600 rounded-lg p-4">
-                        <h3 className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-2">🔗 Required Setup</h3>
-                        <p className="text-sm text-blue-800 dark:text-blue-200 mb-3">
-                            Configure this callback URL in your OAuth provider first:
+            {setupStep === 1 && (
+                <div className="space-y-6">
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Setup the Upstream OAuth / OIDC Provider</h2>
+                        <ol className="text-sm list-decimal list-inside space-y-2">
+                            <li>Register an OAuth app with your provider and collect client credentials.</li>
+                            <li>Configure the redirect URI below as an allowed callback in your provider.</li>
+                            <li>Return here and continue to enter the configuration inputs.</li>
+                        </ol>
+                        <p className="text-xs mt-3 text-gray-600 dark:text-gray-400">
+                            For local development, you can redirect to localhost via the <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">redirect_uri</code> query parameter even if the provider only allows the Rise callback URL.
                         </p>
-                        <div className="flex items-center gap-2 mb-2">
-                            <code className="flex-1 bg-gray-100 dark:bg-gray-800 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all font-mono">
+                    </section>
+
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Redirect URI</h2>
+                        <div className="mono-uri-field">
+                            <code className="flex-1 px-3 py-2 text-xs break-all font-mono">
                                 {redirectUri}
                             </code>
-                            <button
-                                type="button"
+                            <Button
                                 onClick={async () => {
                                     try {
                                         await copyToClipboard(redirectUri);
@@ -481,70 +359,184 @@ export function OAuthExtensionUI({ spec, schema, onChange, projectName, instance
                                         showToast(`Failed to copy: ${err.message}`, 'error');
                                     }
                                 }}
-                                className="px-3 py-2 bg-blue-600 hover:bg-blue-700 text-white text-xs rounded transition-colors whitespace-nowrap font-semibold"
-                                title="Copy redirect URI"
+                                className="whitespace-nowrap"
+                                size="sm"
+                                variant="secondary"
                             >
                                 Copy
-                            </button>
+                            </Button>
                         </div>
-                        <p className="text-xs text-blue-900 dark:text-blue-300">
-                            Also called "Callback URL" or "Authorized redirect URIs".
-                            {!isEnabled && instanceName && (
-                                <span className="block mt-2 text-blue-800 dark:text-blue-200">
-                                    <strong>Note:</strong> Uses extension name "{instanceName}"
-                                </span>
-                            )}
-                        </p>
-                    </div>
-                </section>
+                    </section>
 
-                {/* Quick Start Templates */}
-                <section>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Quick Start</h2>
-                    <div className="space-y-2">
-                        <button
-                            type="button"
-                            onClick={() => applyTemplate('snowflake')}
-                            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
-                            title="Apply Snowflake template"
-                        >
-                            📋 Snowflake Template
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => applyTemplate('google')}
-                            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
-                            title="Apply Google template"
-                        >
-                            📋 Google Template
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => applyTemplate('github')}
-                            className="w-full px-3 py-2 bg-gray-200 hover:bg-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 rounded text-sm text-gray-900 dark:text-gray-200 font-semibold transition-colors text-left"
-                            title="Apply GitHub template"
-                        >
-                            📋 GitHub Template
-                        </button>
-                    </div>
-                    <p className="text-xs text-gray-600 dark:text-gray-500 mt-2">
-                        Click to auto-fill endpoints for common providers
-                    </p>
-                </section>
+                    <section>
+                        <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Example Configurations</h2>
+                        <div className="space-y-2">
+                            {Object.entries(exampleConfigs).map(([key, example]) => (
+                                <details key={example.title} className="mono-table-wrap p-3">
+                                    <summary className="cursor-pointer text-sm font-semibold text-gray-900 dark:text-gray-200 flex items-center gap-2">
+                                        <span className="flex-1">{example.title}</span>
+                                        <Button
+                                            size="sm"
+                                            variant="secondary"
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                e.stopPropagation();
+                                                applyExampleConfig(key);
+                                            }}
+                                        >
+                                            Apply
+                                        </Button>
+                                    </summary>
+                                    <MonoCodeBlock className="mt-3 text-xs mono-code-block-dotted">
+{example.spec}
+                                    </MonoCodeBlock>
+                                </details>
+                            ))}
+                        </div>
+                    </section>
 
-                {/* Setup Steps */}
-                <section>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Setup Steps</h2>
-                    <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
-                        <ol className="text-sm text-yellow-900 dark:text-yellow-200 list-decimal list-inside space-y-2">
-                            <li>Register OAuth app with provider and get client credentials</li>
-                            <li>Configure redirect URI in provider: <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded text-xs">{redirectUri}</code></li>
-                            <li>Enter client secret below (it will be encrypted automatically)</li>
-                            <li>Save this extension</li>
-                        </ol>
+                    <div className="flex justify-end">
+                        <Button onClick={() => setSetupStep(2)} size="md">
+                            Next &gt;
+                        </Button>
                     </div>
-                </section>
-            </div>
+                </div>
+            )}
+
+            {setupStep === 2 && (
+                <div className="space-y-4">
+                        <FormField
+                            label="Provider Name"
+                            id="oauth-provider-name"
+                            value={providerName}
+                            onChange={(e) => setProviderName(e.target.value)}
+                            placeholder="e.g., Snowflake Production"
+                            required
+                            helperText="Display name for this OAuth provider"
+                        />
+
+                        <FormField
+                            label="Description (Optional)"
+                            id="oauth-description"
+                            value={description}
+                            onChange={(e) => setDescription(e.target.value)}
+                            placeholder="e.g., OAuth authentication for analytics access"
+                            helperText="Human-readable description of this OAuth configuration"
+                        />
+
+                        <FormField
+                            label="Client ID"
+                            id="oauth-client-id"
+                            value={clientId}
+                            onChange={(e) => setClientId(e.target.value)}
+                            placeholder="e.g., ABC123XYZ..."
+                            required
+                            helperText="OAuth client identifier from your provider"
+                        />
+
+                        <div className="space-y-2">
+                            <label className="mono-label">
+                                Client Secret <span className="text-red-500">*</span> {hasExistingSecret && !clientSecretPlaintext && <span className="text-gray-500 dark:text-gray-400">(configured)</span>}
+                                {clientSecretPlaintext && <span className="text-blue-600 dark:text-blue-400">(will be updated)</span>}
+                            </label>
+                            <div className="flex gap-2">
+                                <div className="flex-1 relative">
+                                    <input
+                                        type={showSecret ? "text" : "password"}
+                                        id="oauth-client-secret"
+                                        value={clientSecretPlaintext}
+                                        onChange={(e) => setClientSecretPlaintext(e.target.value)}
+                                        placeholder={clientSecretEncrypted ? "••••••••" : "Enter client secret"}
+                                        disabled={isEncrypting}
+                                        className="mono-input pr-16 disabled:opacity-50"
+                                    />
+                                    <button
+                                        type="button"
+                                        onClick={() => setShowSecret(!showSecret)}
+                                        className="absolute right-2 top-1/2 transform -translate-y-1/2 text-xs text-gray-500 hover:text-gray-300"
+                                    >
+                                        {showSecret ? 'Hide' : 'Show'}
+                                    </button>
+                                </div>
+                                <Button
+                                    onClick={handleEncryptSecret}
+                                    disabled={!clientSecretPlaintext || clientSecretPlaintext.trim() === '' || isEncrypting}
+                                    variant="secondary"
+                                    size="md"
+                                >
+                                    {isEncrypting ? 'Encrypting...' : 'Encrypt'}
+                                </Button>
+                            </div>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">
+                                {hasExistingSecret
+                                    ? "Secret is configured. Leave blank to keep current secret, or enter a new value and click Encrypt to update it."
+                                    : "Enter the OAuth client secret from your provider and click Encrypt to securely store it"}
+                            </p>
+                        </div>
+
+                        <FormField
+                            label="Issuer URL"
+                            id="oauth-issuer-url"
+                            value={issuerUrl}
+                            onChange={(e) => setIssuerUrl(e.target.value)}
+                            placeholder="https://accounts.google.com"
+                            required
+                            helperText="OIDC issuer URL. For OIDC-compliant providers, endpoints are auto-discovered. For non-OIDC providers (GitHub), also set endpoints below."
+                        />
+
+                        <FormField
+                            label="Scopes"
+                            id="oauth-scopes"
+                            value={scopes}
+                            onChange={(e) => setScopes(e.target.value)}
+                            placeholder="openid, email, profile"
+                            required
+                            helperText="Comma-separated list of OAuth scopes to request"
+                        />
+
+                        <div className="border-t border-gray-300 dark:border-gray-700 pt-4 mt-4">
+                            <button
+                                type="button"
+                                onClick={() => setShowAdvanced(!showAdvanced)}
+                                className="flex items-center text-sm font-medium text-gray-700 dark:text-gray-300 hover:text-indigo-600 dark:hover:text-indigo-400"
+                            >
+                                <span className="mr-2">{showAdvanced ? '▼' : '▶'}</span>
+                                Advanced: Manual Endpoint Overrides
+                            </button>
+                            <p className="text-xs text-gray-600 dark:text-gray-500 mt-1">
+                                Only needed for non-OIDC providers (GitHub) or if OIDC discovery fails
+                            </p>
+                        </div>
+
+                        {showAdvanced && (
+                            <div className="space-y-4 pl-4 border-l-2 border-gray-300 dark:border-gray-700">
+                                <FormField
+                                    label="Authorization Endpoint (Optional)"
+                                    id="oauth-authorization-endpoint"
+                                    value={authorizationEndpoint}
+                                    onChange={(e) => setAuthorizationEndpoint(e.target.value)}
+                                    placeholder="https://github.com/login/oauth/authorize"
+                                    helperText="Override authorization URL (leave empty to use OIDC discovery)"
+                                />
+
+                                <FormField
+                                    label="Token Endpoint (Optional)"
+                                    id="oauth-token-endpoint"
+                                    value={tokenEndpoint}
+                                    onChange={(e) => setTokenEndpoint(e.target.value)}
+                                    placeholder="https://github.com/login/oauth/access_token"
+                                    helperText="Override token URL (leave empty to use OIDC discovery)"
+                                />
+                            </div>
+                        )}
+
+                        <div className="pt-2">
+                            <Button onClick={() => setSetupStep(1)} variant="secondary" size="sm">
+                                &lt; Previous
+                            </Button>
+                        </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -556,34 +548,18 @@ const OAuthExtensionAPI = {
         const status = extension.status || {};
 
         if (status.error) {
-            return (
-                <span className="bg-red-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
-                    Error
-                </span>
-            );
+            return <MonoStatusPill tone="bad">Error</MonoStatusPill>;
         }
 
         if (status.configured_at) {
             if (status.auth_verified) {
-                return (
-                    <span className="bg-green-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
-                        Configured
-                    </span>
-                );
+                return <MonoStatusPill tone="ok">Configured</MonoStatusPill>;
             } else {
-                return (
-                    <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
-                        Waiting For Auth
-                    </span>
-                );
+                return <MonoStatusPill tone="warn">Waiting For Auth</MonoStatusPill>;
             }
         }
 
-        return (
-            <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">
-                Not Configured
-            </span>
-        );
+        return <MonoStatusPill tone="muted">Not Configured</MonoStatusPill>;
     },
 
     renderOverviewTab(extension, projectName) {
@@ -607,36 +583,15 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
     return (
         <Modal isOpen={isOpen} onClose={onClose} title="Integration Guide" maxWidth="max-w-4xl" bodyClassName="mono-modal-body--flush">
                 <ModalTabs className="px-6">
-                    <button
-                        onClick={() => setActiveTab('fragment')}
-                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 mr-2 ${
-                            activeTab === 'fragment'
-                                ? 'border-indigo-500 text-indigo-400'
-                                : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
-                        }`}
-                    >
+                    <MonoTabButton onClick={() => setActiveTab('fragment')} active={activeTab === 'fragment'}>
                         PKCE Flow (SPAs)
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('backend')}
-                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 mr-2 ${
-                            activeTab === 'backend'
-                                ? 'border-indigo-500 text-indigo-400'
-                                : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
-                        }`}
-                    >
+                    </MonoTabButton>
+                    <MonoTabButton onClick={() => setActiveTab('backend')} active={activeTab === 'backend'}>
                         Token Endpoint (Backend)
-                    </button>
-                    <button
-                        onClick={() => setActiveTab('local')}
-                        className={`px-4 py-3 text-sm font-medium transition-colors border-b-2 ${
-                            activeTab === 'local'
-                                ? 'border-indigo-500 text-indigo-400'
-                                : 'border-transparent text-gray-400 hover:text-gray-900 dark:hover:text-gray-300'
-                        }`}
-                    >
+                    </MonoTabButton>
+                    <MonoTabButton onClick={() => setActiveTab('local')} active={activeTab === 'local'}>
                         Local Development
-                    </button>
+                    </MonoTabButton>
                 </ModalTabs>
 
                 {/* Modal Content */}
@@ -651,14 +606,14 @@ function IntegrationGuideModal({ isOpen, onClose, projectName, extensionName }) 
 
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Authorization URL:</p>
-                                <code className="block bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all">
+                                <MonoCodeBlock as="code" className="block break-all">
                                     {authorizeUrl}
-                                </code>
+                                </MonoCodeBlock>
                             </div>
 
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Example Code:</p>
-                                <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
+                                <MonoCodeBlock>
 {`// Initiate OAuth login (fragment flow is default)
 function login() {
   const authUrl = '${authorizeUrl}';
@@ -691,7 +646,7 @@ function handleCallback() {
 
 // Call on page load
 handleCallback();`}
-                                </pre>
+                                </MonoCodeBlock>
                             </div>
                         </div>
                     )}
@@ -705,21 +660,21 @@ handleCallback();`}
 
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Authorization URL:</p>
-                                <code className="block bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all">
+                                <MonoCodeBlock as="code" className="block break-all">
                                     {authorizeUrl}
-                                </code>
+                                </MonoCodeBlock>
                             </div>
 
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Token Endpoint:</p>
-                                <code className="block bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 break-all">
+                                <MonoCodeBlock as="code" className="block break-all">
                                     POST {tokenUrl}
-                                </code>
+                                </MonoCodeBlock>
                             </div>
 
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Example Code (Node.js/Express):</p>
-                                <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
+                                <MonoCodeBlock>
 {`// Initiate OAuth login
 app.get('/login', (req, res) => {
   const authUrl = '${authorizeUrl}';
@@ -765,7 +720,7 @@ app.get('/oauth/callback', async (req, res) => {
     res.status(500).send('Authentication failed');
   }
 });`}
-                                </pre>
+                                </MonoCodeBlock>
                             </div>
                         </div>
                     )}
@@ -779,7 +734,7 @@ app.get('/oauth/callback', async (req, res) => {
 
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">PKCE Flow (localhost):</p>
-                                <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
+                                <MonoCodeBlock>
 {`// Override redirect URI for local development
 const authUrl = '${authorizeUrl}?redirect_uri=' +
   encodeURIComponent('http://localhost:3000/callback');
@@ -793,12 +748,12 @@ function handleCallback() {
   const accessToken = params.get('access_token');
   // ... use the token
 }`}
-                                </pre>
+                                </MonoCodeBlock>
                             </div>
 
                             <div>
                                 <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Token Endpoint Flow (localhost):</p>
-                                <pre className="bg-white dark:bg-gray-900 px-3 py-2 rounded text-xs text-gray-900 dark:text-gray-200 overflow-x-auto">
+                                <MonoCodeBlock>
 {`// Override redirect URI for local development
 app.get('/login', (req, res) => {
   const authUrl = '${authorizeUrl}?redirect_uri=' +
@@ -811,16 +766,15 @@ app.get('/oauth/callback', async (req, res) => {
   const code = req.query.code;
   // ... same token exchange logic as production
 });`}
-                                </pre>
+                                </MonoCodeBlock>
                             </div>
 
-                            <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-600 dark:border-blue-700 rounded p-4">
-                                <p className="text-sm font-semibold text-blue-900 dark:text-blue-300 mb-2">ℹ️ How it Works</p>
-                                <p className="text-xs text-blue-800 dark:text-blue-200">
+                            <MonoNotice tone="info" title="How It Works">
+                                <p className="text-xs">
                                     The OAuth provider only redirects to <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">{callbackUrl}</code> (Rise's callback URL).
                                     Rise then redirects to your app's redirect_uri with the authorization code. You don't need to configure localhost URLs in your OAuth provider.
                                 </p>
-                            </div>
+                            </MonoNotice>
                         </div>
                     )}
                 </div>
@@ -950,37 +904,33 @@ export function OAuthDetailView({ extension, projectName }) {
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Status</h2>
                         <div className="mono-table-wrap p-4">
                             {status.error ? (
-                                <div className="p-3 bg-red-900/20 border border-red-700 rounded">
-                                    <p className="text-sm text-red-300">
+                                <MonoNotice tone="error">
+                                    <p className="text-sm">
                                         <strong>Error:</strong> {status.error}
                                     </p>
-                                </div>
+                                </MonoNotice>
                             ) : status.configured_at ? (
                                 status.auth_verified ? (
-                                    <div className="p-3 bg-green-900/20 border border-green-700 rounded">
-                                        <p className="text-sm text-green-300">
-                                            ✓ Configured
-                                        </p>
-                                        <p className="text-xs text-green-400 mt-1">
+                                    <MonoNotice tone="success">
+                                        <p className="text-sm">Configured</p>
+                                        <p className="text-xs mt-1">
                                             {formatDate(status.configured_at)}
                                         </p>
-                                    </div>
+                                    </MonoNotice>
                                 ) : (
-                                    <div className="p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
-                                        <p className="text-sm text-yellow-900 dark:text-yellow-300">
-                                            ⚠ Waiting For Auth
-                                        </p>
-                                        <p className="text-xs text-yellow-800 dark:text-yellow-400 mt-1">
+                                    <MonoNotice tone="warn">
+                                        <p className="text-sm">Waiting For Auth</p>
+                                        <p className="text-xs mt-1">
                                             Complete OAuth flow to verify configuration
                                         </p>
-                                    </div>
+                                    </MonoNotice>
                                 )
                             ) : (
-                                <div className="p-3 bg-gray-100 dark:bg-gray-800 rounded">
-                                    <p className="text-sm text-gray-600 dark:text-gray-400">
+                                <MonoNotice tone="muted">
+                                    <p className="text-sm">
                                         Configuration pending...
                                     </p>
-                                </div>
+                                </MonoNotice>
                             )}
                         </div>
                     </section>
@@ -988,12 +938,13 @@ export function OAuthDetailView({ extension, projectName }) {
                     {/* Test OAuth Flow */}
                     <section>
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Test</h2>
-                        <button
+                        <Button
                             onClick={handleTestOAuth}
-                            className="w-full px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-semibold transition-colors"
+                            className="w-full"
+                            size="lg"
                         >
-                            🔐 Test OAuth Flow
-                        </button>
+                            Test OAuth Flow
+                        </Button>
                         <p className="text-xs text-gray-600 dark:text-gray-500 mt-2">
                             Test the OAuth flow and return to this page with a notification.
                         </p>
@@ -1002,12 +953,14 @@ export function OAuthDetailView({ extension, projectName }) {
                     {/* Integration Guide Button */}
                     <section>
                         <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Integration</h2>
-                        <button
+                        <Button
                             onClick={() => setShowGuideModal(true)}
-                            className="w-full px-4 py-3 bg-gray-700 hover:bg-gray-600 text-white rounded-lg font-semibold transition-colors"
+                            className="w-full"
+                            size="lg"
+                            variant="secondary"
                         >
-                            📚 Integration Guide
-                        </button>
+                            Integration Guide
+                        </Button>
                         <p className="text-xs text-gray-600 dark:text-gray-500 mt-2">
                             View code examples for PKCE Flow, Token Endpoint Flow, and local development.
                         </p>
@@ -1158,9 +1111,8 @@ export function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
     }, [blockedRoles, scopes, clientSecretEnvVar]);
 
     return (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-            {/* Left column: Form */}
-            <div className="lg:col-span-2 space-y-4">
+        <div className="space-y-6">
+            <div className="space-y-4">
                 <FormField
                     label="Additional Blocked Roles"
                     id="snowflake-blocked-roles"
@@ -1168,7 +1120,7 @@ export function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     value={blockedRoles}
                     onChange={(e) => setBlockedRoles(e.target.value)}
                     placeholder="SYSADMIN, USERADMIN"
-                    helperText="Comma-separated list of Snowflake roles to block. These will be ADDED to the backend-configured defaults (ACCOUNTADMIN, ORGADMIN, SECURITYADMIN). Users will not be able to select these roles when authenticating."
+                    helperText="Comma-separated list added to backend blocked-role defaults."
                 />
 
                 <FormField
@@ -1178,7 +1130,7 @@ export function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     value={scopes}
                     onChange={(e) => setScopes(e.target.value)}
                     placeholder="session:role:ANALYST, session:role:DEVELOPER"
-                    helperText="Comma-separated list of additional OAuth scopes. These will be ADDED to the backend-configured defaults (usually 'refresh_token'). Use 'session:role:ROLENAME' to allow users to select specific roles."
+                    helperText="Comma-separated scopes added to backend defaults."
                 />
 
                 <FormField
@@ -1187,76 +1139,14 @@ export function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     value={clientSecretEnvVar}
                     onChange={(e) => setClientSecretEnvVar(e.target.value)}
                     placeholder="SNOWFLAKE_CLIENT_SECRET"
-                    helperText="Name of the environment variable where the OAuth client secret will be stored. Defaults to 'SNOWFLAKE_CLIENT_SECRET'."
+                    helperText="Environment variable name for OAuth client secret."
                 />
 
-                <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">How This Works</h4>
-                    <ol className="text-sm text-gray-600 dark:text-gray-400 space-y-2 list-decimal list-inside">
-                        <li>This extension provisions a Snowflake SECURITY INTEGRATION (OAuth provider)</li>
-                        <li>Automatically creates a Generic OAuth extension for end-user authentication</li>
-                        <li>OAuth credentials are retrieved from Snowflake and stored encrypted</li>
-                        <li>Users authenticate via Snowflake OAuth in your application</li>
-                    </ol>
-                </div>
-
-                <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded-lg p-4">
-                    <h4 className="text-sm font-semibold text-yellow-900 dark:text-yellow-300 mb-2">⏱️ Initial Provisioning</h4>
-                    <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                        Creating the Snowflake integration typically takes <strong>10-30 seconds</strong>.
-                        The extension will automatically create the OAuth integration in Snowflake and configure
-                        the corresponding OAuth extension for your project.
+                <MonoNotice tone="success" title="Secondary Roles">
+                    <p>
+                        Secondary roles are enabled by default (OAUTH_USE_SECONDARY_ROLES = IMPLICIT).
                     </p>
-                </div>
-            </div>
-
-            {/* Right column: Guidance */}
-            <div className="space-y-4">
-                <section>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Configuration Notes</h2>
-                    <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-600 dark:border-blue-700 rounded-lg p-3">
-                        <p className="text-sm text-blue-800 dark:text-blue-200 mb-2">
-                            <strong>Backend Configuration</strong>
-                        </p>
-                        <p className="text-xs text-blue-800 dark:text-blue-200">
-                            Snowflake credentials (account, user, password/key) are configured at the server level.
-                            You only need to specify additional blocked roles and scopes here.
-                        </p>
-                    </div>
-                </section>
-
-                <section>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Common Scopes</h2>
-                    <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
-                        <ul className="text-xs text-gray-600 dark:text-gray-400 space-y-1">
-                            <li><code>refresh_token</code> - Enable refresh tokens (default)</li>
-                            <li><code>session:role:ANALYST</code> - Allow ANALYST role</li>
-                            <li><code>session:role:DEVELOPER</code> - Allow DEVELOPER role</li>
-                            <li><code>session:role:PUBLIC</code> - Allow PUBLIC role</li>
-                        </ul>
-                    </div>
-                </section>
-
-                <section>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Security</h2>
-                    <div className="bg-gray-100 dark:bg-gray-800 rounded-lg p-3">
-                        <p className="text-xs text-gray-600 dark:text-gray-400">
-                            Blocked roles prevent users from accessing sensitive roles.
-                            ACCOUNTADMIN, ORGADMIN, and SECURITYADMIN are always blocked by default.
-                        </p>
-                    </div>
-                </section>
-
-                <section>
-                    <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">Secondary Roles</h2>
-                    <div className="bg-green-50 dark:bg-green-900/20 border border-green-600 dark:border-green-700 rounded-lg p-3">
-                        <p className="text-xs text-green-800 dark:text-green-200">
-                            <strong>Enabled by default.</strong> The integration is created with
-                            OAUTH_USE_SECONDARY_ROLES = IMPLICIT, allowing users to use multiple roles
-                            in their session.
-                        </p>
-                    </div>
-                </section>
+                </MonoNotice>
             </div>
         </div>
     );
@@ -1269,56 +1159,44 @@ export function SnowflakeOAuthDetailView({ extension, projectName }) {
 
     // Get state badge color
     const getStateBadge = () => {
-        if (!status.state) return null;
-
-        let badgeColor;
-        const state = status.state;
-
-        switch (state) {
-            case 'Available':
-                badgeColor = 'bg-green-600';
-                break;
-            case 'Pending':
-            case 'TestingConnection':
-            case 'CreatingIntegration':
-            case 'RetrievingCredentials':
-            case 'CreatingOAuthExtension':
-                badgeColor = 'bg-yellow-600';
-                break;
-            case 'Failed':
-                badgeColor = 'bg-red-600';
-                break;
-            case 'Deleting':
-            case 'Deleted':
-                badgeColor = 'bg-gray-600';
-                break;
-            default:
-                badgeColor = 'bg-gray-600';
-        }
-
-        return (
-            <span className={`${badgeColor} text-white text-xs font-semibold px-3 py-1 rounded-full uppercase`}>
-                {state}
-            </span>
-        );
+        return renderStatePill(status.state);
     };
 
     return (
         <>
-            <div className="mb-6">
+            <section className="mb-6 space-y-3">
                 <div className="flex items-center space-x-3">
                     <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">Snowflake OAuth Provisioner</h2>
                     {getStateBadge()}
                 </div>
-                <p className="text-sm text-gray-600 dark:text-gray-400 mt-2">
-                    Automatically provisions Snowflake SECURITY INTEGRATIONs and configures OAuth extensions
+                <p className="text-sm text-gray-600 dark:text-gray-400">
+                    Automatically provisions Snowflake SECURITY INTEGRATIONs and a linked OAuth extension.
                 </p>
-            </div>
+                {status.state === 'Available' && status.oauth_extension_name ? (
+                    <MonoNotice tone="success" title="Next Action">
+                        <p>Provisioning completed. Continue by reviewing or testing the linked OAuth extension.</p>
+                        <div className="mt-2">
+                            <a
+                                href={`/project/${projectName}/extensions/oauth/${status.oauth_extension_name}`}
+                                className="mono-btn mono-btn-primary mono-btn-sm inline-flex"
+                            >
+                                Open Linked OAuth Extension
+                            </a>
+                        </div>
+                    </MonoNotice>
+                ) : (
+                    <MonoNotice tone="warn" title="Current State">
+                        <p>
+                            This extension is still progressing through provisioning states. Use the status sections below to track readiness and errors.
+                        </p>
+                    </MonoNotice>
+                )}
+            </section>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                 {/* Snowflake Integration Details */}
                 <section className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-4">Snowflake Integration</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-4">Snowflake Integration Status</h3>
 
                     <div className="space-y-3 text-sm">
                         {status.integration_name && (
@@ -1351,25 +1229,23 @@ export function SnowflakeOAuthDetailView({ extension, projectName }) {
                     </div>
 
                     {status.state === 'Available' && (
-                        <div className="mt-4 p-3 bg-green-900/20 border border-green-700 rounded">
-                            <p className="text-xs text-green-300">
-                                ✓ Snowflake integration is active and configured
-                            </p>
-                        </div>
+                        <MonoNotice className="mt-4" tone="success">
+                            <p className="text-xs">Snowflake integration is active and configured.</p>
+                        </MonoNotice>
                     )}
 
                     {status.error && (
-                        <div className="mt-4 p-3 bg-red-900/20 border border-red-700 rounded">
-                            <p className="text-xs text-red-300">
+                        <MonoNotice className="mt-4" tone="error">
+                            <p className="text-xs">
                                 <strong>Error:</strong> {status.error}
                             </p>
-                        </div>
+                        </MonoNotice>
                     )}
                 </section>
 
                 {/* OAuth Extension Details */}
                 <section className="bg-gray-100 dark:bg-gray-800 rounded-lg p-4">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-4">OAuth Extension</h3>
+                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-4">Linked OAuth Extension</h3>
 
                     {status.oauth_extension_name ? (
                         <div className="space-y-3">
@@ -1382,19 +1258,19 @@ export function SnowflakeOAuthDetailView({ extension, projectName }) {
                                 <div className="mt-4">
                                     <a
                                         href={`/project/${projectName}/extensions/oauth/${status.oauth_extension_name}`}
-                                        className="inline-block bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium px-4 py-2 rounded transition"
+                                        className="mono-btn mono-btn-primary mono-btn-sm inline-flex"
                                     >
-                                        View OAuth Extension →
+                                        View OAuth Extension
                                     </a>
                                 </div>
                             )}
 
-                            <div className="mt-4 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-600 dark:border-blue-700 rounded">
-                                <p className="text-xs text-blue-800 dark:text-blue-200">
+                            <MonoNotice className="mt-4" tone="info">
+                                <p className="text-xs">
                                     The OAuth extension is automatically created and managed by this provisioner.
                                     Users can authenticate using their Snowflake credentials.
                                 </p>
-                            </div>
+                            </MonoNotice>
                         </div>
                     ) : (
                         <div className="text-sm text-gray-600 dark:text-gray-400">
@@ -1439,12 +1315,12 @@ export function SnowflakeOAuthDetailView({ extension, projectName }) {
                         </div>
                     </div>
 
-                    <div className="mt-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
-                        <p className="text-xs text-yellow-800 dark:text-yellow-200">
+                    <MonoNotice className="mt-4" tone="warn">
+                        <p className="text-xs">
                             <strong>Note:</strong> Additional roles and scopes are combined with backend defaults
                             (not replaced). ACCOUNTADMIN, ORGADMIN, and SECURITYADMIN are always blocked.
                         </p>
-                    </div>
+                    </MonoNotice>
                 </section>
             </div>
         </>
@@ -1457,37 +1333,7 @@ const SnowflakeOAuthExtensionAPI = {
     renderStatusBadge(extension) {
         const status = extension.status || {};
         if (!status.state) return null;
-
-        let badgeColor;
-        const state = status.state;
-
-        switch (state) {
-            case 'Available':
-                badgeColor = 'bg-green-600';
-                break;
-            case 'Pending':
-            case 'TestingConnection':
-            case 'CreatingIntegration':
-            case 'RetrievingCredentials':
-            case 'CreatingOAuthExtension':
-                badgeColor = 'bg-yellow-600';
-                break;
-            case 'Failed':
-                badgeColor = 'bg-red-600';
-                break;
-            case 'Deleting':
-            case 'Deleted':
-                badgeColor = 'bg-gray-600';
-                break;
-            default:
-                badgeColor = 'bg-gray-600';
-        }
-
-        return (
-            <span className={`${badgeColor} text-white text-xs font-semibold px-3 py-1 rounded-full uppercase`}>
-                {status.state}
-            </span>
-        );
+        return renderStatePill(status.state);
     },
 
     renderOverviewTab(extension, projectName) {
@@ -1516,42 +1362,30 @@ export function AwsRdsDetailView({ extension, projectName }) {
 
     // Determine instance state badge color
     const getInstanceStateBadge = () => {
-        if (!status.state) return null;
-
-        let badgeColor;
-        const state = status.state.toLowerCase();
-
-        switch (state) {
-            case 'available':
-                badgeColor = 'bg-green-600';
-                break;
-            case 'creating':
-            case 'pending':
-                badgeColor = 'bg-yellow-600';
-                break;
-            case 'failed':
-                badgeColor = 'bg-red-600';
-                break;
-            case 'deleting':
-            case 'deleted':
-                badgeColor = 'bg-gray-600';
-                break;
-            default:
-                badgeColor = 'bg-gray-600';
-        }
-
-        return (
-            <span className={`${badgeColor} text-white text-xs font-semibold px-3 py-1 rounded-full uppercase inline-block`}>
-                {status.state}
-            </span>
-        );
+        return renderStatePill(status.state);
     };
 
     return (
         <div className="space-y-6">
+            <section className="space-y-3">
+                <div className="flex items-center gap-3">
+                    <h2 className="text-xl font-semibold text-gray-900 dark:text-gray-100">AWS RDS Provisioner</h2>
+                    {getInstanceStateBadge()}
+                </div>
+                {String(status.state || '').toLowerCase() === 'available' ? (
+                    <MonoNotice tone="success" title="Current State">
+                        <p>Database infrastructure is available. Review endpoint and environment variable settings below before deploying.</p>
+                    </MonoNotice>
+                ) : (
+                    <MonoNotice tone="warn" title="Current State">
+                        <p>Provisioning is in progress or requires attention. New dependent deployments may be blocked until the instance is available.</p>
+                    </MonoNotice>
+                )}
+            </section>
+
             {/* Instance Information */}
             <section>
-                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">RDS Instance</h2>
+                <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-200 mb-3">RDS Instance Status</h2>
                 <div className="bg-white dark:bg-gray-900 rounded p-4 grid grid-cols-2 gap-4">
                     <div>
                         <p className="text-sm text-gray-600 dark:text-gray-500">State</p>
@@ -1584,11 +1418,11 @@ export function AwsRdsDetailView({ extension, projectName }) {
                 </div>
 
                 {status.error && (
-                    <div className="mt-3 p-3 bg-red-900/20 border border-red-700 rounded">
-                        <p className="text-sm text-red-300">
+                    <MonoNotice className="mt-3" tone="error">
+                        <p className="text-sm">
                             <strong>Error:</strong> {status.error}
                         </p>
-                    </div>
+                    </MonoNotice>
                 )}
             </section>
 
@@ -1633,7 +1467,7 @@ export function AwsRdsDetailView({ extension, projectName }) {
                             className="rounded"
                         />
                         <span className="text-gray-700 dark:text-gray-300 text-sm">
-                            Inject <code className="bg-gray-100 dark:bg-gray-800 px-1 rounded">PG*</code> variables
+                            Inject <code className="mono-token-accent">PG*</code> variables
                         </span>
                     </label>
                 </div>
@@ -1644,26 +1478,26 @@ export function AwsRdsDetailView({ extension, projectName }) {
 
 // Database Card Component
 function DatabaseCard({ name, status }) {
-    // Determine status badge color
-    let badgeColor;
+    // Determine status badge tone/label
+    let badgeTone = 'muted';
     let statusText = status.status || 'Unknown';
     const state = (status.status || '').toLowerCase();
 
     switch (state) {
         case 'available':
-            badgeColor = 'bg-green-600';
+            badgeTone = 'ok';
             break;
         case 'pending':
         case 'creatingdatabase':
         case 'creatinguser':
-            badgeColor = 'bg-yellow-600';
+            badgeTone = 'warn';
             statusText = 'Provisioning';
             break;
         case 'terminating':
-            badgeColor = 'bg-red-600';
+            badgeTone = 'bad';
             break;
         default:
-            badgeColor = 'bg-gray-600';
+            badgeTone = 'muted';
     }
 
     const isScheduledForCleanup = status.cleanup_scheduled_at != null;
@@ -1678,9 +1512,7 @@ function DatabaseCard({ name, status }) {
         <div className="bg-white dark:bg-gray-900 rounded-lg p-4 border border-gray-300 dark:border-gray-700">
             <div className="flex items-center justify-between mb-3">
                 <h3 className="text-gray-900 dark:text-white font-semibold">{name}</h3>
-                <span className={`${badgeColor} text-white text-xs font-semibold px-2 py-1 rounded uppercase`}>
-                    {statusText}
-                </span>
+                <MonoStatusPill tone={badgeTone}>{statusText}</MonoStatusPill>
             </div>
 
             <div className="space-y-2 text-sm">
@@ -1690,22 +1522,22 @@ function DatabaseCard({ name, status }) {
                 </div>
 
                 {isScheduledForCleanup && cleanupTime && (
-                    <div className="mt-3 p-2 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-600 dark:border-yellow-700 rounded">
-                        <p className="text-xs text-yellow-900 dark:text-yellow-300">
-                            <strong>⏱️ Cleanup Scheduled</strong>
+                    <MonoNotice className="mt-3" tone="warn">
+                        <p className="text-xs">
+                            <strong>Cleanup Scheduled</strong>
                         </p>
-                        <p className="text-xs text-yellow-800 dark:text-yellow-200 mt-1">
+                        <p className="text-xs mt-1">
                             Will be deleted at {formatDate(cleanupTime.toISOString())}
                         </p>
-                    </div>
+                    </MonoNotice>
                 )}
 
                 {status.status === 'Available' && !isScheduledForCleanup && (
-                    <div className="mt-3 p-2 bg-green-900/20 border border-green-700 rounded">
-                        <p className="text-xs text-green-300">
-                            ✓ Database is active and ready
+                    <MonoNotice className="mt-3" tone="success">
+                        <p className="text-xs">
+                            Database is active and ready.
                         </p>
-                    </div>
+                    </MonoNotice>
                 )}
             </div>
         </div>
@@ -1728,7 +1560,14 @@ export function getExtensionUIAPI(extensionType) {
 export function getExtensionUI(extensionType) {
     const api = getExtensionUIAPI(extensionType);
     return api?.renderConfigureTab ?
-        (props) => api.renderConfigureTab(props.spec, props.schema, props.onChange) :
+        (props) => api.renderConfigureTab(
+            props.spec,
+            props.schema,
+            props.onChange,
+            props.projectName,
+            props.instanceName,
+            props.isEnabled
+        ) :
         null;
 }
 

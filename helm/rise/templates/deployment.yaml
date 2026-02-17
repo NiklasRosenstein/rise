@@ -81,8 +81,8 @@ spec:
           {{- toYaml .Values.server.resources | nindent 12 }}
         volumeMounts:
         - name: config
-          mountPath: /etc/rise/production.yaml
-          subPath: production.yaml
+          mountPath: /etc/rise/local.yaml
+          subPath: local.yaml
           readOnly: true
         - name: tmp
           mountPath: /tmp

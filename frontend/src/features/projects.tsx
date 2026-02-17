@@ -740,6 +740,7 @@ export function ProjectDetail({ projectName, initialTab }) {
                                 <span className="text-red-300 ml-1">*</span>
                             </label>
                             <AutocompleteInput
+                                type="email"
                                 id="project-owner-user-email"
                                 value={ownerUserEmail}
                                 onChange={setOwnerUserEmail}
@@ -1046,6 +1047,7 @@ function AppUsersList({ projectName, project, accessClasses, currentUserEmail, o
                     <div className="flex justify-end">
                         <div className="flex gap-2">
                             <AutocompleteInput
+                                type="email"
                                 value={newUserEmail}
                                 onChange={setNewUserEmail}
                                 options={currentUserEmail ? [currentUserEmail] : []}

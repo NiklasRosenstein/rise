@@ -193,6 +193,7 @@ export function TeamsList({ currentUser, openCreate = false }) {
                         </label>
                         <AutocompleteInput
                             id="team-owners"
+                            type="email"
                             value={formData.owners}
                             onChange={(next) => setFormData({ ...formData, owners: next })}
                             options={currentUser?.email ? [currentUser.email] : []}
@@ -210,6 +211,7 @@ export function TeamsList({ currentUser, openCreate = false }) {
                         </label>
                         <AutocompleteInput
                             id="team-members"
+                            type="email"
                             value={formData.members}
                             onChange={(next) => setFormData({ ...formData, members: next })}
                             options={currentUser?.email ? [currentUser.email] : []}
@@ -495,6 +497,7 @@ export function TeamDetail({ teamName, currentUser }) {
                         <div className="flex justify-end">
                             <div className="flex gap-2">
                                 <AutocompleteInput
+                                    type="email"
                                     value={newOwnerEmail}
                                     onChange={setNewOwnerEmail}
                                     options={currentUser?.email ? [currentUser.email] : []}
@@ -552,6 +555,7 @@ export function TeamDetail({ teamName, currentUser }) {
                         <div className="flex justify-end">
                             <div className="flex gap-2">
                                 <AutocompleteInput
+                                    type="email"
                                     value={newMemberEmail}
                                     onChange={setNewMemberEmail}
                                     options={currentUser?.email ? [currentUser.email] : []}

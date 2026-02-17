@@ -155,6 +155,61 @@ export function ModalTabs({ children, className = '' }) {
     return <div className={cx('mono-modal-tabs', className)}>{children}</div>;
 }
 
+export function MonoTabButton({
+    children,
+    active = false,
+    tone = 'default',
+    onClick,
+    className = '',
+}) {
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={cx('mono-tab-trigger', active && 'active', tone === 'danger' && 'mono-tab-trigger-danger', className)}
+        >
+            {children}
+        </button>
+    );
+}
+
+export function MonoStatusPill({ tone = 'muted', uppercase = true, className = '', children }) {
+    const toneClass = {
+        ok: 'mono-pill-ok',
+        warn: 'mono-pill-warn',
+        bad: 'mono-pill-bad',
+        muted: 'mono-pill-muted',
+    }[tone] || 'mono-pill-muted';
+
+    return <span className={cx('mono-status-pill', toneClass, uppercase && 'mono-status-pill-up', className)}>{children}</span>;
+}
+
+export function MonoNotice({ tone = 'info', title = '', className = '', children }) {
+    const toneClass = {
+        info: 'mono-notice-info',
+        warn: 'mono-notice-warn',
+        error: 'mono-notice-error',
+        success: 'mono-notice-success',
+        muted: 'mono-notice-muted',
+    }[tone] || 'mono-notice-info';
+
+    return (
+        <div className={cx('mono-notice', toneClass, className)}>
+            {title && <h4 className="mono-notice-title">{title}</h4>}
+            <div className="mono-notice-body">{children}</div>
+        </div>
+    );
+}
+
+export function MonoCodeBlock({ as = 'pre', className = '', children }) {
+    const Tag = as as any;
+    return (
+        <Tag className={cx('mono-code-block', className)}>
+            {children}
+        </Tag>
+    );
+}
+
 export function SegmentedRadioGroup({
     label,
     name,
@@ -260,6 +315,7 @@ export function AutocompleteInput({
     value,
     onChange,
     options = [],
+    type = 'text',
     placeholder = '',
     disabled = false,
     loading = false,
@@ -300,7 +356,7 @@ export function AutocompleteInput({
     return (
         <div ref={ref} className={cx('relative', className)}>
             <input
-                type="text"
+                type={type}
                 id={id}
                 className="mono-input w-full"
                 placeholder={placeholder}

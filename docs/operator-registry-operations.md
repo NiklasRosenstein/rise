@@ -52,8 +52,8 @@ For `oci-client-auth` mode, the backend returns target registry information whil
 Registry configuration is loaded from backend config files under `config/`.
 
 Typical precedence:
-1. `local.yaml`
-2. `{RISE_CONFIG_RUN_MODE}.yaml` (required)
+1. `{RISE_CONFIG_RUN_MODE}.{toml,yaml,yml}` (required)
+2. `local.{toml,yaml,yml}` (optional local overrides)
 
 Use environment variable substitution for secrets and environment-specific values.
 

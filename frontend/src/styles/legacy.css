@@ -1113,6 +1113,17 @@ textarea:focus-visible {
     background: #1a1a1a;
 }
 
+.mono-btn-cta {
+    background: var(--rise-accent-strong);
+    border-color: var(--rise-accent);
+    color: #fff5ef;
+}
+
+.mono-btn-cta:hover {
+    background: #c26c3f;
+    border-color: #d98659;
+}
+
 .mono-btn-secondary {
     background: #151515;
     color: var(--mono-muted);
@@ -1196,6 +1207,173 @@ textarea:focus-visible {
     gap: 0;
     border-bottom: 1px solid var(--mono-line);
     background: #121212;
+}
+
+.mono-tab-trigger {
+    padding: 0.7rem 0.55rem;
+    margin-right: 0.55rem;
+    border: 0;
+    border-bottom: 2px solid transparent;
+    background: transparent;
+    color: var(--mono-muted);
+    font-size: 0.82rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: color 0.15s ease, border-color 0.15s ease;
+}
+
+.mono-tab-trigger:hover {
+    color: var(--mono-text);
+}
+
+.mono-tab-trigger.active {
+    color: var(--mono-text);
+    border-bottom-color: var(--rise-accent);
+}
+
+.mono-tab-trigger-danger.active {
+    color: var(--mono-bad);
+    border-bottom-color: #8a5757;
+}
+
+.mono-status-pill {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.24rem 0.5rem;
+    border-radius: 0;
+    border: 1px solid var(--mono-line);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+}
+
+.mono-status-pill-up {
+    text-transform: uppercase;
+}
+
+.mono-pill-ok {
+    color: var(--mono-ok);
+    border-color: #2e6c44;
+    background: rgba(44, 105, 66, 0.2);
+}
+
+.mono-pill-warn {
+    color: var(--mono-warn);
+    border-color: #7b6333;
+    background: rgba(139, 112, 57, 0.22);
+}
+
+.mono-pill-bad {
+    color: var(--mono-bad);
+    border-color: #7d4b4b;
+    background: rgba(125, 75, 75, 0.24);
+}
+
+.mono-pill-muted {
+    color: var(--mono-muted);
+    border-color: #4a4a4a;
+    background: rgba(74, 74, 74, 0.2);
+}
+
+.mono-notice {
+    border: 1px solid var(--mono-line);
+    background: #151515;
+    padding: 0.75rem;
+}
+
+.mono-notice-title {
+    margin: 0 0 0.35rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+}
+
+.mono-notice-body {
+    color: var(--mono-muted);
+    font-size: 0.82rem;
+}
+
+.mono-notice-body p {
+    margin: 0;
+}
+
+.mono-notice-body p + p {
+    margin-top: 0.5rem;
+}
+
+.mono-notice-info {
+    border-color: var(--rise-accent);
+    background: rgba(214, 125, 79, 0.16);
+}
+
+.mono-notice-info .mono-notice-title {
+    color: var(--rise-accent-soft);
+}
+
+.mono-notice-warn {
+    border-color: #7b6333;
+    background: rgba(139, 112, 57, 0.2);
+}
+
+.mono-notice-warn .mono-notice-title {
+    color: var(--mono-warn);
+}
+
+.mono-notice-error {
+    border-color: #7d4b4b;
+    background: rgba(125, 75, 75, 0.22);
+}
+
+.mono-notice-error .mono-notice-title {
+    color: var(--mono-bad);
+}
+
+.mono-notice-success {
+    border-color: #2e6c44;
+    background: rgba(44, 105, 66, 0.2);
+}
+
+.mono-notice-success .mono-notice-title {
+    color: var(--mono-ok);
+}
+
+.mono-notice-muted {
+    border-color: var(--mono-line);
+    background: #151515;
+}
+
+.mono-notice-muted .mono-notice-title {
+    color: var(--mono-text);
+}
+
+.mono-code-block {
+    border: 1px solid var(--mono-line);
+    background: #101010;
+    color: var(--mono-text);
+    padding: 0.65rem 0.8rem;
+    border-radius: 0;
+    overflow-x: auto;
+    font-family: inherit;
+    font-size: 0.78rem;
+    line-height: 1.55;
+}
+
+.mono-code-block-dotted {
+    border-style: dotted;
+}
+
+.mono-token-accent {
+    border: 1px solid #8aa0d6;
+    background: #e2e8f9;
+    color: #1f2f5f !important;
+    font-weight: 700;
+    padding: 0.05rem 0.35rem;
+    border-radius: 0.2rem;
+}
+
+.dark .mono-token-accent {
+    border-color: #5066a3;
+    background: #1e2a4f;
+    color: #dbe7ff !important;
 }
 
 .modal-content .rounded,
@@ -1777,6 +1955,22 @@ textarea:focus-visible {
 .mono-copy-icon {
     width: 0.72rem;
     height: 0.72rem;
+}
+
+.mono-uri-field {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    border: 1px solid var(--rise-accent);
+    border-left: 3px solid var(--rise-accent);
+    background: rgba(214, 125, 79, 0.12);
+    padding: 0.35rem;
+}
+
+.mono-uri-field code {
+    color: var(--mono-text);
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 .mono-timeline-group {
