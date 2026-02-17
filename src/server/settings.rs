@@ -736,13 +736,10 @@ impl Settings {
         // Load config files in order, trying both .toml and .yaml/.yml extensions.
         // TOML takes precedence if both exist.
 
-        // 1. Load default config (optional)
-        Self::try_add_config_file(&mut builder, &config_dir, "default", false)?;
-
-        // 2. Load environment-specific config (required)
+        // 1. Load environment-specific config (required)
         Self::try_add_config_file(&mut builder, &config_dir, &run_mode, true)?;
 
-        // 3. Load local config (optional, not checked into git)
+        // 2. Load local config (optional, not checked into git)
         Self::try_add_config_file(&mut builder, &config_dir, "local", false)?;
 
         // Build config and substitute environment variables
@@ -993,15 +990,15 @@ unknown_top_level: "also unknown"
     }
 
     #[test]
-    fn test_run_mode_config_is_required_even_if_default_exists() {
+    fn test_run_mode_config_is_required_even_if_local_exists() {
         use std::fs;
         use tempfile::TempDir;
 
         let temp_dir = TempDir::new().unwrap();
-        let default_path = temp_dir.path().join("default.yaml");
+        let local_path = temp_dir.path().join("local.yaml");
 
         fs::write(
-            &default_path,
+            &local_path,
             r#"
 server:
   host: "0.0.0.0"
