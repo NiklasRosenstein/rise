@@ -72,7 +72,7 @@ spec:
   - metadata:
       name: data
       labels:
-        {{- include "rise.labels" . | nindent 8 }}
+        {{- include "rise.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: postgresql
     spec:
       accessModes:

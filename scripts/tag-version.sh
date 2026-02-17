@@ -192,9 +192,11 @@ echo ""
 echo "Creating release ${VERSION}..."
 echo ""
 
-# Step 1: Update version in Cargo.toml
-echo "[1/5] Updating Cargo.toml..."
+# Step 1: Update version in Cargo.toml and Chart.yaml
+echo "[1/5] Updating Cargo.toml and Chart.yaml..."
 sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml && rm Cargo.toml.bak
+sed -i.bak "s/^version: .*/version: ${VERSION}/" helm/rise/Chart.yaml && rm helm/rise/Chart.yaml.bak
+sed -i.bak "s/^appVersion: .*/appVersion: \"${VERSION}\"/" helm/rise/Chart.yaml && rm helm/rise/Chart.yaml.bak
 
 # Step 2: Update Cargo.lock
 echo "[2/5] Updating Cargo.lock..."
@@ -202,7 +204,7 @@ cargo update --workspace --quiet
 
 # Step 3: Commit the changes
 echo "[3/5] Committing version bump..."
-git add Cargo.toml Cargo.lock
+git add Cargo.toml Cargo.lock helm/rise/Chart.yaml
 git commit -m "chore: bump version to ${VERSION}"
 
 # Step 4: Create the tag with AI-generated notes in the annotation
