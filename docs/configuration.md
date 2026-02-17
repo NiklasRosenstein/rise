@@ -239,8 +239,8 @@ allow_team_creation = true     # Allow regular users to create teams (default: t
 ```
 
 **Team Creation Control:**
-- `allow_team_creation: true` (default): All authenticated users can create teams
-- `allow_team_creation: false`: Only admin users can create teams (suitable for centrally-managed organizations)
+- `allow_team_creation = true` (default): All authenticated users can create teams
+- `allow_team_creation = false`: Only admin users can create teams (suitable for centrally-managed organizations)
 
 ### Database Settings
 

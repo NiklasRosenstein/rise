@@ -167,8 +167,8 @@ pub struct AuthSettings {
     /// Platform access control configuration
     #[serde(default)]
     pub platform_access: PlatformAccessConfig,
-    /// Allow regular users to create teams (default: true)
-    /// When false, only admin users can create teams
+    /// Allow regular users to create teams (default: true).
+    /// When false, only admin users can create teams.
     #[serde(default = "default_allow_team_creation")]
     pub allow_team_creation: bool,
     /// Optional custom authorize endpoint URL
