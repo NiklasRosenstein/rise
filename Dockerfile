@@ -68,7 +68,6 @@ COPY --from=builder /usr/local/bin/rise /usr/local/bin/rise
 
 # Copy the configuration files
 COPY config /etc/rise
-RUN cp /etc/rise/production.yaml /etc/rise/default.yaml
 
 # Copy documentation files for serving via docs_dir
 COPY docs /var/rise/docs

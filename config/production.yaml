@@ -17,7 +17,7 @@ database:
   url: "${DATABASE_URL}"
 
 auth:
-  issuer: "${OIDC_ISSUER:-${PUBLIC_URL}/dex}"
+  issuer: "${OIDC_ISSUER}"
   client_id: "${OIDC_CLIENT_ID:-rise-backend}"
   client_secret: "${OIDC_CLIENT_SECRET}"
   admin_users:

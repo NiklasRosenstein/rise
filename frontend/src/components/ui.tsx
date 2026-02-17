@@ -315,6 +315,7 @@ export function AutocompleteInput({
     value,
     onChange,
     options = [],
+    type = 'text',
     placeholder = '',
     disabled = false,
     loading = false,
@@ -355,7 +356,7 @@ export function AutocompleteInput({
     return (
         <div ref={ref} className={cx('relative', className)}>
             <input
-                type="text"
+                type={type}
                 id={id}
                 className="mono-input w-full"
                 placeholder={placeholder}

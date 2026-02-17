@@ -6,6 +6,5 @@ metadata:
     {{- include "rise.labels" . | nindent 4 }}
 data:
   # Production overrides from values.yaml
-  # The image embeds /etc/rise/default.yaml at build time.
   production.yaml: |
 {{ .Values.config | toYaml | nindent 4 }}
