@@ -98,7 +98,7 @@
         },
         "allow_team_creation": {
           "default": true,
-          "description": "Allow regular users to create teams (default: true) When false, only admin users can create teams",
+          "description": "Allow regular users to create teams (default: true). When false, only admin users can create teams.",
           "type": "boolean"
         },
         "authorize_url": {
