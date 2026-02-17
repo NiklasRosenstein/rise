@@ -86,16 +86,11 @@ if [ "$DRY_RUN" = false ]; then
         exit 1
     fi
 
-    # Check if on develop branch
+    # Require develop branch
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
     if [ "$CURRENT_BRANCH" != "develop" ]; then
-        echo "Warning: You are not on the develop branch (current: $CURRENT_BRANCH)"
-        read -p "Continue anyway? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            echo "Aborted."
-            exit 1
-        fi
+        echo "Error: Releases can only be created from the develop branch (current: $CURRENT_BRANCH)"
+        exit 1
     fi
 fi
 
