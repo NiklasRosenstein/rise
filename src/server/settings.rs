@@ -111,6 +111,10 @@ fn default_idp_group_sync_enabled() -> bool {
     true
 }
 
+fn default_allow_team_creation() -> bool {
+    true // Backward compatible - existing behavior
+}
+
 #[derive(Debug, Deserialize, Clone, JsonSchema)]
 pub struct ControllerSettings {
     /// Interval in seconds for checking deployments to reconcile (default: 5)
@@ -163,6 +167,10 @@ pub struct AuthSettings {
     /// Platform access control configuration
     #[serde(default)]
     pub platform_access: PlatformAccessConfig,
+    /// Allow regular users to create teams (default: true)
+    /// When false, only admin users can create teams
+    #[serde(default = "default_allow_team_creation")]
+    pub allow_team_creation: bool,
     /// Optional custom authorize endpoint URL
     /// If not set, will be discovered from issuer's .well-known/openid-configuration
     /// or default to {issuer}/authorize

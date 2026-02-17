@@ -25,6 +25,8 @@ auth:
   client_secret: "rise-backend-secret"
   admin_users:
     - "admin@example.com"
+  # Allow all users to create teams (default: true). Set to false to restrict team creation to admins only.
+  allow_team_creation: true
   platform_access:
     policy: restrictive
     allowed_user_emails:

@@ -234,7 +234,13 @@ issuer = "http://..."          # OIDC issuer URL
 client_id = "rise-backend"     # OAuth2 client ID
 client_secret = "..."          # OAuth2 client secret
 admin_users = ["email@..."]    # Admin user emails (array)
+allow_team_creation = true     # Allow regular users to create teams (default: true)
+                              # When false, only admins can create teams
 ```
+
+**Team Creation Control:**
+- `allow_team_creation: true` (default): All authenticated users can create teams
+- `allow_team_creation: false`: Only admin users can create teams (suitable for centrally-managed organizations)
 
 ### Database Settings
 
