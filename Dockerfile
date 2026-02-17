@@ -72,6 +72,10 @@ COPY config /etc/rise
 # Copy documentation files for serving via docs_dir
 COPY docs /var/rise/docs
 
+# Default config location/run mode for containerized execution
+ENV RISE_CONFIG_DIR=/etc/rise
+ENV RISE_CONFIG_RUN_MODE=production
+
 # Expose the application port
 EXPOSE 3000
 
