@@ -3,10 +3,10 @@ name: CI
 on:
   pull_request:
     branches:
-      - main
+      - develop
   push:
     branches:
-      - main
+      - develop
     tags:
       - "v*"
 
@@ -48,9 +48,9 @@ jobs:
             if [[ "${{ github.event.pull_request.head.repo.full_name }}" == "${{ github.repository }}" ]]; then
               is_trusted_pr="true"
             fi
-          elif [[ "${GITHUB_REF}" == refs/heads/main ]]; then
-            ci_version="0.0.0-main.${GITHUB_RUN_NUMBER}+${short_sha}"
-            image_tag="main-${short_sha}"
+          elif [[ "${GITHUB_REF}" == refs/heads/develop ]]; then
+            ci_version="0.0.0-develop.${GITHUB_RUN_NUMBER}+${short_sha}"
+            image_tag="develop-${short_sha}"
             is_trusted_pr="false"
           elif [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             version="${GITHUB_REF#refs/tags/v}"
@@ -291,7 +291,7 @@ jobs:
   e2e-minikube:
     name: Minikube end-to-end smoke tests
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/develop'
     needs:
       - prepare
       - package-image

@@ -78,7 +78,7 @@ Add to `.github/workflows/deploy.yml`:
 name: Deploy
 on:
   push:
-    branches: [main]
+    branches: [develop]
 
 permissions:
   id-token: write
