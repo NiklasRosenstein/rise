@@ -54,7 +54,6 @@ backend = [
     "dep:async-trait",
     "dep:oci-distribution",
     "dep:thiserror",
-    "dep:rust-embed",
     "dep:mime_guess",
     "dep:tera",
     "dep:serde_ignored",
@@ -133,7 +132,6 @@ oci-distribution = { version = "0.11", optional = true }
 thiserror = { version = "2.0", optional = true }
 
 # Server: Frontend
-rust-embed = { version = "8.0", optional = true }
 mime_guess = { version = "2.0", optional = true }
 tera = { version = "1.20", optional = true }
 
