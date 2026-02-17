@@ -6,7 +6,7 @@ use crate::server::auth::{
         CompletedAuthSession, OAuth2State,
     },
 };
-use crate::server::frontend::StaticAssets;
+use crate::server::frontend::load_static_file;
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Query, State},
@@ -762,16 +762,24 @@ pub async fn signin_page(
         "Signin page requested"
     );
 
-    // Load template from embedded assets
-    let template_content = StaticAssets::get("auth-signin.html.tera")
+    // Load template from static directory
+    let static_dir = state.server_settings.static_dir.as_deref().ok_or_else(|| {
+        tracing::error!("static_dir not configured");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Static dir not configured".to_string(),
+        )
+    })?;
+
+    let template_content = load_static_file(static_dir, "auth-signin.html.tera")
+        .await
         .ok_or_else(|| {
             tracing::error!("auth-signin.html.tera template not found");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Template not found".to_string(),
             )
-        })?
-        .data;
+        })?;
 
     let template_str = std::str::from_utf8(&template_content).map_err(|e| {
         tracing::error!("Failed to parse template as UTF-8: {:#}", e);
@@ -884,23 +892,49 @@ fn extract_request_base_url(headers: &HeaderMap, state: &AppState) -> String {
 }
 
 /// Render warning page for cookie configuration issues
-fn render_warning_page(
+async fn render_warning_page(
     state: &AppState,
     params: &SigninQuery,
     warnings: Vec<String>,
     request_host: &str,
-) -> Html<String> {
+) -> Result<Html<String>, (StatusCode, String)> {
     // Load template
-    let template_content = StaticAssets::get("auth-warning.html.tera")
-        .expect("auth-warning.html.tera template not found")
-        .data;
+    let static_dir = state.server_settings.static_dir.as_deref().ok_or_else(|| {
+        tracing::error!("static_dir not configured");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Static dir not configured".to_string(),
+        )
+    })?;
 
-    let template_str = std::str::from_utf8(&template_content).expect("Template encoding error");
+    let template_content = load_static_file(static_dir, "auth-warning.html.tera")
+        .await
+        .ok_or_else(|| {
+            tracing::error!("auth-warning.html.tera template not found");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template not found".to_string(),
+            )
+        })?;
+
+    let template_str = std::str::from_utf8(&template_content).map_err(|e| {
+        tracing::error!("Failed to parse template as UTF-8: {:#}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Template encoding error".to_string(),
+        )
+    })?;
 
     // Create Tera instance
     let mut tera = Tera::default();
     tera.add_raw_template("auth-warning.html.tera", template_str)
-        .expect("Template parse error");
+        .map_err(|e| {
+            tracing::error!("Failed to parse template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template error".to_string(),
+            )
+        })?;
 
     // Extract redirect host
     let redirect_url = params.redirect.as_ref().or(params.rd.as_ref());
@@ -950,9 +984,15 @@ fn render_warning_page(
 
     let html = tera
         .render("auth-warning.html.tera", &context)
-        .expect("Template rendering error");
+        .map_err(|e| {
+            tracing::error!("Failed to render template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template rendering error".to_string(),
+            )
+        })?;
 
-    Html(html)
+    Ok(Html(html))
 }
 
 /// Initiate OAuth2 login flow for ingress auth (start of OAuth flow)
@@ -1066,7 +1106,9 @@ pub async fn oauth_signin_start(
             );
 
             // Show warning page to user
-            return Ok(render_warning_page(&state, &params, warnings, request_host).into_response());
+            return Ok(render_warning_page(&state, &params, warnings, request_host)
+                .await?
+                .into_response());
         }
     }
 
@@ -1305,7 +1347,7 @@ pub async fn oauth_callback(
             max_age,
         );
 
-        return render_success_page(&state, project, &redirect_url, &cookie);
+        return render_success_page(&state, project, &redirect_url, &cookie).await;
     }
 
     // Regular OAuth flow (not ingress auth) - UI login
@@ -1378,26 +1420,34 @@ pub async fn oauth_callback(
     );
 
     // Use success page with delayed redirect to ensure cookie is properly persisted
-    render_ui_login_success_page(&redirect_url, &cookie)
+    render_ui_login_success_page(&state, &redirect_url, &cookie).await
 }
 
 /// Helper function to render the success page with cookie
-fn render_success_page(
-    _state: &AppState,
+async fn render_success_page(
+    state: &AppState,
     project_name: &str,
     redirect_url: &str,
     cookie: &str,
 ) -> Result<Response, (StatusCode, String)> {
     // Load success template
-    let template_content = StaticAssets::get("auth-success.html.tera")
+    let static_dir = state.server_settings.static_dir.as_deref().ok_or_else(|| {
+        tracing::error!("static_dir not configured");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Static dir not configured".to_string(),
+        )
+    })?;
+
+    let template_content = load_static_file(static_dir, "auth-success.html.tera")
+        .await
         .ok_or_else(|| {
             tracing::error!("auth-success.html.tera template not found");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Template not found".to_string(),
             )
-        })?
-        .data;
+        })?;
 
     let template_str = std::str::from_utf8(&template_content).map_err(|e| {
         tracing::error!("Failed to parse template as UTF-8: {:#}", e);
@@ -1446,20 +1496,31 @@ fn render_success_page(
 }
 
 /// Helper function to render the UI login success page with cookie
-fn render_ui_login_success_page(
+async fn render_ui_login_success_page(
+    state: &AppState,
     redirect_url: &str,
     cookie: &str,
 ) -> Result<Response, (StatusCode, String)> {
     // Load UI success template
-    let template_content = StaticAssets::get("auth-ui-success.html.tera").ok_or_else(|| {
-        tracing::error!("auth-ui-success.html.tera template not found");
+    let static_dir = state.server_settings.static_dir.as_deref().ok_or_else(|| {
+        tracing::error!("static_dir not configured");
         (
             StatusCode::INTERNAL_SERVER_ERROR,
-            "Template not found".to_string(),
+            "Static dir not configured".to_string(),
         )
     })?;
 
-    let template_str = std::str::from_utf8(&template_content.data).map_err(|e| {
+    let template_content = load_static_file(static_dir, "auth-ui-success.html.tera")
+        .await
+        .ok_or_else(|| {
+            tracing::error!("auth-ui-success.html.tera template not found");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template not found".to_string(),
+            )
+        })?;
+
+    let template_str = std::str::from_utf8(&template_content).map_err(|e| {
         tracing::error!("Failed to decode template: {:#}", e);
         (
             StatusCode::INTERNAL_SERVER_ERROR,
@@ -1550,6 +1611,7 @@ pub async fn oauth_complete(
         &session.redirect_url,
         &cookie,
     )
+    .await
 }
 
 #[derive(Debug, Deserialize)]
@@ -1822,23 +1884,31 @@ pub struct CliAuthSuccessQuery {
 ///
 /// This endpoint is used to show a styled success or error page when CLI login completes.
 /// The CLI callback redirects to this endpoint instead of showing a basic HTML page.
-#[instrument(skip(_state))]
+#[instrument(skip(state))]
 pub async fn cli_auth_success(
-    State(_state): State<AppState>,
+    State(state): State<AppState>,
     Query(params): Query<CliAuthSuccessQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     let success = params.success.unwrap_or(true);
 
     // Load CLI success template
-    let template_content = StaticAssets::get("cli-auth-success.html.tera")
+    let static_dir = state.server_settings.static_dir.as_deref().ok_or_else(|| {
+        tracing::error!("static_dir not configured");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Static dir not configured".to_string(),
+        )
+    })?;
+
+    let template_content = load_static_file(static_dir, "cli-auth-success.html.tera")
+        .await
         .ok_or_else(|| {
             tracing::error!("cli-auth-success.html.tera template not found");
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Template not found".to_string(),
             )
-        })?
-        .data;
+        })?;
 
     let template_str = std::str::from_utf8(&template_content).map_err(|e| {
         tracing::error!("Failed to parse template as UTF-8: {:#}", e);

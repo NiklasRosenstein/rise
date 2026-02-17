@@ -12,7 +12,7 @@ use std::path::{Component, PathBuf};
 use crate::server::settings::ServerSettings;
 use crate::server::state::AppState;
 
-use super::StaticAssets;
+use super::load_static_file;
 
 pub fn frontend_routes() -> Router<AppState> {
     Router::new()
@@ -31,7 +31,7 @@ async fn serve_index(State(state): State<AppState>) -> Response {
         )
         .await;
     }
-    render_index(&state)
+    render_index(&state).await
 }
 
 async fn fallback_handler(State(state): State<AppState>, request: Request) -> Response {
@@ -44,14 +44,16 @@ async fn fallback_handler(State(state): State<AppState>, request: Request) -> Re
     }
 
     // Try to serve as static file first
-    if let Some(content) = StaticAssets::get(path) {
-        let mime = mime_guess::from_path(path).first_or_octet_stream();
-        return Response::builder()
-            .status(StatusCode::OK)
-            .header(header::CONTENT_TYPE, mime.as_ref())
-            .header(header::CACHE_CONTROL, "public, max-age=3600")
-            .body(Body::from(content.data))
-            .unwrap();
+    if let Some(ref static_dir) = state.server_settings.static_dir {
+        if let Some(data) = load_static_file(static_dir, path).await {
+            let mime = mime_guess::from_path(path).first_or_octet_stream();
+            return Response::builder()
+                .status(StatusCode::OK)
+                .header(header::CONTENT_TYPE, mime.as_ref())
+                .header(header::CACHE_CONTROL, "public, max-age=3600")
+                .body(Body::from(data))
+                .unwrap();
+        }
     }
 
     // Virtual docs route: /static/docs/* — served from configured docs_dir
@@ -75,7 +77,7 @@ async fn fallback_handler(State(state): State<AppState>, request: Request) -> Re
     }
 
     // If not a static file, serve SPA index.html
-    render_index(&state)
+    render_index(&state).await
 }
 
 async fn load_docs_content_from_filesystem(
@@ -99,10 +101,22 @@ async fn load_docs_content_from_filesystem(
     Some((bytes, "text/markdown; charset=utf-8"))
 }
 
-fn render_index(state: &AppState) -> Response {
-    // Load the Vite-generated index.html from embedded assets
-    let html_content = match StaticAssets::get("index.html") {
-        Some(content) => match std::str::from_utf8(&content.data) {
+async fn render_index(state: &AppState) -> Response {
+    // Load the Vite-generated index.html from the static directory
+    let static_dir = match state.server_settings.static_dir.as_deref() {
+        Some(dir) => dir,
+        None => {
+            tracing::error!("static_dir not configured, cannot serve index.html");
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Static dir not configured",
+            )
+                .into_response();
+        }
+    };
+
+    let html_content = match load_static_file(static_dir, "index.html").await {
+        Some(data) => match std::str::from_utf8(&data) {
             Ok(s) => s.to_string(),
             Err(e) => {
                 tracing::error!("Failed to parse index.html as UTF-8: {:?}", e);
@@ -110,7 +124,7 @@ fn render_index(state: &AppState) -> Response {
             }
         },
         None => {
-            tracing::error!("index.html not found in embedded assets");
+            tracing::error!("index.html not found in static_dir: {}", static_dir);
             return (StatusCode::INTERNAL_SERVER_ERROR, "HTML not found").into_response();
         }
     };

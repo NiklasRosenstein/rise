@@ -45,7 +45,7 @@ COPY Cargo.toml Cargo.lock ./
 COPY src ./src
 COPY migrations ./migrations
 COPY static ./static
-COPY --from=frontend-builder /usr/src/frontend/dist ./static/ui
+COPY --from=frontend-builder /usr/src/frontend/dist/ ./static/
 COPY .sqlx ./.sqlx
 
 # Build the application with server features
@@ -69,12 +69,17 @@ COPY --from=builder /usr/local/bin/rise /usr/local/bin/rise
 # Copy the configuration files
 COPY config /etc/rise
 
+# Copy static assets for filesystem-based serving (templates, SVGs, Vite build output)
+COPY --from=builder /usr/src/static /var/lib/rise/static
+
 # Copy documentation files for serving via docs_dir
 COPY docs /var/rise/docs
 
 # Default config location/run mode for containerized execution
 ENV RISE_CONFIG_DIR=/etc/rise
 ENV RISE_CONFIG_RUN_MODE=production
+ENV RISE_STATIC_DIR=/var/lib/rise/static
+ENV RISE_DOCS_DIR=/var/rise/docs
 
 # Expose the application port
 EXPOSE 3000

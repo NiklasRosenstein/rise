@@ -65,14 +65,27 @@ pub struct ServerSettings {
     #[serde(default = "default_jwt_expiry_seconds")]
     pub jwt_expiry_seconds: u64,
 
+    /// Directory containing static assets (Tera templates, SVGs, Vite build output).
+    /// Defaults to the RISE_STATIC_DIR environment variable.
+    #[serde(default = "default_static_dir")]
+    pub static_dir: Option<String>,
+
     /// Directory to serve documentation files from (e.g., "/var/rise/docs" or "docs")
-    /// If not set, documentation endpoints return 404.
-    #[serde(default)]
+    /// Defaults to the RISE_DOCS_DIR environment variable.
+    #[serde(default = "default_docs_dir")]
     pub docs_dir: Option<String>,
 }
 
 fn default_cookie_secure() -> bool {
     true
+}
+
+fn default_static_dir() -> Option<String> {
+    std::env::var("RISE_STATIC_DIR").ok()
+}
+
+fn default_docs_dir() -> Option<String> {
+    std::env::var("RISE_DOCS_DIR").ok()
 }
 
 fn default_jwt_claims() -> Vec<String> {
