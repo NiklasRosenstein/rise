@@ -118,11 +118,13 @@ export function TeamsList({ currentUser, openCreate = false }) {
 
     return (
         <section>
-            <div className="flex justify-end items-center mb-6">
-                <Button variant="primary" size="sm" onClick={handleCreateClick}>
-                    Create Team
-                </Button>
-            </div>
+            {currentUser?.can_create_teams && (
+                <div className="flex justify-end items-center mb-6">
+                    <Button variant="primary" size="sm" onClick={handleCreateClick}>
+                        Create Team
+                    </Button>
+                </div>
+            )}
             {actionStatus && <p className="mono-inline-status mb-3">{actionStatus}</p>}
             <MonoTableFrame>
                 <MonoTable className="mono-sticky-table mono-table--sticky" onKeyDown={onKeyDown}>

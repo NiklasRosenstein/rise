@@ -18,6 +18,20 @@ pub async fn create_team(
     Extension(user): Extension<User>,
     Json(payload): Json<CreateTeamRequest>,
 ) -> Result<Json<CreateTeamResponse>, (StatusCode, String)> {
+    // Check if user is allowed to create teams
+    let is_admin = state.is_admin(&user.email);
+    if !state.auth_settings.allow_team_creation && !is_admin {
+        tracing::warn!(
+            "User {} attempted to create team '{}' but team creation is disabled for non-admins",
+            user.email,
+            payload.name
+        );
+        return Err((
+            StatusCode::FORBIDDEN,
+            "Team creation is disabled. Please contact your administrator.".to_string(),
+        ));
+    }
+
     tracing::info!("Creating team '{}' for user {}", payload.name, user.email);
 
     // Validate that at least one owner is specified
