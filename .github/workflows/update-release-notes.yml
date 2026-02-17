@@ -1,0 +1,54 @@
+name: Update Release Notes
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  update-notes:
+    runs-on: ubuntu-22.04
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Fetch tags so we can read the annotation
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Read tag annotation and update release
+        run: |
+          TAG="${{ github.event.release.tag_name }}"
+          echo "Reading annotation for tag: ${TAG}"
+
+          # Read the tag annotation message
+          TAG_MESSAGE=$(git tag -l --format='%(contents)' "${TAG}")
+
+          # Skip if annotation is empty or just the default "Release vX.Y.Z" message
+          if [ -z "${TAG_MESSAGE}" ]; then
+            echo "Tag annotation is empty, skipping update"
+            exit 0
+          fi
+
+          if echo "${TAG_MESSAGE}" | grep -qxP "Release ${TAG}\s*"; then
+            echo "Tag annotation is just the default message, skipping update"
+            exit 0
+          fi
+
+          echo "Found AI-generated release notes in tag annotation"
+
+          # Get the existing release body
+          EXISTING_BODY=$(gh release view "${TAG}" --json body --jq '.body')
+
+          # Build the new body: AI summary + separator + existing content
+          NOTES_FILE=$(mktemp)
+          printf '%s\n\n---\n\n%s\n' "${TAG_MESSAGE}" "${EXISTING_BODY}" > "${NOTES_FILE}"
+
+          # Update the release
+          gh release edit "${TAG}" --notes-file "${NOTES_FILE}"
+
+          rm "${NOTES_FILE}"
+          echo "Release notes updated successfully"

@@ -13,10 +13,6 @@ check_prerequisites() {
         missing+=("cargo")
     fi
 
-    if ! command -v gh &> /dev/null; then
-        missing+=("gh (GitHub CLI)")
-    fi
-
     if ! command -v claude &> /dev/null; then
         missing+=("claude (Claude CLI - optional for AI-generated release notes)")
     fi
@@ -32,15 +28,7 @@ check_prerequisites() {
         done
         echo ""
         echo "Install missing tools:"
-        echo "  - gh: https://cli.github.com/"
         echo "  - claude: https://github.com/anthropics/anthropic-tools"
-        exit 1
-    fi
-
-    # Check if gh is authenticated
-    if ! gh auth status &> /dev/null; then
-        echo "Error: GitHub CLI (gh) is not authenticated"
-        echo "Run: gh auth login"
         exit 1
     fi
 }
@@ -98,10 +86,10 @@ if [ "$DRY_RUN" = false ]; then
         exit 1
     fi
 
-    # Check if on main branch
+    # Check if on develop branch
     CURRENT_BRANCH=$(git rev-parse --abbrev-ref HEAD)
-    if [ "$CURRENT_BRANCH" != "main" ]; then
-        echo "Warning: You are not on the main branch (current: $CURRENT_BRANCH)"
+    if [ "$CURRENT_BRANCH" != "develop" ]; then
+        echo "Warning: You are not on the develop branch (current: $CURRENT_BRANCH)"
         read -p "Continue anyway? (y/n) " -n 1 -r
         echo
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -185,9 +173,8 @@ echo "The following actions will be performed:"
 echo "  1. Update version in Cargo.toml to ${VERSION}"
 echo "  2. Update Cargo.lock"
 echo "  3. Commit changes with message: 'chore: bump version to ${VERSION}'"
-echo "  4. Create git tag: ${TAG}"
+echo "  4. Create git tag: ${TAG} (with AI-generated notes in tag annotation)"
 echo "  5. Push commit and tag to origin"
-echo "  6. Create GitHub release with AI-generated notes"
 echo ""
 echo "Release notes preview:"
 echo "---"
@@ -211,48 +198,32 @@ echo "Creating release ${VERSION}..."
 echo ""
 
 # Step 1: Update version in Cargo.toml
-echo "[1/6] Updating Cargo.toml..."
+echo "[1/5] Updating Cargo.toml..."
 sed -i.bak "s/^version = \".*\"/version = \"${VERSION}\"/" Cargo.toml && rm Cargo.toml.bak
 
 # Step 2: Update Cargo.lock
-echo "[2/6] Updating Cargo.lock..."
+echo "[2/5] Updating Cargo.lock..."
 cargo update --workspace --quiet
 
 # Step 3: Commit the changes
-echo "[3/6] Committing version bump..."
+echo "[3/5] Committing version bump..."
 git add Cargo.toml Cargo.lock
 git commit -m "chore: bump version to ${VERSION}"
 
-# Step 4: Create the tag
-echo "[4/6] Creating tag ${TAG}..."
-git tag -a "${TAG}" -m "Release ${TAG}"
+# Step 4: Create the tag with AI-generated notes in the annotation
+echo "[4/5] Creating tag ${TAG}..."
+git tag -a "${TAG}" -m "${RELEASE_SUMMARY}"
 
 # Step 5: Push commit and tag
-echo "[5/6] Pushing to remote..."
-git push origin main
+echo "[5/5] Pushing to remote..."
+git push origin develop
 git push origin "${TAG}"
-
-# Step 6: Create GitHub release
-echo "[6/6] Creating GitHub release..."
-NOTES_FILE=$(mktemp)
-cat > "$NOTES_FILE" << EOF
-${RELEASE_SUMMARY}
-
----
-
-## Full Changelog
-EOF
-
-gh release create "${TAG}" --notes-file "$NOTES_FILE" --generate-notes
-
-# Clean up
-rm "$NOTES_FILE"
 
 echo ""
 echo "✓ Successfully created and pushed version ${VERSION} with tag ${TAG}"
-echo "✓ GitHub release created with AI-generated summary and auto-generated notes"
+echo "✓ AI-generated release notes stored in tag annotation"
 echo ""
 echo "CI will now:"
-echo "  - Publish to crates.io"
-echo "  - Build and push Docker images to ghcr.io"
-echo "  - Package Helm charts"
+echo "  - Build release artifacts via cargo-dist"
+echo "  - Create the GitHub release"
+echo "  - Update release notes from tag annotation (update-release-notes workflow)"
