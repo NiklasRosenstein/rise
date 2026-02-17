@@ -897,23 +897,44 @@ async fn render_warning_page(
     params: &SigninQuery,
     warnings: Vec<String>,
     request_host: &str,
-) -> Html<String> {
+) -> Result<Html<String>, (StatusCode, String)> {
     // Load template
-    let static_dir = state
-        .server_settings
-        .static_dir
-        .as_deref()
-        .expect("static_dir not configured");
+    let static_dir = state.server_settings.static_dir.as_deref().ok_or_else(|| {
+        tracing::error!("static_dir not configured");
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Static dir not configured".to_string(),
+        )
+    })?;
+
     let template_content = load_static_file(static_dir, "auth-warning.html.tera")
         .await
-        .expect("auth-warning.html.tera template not found");
+        .ok_or_else(|| {
+            tracing::error!("auth-warning.html.tera template not found");
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template not found".to_string(),
+            )
+        })?;
 
-    let template_str = std::str::from_utf8(&template_content).expect("Template encoding error");
+    let template_str = std::str::from_utf8(&template_content).map_err(|e| {
+        tracing::error!("Failed to parse template as UTF-8: {:#}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            "Template encoding error".to_string(),
+        )
+    })?;
 
     // Create Tera instance
     let mut tera = Tera::default();
     tera.add_raw_template("auth-warning.html.tera", template_str)
-        .expect("Template parse error");
+        .map_err(|e| {
+            tracing::error!("Failed to parse template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template error".to_string(),
+            )
+        })?;
 
     // Extract redirect host
     let redirect_url = params.redirect.as_ref().or(params.rd.as_ref());
@@ -963,9 +984,15 @@ async fn render_warning_page(
 
     let html = tera
         .render("auth-warning.html.tera", &context)
-        .expect("Template rendering error");
+        .map_err(|e| {
+            tracing::error!("Failed to render template: {:#}", e);
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Template rendering error".to_string(),
+            )
+        })?;
 
-    Html(html)
+    Ok(Html(html))
 }
 
 /// Initiate OAuth2 login flow for ingress auth (start of OAuth flow)
@@ -1080,7 +1107,7 @@ pub async fn oauth_signin_start(
 
             // Show warning page to user
             return Ok(render_warning_page(&state, &params, warnings, request_host)
-                .await
+                .await?
                 .into_response());
         }
     }
