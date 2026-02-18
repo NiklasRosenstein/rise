@@ -1091,7 +1091,6 @@ export function OAuthDetailView({ extension, projectName }) {
 export function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
     const [blockedRoles, setBlockedRoles] = useState(spec?.blocked_roles?.join(', ') || '');
     const [scopes, setScopes] = useState(spec?.scopes?.join(', ') || '');
-    const [clientSecretEnvVar, setClientSecretEnvVar] = useState(spec?.client_secret_env_var || 'SNOWFLAKE_CLIENT_SECRET');
 
     // Use a ref to store the latest onChange callback
     const onChangeRef = useRef(onChange);
@@ -1104,11 +1103,10 @@ export function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
         const newSpec = {
             blocked_roles: blockedRoles.split(',').map(r => r.trim()).filter(r => r),
             scopes: scopes.split(',').map(s => s.trim()).filter(s => s),
-            client_secret_env_var: clientSecretEnvVar.trim() || 'SNOWFLAKE_CLIENT_SECRET',
         };
 
         onChangeRef.current(newSpec);
-    }, [blockedRoles, scopes, clientSecretEnvVar]);
+    }, [blockedRoles, scopes]);
 
     return (
         <div className="space-y-6">
@@ -1131,15 +1129,6 @@ export function SnowflakeOAuthExtensionUI({ spec, schema, onChange }) {
                     onChange={(e) => setScopes(e.target.value)}
                     placeholder="session:role:ANALYST, session:role:DEVELOPER"
                     helperText="Comma-separated scopes added to backend defaults."
-                />
-
-                <FormField
-                    label="Client Secret Environment Variable"
-                    id="snowflake-client-secret-env-var"
-                    value={clientSecretEnvVar}
-                    onChange={(e) => setClientSecretEnvVar(e.target.value)}
-                    placeholder="SNOWFLAKE_CLIENT_SECRET"
-                    helperText="Environment variable name for OAuth client secret."
                 />
 
                 <MonoNotice tone="success" title="Secondary Roles">

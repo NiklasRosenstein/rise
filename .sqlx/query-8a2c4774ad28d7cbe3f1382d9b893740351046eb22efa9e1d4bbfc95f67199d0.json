@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE project_extensions\n        SET spec = $3, updated_at = NOW()\n        WHERE project_id = $1 AND extension = $2\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Jsonb"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "8a2c4774ad28d7cbe3f1382d9b893740351046eb22efa9e1d4bbfc95f67199d0"
+}
