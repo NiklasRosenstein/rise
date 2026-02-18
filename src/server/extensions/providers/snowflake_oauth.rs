@@ -1015,17 +1015,66 @@ impl SnowflakeOAuthProvisioner {
                 oauth_extension_name, project_name, env_var_name
             );
 
-            // Resolve the secret from the env var and encrypt it for the spec
-            let client_secret = self
+            // Try to resolve the secret from the env var, falling back to the
+            // provisioner status if the env var has already been deleted.
+            let client_secret_encrypted = match self
                 .resolve_client_secret_from_env_var(project_id, env_var_name)
                 .await
-                .context("Failed to resolve client secret from env var during migration")?;
+            {
+                Ok(client_secret) => {
+                    let encrypted = self
+                        .encryption_provider
+                        .encrypt(&client_secret)
+                        .await
+                        .context("Failed to encrypt client secret during migration")?;
 
-            let client_secret_encrypted = self
-                .encryption_provider
-                .encrypt(&client_secret)
-                .await
-                .context("Failed to encrypt client secret during migration")?;
+                    // Delete the env var (no longer needed)
+                    if let Err(e) =
+                        db_env_vars::delete_project_env_var(&self.db_pool, project_id, env_var_name)
+                            .await
+                    {
+                        warn!(
+                            "Failed to delete migrated environment variable {}: {:?}",
+                            env_var_name, e
+                        );
+                    } else {
+                        info!(
+                            "Deleted migrated environment variable {} for project {}",
+                            env_var_name, project_name
+                        );
+                    }
+
+                    encrypted
+                }
+                Err(e) => {
+                    // Env var is missing — fall back to the encrypted secret stored
+                    // in the Snowflake provisioner status (same value that was used
+                    // to create the env var originally).
+                    if let Some(ref encrypted) = status.oauth_client_secret_encrypted {
+                        warn!(
+                            "Environment variable {} not found for project {} ({}), \
+                             falling back to provisioner status secret for migration",
+                            env_var_name, project_name, e
+                        );
+                        encrypted.clone()
+                    } else {
+                        error!(
+                            "Cannot migrate OAuth extension {} for project {}: \
+                             environment variable {} is missing and no fallback secret \
+                             in provisioner status: {}",
+                            oauth_extension_name, project_name, env_var_name, e
+                        );
+                        status.state = SnowflakeOAuthState::Failed;
+                        status.error = Some(format!(
+                            "Migration failed: client secret environment variable '{}' \
+                             not found and no fallback available. The extension must be \
+                             deleted and re-created.",
+                            env_var_name
+                        ));
+                        return Ok(());
+                    }
+                }
+            };
 
             // Update the OAuth spec: set client_secret_encrypted, remove client_secret_ref
             let mut updated_spec = oauth_spec.clone();
@@ -1041,21 +1090,6 @@ impl SnowflakeOAuthProvisioner {
             )
             .await
             .context("Failed to update OAuth extension spec during migration")?;
-
-            // Delete the env var (no longer needed)
-            if let Err(e) =
-                db_env_vars::delete_project_env_var(&self.db_pool, project_id, env_var_name).await
-            {
-                warn!(
-                    "Failed to delete migrated environment variable {}: {:?}",
-                    env_var_name, e
-                );
-            } else {
-                info!(
-                    "Deleted migrated environment variable {} for project {}",
-                    env_var_name, project_name
-                );
-            }
 
             // Clear the env var name from status
             status.client_secret_env_var = None;
