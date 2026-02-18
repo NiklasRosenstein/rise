@@ -13,8 +13,7 @@ The `snowflake-oauth-provisioner` extension provisions Snowflake OAuth integrati
 ```json
 {
   "blocked_roles": ["SYSADMIN"],
-  "scopes": ["session:role:ANALYST"],
-  "client_secret_env_var": "SNOWFLAKE_CLIENT_SECRET"
+  "scopes": ["session:role:ANALYST"]
 }
 ```
 
@@ -22,7 +21,6 @@ The `snowflake-oauth-provisioner` extension provisions Snowflake OAuth integrati
 
 - `blocked_roles` (optional): additional blocked roles merged with backend defaults.
 - `scopes` (optional): additional scopes merged with backend defaults.
-- `client_secret_env_var` (optional): env var name for client secret.
 
 ## Lifecycle
 

@@ -185,6 +185,31 @@ pub async fn update_status(
     Ok(())
 }
 
+/// Update extension spec
+#[allow(dead_code)]
+pub async fn update_spec(
+    pool: &PgPool,
+    project_id: Uuid,
+    extension: &str,
+    spec: &Value,
+) -> Result<()> {
+    sqlx::query!(
+        r#"
+        UPDATE project_extensions
+        SET spec = $3, updated_at = NOW()
+        WHERE project_id = $1 AND extension = $2
+        "#,
+        project_id,
+        extension,
+        spec
+    )
+    .execute(pool)
+    .await
+    .context("Failed to update extension spec")?;
+
+    Ok(())
+}
+
 /// Permanently delete extension record
 #[allow(dead_code)]
 pub async fn delete_permanently(pool: &PgPool, project_id: Uuid, extension: &str) -> Result<()> {

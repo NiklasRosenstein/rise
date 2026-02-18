@@ -28,15 +28,6 @@ pub struct SnowflakeOAuthProvisionerSpec {
     /// Additional OAuth scopes (unioned with backend defaults)
     #[serde(default)]
     pub scopes: Vec<String>,
-
-    /// Environment variable name for storing the OAuth client secret
-    /// Defaults to "SNOWFLAKE_CLIENT_SECRET"
-    #[serde(default = "default_client_secret_env_var")]
-    pub client_secret_env_var: String,
-}
-
-fn default_client_secret_env_var() -> String {
-    "SNOWFLAKE_CLIENT_SECRET".to_string()
 }
 
 /// Extension status tracking Snowflake integration state
@@ -838,50 +829,12 @@ impl SnowflakeOAuthProvisioner {
             }
         }
 
-        // Decrypt client secret from status
-        let client_secret = self
-            .encryption_provider
-            .decrypt(
-                status
-                    .oauth_client_secret_encrypted
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("Client secret not set"))?,
-            )
-            .await
-            .context("Failed to decrypt client secret")?;
-
-        // Create encrypted environment variable for OAuth extension to use
-        // Use configured env var name or default
-        let env_var_name = if spec.client_secret_env_var.is_empty() {
-            default_client_secret_env_var()
-        } else {
-            spec.client_secret_env_var.clone()
-        };
-
-        let client_secret_encrypted = self
-            .encryption_provider
-            .encrypt(&client_secret)
-            .await
-            .context("Failed to encrypt client secret for env var")?;
-
-        db_env_vars::upsert_project_env_var(
-            &self.db_pool,
-            project_id,
-            &env_var_name,
-            &client_secret_encrypted,
-            true, // is_secret
-            true, // is_protected (system-generated secrets are protected by default)
-        )
-        .await
-        .context("Failed to create environment variable")?;
-
-        info!(
-            "Created environment variable {} for project {}",
-            env_var_name, project_name
-        );
-
-        // Store the env var name in status for later use during deletion
-        status.client_secret_env_var = Some(env_var_name.clone());
+        // Get the encrypted client secret from status to store directly in OAuth spec
+        let client_secret_encrypted = status
+            .oauth_client_secret_encrypted
+            .as_ref()
+            .ok_or_else(|| anyhow!("Client secret not set"))?
+            .clone();
 
         // Get effective config for scopes
         let effective_config = self.get_effective_config(spec);
@@ -895,8 +848,8 @@ impl SnowflakeOAuthProvisioner {
                 .as_ref()
                 .ok_or_else(|| anyhow!("Client ID not set"))?
                 .clone(),
-            client_secret_ref: Some(env_var_name),
-            client_secret_encrypted: None,
+            client_secret_ref: None,
+            client_secret_encrypted: Some(client_secret_encrypted),
             // Snowflake doesn't support OIDC discovery, so we set the issuer_url to the Snowflake base
             // and explicitly provide the authorization and token endpoints
             issuer_url: format!("https://{}.snowflakecomputing.com", self.account),
@@ -1020,6 +973,77 @@ impl SnowflakeOAuthProvisioner {
             return Ok(());
         }
 
+        let oauth_ext = oauth_ext.unwrap();
+
+        // Migrate old-style client_secret_ref to client_secret_encrypted
+        let oauth_spec: crate::server::extensions::providers::oauth::models::OAuthExtensionSpec =
+            serde_json::from_value(oauth_ext.spec.clone())
+                .context("Failed to parse OAuth extension spec")?;
+
+        if oauth_spec.client_secret_ref.is_some() && oauth_spec.client_secret_encrypted.is_none() {
+            let env_var_name = oauth_spec.client_secret_ref.as_ref().unwrap();
+            info!(
+                "Migrating OAuth extension {} for project {} from client_secret_ref ({}) to client_secret_encrypted",
+                oauth_extension_name, project_name, env_var_name
+            );
+
+            // Use the encrypted secret directly from the provisioner status — it's the
+            // authoritative source (the secret originated from Snowflake and was stored
+            // here first, then copied into the env var).
+            let Some(ref client_secret_encrypted) = status.oauth_client_secret_encrypted else {
+                error!(
+                    "Cannot migrate OAuth extension {} for project {}: \
+                     no client secret in provisioner status",
+                    oauth_extension_name, project_name
+                );
+                status.state = SnowflakeOAuthState::Failed;
+                status.error = Some(
+                    "Migration failed: no client secret available in provisioner status. \
+                     The extension must be deleted and re-created."
+                        .to_string(),
+                );
+                return Ok(());
+            };
+
+            // Update the OAuth spec: set client_secret_encrypted, remove client_secret_ref
+            let mut updated_spec = oauth_spec.clone();
+            updated_spec.client_secret_encrypted = Some(client_secret_encrypted.clone());
+            updated_spec.client_secret_ref = None;
+
+            db_extensions::update_spec(
+                &self.db_pool,
+                project_id,
+                oauth_extension_name,
+                &serde_json::to_value(&updated_spec)
+                    .context("Failed to serialize updated OAuth spec")?,
+            )
+            .await
+            .context("Failed to update OAuth extension spec during migration")?;
+
+            // Best-effort cleanup: delete the legacy env var
+            if let Err(e) =
+                db_env_vars::delete_project_env_var(&self.db_pool, project_id, env_var_name).await
+            {
+                warn!(
+                    "Failed to delete migrated environment variable {}: {:?}",
+                    env_var_name, e
+                );
+            } else {
+                info!(
+                    "Deleted migrated environment variable {} for project {}",
+                    env_var_name, project_name
+                );
+            }
+
+            // Clear the env var name from status
+            status.client_secret_env_var = None;
+
+            info!(
+                "Successfully migrated OAuth extension {} for project {} to client_secret_encrypted",
+                oauth_extension_name, project_name
+            );
+        }
+
         let expected_redirect_uri = format!(
             "{}/oidc/{}/{}/callback",
             self.api_domain.trim_end_matches('/'),
@@ -1126,30 +1150,17 @@ impl SnowflakeOAuthProvisioner {
             }
         }
 
-        // 3. Delete environment variable
+        // 3. Delete legacy environment variable (from old-style client_secret_ref configuration)
         if let Some(env_var_name) = &status.client_secret_env_var {
             if let Err(e) =
                 db_env_vars::delete_project_env_var(&self.db_pool, project_id, env_var_name).await
             {
                 warn!(
-                    "Failed to delete environment variable {}: {:?}",
+                    "Failed to delete legacy environment variable {}: {:?}",
                     env_var_name, e
                 );
             } else {
-                info!("Deleted environment variable {}", env_var_name);
-            }
-        } else {
-            // Fallback for extensions created before this field was added
-            let env_var_name = default_client_secret_env_var();
-            if let Err(e) =
-                db_env_vars::delete_project_env_var(&self.db_pool, project_id, &env_var_name).await
-            {
-                warn!(
-                    "Failed to delete environment variable {} (fallback): {:?}",
-                    env_var_name, e
-                );
-            } else {
-                info!("Deleted environment variable {} (fallback)", env_var_name);
+                info!("Deleted legacy environment variable {}", env_var_name);
             }
         }
 
@@ -1345,14 +1356,13 @@ extensions:
 
 ## User Spec
 
-Users can optionally configure additional blocked roles, scopes, and the environment variable name:
+Users can optionally configure additional blocked roles and scopes:
 
 ```yaml
 blocked_roles:
   - SYSADMIN
 scopes:
   - session:role:ANALYST
-client_secret_env_var: SNOWFLAKE_CLIENT_SECRET  # Default if not specified
 ```
 
 ## Lifecycle
@@ -1391,11 +1401,6 @@ Deletion removes all resources: Snowflake integration, OAuth extension, and envi
                     "items": {"type": "string"},
                     "description": "Additional OAuth scopes (unioned with backend defaults)",
                     "default": []
-                },
-                "client_secret_env_var": {
-                    "type": "string",
-                    "description": "Environment variable name for storing the OAuth client secret",
-                    "default": "SNOWFLAKE_CLIENT_SECRET"
                 }
             },
             "additionalProperties": false
