@@ -199,6 +199,18 @@ jobs:
       - name: Run chart-testing (lint)
         run: ct lint --target-branch ${{ github.event.repository.default_branch }} --charts helm/rise --validate-maintainers=false
 
+      - name: Install kubeconform
+        run: |
+          set -euo pipefail
+          curl -sSLo /tmp/kubeconform.tar.gz https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz
+          tar -xzf /tmp/kubeconform.tar.gz -C /tmp kubeconform
+          sudo install -m 0755 /tmp/kubeconform /usr/local/bin/kubeconform
+
+      - name: Validate Helm templates with kubeconform
+        run: |
+          helm template rise helm/rise | kubeconform -strict -summary
+          helm template rise helm/rise -f helm/rise/values-ci.yaml | kubeconform -strict -summary
+
   package-image:
     name: Build and publish image
     runs-on: ubuntu-latest
