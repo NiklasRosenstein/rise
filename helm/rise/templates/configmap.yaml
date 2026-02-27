@@ -5,6 +5,5 @@ metadata:
   labels:
     {{- include "rise.labels" . | nindent 4 }}
 data:
-  # Local overrides from values.yaml
-  local.yaml: |
+  production.yaml: |
 {{ .Values.config | toYaml | nindent 4 }}
