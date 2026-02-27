@@ -969,8 +969,6 @@ impl SnowflakeOAuthProvisioner {
             return Ok(());
         }
 
-        let _oauth_ext = oauth_ext.unwrap();
-
         let expected_redirect_uri = format!(
             "{}/oidc/{}/{}/callback",
             self.api_domain.trim_end_matches('/'),

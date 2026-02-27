@@ -165,7 +165,9 @@ impl OAuthProvider {
         }
 
         Err(anyhow!(
-            "No client secret configured (set client_secret_encrypted)"
+            "No client_secret_encrypted configured. \
+             If this extension uses the deprecated client_secret_ref, \
+             it should be auto-migrated by the reconciler on the next cycle."
         ))
     }
 
