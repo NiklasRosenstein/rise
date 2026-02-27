@@ -1,4 +1,4 @@
-use crate::db::{env_vars as db_env_vars, extensions as db_extensions, projects as db_projects};
+use crate::db::{extensions as db_extensions, projects as db_projects};
 use crate::server::encryption::EncryptionProvider;
 use crate::server::extensions::{Extension, InjectedEnvVar};
 use crate::server::settings::{PrivateKeySource, SnowflakeAuth};
@@ -55,10 +55,6 @@ pub struct SnowflakeOAuthProvisionerStatus {
     /// Redirect URI configured in the integration
     #[serde(skip_serializing_if = "Option::is_none")]
     pub redirect_uri: Option<String>,
-
-    /// Environment variable name used to store the client secret
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub client_secret_env_var: Option<String>,
 
     /// Last error message
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -973,77 +969,6 @@ impl SnowflakeOAuthProvisioner {
             return Ok(());
         }
 
-        let oauth_ext = oauth_ext.unwrap();
-
-        // Migrate old-style client_secret_ref to client_secret_encrypted
-        let oauth_spec: crate::server::extensions::providers::oauth::models::OAuthExtensionSpec =
-            serde_json::from_value(oauth_ext.spec.clone())
-                .context("Failed to parse OAuth extension spec")?;
-
-        if oauth_spec.client_secret_ref.is_some() && oauth_spec.client_secret_encrypted.is_none() {
-            let env_var_name = oauth_spec.client_secret_ref.as_ref().unwrap();
-            info!(
-                "Migrating OAuth extension {} for project {} from client_secret_ref ({}) to client_secret_encrypted",
-                oauth_extension_name, project_name, env_var_name
-            );
-
-            // Use the encrypted secret directly from the provisioner status — it's the
-            // authoritative source (the secret originated from Snowflake and was stored
-            // here first, then copied into the env var).
-            let Some(ref client_secret_encrypted) = status.oauth_client_secret_encrypted else {
-                error!(
-                    "Cannot migrate OAuth extension {} for project {}: \
-                     no client secret in provisioner status",
-                    oauth_extension_name, project_name
-                );
-                status.state = SnowflakeOAuthState::Failed;
-                status.error = Some(
-                    "Migration failed: no client secret available in provisioner status. \
-                     The extension must be deleted and re-created."
-                        .to_string(),
-                );
-                return Ok(());
-            };
-
-            // Update the OAuth spec: set client_secret_encrypted, remove client_secret_ref
-            let mut updated_spec = oauth_spec.clone();
-            updated_spec.client_secret_encrypted = Some(client_secret_encrypted.clone());
-            updated_spec.client_secret_ref = None;
-
-            db_extensions::update_spec(
-                &self.db_pool,
-                project_id,
-                oauth_extension_name,
-                &serde_json::to_value(&updated_spec)
-                    .context("Failed to serialize updated OAuth spec")?,
-            )
-            .await
-            .context("Failed to update OAuth extension spec during migration")?;
-
-            // Best-effort cleanup: delete the legacy env var
-            if let Err(e) =
-                db_env_vars::delete_project_env_var(&self.db_pool, project_id, env_var_name).await
-            {
-                warn!(
-                    "Failed to delete migrated environment variable {}: {:?}",
-                    env_var_name, e
-                );
-            } else {
-                info!(
-                    "Deleted migrated environment variable {} for project {}",
-                    env_var_name, project_name
-                );
-            }
-
-            // Clear the env var name from status
-            status.client_secret_env_var = None;
-
-            info!(
-                "Successfully migrated OAuth extension {} for project {} to client_secret_encrypted",
-                oauth_extension_name, project_name
-            );
-        }
-
         let expected_redirect_uri = format!(
             "{}/oidc/{}/{}/callback",
             self.api_domain.trim_end_matches('/'),
@@ -1150,21 +1075,7 @@ impl SnowflakeOAuthProvisioner {
             }
         }
 
-        // 3. Delete legacy environment variable (from old-style client_secret_ref configuration)
-        if let Some(env_var_name) = &status.client_secret_env_var {
-            if let Err(e) =
-                db_env_vars::delete_project_env_var(&self.db_pool, project_id, env_var_name).await
-            {
-                warn!(
-                    "Failed to delete legacy environment variable {}: {:?}",
-                    env_var_name, e
-                );
-            } else {
-                info!("Deleted legacy environment variable {}", env_var_name);
-            }
-        }
-
-        // 4. Remove finalizer
+        // 3. Remove finalizer
         let finalizer = self.finalizer_name(extension_name);
         if let Err(e) = db_projects::remove_finalizer(&self.db_pool, project_id, &finalizer).await {
             error!(
@@ -1382,7 +1293,7 @@ with an error message.
 The integration is created with `OAUTH_USE_SECONDARY_ROLES = IMPLICIT`, which enables
 secondary roles for OAuth sessions. This allows users to use multiple roles in their session.
 
-Deletion removes all resources: Snowflake integration, OAuth extension, and environment variables.
+Deletion removes all resources: Snowflake integration and OAuth extension.
 "#
     }
 
