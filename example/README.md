@@ -61,8 +61,8 @@ The OAuth examples require additional setup to create the OAuth extension:
 
 1. **Create the OAuth extension**:
    ```bash
-   # Store Dex client secret
-   rise env set oauth-demo DEX_CLIENT_SECRET "rise-backend-secret" --secret
+   # Encrypt the Dex client secret
+   ENCRYPTED=$(rise encrypt "rise-backend-secret")
 
    # Create OAuth extension
    rise extension create oauth-demo oauth-dex \
@@ -71,7 +71,7 @@ The OAuth examples require additional setup to create the OAuth extension:
        "provider_name": "Dex (Local Dev)",
        "description": "Local Dex OIDC provider for development",
        "client_id": "rise-backend",
-       "client_secret_ref": "DEX_CLIENT_SECRET",
+       "client_secret_encrypted": "'"$ENCRYPTED"'",
        "authorization_endpoint": "http://localhost:5556/dex/auth",
        "token_endpoint": "http://localhost:5556/dex/token",
        "scopes": ["openid", "email", "profile"]

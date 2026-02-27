@@ -178,10 +178,6 @@ Rise supports two types of OAuth providers:
 
 **3. Store Client Secret in Rise**
 
-There are two ways to store the OAuth provider's client secret:
-
-**Option A: Encrypted in Extension Spec (Recommended)**
-
 Encrypt the secret and store it directly in the extension spec:
 
 ```bash
@@ -210,32 +206,6 @@ echo "your_client_secret_here" | rise encrypt
 ```
 
 The `rise encrypt` command is rate-limited to 100 requests per hour per user.
-
-**Option B: Environment Variable Reference (Legacy)**
-
-Store the secret as an encrypted environment variable and reference it:
-
-```bash
-# Store as environment variable
-rise env set my-app OAUTH_GOOGLE_SECRET "your_client_secret_here" --secret
-
-# Reference in extension spec
-rise extension create oauth-provider -p my-app \
-  --type oauth \
-  --spec '{
-    "provider_name": "My OAuth Provider",
-    "client_id": "your_client_id",
-    "client_secret_ref": "OAUTH_GOOGLE_SECRET",
-    "issuer_url": "https://accounts.google.com",
-    "scopes": ["openid", "email", "profile"]
-  }'
-```
-
-**Which should you use?**
-
-- **New extensions**: Use `client_secret_encrypted` (Option A) for simpler configuration
-- **Existing extensions**: Continue using `client_secret_ref` (Option B) - it will be supported indefinitely
-- **Migration**: Optional - both patterns work identically
 
 ### Creating OAuth Extension
 
@@ -335,9 +305,6 @@ Clients manage token refresh via the `/oidc/{project}/{extension}/token` endpoin
 
 ## Troubleshooting
 
-**"Environment variable 'OAUTH_XXX_SECRET' not found"**
-- Store client secret: `rise env set <project> OAUTH_XXX_SECRET "secret" --secret`
-
 **"Failed to resolve OAuth endpoints"** or **"No authorization_endpoint in spec or OIDC discovery"**
 - For OIDC-compliant providers: Ensure `issuer_url` is correct and provider supports OIDC discovery
 - For non-OIDC providers (GitHub, Snowflake): Set `authorization_endpoint` and `token_endpoint` manually
@@ -348,7 +315,7 @@ Clients manage token refresh via the `/oidc/{project}/{extension}/token` endpoin
 - Don't include trailing slash or paths (e.g., `https://accounts.google.com`, not `https://accounts.google.com/`)
 
 **"Token exchange failed with status 400"**
-- Verify `client_id` and `client_secret_ref` are correct
+- Verify `client_id` and `client_secret_encrypted` are correct
 - Check redirect URI matches OAuth provider configuration
 - Review OAuth provider logs for specific error
 
