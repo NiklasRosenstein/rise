@@ -12,8 +12,9 @@ pub struct OAuthExtensionSpec {
     pub description: String,
     /// OAuth client ID (for upstream provider)
     pub client_id: String,
-    /// DEPRECATED: Environment variable name containing the client secret (for backward compatibility)
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// DEPRECATED: Will be auto-migrated to client_secret_encrypted by the reconciler.
+    /// Kept for deserialization only (existing DB records may still have this field).
+    #[serde(default, skip_serializing)]
     pub client_secret_ref: Option<String>,
     /// Encrypted client secret stored directly in spec (preferred over client_secret_ref)
     #[serde(default, skip_serializing_if = "Option::is_none")]

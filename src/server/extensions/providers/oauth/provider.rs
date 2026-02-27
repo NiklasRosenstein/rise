@@ -149,14 +149,13 @@ impl OAuthProvider {
             .ok_or_else(|| anyhow!("No token_endpoint in OIDC discovery"))
     }
 
-    /// Resolve OAuth provider's client_secret from spec (prefers encrypted, falls back to ref)
+    /// Resolve OAuth provider's client_secret from spec
     #[allow(dead_code)]
     pub async fn resolve_oauth_client_secret(
         &self,
-        project_id: Uuid,
+        _project_id: Uuid,
         spec: &OAuthExtensionSpec,
     ) -> Result<String> {
-        // Prefer client_secret_encrypted if set
         if let Some(ref encrypted) = spec.client_secret_encrypted {
             return self
                 .encryption_provider
@@ -165,15 +164,8 @@ impl OAuthProvider {
                 .context("Failed to decrypt OAuth client secret from spec");
         }
 
-        // Fall back to client_secret_ref (legacy env var pattern)
-        if let Some(ref client_secret_ref) = spec.client_secret_ref {
-            return self
-                .resolve_client_secret(project_id, client_secret_ref)
-                .await;
-        }
-
         Err(anyhow!(
-            "No client secret configured (set client_secret_encrypted or client_secret_ref)"
+            "No client secret configured (set client_secret_encrypted)"
         ))
     }
 
@@ -286,6 +278,80 @@ impl OAuthProvider {
         Ok(token_response)
     }
 
+    /// Migrate an extension from client_secret_ref to client_secret_encrypted.
+    /// If the extension has client_secret_ref set but no client_secret_encrypted,
+    /// resolves the env var value, encrypts it, updates the spec, and deletes the env var.
+    async fn migrate_client_secret_ref(
+        &self,
+        ext: &crate::db::models::ProjectExtension,
+    ) -> Result<()> {
+        let spec: OAuthExtensionSpec = serde_json::from_value(ext.spec.clone())
+            .context("Failed to parse OAuth extension spec")?;
+
+        // Only migrate if client_secret_ref is set and client_secret_encrypted is not
+        let client_secret_ref = match (&spec.client_secret_ref, &spec.client_secret_encrypted) {
+            (Some(ref_name), None) => ref_name.clone(),
+            _ => return Ok(()),
+        };
+
+        info!(
+            "Migrating OAuth extension {}/{} from client_secret_ref ({}) to client_secret_encrypted",
+            ext.project_id, ext.extension, client_secret_ref
+        );
+
+        // Resolve the secret from the env var
+        let client_secret = self
+            .resolve_client_secret(ext.project_id, &client_secret_ref)
+            .await
+            .context("Failed to resolve client secret during migration")?;
+
+        // Encrypt it
+        let encrypted = self
+            .encryption_provider
+            .encrypt(&client_secret)
+            .await
+            .context("Failed to encrypt client secret during migration")?;
+
+        // Update the spec: set client_secret_encrypted, client_secret_ref will be
+        // dropped on serialization because it has skip_serializing
+        let mut updated_spec = spec.clone();
+        updated_spec.client_secret_encrypted = Some(encrypted);
+        updated_spec.client_secret_ref = None;
+
+        crate::db::extensions::update_spec(
+            &self.db_pool,
+            ext.project_id,
+            &ext.extension,
+            &serde_json::to_value(&updated_spec)
+                .context("Failed to serialize updated OAuth spec")?,
+        )
+        .await
+        .context("Failed to update OAuth extension spec during migration")?;
+
+        // Best-effort cleanup: delete the legacy env var
+        if let Err(e) =
+            db_env_vars::delete_project_env_var(&self.db_pool, ext.project_id, &client_secret_ref)
+                .await
+        {
+            warn!(
+                "Failed to delete migrated environment variable {}: {:?}",
+                client_secret_ref, e
+            );
+        } else {
+            info!(
+                "Deleted migrated environment variable {} for project {}",
+                client_secret_ref, ext.project_id
+            );
+        }
+
+        info!(
+            "Successfully migrated OAuth extension {}/{} to client_secret_encrypted",
+            ext.project_id, ext.extension
+        );
+
+        Ok(())
+    }
+
     /// Handle deletion of an OAuth extension
     async fn reconcile_deletion(&self, ext: crate::db::models::ProjectExtension) -> Result<()> {
         use crate::db::extensions as db_extensions;
@@ -328,10 +394,8 @@ impl Extension for OAuthProvider {
         if spec.client_id.is_empty() {
             return Err(anyhow!("client_id is required"));
         }
-        if spec.client_secret_encrypted.is_none() && spec.client_secret_ref.is_none() {
-            return Err(anyhow!(
-                "Either client_secret_encrypted or client_secret_ref must be set"
-            ));
+        if spec.client_secret_encrypted.is_none() {
+            return Err(anyhow!("client_secret_encrypted is required"));
         }
         if spec.issuer_url.is_empty() {
             return Err(anyhow!("issuer_url is required"));
@@ -468,6 +532,15 @@ impl Extension for OAuthProvider {
                                 if let Err(e) = provider.reconcile_deletion(ext).await {
                                     error!("Failed to reconcile OAuth extension deletion: {:?}", e);
                                 }
+                                continue;
+                            }
+
+                            // Migrate client_secret_ref → client_secret_encrypted
+                            if let Err(e) = provider.migrate_client_secret_ref(&ext).await {
+                                error!(
+                                    "Failed to migrate client_secret_ref for OAuth extension {}/{}: {:?}",
+                                    ext.project_id, ext.extension, e
+                                );
                             }
                         }
                     }
@@ -619,7 +692,7 @@ The OAuth extension requires:
 
 1. **OAuth Client Credentials**: Register an OAuth application with your provider to get:
    - `client_id`: OAuth client identifier
-   - `client_secret`: OAuth client secret (stored as encrypted environment variable)
+   - `client_secret`: OAuth client secret (stored encrypted via `rise encrypt`)
 
 2. **Provider Endpoints**:
    - `authorization_endpoint`: OAuth provider's authorization URL
@@ -629,10 +702,10 @@ The OAuth extension requires:
 
 ## Setup Steps
 
-### Step 1: Store Client Secret as Environment Variable
+### Step 1: Encrypt Client Secret
 
 ```bash
-rise env set my-app OAUTH_PROVIDER_SECRET "your_client_secret" --secret
+ENCRYPTED=$(rise encrypt "your_client_secret")
 ```
 
 ### Step 2: Create OAuth Extension
@@ -644,7 +717,7 @@ rise extension create my-app oauth-provider \
     "provider_name": "My OAuth Provider",
     "description": "OAuth authentication for my app",
     "client_id": "your_client_id",
-    "client_secret_ref": "OAUTH_PROVIDER_SECRET",
+    "client_secret_encrypted": "'"$ENCRYPTED"'",
     "authorization_endpoint": "https://provider.com/oauth/authorize",
     "token_endpoint": "https://provider.com/oauth/token",
     "scopes": ["openid", "email", "profile"]
@@ -656,13 +729,14 @@ rise extension create my-app oauth-provider \
 ### Snowflake OAuth
 
 ```bash
+ENCRYPTED=$(rise encrypt "your_snowflake_client_secret")
 rise extension create my-app oauth-snowflake \
   --type oauth \
   --spec '{
     "provider_name": "Snowflake Production",
     "description": "Snowflake OAuth for analytics",
     "client_id": "ABC123XYZ...",
-    "client_secret_ref": "OAUTH_SNOWFLAKE_SECRET",
+    "client_secret_encrypted": "'"$ENCRYPTED"'",
     "authorization_endpoint": "https://myorg.snowflakecomputing.com/oauth/authorize",
     "token_endpoint": "https://myorg.snowflakecomputing.com/oauth/token-request",
     "scopes": ["refresh_token"]
@@ -672,13 +746,14 @@ rise extension create my-app oauth-snowflake \
 ### Google OAuth
 
 ```bash
+ENCRYPTED=$(rise encrypt "your_google_client_secret")
 rise extension create my-app oauth-google \
   --type oauth \
   --spec '{
     "provider_name": "Google",
     "description": "Sign in with Google",
     "client_id": "123456789.apps.googleusercontent.com",
-    "client_secret_ref": "OAUTH_GOOGLE_SECRET",
+    "client_secret_encrypted": "'"$ENCRYPTED"'",
     "authorization_endpoint": "https://accounts.google.com/o/oauth2/v2/auth",
     "token_endpoint": "https://oauth2.googleapis.com/token",
     "scopes": ["openid", "email", "profile"]
@@ -688,13 +763,14 @@ rise extension create my-app oauth-google \
 ### GitHub OAuth
 
 ```bash
+ENCRYPTED=$(rise encrypt "your_github_client_secret")
 rise extension create my-app oauth-github \
   --type oauth \
   --spec '{
     "provider_name": "GitHub",
     "description": "Sign in with GitHub",
     "client_id": "Iv1.abc123...",
-    "client_secret_ref": "OAUTH_GITHUB_SECRET",
+    "client_secret_encrypted": "'"$ENCRYPTED"'",
     "authorization_endpoint": "https://github.com/login/oauth/authorize",
     "token_endpoint": "https://github.com/login/oauth/access_token",
     "scopes": ["read:user", "user:email"]
@@ -842,11 +918,6 @@ const authUrl = 'https://api.rise.dev/oidc/my-app/oauth-provider/authorize?redir
                     "type": "string",
                     "description": "Encrypted client secret (use 'rise encrypt' to encrypt)",
                     "example": "encrypted:..."
-                },
-                "client_secret_ref": {
-                    "type": "string",
-                    "description": "(Deprecated) Environment variable name containing the client secret",
-                    "example": "OAUTH_SNOWFLAKE_CLIENT_SECRET"
                 },
                 "issuer_url": {
                     "type": "string",
