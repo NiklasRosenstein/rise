@@ -2,8 +2,8 @@ apiVersion: v2
 name: chart
 description: A Helm chart for Rise - a Kubernetes deployment platform
 type: application
-version: 0.15.5
-appVersion: "0.15.5"
+version: 0.15.6
+appVersion: "0.15.6"
 keywords:
   - kubernetes
   - deployment
