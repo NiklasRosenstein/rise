@@ -136,10 +136,11 @@ if [ ! -f "$DAEMON_JSON" ]; then
   echo "{\"insecure-registries\": $REQUIRED_REGISTRIES}" | sudo tee "$DAEMON_JSON"
   sudo systemctl restart docker || true
 elif ! grep -q 'rise-registry:5000' "$DAEMON_JSON"; then
-  echo "WARNING: Please add the following to $DAEMON_JSON and restart Docker:"
-  echo "  \"insecure-registries\": $REQUIRED_REGISTRIES"
-  echo "Then re-run this task."
-  exit 1
+  echo "Adding insecure-registries to existing $DAEMON_JSON..."
+  UPDATED=$(jq --argjson regs "$REQUIRED_REGISTRIES" '.["insecure-registries"] = ((.["insecure-registries"] // []) + $regs | unique)' "$DAEMON_JSON")
+  echo "$UPDATED" | sudo tee "$DAEMON_JSON" > /dev/null
+  echo "Restarting Docker..."
+  sudo systemctl restart docker || true
 fi
 
 # Configure K3s registries for insecure access to rise-registry:5000
