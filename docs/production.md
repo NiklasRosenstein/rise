@@ -11,7 +11,7 @@ This guide covers security, configuration, database setup, monitoring, and opera
 Rise deploys applications to Kubernetes clusters. For local development, use Minikube:
 
 ```bash
-mise minikube:launch
+mise minikube:up
 ```
 
 See [Kubernetes Backend](./kubernetes.md) for Kubernetes-specific configuration and operation.

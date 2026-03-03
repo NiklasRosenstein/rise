@@ -54,8 +54,12 @@ direnv allow
 # Install development tools
 mise install
 
+# One-time host setup (requires sudo)
+mise setup:hosts
+mise setup:docker
+
 # Terminal (1): Start Minikube
-mise minikube:launch
+mise minikube:up
 
 # Terminal (2): Start the frontend
 mise frontend:dev
@@ -70,11 +74,9 @@ Services will be available at:
 - **Minikube HTTP/HTTPS Ingress**: http://localhost:8080, https://localhost:8443
 - **Vite.js Frontend Server**: http://localhost:5731
 
-However, you need to configure your `/etc/hosts` on your host to ensure consistent name resolution between the involved network namespace:
+You may also need to add entries for deployed projects to `/etc/hosts`:
 
 ```
-127.0.0.1 rise-registry
-127.0.0.1 rise.local
 127.0.0.1 {project}.rise.local # One for each Rise-deployed project you want to access
 ```
 

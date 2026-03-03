@@ -11,34 +11,16 @@ Quick setup guide for running Rise locally with Docker Compose, Minikube, and th
 
 ## Quick Setup
 
-### 1. Clone and Configure Hosts
+### 1. Clone and Configure Host
 
 ```bash
 git clone https://github.com/NiklasRosenstein/rise.git
 cd rise
 
-# Add to /etc/hosts
-sudo tee -a /etc/hosts <<EOF
-127.0.0.1 rise.local
-127.0.0.1 rise-registry
-EOF
+# Configure /etc/hosts and Docker daemon (idempotent, requires sudo)
+mise setup:hosts
+mise setup:docker
 ```
-
-### 2. Configure Docker Daemon
-
-Add to `/etc/docker/daemon.json` (Linux) or Docker Desktop settings:
-
-```json
-{
-  "insecure-registries": [
-    "rise-registry:5000",
-    "localhost:5000",
-    "127.0.0.1:5000"
-  ]
-}
-```
-
-Restart Docker after changes.
 
 ### 3. Start Services
 
@@ -63,7 +45,7 @@ EOF
 ### 5. Start Minikube
 
 ```bash
-mise run minikube:launch
+mise minikube:up
 ```
 
 This will start Minikube with registry access configured and port-forward the ingress controller.
@@ -131,7 +113,7 @@ curl http://rise-registry:5000/v2/
 # Should return: {}
 ```
 
-If it fails, ensure you used `mise run minikube:launch` which configures registry access automatically.
+If it fails, ensure you used `mise minikube:up` which configures registry access automatically.
 
 ## Architecture
 

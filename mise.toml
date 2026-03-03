@@ -88,8 +88,40 @@ cargo install cargo-dist --locked
 cargo dist build --target x86_64-unknown-linux-gnu --target x86_64-apple-darwin --target aarch64-apple-darwin
 """
 
-[tasks."minikube:launch"]
-description = "Start minikube, preconfigured with access to the local Docker registry (rise-registry)."
+[tasks."setup:hosts"]
+description = "Ensure /etc/hosts has rise-registry and rise.local entries (idempotent)."
+run = """
+set -x
+# Remove any existing entries and re-add to ensure correctness
+sudo sed -i '/\\brise-registry\\b/d; /\\brise\\.local\\b/d' /etc/hosts
+echo '127.0.0.1 rise-registry' | sudo tee -a /etc/hosts
+echo '127.0.0.1 rise.local' | sudo tee -a /etc/hosts
+"""
+
+[tasks."setup:docker"]
+description = "Ensure Docker daemon has insecure-registries configured for the local registry (idempotent)."
+run = """
+set -x
+DAEMON_JSON="/etc/docker/daemon.json"
+REQUIRED_REGISTRIES='["rise-registry:5000","localhost:5000","127.0.0.1:5000"]'
+if [ ! -f "$DAEMON_JSON" ]; then
+  echo "Creating $DAEMON_JSON with insecure-registries..."
+  echo "{\"insecure-registries\": $REQUIRED_REGISTRIES}" | sudo tee "$DAEMON_JSON"
+  sudo systemctl restart docker || true
+elif ! grep -q 'rise-registry:5000' "$DAEMON_JSON"; then
+  echo "Adding insecure-registries to existing $DAEMON_JSON..."
+  UPDATED=$(jq --argjson regs "$REQUIRED_REGISTRIES" '.["insecure-registries"] = ((.["insecure-registries"] // []) + $regs | unique)' "$DAEMON_JSON")
+  echo "$UPDATED" | sudo tee "$DAEMON_JSON" > /dev/null
+  echo "Restarting Docker..."
+  sudo systemctl restart docker || true
+else
+  echo "Docker daemon already configured."
+fi
+"""
+
+[tasks."minikube:up"]
+description = "Start Minikube with local Docker registry access and ingress port-forwarding."
+depends = ["setup:hosts", "setup:docker"]
 run = """
 set -x
 
@@ -112,37 +144,21 @@ done
 docker network connect "${NETWORK_NAME}" minikube || true
 
 echo
-echo "Minikube started. Port-forawrding ingress-nginx-controller to localhost:8080 (HTTP) and localhost:8443 (HTTPS)..."
-echo "You might want to update your /etc/hosts to point your local domains to 127.0.0.1"
+echo "Minikube started. Port-forwarding ingress-nginx-controller to localhost:8080 (HTTP) and localhost:8443 (HTTPS)..."
 echo
 
-kubectl port-forward --namespace ingress-nginx svc/ingress-nginx-controller 8080:80 8443:443
+kubectl port-forward --namespace ingress-nginx svc/ingress-nginx-controller 8080:80 8443:443 &
+echo "Port-forward running in background (PID: $!)"
 """
 
+[tasks."minikube:down"]
+description = "Stop and delete Minikube."
+run = "minikube delete"
+
 [tasks."k3s:up"]
+depends = ["setup:hosts", "setup:docker"]
 run = """
 set -x
-
-# Ensure /etc/hosts has an entry for rise-registry
-if ! grep -q 'rise-registry' /etc/hosts; then
-  echo "Adding rise-registry to /etc/hosts..."
-  echo '127.0.0.1 rise-registry' | sudo tee -a /etc/hosts
-fi
-
-# Ensure /etc/docker/daemon.json has insecure-registries configured
-DAEMON_JSON="/etc/docker/daemon.json"
-REQUIRED_REGISTRIES='["rise-registry:5000","localhost:5000","127.0.0.1:5000"]'
-if [ ! -f "$DAEMON_JSON" ]; then
-  echo "Creating $DAEMON_JSON with insecure-registries..."
-  echo "{\"insecure-registries\": $REQUIRED_REGISTRIES}" | sudo tee "$DAEMON_JSON"
-  sudo systemctl restart docker || true
-elif ! grep -q 'rise-registry:5000' "$DAEMON_JSON"; then
-  echo "Adding insecure-registries to existing $DAEMON_JSON..."
-  UPDATED=$(jq --argjson regs "$REQUIRED_REGISTRIES" '.["insecure-registries"] = ((.["insecure-registries"] // []) + $regs | unique)' "$DAEMON_JSON")
-  echo "$UPDATED" | sudo tee "$DAEMON_JSON" > /dev/null
-  echo "Restarting Docker..."
-  sudo systemctl restart docker || true
-fi
 
 # Configure K3s registries for insecure access to rise-registry:5000
 sudo mkdir -p /etc/rancher/k3s

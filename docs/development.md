@@ -39,7 +39,10 @@ Key topics covered:
 - `mise db:migrate` - Run migrations
 - `mise backend:deps` - Start docker-compose services
 - `mise backend:run` (alias: `mise br`) - Run backend
-- `mise minikube:launch` - Start Minikube with local registry
+- `mise setup:hosts` - Configure `/etc/hosts` entries (idempotent)
+- `mise setup:docker` - Configure Docker insecure registries (idempotent)
+- `mise minikube:up` - Start Minikube with local registry
+- `mise minikube:down` - Stop and delete Minikube
 
 ## Quick Start
 
@@ -100,11 +103,7 @@ mise frontend:dev
 ```
 
 Open the app at `http://rise.local:3000` during development. The backend proxies frontend routes to Vite (`http://localhost:5173`) when `server.frontend_dev_proxy_url` is configured.
-Add `rise.local` to `/etc/hosts` if needed:
-
-```text
-127.0.0.1 rise.local
-```
+Run `mise setup:hosts` to add `rise.local` to `/etc/hosts` if needed.
 
 **CLI:**
 ```bash
@@ -125,7 +124,7 @@ cargo sqlx prepare  # Update query cache
 For testing the Kubernetes controller locally, use Minikube:
 
 ```bash
-mise minikube:launch
+mise minikube:up
 ```
 
 This starts a local Kubernetes cluster with an embedded container registry. The backend will automatically deploy applications to Minikube when configured for Kubernetes.
