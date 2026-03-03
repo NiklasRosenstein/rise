@@ -7,6 +7,7 @@ pack = "0.39.0"
 mdbook = "latest"
 helm = "latest"
 rust = { version = "1.91.1", profile = "default" }
+kubectl = "latest"
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
@@ -115,4 +116,21 @@ echo "You might want to update your /etc/hosts to point your local domains to 12
 echo
 
 kubectl port-forward --namespace ingress-nginx svc/ingress-nginx-controller 8080:80 8443:443
+"""
+
+[tasks."k3s:up"]
+run = """
+set -x
+curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--flannel-backend=none --cluster-cidr=192.168.0.0/16 --disable-network-policy --disable=traefik" sh -
+sleep 10
+sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/operator-crds.yaml
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/tigera-operator.yaml
+kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/custom-resources.yaml
+helm install --repo https://kubernetes.github.io/ingress-nginx ingress-nginx --namespace ingress-nginx ingress-nginx --create-namespace
+"""
+
+[tasks."k3s:down"]
+run = """
+sudo /usr/local/bin/k3s-uninstall.sh
 """
