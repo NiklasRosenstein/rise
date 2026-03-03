@@ -8,6 +8,7 @@ mdbook = "latest"
 helm = "latest"
 rust = { version = "1.91.1", profile = "default" }
 kubectl = "latest"
+k9s = "latest"
 
 [tasks."sqlx:prepare"]
 description = "Prepare the SQLX query cache that needs to be committed for building with SQLX_OFFLINE=true."
