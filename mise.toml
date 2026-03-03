@@ -158,7 +158,7 @@ docker compose up -d registry
 # Install K3s
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--flannel-backend=none --cluster-cidr=192.168.0.0/16 --disable-network-policy --disable=traefik" sh -
 sleep 10
-mkdir -p ~/.kube/config
+mkdir -p ~/.kube
 sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
 kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/operator-crds.yaml
 kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/tigera-operator.yaml
