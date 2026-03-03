@@ -121,6 +121,40 @@ kubectl port-forward --namespace ingress-nginx svc/ingress-nginx-controller 8080
 [tasks."k3s:up"]
 run = """
 set -x
+
+# Ensure /etc/hosts has an entry for rise-registry
+if ! grep -q 'rise-registry' /etc/hosts; then
+  echo "Adding rise-registry to /etc/hosts..."
+  echo '127.0.0.1 rise-registry' | sudo tee -a /etc/hosts
+fi
+
+# Ensure /etc/docker/daemon.json has insecure-registries configured
+DAEMON_JSON="/etc/docker/daemon.json"
+REQUIRED_REGISTRIES='["rise-registry:5000","localhost:5000","127.0.0.1:5000"]'
+if [ ! -f "$DAEMON_JSON" ]; then
+  echo "Creating $DAEMON_JSON with insecure-registries..."
+  echo "{\"insecure-registries\": $REQUIRED_REGISTRIES}" | sudo tee "$DAEMON_JSON"
+  sudo systemctl restart docker || true
+elif ! grep -q 'rise-registry:5000' "$DAEMON_JSON"; then
+  echo "WARNING: Please add the following to $DAEMON_JSON and restart Docker:"
+  echo "  \"insecure-registries\": $REQUIRED_REGISTRIES"
+  echo "Then re-run this task."
+  exit 1
+fi
+
+# Configure K3s registries for insecure access to rise-registry:5000
+sudo mkdir -p /etc/rancher/k3s
+sudo tee /etc/rancher/k3s/registries.yaml > /dev/null <<EOF
+mirrors:
+  "rise-registry:5000":
+    endpoint:
+      - "http://rise-registry:5000"
+EOF
+
+# Ensure the local Docker registry is running
+docker compose up -d registry
+
+# Install K3s
 curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--flannel-backend=none --cluster-cidr=192.168.0.0/16 --disable-network-policy --disable=traefik" sh -
 sleep 10
 sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
