@@ -77,13 +77,17 @@ fn runtime_from_version_output(stdout: &[u8], stderr: &[u8]) -> ContainerRuntime
     }
 }
 
-/// Probe runtime by executing `<command> --version`.
+/// Probe runtime by executing `<command> version`.
+///
+/// Uses `version` (not `--version`) because it shows both client AND server
+/// info. This detects the case where the Docker CLI talks to a Podman server
+/// (e.g. Docker Desktop CLI connected to a Podman backend in a VM).
 ///
 /// Returns `None` if command execution fails or exits non-zero.
 fn probe_runtime(command: &str) -> Option<ContainerRuntime> {
     use std::process::Command;
 
-    let output = Command::new(command).arg("--version").output().ok()?;
+    let output = Command::new(command).arg("version").output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -362,6 +366,15 @@ mod tests {
             b"Docker version 5.0.2\n",
             b"Emulate Docker CLI using podman. Create /etc/containers/nodocker to quiet msg.\n",
         );
+        assert_eq!(runtime, ContainerRuntime::Podman);
+    }
+
+    #[test]
+    fn test_runtime_from_version_output_docker_cli_podman_server() {
+        // Docker CLI connected to a Podman server (e.g. via VM).
+        // `docker version` output contains "Podman Engine:" in server section.
+        let stdout = b"Client:\n Version: 29.2.1\n\nServer: linux/arm64/fedora-43\n Podman Engine:\n  Version: 5.7.1\n";
+        let runtime = runtime_from_version_output(stdout, b"");
         assert_eq!(runtime, ContainerRuntime::Podman);
     }
 
