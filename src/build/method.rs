@@ -162,6 +162,7 @@ impl BuildOptions {
             container_cli: build_args
                 .container_cli
                 .clone()
+                .or_else(|| crate::build::env_var_non_empty("RISE_CONTAINER_CLI"))
                 .or_else(|| {
                     project_config
                         .as_ref()
