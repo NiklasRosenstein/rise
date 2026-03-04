@@ -203,8 +203,8 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     if options.push && supports_push_flag {
         // Only use --push with buildx
         cmd.arg("--push");
-    } else if options.use_buildx && !options.push {
-        // For buildx without push, we need --load to get image into local daemon
+    } else if options.use_buildx {
+        // Without --push, load into the local daemon so a subsequent push can work.
         cmd.arg("--load");
     }
 

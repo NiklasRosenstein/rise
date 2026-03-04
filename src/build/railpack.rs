@@ -284,9 +284,7 @@ fn build_with_buildx(
         cmd.arg("--no-cache");
     }
 
-    let supports_push_flag = buildx_supports_push;
-
-    if push && supports_push_flag {
+    if push && buildx_supports_push {
         cmd.arg("--push");
     } else {
         // For local builds, use --load to ensure image is available in local daemon
@@ -314,7 +312,7 @@ fn build_with_buildx(
         );
     }
 
-    if push && !supports_push_flag {
+    if push && !buildx_supports_push {
         docker_push(container_cli, image_tag)?;
     }
 
