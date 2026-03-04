@@ -197,9 +197,7 @@ impl BuildOptions {
                 .or(config.managed_buildkit),
             railpack_embed_ssl_cert: build_args
                 .railpack_embed_ssl_cert
-                .or_else(|| {
-                    crate::build::parse_bool_env_var("RISE_RAILPACK_EMBED_SSL_CERT")
-                })
+                .or_else(|| crate::build::parse_bool_env_var("RISE_RAILPACK_EMBED_SSL_CERT"))
                 .or_else(|| {
                     project_config
                         .as_ref()
