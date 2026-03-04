@@ -151,7 +151,7 @@ pub trait DeploymentBackend: Send + Sync {
 
 /// Main controller orchestrator
 ///
-/// The DeploymentController runs three background loops:
+/// The DeploymentController runs background loops for:
 /// 1. Reconciliation loop - processes deployments in Pushed, Deploying, Healthy, Unhealthy states
 /// 2. Health check loop - monitors deployments in Healthy and Unhealthy states
 /// 3. Termination loop - processes deployments in Terminating state
@@ -248,6 +248,12 @@ impl DeploymentController {
             // Check for timed out deployments
             if let Err(e) = self.check_deployment_timeouts().await {
                 error!("Error checking deployment timeouts: {}", e);
+            }
+
+            // Failed deployments can still have infrastructure (e.g. pod/runtime errors).
+            // Queue them for termination so backend cleanup runs.
+            if let Err(e) = self.queue_failed_deployments_for_cleanup().await {
+                error!("Error queueing failed deployments for cleanup: {}", e);
             }
         }
     }
@@ -663,10 +669,15 @@ impl DeploymentController {
                                 .await?;
                         }
                         Some(crate::db::models::TerminationReason::Failed) => {
+                            // Preserve the original deployment failure reason if present.
+                            let error_message = deployment
+                                .error_message
+                                .as_deref()
+                                .unwrap_or("Deployment failed");
                             db_deployments::mark_failed(
                                 &self.state.db_pool,
                                 deployment.id,
-                                "Deployment timed out",
+                                error_message,
                             )
                             .await?;
                         }
@@ -692,6 +703,39 @@ impl DeploymentController {
                     );
                 }
             }
+        }
+
+        Ok(())
+    }
+
+    /// Queue terminal Failed deployments for termination so backend infrastructure gets cleaned up.
+    ///
+    /// Some failures happen after infrastructure is already created (e.g. pod runtime/readiness errors).
+    /// These deployments are already terminal, so they won't be reconciled again unless explicitly queued.
+    async fn queue_failed_deployments_for_cleanup(&self) -> anyhow::Result<()> {
+        let failed =
+            db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Failed).await?;
+
+        for deployment in failed {
+            // Failed deployments that already came through termination have this reason set.
+            if matches!(
+                deployment.termination_reason,
+                Some(crate::db::models::TerminationReason::Failed)
+            ) {
+                continue;
+            }
+
+            info!(
+                "Queueing failed deployment {} for cleanup",
+                deployment.deployment_id
+            );
+
+            db_deployments::mark_terminating(
+                &self.state.db_pool,
+                deployment.id,
+                crate::db::models::TerminationReason::Failed,
+            )
+            .await?;
         }
 
         Ok(())
