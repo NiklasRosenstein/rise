@@ -13,7 +13,7 @@ pub enum ContainerRuntime {
 /// Container CLI identity, carrying the command to invoke and the detected runtime.
 ///
 /// Handles the case where `docker` is a Podman alias (e.g. podman-docker package)
-/// by inspecting the `--version` output during construction.
+/// by inspecting version command output during construction.
 #[derive(Debug, Clone)]
 pub struct ContainerCli {
     command: String,
@@ -24,7 +24,7 @@ impl ContainerCli {
     /// Build a `ContainerCli` from an explicitly provided command name.
     ///
     /// Detects the runtime by inspecting the binary name first, then falling
-    /// back to checking `--version` output (handles `docker` → Podman aliases).
+    /// back to checking version command output (handles `docker` → Podman aliases).
     pub fn from_command(command: impl Into<String>) -> Self {
         let command = command.into();
         let runtime = detect_runtime(&command);
@@ -77,22 +77,26 @@ fn runtime_from_version_output(stdout: &[u8], stderr: &[u8]) -> ContainerRuntime
     }
 }
 
-/// Probe runtime by executing `<command> version`.
+/// Probe runtime by executing `<command> version` and falling back to `<command> --version`.
 ///
-/// Uses `version` (not `--version`) because it shows both client AND server
-/// info. This detects the case where the Docker CLI talks to a Podman server
-/// (e.g. Docker Desktop CLI connected to a Podman backend in a VM).
+/// `version` can include both client and server info, which detects the case
+/// where the Docker CLI talks to a Podman server (e.g. Docker CLI connected to
+/// a Podman backend in a VM). If that probe fails (for example because Docker
+/// daemon is down), we fall back to `--version` so CLI presence is still
+/// detected.
 ///
 /// Returns `None` if command execution fails or exits non-zero.
 fn probe_runtime(command: &str) -> Option<ContainerRuntime> {
     use std::process::Command;
 
-    let output = Command::new(command).arg("version").output().ok()?;
-    if !output.status.success() {
-        return None;
+    for args in &[&["version"][..], &["--version"][..]] {
+        let output = Command::new(command).args(*args).output().ok()?;
+        if output.status.success() {
+            return Some(runtime_from_version_output(&output.stdout, &output.stderr));
+        }
     }
 
-    Some(runtime_from_version_output(&output.stdout, &output.stderr))
+    None
 }
 
 // TODO: Use keyring crate for secure token storage instead of plain JSON
@@ -256,7 +260,7 @@ impl Config {
 ///
 /// Checks `docker` first, then `podman`. Also detects the case where
 /// `docker` is a Podman alias (e.g. podman-docker package) by inspecting
-/// the `--version` output — the same call that checks availability.
+/// version command output — the same probe that checks availability.
 fn detect_container_cli() -> ContainerCli {
     // Check if docker is available (and whether it's secretly Podman)
     if let Some(runtime) = probe_runtime("docker") {

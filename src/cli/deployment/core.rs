@@ -523,14 +523,17 @@ pub async fn create_deployment(
         }
     } else {
         // Build from source path: Execute build and push
+        let options = BuildOptions::from_build_args(
+            config,
+            deployment_info.image_tag.clone(),
+            deploy_opts.path.to_string(),
+            deploy_opts.build_args,
+        );
+
         // Step 2: Login to registry if credentials provided
         if !deployment_info.credentials.username.is_empty() {
             info!("Logging into registry");
-            let login_cli = deploy_opts
-                .build_args
-                .container_cli
-                .clone()
-                .unwrap_or_else(|| config.get_container_cli().command().to_string());
+            let login_cli = options.container_cli.command().to_string();
             if let Err(e) = build::docker_login(
                 &login_cli,
                 &deployment_info.credentials.registry_url,
@@ -562,13 +565,7 @@ pub async fn create_deployment(
         .await?;
 
         // Step 4: Build and push image using build module
-        let options = BuildOptions::from_build_args(
-            config,
-            deployment_info.image_tag.clone(),
-            deploy_opts.path.to_string(),
-            deploy_opts.build_args,
-        )
-        .with_push(true);
+        let options = options.with_push(true);
 
         if let Err(e) = build::build_image(options) {
             update_deployment_status(
