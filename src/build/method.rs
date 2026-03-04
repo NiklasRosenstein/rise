@@ -5,7 +5,7 @@ use clap::Args;
 use std::path::Path;
 use tracing::info;
 
-use crate::config::Config;
+use crate::config::{Config, ContainerCli};
 
 /// Build method for container images
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -93,7 +93,9 @@ pub(crate) struct BuildOptions {
     pub builder: Option<String>,
     pub buildpacks: Vec<String>,
     pub env: Vec<String>,
-    pub container_cli: Option<String>,
+    pub container_cli: ContainerCli,
+    /// Whether --container-cli was explicitly provided (for "ignored" warnings)
+    pub explicit_container_cli: bool,
     /// None = auto-detect based on SSL_CERT_FILE and BUILDKIT_HOST
     /// Some(true) = explicitly enable managed buildkit
     /// Some(false) = explicitly disable managed buildkit
@@ -159,16 +161,22 @@ impl BuildOptions {
                 .clone()
                 .or_else(|| project_config.as_ref().and_then(|c| c.builder.clone())),
 
-            container_cli: build_args
-                .container_cli
-                .clone()
-                .or_else(|| crate::build::env_var_non_empty("RISE_CONTAINER_CLI"))
-                .or_else(|| {
-                    project_config
-                        .as_ref()
-                        .and_then(|c| c.container_cli.clone())
-                })
-                .or_else(|| Some(config.get_container_cli())),
+            container_cli: {
+                let explicit = build_args
+                    .container_cli
+                    .clone()
+                    .or_else(|| crate::build::env_var_non_empty("RISE_CONTAINER_CLI"))
+                    .or_else(|| {
+                        project_config
+                            .as_ref()
+                            .and_then(|c| c.container_cli.clone())
+                    });
+                match explicit {
+                    Some(name) => ContainerCli::from_command(name),
+                    None => config.get_container_cli(),
+                }
+            },
+            explicit_container_cli: build_args.container_cli.is_some(),
 
             // Vector options - all vectors merge config + CLI values (append)
             buildpacks: {

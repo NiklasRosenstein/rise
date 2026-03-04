@@ -64,10 +64,9 @@ pub(crate) fn parse_bool_env_var(key: &str) -> Option<bool> {
 
 /// Main entry point for building container images
 pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
-    // Resolve container CLI - use explicit value or default to "docker"
-    let container_cli = options.container_cli.as_deref().unwrap_or("docker");
+    let container_cli = &options.container_cli;
 
-    debug!("Using container CLI: {}", container_cli);
+    debug!("Using container CLI: {} ({:?})", container_cli.command(), container_cli.runtime());
     info!(
         "Building image '{}' from path '{}'",
         options.image_tag, options.app_path
@@ -87,7 +86,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
         &options.app_path,
         options.backend.as_deref(),
         options.dockerfile.as_deref(),
-        container_cli,
+        container_cli.command(),
     )?;
 
     // Determine if we should use managed buildkit
@@ -160,7 +159,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 app_path: &options.app_path,
                 dockerfile: dockerfile.as_deref(),
                 image_tag: &options.image_tag,
-                container_cli,
+                container_cli: container_cli.command(),
                 use_buildx,
                 push: options.push,
                 buildkit_host: buildkit_host.as_deref(),
@@ -171,7 +170,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             })?;
         }
         BuildMethod::Pack => {
-            if options.container_cli.is_some() {
+            if options.explicit_container_cli {
                 warn!("--container-cli flag is ignored when using pack build method");
             }
             if options.managed_buildkit.is_some() {
@@ -192,7 +191,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
 
             // Pack doesn't support push during build, so push separately if requested
             if options.push {
-                registry::docker_push(container_cli, &options.image_tag)?;
+                registry::docker_push(container_cli.command(), &options.image_tag)?;
             }
         }
         BuildMethod::Railpack { use_buildctl } => {
@@ -202,14 +201,14 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if !options.buildpacks.is_empty() {
                 warn!("--buildpack flags are ignored when using railpack build method");
             }
-            if use_buildctl && options.container_cli.is_some() {
+            if use_buildctl && options.explicit_container_cli {
                 warn!("--container-cli flag is ignored when using railpack:buildctl build method");
             }
 
             build_image_with_railpacks(RailpackBuildOptions {
                 app_path: &options.app_path,
                 image_tag: &options.image_tag,
-                container_cli,
+                container_cli: container_cli.command(),
                 use_buildctl,
                 push: options.push,
                 buildkit_host: buildkit_host.as_deref(),
@@ -225,7 +224,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if !options.buildpacks.is_empty() {
                 warn!("--buildpack flags are ignored when using buildctl build method");
             }
-            if options.container_cli.is_some() {
+            if options.explicit_container_cli {
                 warn!("--container-cli flag is ignored when using buildctl build method");
             }
             if options.railpack_embed_ssl_cert {

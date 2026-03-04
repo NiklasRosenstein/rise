@@ -526,12 +526,13 @@ pub async fn create_deployment(
         // Step 2: Login to registry if credentials provided
         if !deployment_info.credentials.username.is_empty() {
             info!("Logging into registry");
+            let login_cli = deploy_opts
+                .build_args
+                .container_cli
+                .clone()
+                .unwrap_or_else(|| config.get_container_cli().command().to_string());
             if let Err(e) = build::docker_login(
-                &deploy_opts
-                    .build_args
-                    .container_cli
-                    .clone()
-                    .unwrap_or_else(|| config.get_container_cli()),
+                &login_cli,
                 &deployment_info.credentials.registry_url,
                 &deployment_info.credentials.username,
                 &deployment_info.credentials.password,

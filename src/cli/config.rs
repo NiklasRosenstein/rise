@@ -3,6 +3,76 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+/// The container runtime engine behind the CLI command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ContainerRuntime {
+    Docker,
+    Podman,
+}
+
+/// Container CLI identity, carrying the command to invoke and the detected runtime.
+///
+/// Handles the case where `docker` is a Podman alias (e.g. podman-docker package)
+/// by inspecting the `--version` output during construction.
+#[derive(Debug, Clone)]
+pub struct ContainerCli {
+    command: String,
+    runtime: ContainerRuntime,
+}
+
+impl ContainerCli {
+    /// Build a `ContainerCli` from an explicitly provided command name.
+    ///
+    /// Detects the runtime by inspecting the binary name first, then falling
+    /// back to checking `--version` output (handles `docker` → Podman aliases).
+    pub fn from_command(command: impl Into<String>) -> Self {
+        let command = command.into();
+        let runtime = detect_runtime(&command);
+        Self { command, runtime }
+    }
+
+    /// The CLI command to invoke (e.g. `"docker"` or `"podman"`).
+    pub fn command(&self) -> &str {
+        &self.command
+    }
+
+    /// The detected container runtime engine.
+    pub fn runtime(&self) -> ContainerRuntime {
+        self.runtime
+    }
+}
+
+/// Detect which container runtime a CLI command is backed by.
+fn detect_runtime(command: &str) -> ContainerRuntime {
+    use std::path::Path;
+    use std::process::Command;
+
+    // Fast path: binary name is literally "podman"
+    if Path::new(command)
+        .file_name()
+        .is_some_and(|name| name == "podman")
+    {
+        return ContainerRuntime::Podman;
+    }
+
+    // Slow path: `docker` might be a Podman alias (e.g. podman-docker package)
+    let is_podman = Command::new(command)
+        .arg("--version")
+        .output()
+        .map(|out| {
+            String::from_utf8_lossy(&out.stdout)
+                .to_lowercase()
+                .contains("podman")
+        })
+        .unwrap_or(false);
+
+    if is_podman {
+        ContainerRuntime::Podman
+    } else {
+        ContainerRuntime::Docker
+    }
+}
+
 // TODO: Use keyring crate for secure token storage instead of plain JSON
 // This would store tokens in the system's secure credential storage:
 // - macOS: Keychain
@@ -104,13 +174,13 @@ impl Config {
     /// Get the container CLI to use (docker or podman)
     /// Checks RISE_CONTAINER_CLI environment variable first, then falls back to config file,
     /// then to auto-detection (podman if available, docker otherwise)
-    pub fn get_container_cli(&self) -> String {
+    pub fn get_container_cli(&self) -> ContainerCli {
         #[cfg(not(test))]
         if let Ok(cli) = std::env::var("RISE_CONTAINER_CLI") {
-            return cli;
+            return ContainerCli::from_command(cli);
         }
         if let Some(ref cli) = self.container_cli {
-            return cli.clone();
+            return ContainerCli::from_command(cli.clone());
         }
         detect_container_cli()
     }
@@ -160,19 +230,29 @@ impl Config {
     }
 }
 
-/// Auto-detect which container CLI is available
-/// Returns "podman" if docker is not available and podman is, otherwise "docker"
-fn detect_container_cli() -> String {
+/// Auto-detect which container CLI is available.
+///
+/// Checks `docker` first, then `podman`. Also detects the case where
+/// `docker` is a Podman alias (e.g. podman-docker package) by inspecting
+/// the `--version` output — the same call that checks availability.
+fn detect_container_cli() -> ContainerCli {
     use std::process::Command;
 
-    // Check if docker is available
-    if Command::new("docker")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
-        return "docker".to_string();
+    // Check if docker is available (and whether it's secretly Podman)
+    if let Ok(output) = Command::new("docker").arg("--version").output() {
+        if output.status.success() {
+            let is_podman = String::from_utf8_lossy(&output.stdout)
+                .to_lowercase()
+                .contains("podman");
+            return ContainerCli {
+                command: "docker".to_string(),
+                runtime: if is_podman {
+                    ContainerRuntime::Podman
+                } else {
+                    ContainerRuntime::Docker
+                },
+            };
+        }
     }
 
     // Check if podman is available
@@ -182,11 +262,17 @@ fn detect_container_cli() -> String {
         .map(|o| o.status.success())
         .unwrap_or(false)
     {
-        return "podman".to_string();
+        return ContainerCli {
+            command: "podman".to_string(),
+            runtime: ContainerRuntime::Podman,
+        };
     }
 
     // Default to docker if neither is detected
-    "docker".to_string()
+    ContainerCli {
+        command: "docker".to_string(),
+        runtime: ContainerRuntime::Docker,
+    }
 }
 
 #[cfg(test)]
