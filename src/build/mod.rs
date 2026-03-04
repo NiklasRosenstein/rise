@@ -42,6 +42,26 @@ pub(crate) fn env_var_non_empty(key: &str) -> Option<String> {
         .and_then(|v| if v.is_empty() { None } else { Some(v) })
 }
 
+/// Parse a boolean environment variable.
+///
+/// Returns `Some(true)` for "true"/"1", `Some(false)` for "false"/"0",
+/// and `None` if the variable is unset or empty. This ensures the env var
+/// is authoritative when present — setting it to "false" explicitly disables
+/// the feature rather than falling through to the next precedence level.
+///
+/// Panics with a descriptive message if the value is not a recognized boolean.
+pub(crate) fn parse_bool_env_var(key: &str) -> Option<bool> {
+    let val = env_var_non_empty(key)?;
+    match val.to_lowercase().as_str() {
+        "true" | "1" => Some(true),
+        "false" | "0" => Some(false),
+        _ => panic!(
+            "Invalid boolean value for {}: {:?} (expected true/false/1/0)",
+            key, val
+        ),
+    }
+}
+
 /// Main entry point for building container images
 pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
     // Resolve container CLI - use explicit value or default to "docker"

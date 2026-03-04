@@ -121,8 +121,8 @@ impl Config {
     #[allow(dead_code)]
     pub fn get_managed_buildkit(&self) -> bool {
         #[cfg(not(test))]
-        if let Ok(val) = std::env::var("RISE_MANAGED_BUILDKIT") {
-            return val.to_lowercase() == "true" || val == "1";
+        if let Some(val) = crate::build::parse_bool_env_var("RISE_MANAGED_BUILDKIT") {
+            return val;
         }
         self.managed_buildkit.unwrap_or(false)
     }
@@ -140,8 +140,8 @@ impl Config {
     #[allow(dead_code)]
     pub fn get_railpack_embed_ssl_cert(&self) -> bool {
         #[cfg(not(test))]
-        if let Ok(val) = std::env::var("RISE_RAILPACK_EMBED_SSL_CERT") {
-            return val.to_lowercase() == "true" || val == "1";
+        if let Some(val) = crate::build::parse_bool_env_var("RISE_RAILPACK_EMBED_SSL_CERT") {
+            return val;
         }
         if let Some(enabled) = self.railpack_embed_ssl_cert {
             return enabled;

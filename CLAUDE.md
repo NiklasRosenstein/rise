@@ -151,30 +151,7 @@ cargo build --all-features     # Full build with CLI + backend
    - [x] `rise build` command for local image builds without deployment
    - [x] `rise run` command for local development (build and run with docker/podman)
    - [x] Pre-built image deployment support (`--image` flag)
-      - [x] Native Dex device authorization flow (via `--device` flag) ⚠️ **NOT COMPATIBLE WITH DEX**
-        - Note: Dex's device flow implementation doesn't follow RFC 8628 properly
-        - Dex uses a hybrid approach incompatible with pure CLI implementation
-        - Browser flow is recommended and is the default
-      - [x] Remove password authentication
-      - [x] Local HTTP callback server for authorization code flow
-    - [x] Create project management commands for creating and listing projects.
-    - [x] Develop the build module to support buildpacks (via pack CLI), Dockerfiles (via docker/podman), and Railpacks (via railpack CLI).
-    - [x] Implement automatic build method detection (Dockerfile vs buildpacks) with optional `--backend` flag for explicit selection.
-    - [x] Add `rise build` command for building images locally without deployment.
-    - [x] Support Railpacks build method with both buildx (default) and buildctl via `--backend railpack` or `--backend railpack:buildctl`.
-    - [x] Implement deployment commands to handle the build, push, and deploy process.
-    - [x] Set up configuration handling for the CLI tool (.rise-config.toml).
-    - [x] Add deployment management commands (list, show, rollback).
-    - [x] Implement `--image` flag for deploying pre-built images without builds.
-    - [x] Add deployment following with auto-refresh and timeout support.
-
-3. **Testing and Documentation**:
-    - Write unit and integration tests for both the backend and CLI.
-    - Document the API endpoints and CLI commands for user reference.
-    - Provide examples and usage guides in the project README files.
-
-By following this outline, we can create a robust Rust-based project that meets the requirements for deploying simple
-apps to container runtimes using a user-friendly CLI.
+   - [x] Deployment following with auto-refresh and timeout support
 
 ## User-Facing Documentation
 
@@ -187,18 +164,36 @@ For user-facing documentation, see the [`/docs`](./docs) directory. Key topics i
 
 ## Guidelines
 
-- You must focus on building any given feature at a time in small increments and commit your changes often.
-- You must be able to use the Git commit history as a reference to help remember what you did and why.
-- You must ensure to keep this document updated as the project evolves, keeping track of the features that have been
-  implemented and any changes to the architecture or design decisions that may have been made along the way.
-- You must write clean, maintainable, and well-documented code, following Rust best practices.
-- You must ensure that the project is modular and extensible, allowing for future enhancements and additions.
-- You must prioritize user experience in the CLI, providing clear feedback and error messages.
-- You must embrace modern design practices, such as modular controller design, dependency injection, and separation of concerns.
+- Build features in small increments with frequent commits. Use Git history as a reference for what was done and why.
+- Keep this document updated as the project evolves.
+- Write clean, maintainable code following Rust best practices. Prioritize user experience in the CLI.
 - Don't commit the .claude directory
 - Axum capture groups are formatted as `{capture}`
 - Keep the documentation updated. Don't be overly verbose when documenting the project. People can read the code, but things that are not obvious or help getting started and context are usually helpful in documentation, as well as well-placed and lean examples.
-- Your todo lists should always include tasks for ensuring formatting and linting are addressed and creating commits of reasonable size (related changes in one commit)
+- When removing a feature, do a comprehensive check on the codebase to ensure any remaining references to that feature are removed or updated. This includes documentation files/READMEs, config files, code comments, etc.
+- The CLI should first and foremost always accept the names of things (e.g. project names, or project names + deployment timestamp). The UUIDs in our tables are only for internal book-keeping.
+- The admin user(s) should always have full access to perform any operation. When we work on a new API endpoint, we make sure admin users don't need to pass regular permission checks.
+- Any SQLX queries are to be wrapped by helper functions in the `rise_deploy::db` crate. No SQLX queries outside of this crate are allowed.
+- When we log errors and don't handle them further, we should include a sensible amount of information about the error. Often logging the error with `{:?}` is good enough.
+- When capturing screenshots, the playwright tool will successfully install the driver even if you might think its install step failed. Always use minimum 1280px width and 800px height for the browser.
+
+### Before Commit & Push
+
+Run these to match what CI checks. Fix any issues before committing.
+
+```bash
+cargo fmt --all                # Format code
+mise run lint                  # Clippy + fmt check + sqlx check + helm lint
+cargo test --all-features      # Unit tests (requires `mise run db:migrate` first)
+```
+
+If you modified SQLX queries, also run:
+
+```bash
+mise run sqlx:prepare          # Regenerate offline query cache (commit the changes)
+```
+
+The `mise run lint` task runs: `cargo all-features check`, `cargo all-features clippy -- -D warnings`, `cargo fmt --check`, `mise sqlx:check`, and `helm lint helm/rise`.
 
 ## Future Enhancements
 
@@ -218,11 +213,3 @@ The project `visibility` field (Public/Private) is currently stored but not enfo
 - Public projects will have standard ingress rules
 - Private projects will have OAuth2 proxy or similar authentication middleware configured in the ingress
 - The authentication layer will validate both user identity AND project access permissions before proxying requests to the application
-- When removing a feature, do a comprehensive check on the codebase to ensure any remaining references to that feature are removed or updated. This includes documentation files/READMEs, config files, code comments, etc.
-- Run `mise sqlx:check` and `mise sqlx:prepare` (if needed) as part of the finalizing steps
-- The CLI should first and foremost always accept the names of things (e.g. project names, or project names + deployment timestamp). The UUIDs in our tables are only for internal book-keeping.
-- The admin user(s) should always have full access to perform any operation. When we work on a new API endpoint, we make sure admin users don't need to pass regular permission checks.
-- Any SQLX queries are to be wrapped by helper functions in the rise_deploy::db crate. No SQLX queries outside of this crate are allowed
-- When we log errors and don't handle them further, we should include a sensible amount of information about the error. Often logging the error with `{:?}` is good enough.
-- When capturing screenshots, the playwright tool will successfully install the driver even if you might think its install step failed.
-- Always use minimum 1280px width and 800px height for the browser within the playwright tool.

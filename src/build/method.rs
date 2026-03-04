@@ -119,8 +119,8 @@ impl BuildOptions {
     ///
     /// Configuration precedence (highest to lowest):
     /// 1. CLI flags (BuildArgs)
-    /// 2. Project config file (rise.toml / .rise.toml)
-    /// 3. Environment variables (via Config getters)
+    /// 2. Environment variables (RISE_*)
+    /// 3. Project config file (rise.toml / .rise.toml)
     /// 4. Global config file (via Config getters)
     /// 5. Auto-detection/defaults (via Config getters)
     pub(crate) fn from_build_args(
@@ -162,6 +162,7 @@ impl BuildOptions {
             container_cli: build_args
                 .container_cli
                 .clone()
+                .or_else(|| crate::build::env_var_non_empty("RISE_CONTAINER_CLI"))
                 .or_else(|| {
                     project_config
                         .as_ref()
@@ -188,19 +189,15 @@ impl BuildOptions {
                 env
             },
 
-            // Boolean options - preserve None if not set anywhere for auto-detection
+            // Boolean options: CLI flag > env var > project config > global config > auto-detect
             managed_buildkit: build_args
                 .managed_buildkit
+                .or_else(|| crate::build::parse_bool_env_var("RISE_MANAGED_BUILDKIT"))
                 .or_else(|| project_config.as_ref().and_then(|c| c.managed_buildkit))
-                .or_else(|| {
-                    std::env::var("RISE_MANAGED_BUILDKIT")
-                        .ok()
-                        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
-                })
                 .or(config.managed_buildkit),
-            // Don't unwrap_or here - keep as None if not set anywhere
             railpack_embed_ssl_cert: build_args
                 .railpack_embed_ssl_cert
+                .or_else(|| crate::build::parse_bool_env_var("RISE_RAILPACK_EMBED_SSL_CERT"))
                 .or_else(|| {
                     project_config
                         .as_ref()
