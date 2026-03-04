@@ -8,6 +8,7 @@ use std::process::Command;
 use tracing::{debug, info, warn};
 
 use super::buildkit::ensure_buildx_builder;
+use super::registry::docker_push;
 use super::ssl::embed_ssl_cert_in_plan;
 
 /// BuildKit frontend type for buildctl
@@ -24,6 +25,7 @@ pub(crate) struct RailpackBuildOptions<'a> {
     pub app_path: &'a str,
     pub image_tag: &'a str,
     pub container_cli: &'a str,
+    pub buildx_supports_push: bool,
     pub use_buildctl: bool,
     pub push: bool,
     pub buildkit_host: Option<&'a str>,
@@ -213,6 +215,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             &plan_file,
             options.image_tag,
             options.container_cli,
+            options.buildx_supports_push,
             options.push,
             options.buildkit_host,
             &all_secrets,
@@ -230,6 +233,7 @@ fn build_with_buildx(
     plan_file: &Path,
     image_tag: &str,
     container_cli: &str,
+    buildx_supports_push: bool,
     push: bool,
     buildkit_host: Option<&str>,
     secrets: &HashMap<String, String>,
@@ -280,7 +284,9 @@ fn build_with_buildx(
         cmd.arg("--no-cache");
     }
 
-    if push {
+    let supports_push_flag = buildx_supports_push;
+
+    if push && supports_push_flag {
         cmd.arg("--push");
     } else {
         // For local builds, use --load to ensure image is available in local daemon
@@ -306,6 +312,10 @@ fn build_with_buildx(
             container_cli,
             status
         );
+    }
+
+    if push && !supports_push_flag {
+        docker_push(container_cli, image_tag)?;
     }
 
     Ok(())

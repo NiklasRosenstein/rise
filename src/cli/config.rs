@@ -18,6 +18,7 @@ pub enum ContainerRuntime {
 pub struct ContainerCli {
     command: String,
     runtime: ContainerRuntime,
+    buildx_supports_push: bool,
 }
 
 impl ContainerCli {
@@ -28,7 +29,12 @@ impl ContainerCli {
     pub fn from_command(command: impl Into<String>) -> Self {
         let command = command.into();
         let runtime = detect_runtime(&command);
-        Self { command, runtime }
+        let buildx_supports_push = detect_buildx_push_support(&command);
+        Self {
+            command,
+            runtime,
+            buildx_supports_push,
+        }
     }
 
     /// The CLI command to invoke (e.g. `"docker"` or `"podman"`).
@@ -39,6 +45,11 @@ impl ContainerCli {
     /// The detected container runtime engine.
     pub fn runtime(&self) -> ContainerRuntime {
         self.runtime
+    }
+
+    /// Whether this CLI frontend likely supports `buildx build --push`.
+    pub fn buildx_supports_push(&self) -> bool {
+        self.buildx_supports_push
     }
 }
 
@@ -59,6 +70,12 @@ fn command_file_name(command: &str) -> Option<&str> {
     Path::new(command)
         .file_name()
         .and_then(|name| name.to_str())
+}
+
+/// Heuristic for buildx `--push` support:
+/// treat Podman frontends as unsupported, everything else as supported.
+fn detect_buildx_push_support(command: &str) -> bool {
+    !command.to_lowercase().contains("podman")
 }
 
 /// Parse runtime from version command output.
@@ -267,6 +284,7 @@ fn detect_container_cli() -> ContainerCli {
         return ContainerCli {
             command: "docker".to_string(),
             runtime,
+            buildx_supports_push: detect_buildx_push_support("docker"),
         };
     }
 
@@ -275,6 +293,7 @@ fn detect_container_cli() -> ContainerCli {
         return ContainerCli {
             command: "podman".to_string(),
             runtime: ContainerRuntime::Podman,
+            buildx_supports_push: detect_buildx_push_support("podman"),
         };
     }
 
@@ -282,6 +301,7 @@ fn detect_container_cli() -> ContainerCli {
     ContainerCli {
         command: "docker".to_string(),
         runtime: ContainerRuntime::Docker,
+        buildx_supports_push: detect_buildx_push_support("docker"),
     }
 }
 
