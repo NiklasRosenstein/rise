@@ -7,6 +7,8 @@ use std::path::Path;
 use std::process::Command;
 use tracing::{debug, info, warn};
 
+use crate::config::{ContainerCli, ContainerRuntime};
+
 use super::method::{requires_buildkit, BuildMethod};
 
 /// Compute SHA256 hash of a file
@@ -250,17 +252,21 @@ fn get_daemon_state(container_cli: &str, daemon_name: &str) -> DaemonState {
     DaemonState::NoCert(network_name, config_hash)
 }
 
-/// Stop BuildKit daemon
-fn stop_buildkit_daemon(container_cli: &str, daemon_name: &str) -> Result<()> {
+/// Stop and remove BuildKit daemon.
+///
+/// Uses `rm -f` instead of `stop` because Podman does not always clean up
+/// `--rm` containers reliably on `stop`, leaving the container name in use.
+/// `rm -f` works correctly on both Docker and Podman.
+fn stop_buildkit_daemon(container_cli: &ContainerCli, daemon_name: &str) -> Result<()> {
     info!("Stopping existing BuildKit daemon '{}'", daemon_name);
 
-    let status = Command::new(container_cli)
-        .args(["stop", daemon_name])
+    let status = Command::new(container_cli.command())
+        .args(["rm", "-f", daemon_name])
         .status()
-        .context("Failed to stop BuildKit daemon")?;
+        .context("Failed to remove BuildKit daemon")?;
 
     if !status.success() {
-        bail!("Failed to stop BuildKit daemon");
+        bail!("Failed to remove BuildKit daemon");
     }
 
     Ok(())
@@ -269,7 +275,7 @@ fn stop_buildkit_daemon(container_cli: &str, daemon_name: &str) -> Result<()> {
 /// Create BuildKit daemon with optional SSL certificate mounted and network connection
 /// Returns the BUILDKIT_HOST value to be used with this daemon
 fn create_buildkit_daemon(
-    container_cli: &str,
+    container_cli: &ContainerCli,
     daemon_name: &str,
     ssl_cert_file: Option<&Path>,
     network_name: Option<&str>,
@@ -291,11 +297,9 @@ fn create_buildkit_daemon(
         info!("BuildKit daemon will be connected to network '{}'", network);
     }
 
-    let mut cmd = Command::new(container_cli);
+    let mut cmd = Command::new(container_cli.command());
     cmd.args([
         "run",
-        "--platform",
-        "linux/amd64",
         "--privileged",
         "--name",
         daemon_name,
@@ -304,6 +308,15 @@ fn create_buildkit_daemon(
         "--add-host",
         "host.docker.internal:host-gateway",
     ]);
+
+    // Podman with cgroup v2 does not delegate the memory controller to containers
+    // by default, which causes runc (used internally by BuildKit) to fail with:
+    //   "can't get final child's PID from pipe: EOF"
+    // Using --cgroupns=host lets BuildKit access the host cgroup hierarchy directly.
+    if container_cli.runtime() == ContainerRuntime::Podman {
+        debug!("Podman detected, adding --cgroupns=host for cgroup v2 compatibility");
+        cmd.arg("--cgroupns=host");
+    }
 
     // Add labels and volume mount based on SSL cert presence
     if let Some(cert_path) = ssl_cert_file {
@@ -378,8 +391,8 @@ fn create_buildkit_daemon(
 
     // Connect to network if specified
     if let Some(network) = network_name {
-        create_network(container_cli, network)?;
-        connect_to_network(container_cli, network, daemon_name)?;
+        create_network(container_cli.command(), network)?;
+        connect_to_network(container_cli.command(), network, daemon_name)?;
     }
 
     // Return BUILDKIT_HOST value for this daemon
@@ -390,7 +403,7 @@ fn create_buildkit_daemon(
 /// Returns the BUILDKIT_HOST value to be used with this daemon
 pub(crate) fn ensure_managed_buildkit_daemon(
     ssl_cert_file: Option<&Path>,
-    container_cli: &str,
+    container_cli: &ContainerCli,
 ) -> Result<String> {
     let daemon_name = "rise-buildkit";
 
@@ -401,7 +414,7 @@ pub(crate) fn ensure_managed_buildkit_daemon(
     let expected_config_hash = generate_buildkit_config().map(|(_, hash)| hash);
 
     // Get current daemon state
-    let current_state = get_daemon_state(container_cli, daemon_name);
+    let current_state = get_daemon_state(container_cli.command(), daemon_name);
 
     match (ssl_cert_file, &current_state) {
         // Certificate provided, daemon has matching cert

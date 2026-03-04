@@ -25,6 +25,7 @@ pub(crate) struct DockerBuildOptions<'a> {
     pub dockerfile: Option<&'a str>,
     pub image_tag: &'a str,
     pub container_cli: &'a str,
+    pub buildx_supports_push: bool,
     pub use_buildx: bool,
     pub push: bool,
     pub buildkit_host: Option<&'a str>,
@@ -98,9 +99,8 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
 
     let mut cmd = Command::new(options.container_cli);
 
-    // Only buildx supports --push during build
-    // Regular docker build and podman build don't support --push
-    let supports_push_flag = options.use_buildx;
+    // Some buildx frontends (e.g. Podman) do not support `--push`.
+    let supports_push_flag = options.use_buildx && options.buildx_supports_push;
 
     if options.use_buildx {
         // Check buildx availability
@@ -203,8 +203,8 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     if options.push && supports_push_flag {
         // Only use --push with buildx
         cmd.arg("--push");
-    } else if options.use_buildx && !options.push {
-        // For buildx without push, we need --load to get image into local daemon
+    } else if options.use_buildx {
+        // Without --push, load into the local daemon so a subsequent push can work.
         cmd.arg("--load");
     }
 
