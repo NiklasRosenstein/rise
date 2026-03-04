@@ -66,7 +66,11 @@ pub(crate) fn parse_bool_env_var(key: &str) -> Option<bool> {
 pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
     let container_cli = &options.container_cli;
 
-    debug!("Using container CLI: {} ({:?})", container_cli.command(), container_cli.runtime());
+    debug!(
+        "Using container CLI: {} ({:?})",
+        container_cli.command(),
+        container_cli.runtime()
+    );
     info!(
         "Building image '{}' from path '{}'",
         options.image_tag, options.app_path

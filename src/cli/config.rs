@@ -44,33 +44,51 @@ impl ContainerCli {
 
 /// Detect which container runtime a CLI command is backed by.
 fn detect_runtime(command: &str) -> ContainerRuntime {
-    use std::path::Path;
-    use std::process::Command;
-
     // Fast path: binary name is literally "podman"
-    if Path::new(command)
-        .file_name()
-        .is_some_and(|name| name == "podman")
-    {
+    if command_file_name(command) == Some("podman") {
         return ContainerRuntime::Podman;
     }
 
-    // Slow path: `docker` might be a Podman alias (e.g. podman-docker package)
-    let is_podman = Command::new(command)
-        .arg("--version")
-        .output()
-        .map(|out| {
-            String::from_utf8_lossy(&out.stdout)
-                .to_lowercase()
-                .contains("podman")
-        })
-        .unwrap_or(false);
+    // Slow path: e.g. `docker` might be a Podman alias (podman-docker package)
+    probe_runtime(command).unwrap_or(ContainerRuntime::Docker)
+}
 
-    if is_podman {
+/// Return the file name component of a command path.
+fn command_file_name(command: &str) -> Option<&str> {
+    use std::path::Path;
+    Path::new(command)
+        .file_name()
+        .and_then(|name| name.to_str())
+}
+
+/// Parse runtime from version command output.
+///
+/// Combines stdout and stderr because wrappers may emit identifying text to either stream.
+fn runtime_from_version_output(stdout: &[u8], stderr: &[u8]) -> ContainerRuntime {
+    let combined = format!(
+        "{}\n{}",
+        String::from_utf8_lossy(stdout),
+        String::from_utf8_lossy(stderr)
+    );
+    if combined.to_lowercase().contains("podman") {
         ContainerRuntime::Podman
     } else {
         ContainerRuntime::Docker
     }
+}
+
+/// Probe runtime by executing `<command> --version`.
+///
+/// Returns `None` if command execution fails or exits non-zero.
+fn probe_runtime(command: &str) -> Option<ContainerRuntime> {
+    use std::process::Command;
+
+    let output = Command::new(command).arg("--version").output().ok()?;
+    if !output.status.success() {
+        return None;
+    }
+
+    Some(runtime_from_version_output(&output.stdout, &output.stderr))
 }
 
 // TODO: Use keyring crate for secure token storage instead of plain JSON
@@ -236,32 +254,16 @@ impl Config {
 /// `docker` is a Podman alias (e.g. podman-docker package) by inspecting
 /// the `--version` output — the same call that checks availability.
 fn detect_container_cli() -> ContainerCli {
-    use std::process::Command;
-
     // Check if docker is available (and whether it's secretly Podman)
-    if let Ok(output) = Command::new("docker").arg("--version").output() {
-        if output.status.success() {
-            let is_podman = String::from_utf8_lossy(&output.stdout)
-                .to_lowercase()
-                .contains("podman");
-            return ContainerCli {
-                command: "docker".to_string(),
-                runtime: if is_podman {
-                    ContainerRuntime::Podman
-                } else {
-                    ContainerRuntime::Docker
-                },
-            };
-        }
+    if let Some(runtime) = probe_runtime("docker") {
+        return ContainerCli {
+            command: "docker".to_string(),
+            runtime,
+        };
     }
 
     // Check if podman is available
-    if Command::new("podman")
-        .arg("--version")
-        .output()
-        .map(|o| o.status.success())
-        .unwrap_or(false)
-    {
+    if probe_runtime("podman").is_some() {
         return ContainerCli {
             command: "podman".to_string(),
             runtime: ContainerRuntime::Podman,
@@ -334,5 +336,39 @@ mod tests {
 
         let c = config(|c| c.railpack_embed_ssl_cert = Some(false));
         assert!(!c.get_railpack_embed_ssl_cert());
+    }
+
+    #[test]
+    fn test_runtime_from_version_output_docker_sample() {
+        // Sample Docker output:
+        // Docker version 27.3.1, build ce12230
+        let runtime = runtime_from_version_output(b"Docker version 27.3.1, build ce12230\n", b"");
+        assert_eq!(runtime, ContainerRuntime::Docker);
+    }
+
+    #[test]
+    fn test_runtime_from_version_output_podman_sample_stdout() {
+        // Sample Podman output:
+        // podman version 5.0.2
+        let runtime = runtime_from_version_output(b"podman version 5.0.2\n", b"");
+        assert_eq!(runtime, ContainerRuntime::Podman);
+    }
+
+    #[test]
+    fn test_runtime_from_version_output_podman_sample_stderr() {
+        // Sample podman-docker wrapper behavior (identity text on stderr):
+        // Emulate Docker CLI using podman. Create /etc/containers/nodocker to quiet msg.
+        let runtime = runtime_from_version_output(
+            b"Docker version 5.0.2\n",
+            b"Emulate Docker CLI using podman. Create /etc/containers/nodocker to quiet msg.\n",
+        );
+        assert_eq!(runtime, ContainerRuntime::Podman);
+    }
+
+    #[test]
+    fn test_command_file_name_extracts_binary_name() {
+        assert_eq!(command_file_name("podman"), Some("podman"));
+        assert_eq!(command_file_name("/usr/bin/podman"), Some("podman"));
+        assert_eq!(command_file_name("/usr/local/bin/docker"), Some("docker"));
     }
 }
