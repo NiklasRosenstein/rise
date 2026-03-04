@@ -13,28 +13,27 @@ check_prerequisites() {
         missing+=("cargo")
     fi
 
-    if ! command -v claude &> /dev/null; then
-        missing+=("claude (Claude CLI - optional for AI-generated release notes)")
+    if [ "$SKIP_AI_RELEASE_NOTES" = false ] && ! command -v claude &> /dev/null; then
+        missing+=("claude (Claude CLI)")
     fi
 
     if [ ${#missing[@]} -gt 0 ]; then
         echo "Error: Missing required tools:"
         for tool in "${missing[@]}"; do
-            if [[ "$tool" == *"optional"* ]]; then
-                echo "  - $tool"
-            else
-                echo "  ✗ $tool"
-            fi
+            echo "  ✗ $tool"
         done
         echo ""
         echo "Install missing tools:"
-        echo "  - claude: https://github.com/anthropics/anthropic-tools"
+        if [ "$SKIP_AI_RELEASE_NOTES" = false ]; then
+            echo "  - claude: https://github.com/anthropics/anthropic-tools"
+        fi
         exit 1
     fi
 }
 
 # Parse arguments
 DRY_RUN=false
+SKIP_AI_RELEASE_NOTES=false
 VERSION=""
 COMMIT_RANGE=""
 
@@ -42,6 +41,10 @@ while [[ $# -gt 0 ]]; do
     case $1 in
         --dry-run|-n)
             DRY_RUN=true
+            shift
+            ;;
+        --skip-ai-release-notes)
+            SKIP_AI_RELEASE_NOTES=true
             shift
             ;;
         *)
@@ -57,11 +60,12 @@ done
 
 # Check if version argument is provided
 if [ -z "$VERSION" ]; then
-    echo "Usage: $0 [--dry-run] <version> [commit-range]"
+    echo "Usage: $0 [--dry-run] [--skip-ai-release-notes] <version> [commit-range]"
     echo ""
     echo "Examples:"
     echo "  $0 0.1.4                    # Create release for version 0.1.4"
     echo "  $0 --dry-run 0.1.4          # Preview release notes for next version"
+    echo "  $0 --skip-ai-release-notes 0.1.4  # Tag without Claude-generated notes"
     echo "  $0 --dry-run 0.1.4 v0.13.0..HEAD  # Preview notes for specific range"
     exit 1
 fi
@@ -119,6 +123,9 @@ echo "Generating release notes..."
 if [ -z "$COMMITS" ]; then
     echo "No commits found in range ${COMMIT_RANGE}"
     RELEASE_SUMMARY="No changes in this release."
+elif [ "$SKIP_AI_RELEASE_NOTES" = true ]; then
+    echo "Skipping AI release notes generation (--skip-ai-release-notes)"
+    RELEASE_SUMMARY="Release ${TAG}"
 else
     # Create a temporary file for the analysis prompt
     TEMP_PROMPT=$(mktemp)
@@ -135,9 +142,20 @@ Commits:
 ${COMMITS}
 EOF
 
-    # Call Claude API to generate summary
-    RELEASE_SUMMARY=$(claude -p "$(cat "$TEMP_PROMPT")" 2>/dev/null || echo "Failed to generate AI summary. Please install Claude CLI from https://github.com/anthropics/anthropic-tools")
+    # Call Claude CLI to generate summary (required unless --skip-ai-release-notes is set)
+    if ! RELEASE_SUMMARY=$(claude -p "$(cat "$TEMP_PROMPT")"); then
+        rm "$TEMP_PROMPT"
+        echo "Error: Failed to generate AI summary with Claude CLI."
+        echo "Use --skip-ai-release-notes to bypass AI note generation."
+        exit 1
+    fi
     rm "$TEMP_PROMPT"
+
+    if [ -z "${RELEASE_SUMMARY//[[:space:]]/}" ]; then
+        echo "Error: Claude returned empty release notes."
+        echo "Use --skip-ai-release-notes to bypass AI note generation."
+        exit 1
+    fi
 fi
 
 # DRY RUN: Just print the release notes and exit
@@ -168,7 +186,11 @@ echo "The following actions will be performed:"
 echo "  1. Update version in Cargo.toml to ${VERSION}"
 echo "  2. Update Cargo.lock"
 echo "  3. Commit changes with message: 'chore: bump version to ${VERSION}'"
-echo "  4. Create git tag: ${TAG} (with AI-generated notes in tag annotation)"
+if [ "$SKIP_AI_RELEASE_NOTES" = true ]; then
+    echo "  4. Create git tag: ${TAG} (default annotation, AI notes skipped)"
+else
+    echo "  4. Create git tag: ${TAG} (with AI-generated notes in tag annotation)"
+fi
 echo "  5. Push commit and tag to origin"
 echo ""
 echo "Release notes preview:"
@@ -218,7 +240,11 @@ git push origin "${TAG}"
 
 echo ""
 echo "✓ Successfully created and pushed version ${VERSION} with tag ${TAG}"
-echo "✓ AI-generated release notes stored in tag annotation"
+if [ "$SKIP_AI_RELEASE_NOTES" = true ]; then
+    echo "✓ AI-generated release notes were skipped (--skip-ai-release-notes)"
+else
+    echo "✓ AI-generated release notes stored in tag annotation"
+fi
 echo ""
 echo "CI will now:"
 echo "  - Build release artifacts via cargo-dist"

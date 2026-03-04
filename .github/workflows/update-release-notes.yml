@@ -4,6 +4,8 @@ on:
   workflow_run:
     workflows: ["Release"]
     types: [completed]
+    branches:
+      - 'v*'
 
 permissions:
   contents: write
