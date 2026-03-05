@@ -189,9 +189,10 @@ impl GraphClient {
 
     /// Look up the service principal by app ID (client_id)
     async fn get_service_principal_id(&self) -> Result<String> {
+        let encoded_client_id = urlencoding::encode(&self.client_id);
         let url = format!(
             "https://graph.microsoft.com/v1.0/servicePrincipals?$filter=appId eq '{}'&$select=id",
-            self.client_id
+            encoded_client_id
         );
 
         let sps: Vec<ServicePrincipal> = self.get_paginated(&url).await?;
@@ -209,18 +210,20 @@ impl GraphClient {
 
     /// List all app role assignments (users and groups assigned to the enterprise app)
     async fn get_app_role_assignments(&self, sp_id: &str) -> Result<Vec<AppRoleAssignment>> {
+        let encoded_sp_id = urlencoding::encode(sp_id);
         let url = format!(
             "https://graph.microsoft.com/v1.0/servicePrincipals/{}/appRoleAssignedTo?$select=principalId,principalType,principalDisplayName",
-            sp_id
+            encoded_sp_id
         );
         self.get_paginated(&url).await
     }
 
     /// Get transitive user members of a group (resolves nested groups)
     async fn get_group_user_members(&self, group_id: &str) -> Result<Vec<GraphUser>> {
+        let encoded_group_id = urlencoding::encode(group_id);
         let url = format!(
             "https://graph.microsoft.com/v1.0/groups/{}/transitiveMembers/microsoft.graph.user?$select=id,mail,userPrincipalName",
-            group_id
+            encoded_group_id
         );
         self.get_paginated(&url).await
     }
@@ -407,7 +410,7 @@ async fn sync_once(pool: &PgPool, client: &mut GraphClient) -> Result<()> {
                 group.team_name,
                 e
             );
-            // Roll back and return error since we're in a transaction
+            // Transaction is rolled back implicitly when `tx` is dropped
             return Err(e);
         }
     }
