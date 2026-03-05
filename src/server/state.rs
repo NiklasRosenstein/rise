@@ -667,6 +667,65 @@ impl AppState {
             }
         }
 
+        // Register Snowflake Postgres provisioner (if configured)
+        #[cfg(feature = "backend")]
+        if let Some(ref extensions_config) = settings.extensions {
+            for provider_config in &extensions_config.providers {
+                if let crate::server::settings::ExtensionProviderConfig::SnowflakePostgresProvisioner {
+                    account,
+                    user,
+                    role,
+                    warehouse,
+                    auth,
+                    namespace,
+                    kubeconfig,
+                } = provider_config
+                {
+                    tracing::info!("Initializing Snowflake Postgres provisioner");
+
+                    // Re-use the existing kube client if Kubernetes deployment is configured;
+                    // otherwise create a new one using the optional kubeconfig.
+                    rustls::crypto::ring::default_provider()
+                        .install_default()
+                        .ok();
+
+                    let kube_config = if kubeconfig.is_some() {
+                        kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
+                            context: None,
+                            cluster: None,
+                            user: None,
+                        })
+                        .await?
+                    } else {
+                        kube::Config::infer().await?
+                    };
+                    let kube_client = kube::Client::try_from(kube_config)?;
+
+                    let sfpg_provisioner =
+                        crate::server::extensions::providers::snowflake_postgres::SnowflakePostgresProvisioner::new(
+                            crate::server::extensions::providers::snowflake_postgres::SnowflakePostgresProvisionerConfig {
+                                db_pool: db_pool.clone(),
+                                encryption_provider: encryption_provider.clone()
+                                    .ok_or_else(|| anyhow::anyhow!("Encryption provider required for Snowflake Postgres provisioner"))?,
+                                kube_client,
+                                namespace: namespace.clone(),
+                                account: account.clone(),
+                                user: user.clone(),
+                                role: role.clone(),
+                                warehouse: warehouse.clone(),
+                                auth: auth.clone(),
+                            },
+                        );
+
+                    let sfpg_arc: Arc<dyn crate::server::extensions::Extension> =
+                        Arc::new(sfpg_provisioner);
+                    extension_registry.register_type(sfpg_arc.clone());
+                    sfpg_arc.start();
+                    tracing::info!("Snowflake Postgres provisioner initialized and started");
+                }
+            }
+        }
+
         let extension_registry = Arc::new(extension_registry);
 
         // Initialize OAuth state store for OAuth extension (10 minute TTL)
