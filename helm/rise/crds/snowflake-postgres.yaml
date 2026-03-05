@@ -1,0 +1,130 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: snowflakepostgreses.rise.dev
+spec:
+  group: rise.dev
+  names:
+    categories: []
+    kind: SnowflakePostgres
+    plural: snowflakepostgreses
+    shortNames:
+    - sfpg
+    singular: snowflakepostgres
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - jsonPath: .status.state
+      name: State
+      type: string
+    - jsonPath: .status.endpoint
+      name: Endpoint
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1alpha1
+    schema:
+      openAPIV3Schema:
+        description: Auto-generated derived type for SnowflakePostgresSpec via `CustomResource`
+        properties:
+          spec:
+            description: Spec for the SnowflakePostgres custom resource
+            properties:
+              database_isolation:
+                default: shared
+                description: Database isolation mode for deployment groups
+                enum:
+                - shared
+                - isolated
+                type: string
+              database_url_env_var:
+                default: DATABASE_URL
+                description: Environment variable name for the database URL Set to null to disable DATABASE_URL injection
+                nullable: true
+                type: string
+              extension_name:
+                description: Extension instance name
+                type: string
+              inject_pg_vars:
+                default: true
+                description: Whether to inject PG* environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD)
+                type: boolean
+              project_name:
+                description: Rise project name
+                type: string
+            required:
+            - extension_name
+            - project_name
+            type: object
+          status:
+            description: Status for the SnowflakePostgres custom resource
+            nullable: true
+            properties:
+              databases:
+                additionalProperties:
+                  description: Status and credentials for an individual database within the instance
+                  properties:
+                    cleanup_scheduled_at:
+                      description: Timestamp when cleanup was scheduled (for inactive deployment groups)
+                      format: date-time
+                      nullable: true
+                      type: string
+                    password_encrypted:
+                      description: Encrypted password for this user
+                      type: string
+                    status:
+                      description: Current provisioning state for this database
+                      enum:
+                      - Pending
+                      - Creating
+                      - Available
+                      - Terminating
+                      type: string
+                    user:
+                      description: Username for this database
+                      type: string
+                  required:
+                  - password_encrypted
+                  - status
+                  - user
+                  type: object
+                description: Per-deployment-group database status and credentials
+                type: object
+              endpoint:
+                description: Snowflake account endpoint (host:port)
+                nullable: true
+                type: string
+              error:
+                description: Last error message
+                nullable: true
+                type: string
+              master_password_encrypted:
+                description: Encrypted master password (AES-GCM or KMS encrypted)
+                nullable: true
+                type: string
+              master_username:
+                description: Master username
+                nullable: true
+                type: string
+              state:
+                description: Current provisioning state
+                enum:
+                - Pending
+                - Creating
+                - Available
+                - Deleting
+                - Deleted
+                - Failed
+                type: string
+            required:
+            - state
+            type: object
+        required:
+        - spec
+        title: SnowflakePostgres
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}

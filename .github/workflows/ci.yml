@@ -113,6 +113,9 @@ jobs:
       - name: Verify backend config schema is up to date
         run: mise config:schema:check
 
+      - name: Verify CRD YAML files are up to date
+        run: mise crds:check
+
       - name: Check formatting
         run: cargo fmt --all -- --check
 
