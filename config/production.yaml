@@ -22,6 +22,10 @@ auth:
   client_secret: "${OIDC_CLIENT_SECRET}"
   admin_users:
     - "${ADMIN_EMAIL:-admin@example.com}"
+  # Optional: enable active sync to pull users/groups from Entra ID.
+  # Requires Microsoft Graph API permissions: Application.Read.All, GroupMember.Read.All, User.Read.All
+  # active_sync_source: Entra
+  # active_sync_interval_secs: 300
 
 controller: {}
 

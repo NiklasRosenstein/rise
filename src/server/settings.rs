@@ -124,6 +124,18 @@ fn default_idp_group_sync_enabled() -> bool {
     true
 }
 
+fn default_active_sync_interval_secs() -> u64 {
+    300 // 5 minutes
+}
+
+/// Supported active sync sources for pulling users and groups
+#[derive(Debug, Deserialize, Clone, JsonSchema, PartialEq)]
+pub enum ActiveSyncSource {
+    /// Microsoft Entra ID (Azure AD) - uses Microsoft Graph API to pull
+    /// users and groups assigned to the configured app registration.
+    Entra,
+}
+
 fn default_allow_team_creation() -> bool {
     true // Backward compatible - existing behavior
 }
@@ -198,6 +210,14 @@ pub struct AuthSettings {
     /// When enabled, user team memberships are automatically synced from IdP groups claim on login
     #[serde(default = "default_idp_group_sync_enabled")]
     pub idp_group_sync_enabled: bool,
+    /// Optional active sync source for pulling users and groups from an external IdP.
+    /// When configured, Rise will periodically query the IdP for users and groups
+    /// assigned to the app and sync them as Rise teams.
+    #[serde(default)]
+    pub active_sync_source: Option<ActiveSyncSource>,
+    /// Interval in seconds for active sync polling (default: 300 = 5 minutes)
+    #[serde(default = "default_active_sync_interval_secs")]
+    pub active_sync_interval_secs: u64,
 }
 
 #[derive(Debug, Deserialize, Clone, JsonSchema)]

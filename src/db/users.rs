@@ -72,6 +72,28 @@ pub async fn find_or_create(pool: &PgPool, email: &str) -> Result<User> {
     create(pool, email).await
 }
 
+/// Find user by email, or create if not exists (using a generic executor for transactions)
+pub async fn find_or_create_with_executor<'a, E>(executor: E, email: &str) -> Result<User>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let user = sqlx::query_as!(
+        User,
+        r#"
+        INSERT INTO users (email)
+        VALUES ($1)
+        ON CONFLICT (email) DO UPDATE SET updated_at = NOW()
+        RETURNING id, email, created_at, updated_at
+        "#,
+        email
+    )
+    .fetch_one(executor)
+    .await
+    .context("Failed to find or create user")?;
+
+    Ok(user)
+}
+
 /// Batch fetch user emails by IDs
 pub async fn get_emails_batch(
     pool: &PgPool,

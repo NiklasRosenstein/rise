@@ -1,5 +1,6 @@
 pub mod admin;
 pub mod cookie_helpers;
+pub mod entra_sync;
 pub mod group_sync;
 pub mod handlers;
 pub mod jwt;

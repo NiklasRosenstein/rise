@@ -439,3 +439,23 @@ pub async fn get_team_names_for_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
 
     Ok(records.into_iter().map(|r| r.name).collect())
 }
+
+/// Get all member user IDs for a team (any role)
+pub async fn get_all_member_user_ids<'a, E>(executor: E, team_id: Uuid) -> Result<Vec<Uuid>>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let records = sqlx::query!(
+        r#"
+        SELECT DISTINCT user_id
+        FROM team_members
+        WHERE team_id = $1
+        "#,
+        team_id
+    )
+    .fetch_all(executor)
+    .await
+    .context("Failed to get team member user IDs")?;
+
+    Ok(records.into_iter().map(|r| r.user_id).collect())
+}
