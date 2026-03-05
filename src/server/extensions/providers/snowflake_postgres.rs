@@ -583,12 +583,14 @@ impl SnowflakePostgresProvisioner {
         mut status: SnowflakePostgresStatus,
     ) -> Result<()> {
         let default_db_name = format!("{}_db_default", spec.project_name);
+        // The Snowflake database created in handle_crd_pending.
+        let snowflake_db = Self::snowflake_db_name(&spec.project_name, &spec.extension_name);
 
         use std::collections::hash_map::Entry;
         if let Entry::Vacant(entry) = status.databases.entry(default_db_name.clone()) {
             let username = format!("{}_db_default_user", spec.project_name);
             match self
-                .provision_snowflake_user(&spec.project_name, &default_db_name, &username)
+                .provision_snowflake_user(&snowflake_db, &username)
                 .await
             {
                 Ok(()) => {
@@ -597,7 +599,12 @@ impl SnowflakePostgresProvisioner {
                         .encryption_provider
                         .encrypt(&password)
                         .await
-                        .unwrap_or_else(|_| password.clone());
+                        .with_context(|| {
+                            format!(
+                                "Failed to encrypt password for database user '{}' in CRD '{}'",
+                                username, name
+                            )
+                        })?;
 
                     entry.insert(DatabaseStatus {
                         user: username,
@@ -702,14 +709,14 @@ impl SnowflakePostgresProvisioner {
 
     async fn provision_snowflake_user(
         &self,
-        project_name: &str,
-        _database_name: &str,
+        snowflake_db_name: &str,
         username: &str,
     ) -> Result<()> {
-        let db_name = Self::snowflake_db_name(project_name, username);
-        let safe_db = Self::escape_identifier(&db_name)?;
+        let safe_db = Self::escape_identifier(snowflake_db_name)?;
         let safe_user = Self::escape_identifier(username)?;
 
+        // MUST_CHANGE_PASSWORD = FALSE is appropriate for programmatic service accounts
+        // managed by Rise; these accounts are not used interactively.
         let create_user_sql = format!(
             "CREATE USER IF NOT EXISTS {} MUST_CHANGE_PASSWORD = FALSE",
             safe_user
@@ -721,14 +728,14 @@ impl SnowflakePostgresProvisioner {
         let grant_sql = format!("GRANT USAGE ON DATABASE {} TO USER {}", safe_db, safe_user);
         self.execute_sql(&grant_sql).await.with_context(|| {
             format!(
-                "Failed to grant database access to Snowflake user '{}'",
-                username
+                "Failed to grant database '{}' access to Snowflake user '{}'",
+                snowflake_db_name, username
             )
         })?;
 
         info!(
             "Provisioned Snowflake user '{}' with access to database '{}'",
-            username, project_name
+            username, snowflake_db_name
         );
         Ok(())
     }

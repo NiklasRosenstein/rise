@@ -683,8 +683,10 @@ impl AppState {
                 {
                     tracing::info!("Initializing Snowflake Postgres provisioner");
 
-                    // Re-use the existing kube client if Kubernetes deployment is configured;
-                    // otherwise create a new one using the optional kubeconfig.
+                    // Install ring as the default rustls crypto provider.
+                    // Ignoring the error here is safe: the only failure mode is
+                    // "already installed", which happens when the Kubernetes
+                    // deployment controller was also configured.
                     rustls::crypto::ring::default_provider()
                         .install_default()
                         .ok();
