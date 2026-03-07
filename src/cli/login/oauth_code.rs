@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{normalize_backend_url, Config};
 use crate::login::token_utils::format_token_expiration;
 use anyhow::{Context, Result};
 use axum::{extract::Query, response::IntoResponse, routing::get, Router};
@@ -194,9 +194,11 @@ pub async fn handle_authorization_code_flow(
     config: &mut Config,
     backend_url_to_save: Option<&str>,
 ) -> Result<()> {
+    let backend_url = normalize_backend_url(backend_url);
+
     // Step 1: Discover OpenID endpoints
     tracing::debug!("Discovering authentication endpoints...");
-    let discovery = discover_endpoints(http_client, backend_url)
+    let discovery = discover_endpoints(http_client, &backend_url)
         .await
         .context("Failed to discover authentication endpoints")?;
 
@@ -204,7 +206,7 @@ pub async fn handle_authorization_code_flow(
     let (code_verifier, code_challenge) = generate_pkce_challenge();
 
     // Step 3: Start local callback server
-    let (redirect_uri, code_receiver) = start_callback_server(backend_url)
+    let (redirect_uri, code_receiver) = start_callback_server(&backend_url)
         .await
         .context("Failed to start local callback server")?;
 

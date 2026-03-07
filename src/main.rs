@@ -753,17 +753,20 @@ async fn main() -> Result<()> {
             device,
         } => {
             // Use provided URL or fall back to config default
-            let login_url = url.as_deref().unwrap_or(&backend_url);
+            let login_url = url
+                .as_deref()
+                .map(config::normalize_backend_url)
+                .unwrap_or_else(|| backend_url.clone());
 
             if *device {
                 // Device flow (explicit)
-                login::handle_device_flow(&http_client, login_url, &mut config, url.as_deref())
+                login::handle_device_flow(&http_client, &login_url, &mut config, url.as_deref())
                     .await?;
             } else {
                 // Authorization code flow with PKCE (default)
                 login::handle_authorization_code_flow(
                     &http_client,
-                    login_url,
+                    &login_url,
                     &mut config,
                     url.as_deref(),
                 )
