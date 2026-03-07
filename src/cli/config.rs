@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+pub fn normalize_backend_url(url: &str) -> String {
+    url.trim_end_matches('/').to_string()
+}
+
 /// The container runtime engine behind the CLI command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContainerRuntime {
@@ -191,7 +195,7 @@ impl Config {
 
     /// Set the backend URL
     pub fn set_backend_url(&mut self, url: String) -> Result<()> {
-        self.backend_url = Some(url);
+        self.backend_url = Some(normalize_backend_url(&url));
         self.save()
     }
 
@@ -200,10 +204,11 @@ impl Config {
     pub fn get_backend_url(&self) -> String {
         #[cfg(not(test))]
         if let Ok(url) = std::env::var("RISE_URL") {
-            return url;
+            return normalize_backend_url(&url);
         }
         self.backend_url
-            .clone()
+            .as_deref()
+            .map(normalize_backend_url)
             .unwrap_or_else(|| "http://localhost:3000".to_string())
     }
 
@@ -324,6 +329,20 @@ mod tests {
     fn test_backend_url_from_config() {
         let c = config(|c| c.backend_url = Some("https://api.example.com".to_string()));
         assert_eq!(c.get_backend_url(), "https://api.example.com");
+    }
+
+    #[test]
+    fn test_backend_url_trailing_slash_is_trimmed() {
+        let c = config(|c| c.backend_url = Some("https://api.example.com/".to_string()));
+        assert_eq!(c.get_backend_url(), "https://api.example.com");
+    }
+
+    #[test]
+    fn test_normalize_backend_url_trims_multiple_trailing_slashes() {
+        assert_eq!(
+            normalize_backend_url("https://api.example.com///"),
+            "https://api.example.com"
+        );
     }
 
     #[test]
