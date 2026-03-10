@@ -8,6 +8,7 @@ use std::process::Command;
 use tracing::{debug, info, warn};
 
 use super::buildkit::ensure_buildx_builder;
+use super::proxy;
 use super::registry::docker_push;
 use super::ssl::embed_ssl_cert_in_plan;
 
@@ -32,31 +33,6 @@ pub(crate) struct RailpackBuildOptions<'a> {
     pub embed_ssl_cert: bool,
     pub env: &'a [String],
     pub no_cache: bool,
-}
-
-/// Parse environment variables from CLI format to HashMap
-/// Supports both KEY=VALUE and KEY (reads from current environment)
-fn parse_env_vars(env: &[String]) -> Result<HashMap<String, String>> {
-    let mut result = HashMap::new();
-
-    for env_var in env {
-        if let Some((key, value)) = env_var.split_once('=') {
-            // KEY=VALUE format
-            result.insert(key.to_string(), value.to_string());
-        } else {
-            // KEY format - read from environment
-            if let Ok(value) = std::env::var(env_var) {
-                result.insert(env_var.to_string(), value);
-            } else {
-                bail!(
-                    "Environment variable '{}' is not set in current environment",
-                    env_var
-                );
-            }
-        }
-    }
-
-    Ok(result)
 }
 
 /// RAII guard for cleaning up temp files and directories
@@ -129,9 +105,18 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
         None
     };
 
+    // Read proxy vars and parse user-provided env vars before railpack prepare
+    let proxy_vars = proxy::read_and_transform_proxy_vars();
+    let user_env_vars = proxy::parse_env_vars(options.env)?;
+
+    // Combine proxy vars and user env vars for secrets
+    let mut all_secrets = proxy_vars.clone();
+    all_secrets.extend(user_env_vars);
+
     info!("Running railpack prepare for: {}", options.app_path);
 
-    // Run railpack prepare
+    // Run railpack prepare with --env flags so secrets are declared in the plan
+    // (this enables railpack's secrets-hash cache invalidation mechanism)
     let mut cmd = Command::new("railpack");
     cmd.arg("prepare")
         .arg(options.app_path)
@@ -139,6 +124,11 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
         .arg(&plan_file)
         .arg("--info-out")
         .arg(&info_file);
+
+    for key in all_secrets.keys() {
+        cmd.arg("--env")
+            .arg(format!("{}={}", key, all_secrets[key]));
+    }
 
     debug!("Executing command: {:?}", cmd);
 
@@ -175,20 +165,6 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
                 "--railpack-embed-ssl-cert enabled but SSL_CERT_FILE environment variable not set"
             );
         }
-    }
-
-    let proxy_vars = super::proxy::read_and_transform_proxy_vars();
-
-    // Parse user-provided environment variables into HashMap
-    let user_env_vars = parse_env_vars(options.env)?;
-
-    // Combine proxy vars and user env vars for secrets
-    let mut all_secrets = proxy_vars.clone();
-    all_secrets.extend(user_env_vars);
-
-    if !all_secrets.is_empty() {
-        info!("Adding environment variable references to railpack plan");
-        super::proxy::add_secret_refs_to_plan(&plan_file, &all_secrets)?;
     }
 
     // Debug log plan contents
@@ -240,10 +216,7 @@ fn build_with_buildx(
     no_cache: bool,
 ) -> Result<()> {
     // Check buildx availability
-    let buildx_check = Command::new(container_cli)
-        .args(["buildx", "version"])
-        .output();
-    if buildx_check.is_err() {
+    if !super::docker::is_buildx_available(container_cli) {
         bail!(
             "{} buildx not available. Install buildx or use railpack:buildctl backend instead.",
             container_cli
@@ -294,6 +267,12 @@ fn build_with_buildx(
     // Add secrets
     for key in secrets.keys() {
         cmd.arg("--secret").arg(format!("id={},env={}", key, key));
+    }
+
+    // Add --add-host when a proxy URL was transformed to host.docker.internal
+    if proxy::needs_host_gateway(secrets) {
+        cmd.arg("--add-host")
+            .arg("host.docker.internal:host-gateway");
     }
 
     cmd.arg(app_path);

@@ -174,10 +174,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
 
     // Only add --add-host when a proxy URL was transformed to host.docker.internal.
     // The host-gateway mapping is not supported by the remote buildx driver.
-    let needs_host_gateway = proxy_vars
-        .values()
-        .any(|v| v.contains("host.docker.internal"));
-    if needs_host_gateway {
+    if super::proxy::needs_host_gateway(&proxy_vars) {
         cmd.arg("--add-host")
             .arg("host.docker.internal:host-gateway");
     }

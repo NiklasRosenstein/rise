@@ -271,13 +271,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
 
             // Parse env vars into HashMap for secrets
             let mut secrets = proxy::read_and_transform_proxy_vars();
-            for env_var in &options.env {
-                if let Some((key, value)) = env_var.split_once('=') {
-                    secrets.insert(key.to_string(), value.to_string());
-                } else if let Ok(value) = std::env::var(env_var) {
-                    secrets.insert(env_var.to_string(), value);
-                }
-            }
+            secrets.extend(proxy::parse_env_vars(&options.env)?);
 
             // Add SSL cert using named build context (bind mount)
             // RAII cleanup via SslCertContext drop
