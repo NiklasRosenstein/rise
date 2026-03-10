@@ -11,6 +11,11 @@ use crate::config::{ContainerCli, ContainerRuntime};
 
 use super::method::{requires_buildkit, BuildMethod};
 
+/// Daemon version label value. Bump this whenever the managed BuildKit daemon
+/// creation parameters change (e.g. new flags, image updates) to force
+/// recreation of stale daemons.
+const DAEMON_VERSION: &str = "2";
+
 /// Compute SHA256 hash of a file
 pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
     let contents = fs::read(path).context("Failed to read certificate file")?;
@@ -177,6 +182,28 @@ fn get_config_hash_label_from_container(container_cli: &str, daemon_name: &str) 
     None
 }
 
+/// Get daemon version label from container
+fn get_daemon_version_label(container_cli: &str, daemon_name: &str) -> Option<String> {
+    let output = Command::new(container_cli)
+        .args([
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"rise.daemon_version\"}}",
+            daemon_name,
+        ])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let label_value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !label_value.is_empty() && label_value != "<no value>" {
+            return Some(label_value);
+        }
+    }
+
+    None
+}
+
 /// Represents the state of a BuildKit daemon
 #[derive(Debug, PartialEq)]
 enum DaemonState {
@@ -307,7 +334,9 @@ fn create_buildkit_daemon(
         "-d",
         "--add-host",
         "host.docker.internal:host-gateway",
-    ]);
+        "--label",
+    ])
+    .arg(format!("rise.daemon_version={}", DAEMON_VERSION));
 
     // Podman with cgroup v2 does not delegate the memory controller to containers
     // by default, which causes runc (used internally by BuildKit) to fail with:
@@ -415,6 +444,24 @@ pub(crate) fn ensure_managed_buildkit_daemon(
 
     // Get current daemon state
     let current_state = get_daemon_state(container_cli.command(), daemon_name);
+
+    // Check daemon version — recreate if outdated (e.g. missing --add-host flag)
+    if current_state != DaemonState::NotFound {
+        let current_version = get_daemon_version_label(container_cli.command(), daemon_name);
+        if current_version.as_deref() != Some(DAEMON_VERSION) {
+            info!(
+                "BuildKit daemon version changed ({:?} -> {}), recreating",
+                current_version, DAEMON_VERSION
+            );
+            stop_buildkit_daemon(container_cli, daemon_name)?;
+            return create_buildkit_daemon(
+                container_cli,
+                daemon_name,
+                ssl_cert_file,
+                network_name.as_deref(),
+            );
+        }
+    }
 
     match (ssl_cert_file, &current_state) {
         // Certificate provided, daemon has matching cert
