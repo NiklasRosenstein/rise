@@ -264,27 +264,15 @@ fn build_with_buildx(
         cmd.arg("--load");
     }
 
+    // Resolve host gateway IP and rewrite proxy URLs in secrets.
+    let gateway_ip = builder_name
+        .as_ref()
+        .and_then(|b| super::buildkit::resolve_host_gateway_ip(container_cli, b));
+    let effective_secrets = proxy::apply_host_gateway(&mut cmd, secrets, gateway_ip.as_deref());
+
     // Add secrets via prefixed env vars so the docker CLI keeps its original
     // proxy vars while build containers get the transformed values.
-    proxy::add_secrets_to_command(&mut cmd, secrets);
-
-    // Add --add-host when a proxy URL was transformed to host.docker.internal.
-    // Build containers inside BuildKit need this to resolve the host address.
-    if proxy::needs_host_gateway(secrets) {
-        if builder_name.is_some() {
-            // Remote builders can't resolve the "host-gateway" magic value.
-            // Resolve the actual gateway IP from the daemon container instead.
-            if let Some(ref builder) = builder_name {
-                if let Some(ip) = super::buildkit::resolve_host_gateway_ip(container_cli, builder) {
-                    cmd.arg("--add-host")
-                        .arg(format!("host.docker.internal:{}", ip));
-                }
-            }
-        } else {
-            cmd.arg("--add-host")
-                .arg("host.docker.internal:host-gateway");
-        }
-    }
+    proxy::add_secrets_to_command(&mut cmd, &effective_secrets);
 
     cmd.arg(app_path);
 

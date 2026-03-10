@@ -8,7 +8,7 @@ Rise supports multiple build backends for creating container images from your ap
 |---------|------------|----------|
 | `docker` / `docker:build` | docker build | Simple local builds, maximum compatibility |
 | `docker:buildx` | docker buildx build | BuildKit features (secrets, caching, multi-platform) |
-| `buildctl` | buildctl | BuildKit-first CI environments without Docker |
+| `docker:buildctl` / `buildctl` | buildctl | Dockerfile builds via buildctl (no Docker daemon needed) |
 | `pack` | pack CLI | Cloud Native Buildpacks (no Dockerfile needed) |
 | `railpack` / `railpack:buildx` | railpack + buildx | Railway Railpacks with BuildKit |
 | `railpack:buildctl` | railpack + buildctl | Railpacks with direct buildctl |

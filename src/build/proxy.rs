@@ -104,6 +104,39 @@ pub(crate) fn needs_host_gateway(vars: &HashMap<String, String>) -> bool {
     vars.values().any(|v| v.contains("host.docker.internal"))
 }
 
+/// Apply host gateway resolution to a build command and return updated vars.
+///
+/// When vars contain `host.docker.internal` URLs:
+/// - If `gateway_ip` is Some: replaces the hostname with the concrete IP
+///   and adds `--add-host host.docker.internal:IP` to the command
+/// - If `gateway_ip` is None (local builder): adds `--add-host host.docker.internal:host-gateway`
+///
+/// Returns the (potentially modified) vars. When no host gateway is needed,
+/// returns a clone of the input unchanged.
+pub(crate) fn apply_host_gateway(
+    cmd: &mut std::process::Command,
+    vars: &HashMap<String, String>,
+    gateway_ip: Option<&str>,
+) -> HashMap<String, String> {
+    if !needs_host_gateway(vars) {
+        return vars.clone();
+    }
+
+    if let Some(ip) = gateway_ip {
+        cmd.arg("--add-host")
+            .arg(format!("host.docker.internal:{}", ip));
+        // Replace host.docker.internal with concrete IP in values so build
+        // containers don't need DNS resolution for it.
+        vars.iter()
+            .map(|(k, v)| (k.clone(), v.replace("host.docker.internal", ip)))
+            .collect()
+    } else {
+        cmd.arg("--add-host")
+            .arg("host.docker.internal:host-gateway");
+        vars.clone()
+    }
+}
+
 /// Prefix for transformed secret env vars.
 ///
 /// `--secret id=KEY,env=KEY` reads from the subprocess environment, but we can't

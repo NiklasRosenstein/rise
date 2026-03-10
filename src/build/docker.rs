@@ -163,33 +163,19 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
         None
     };
 
-    // Add proxy build arguments
+    // Add proxy build arguments with host gateway resolution
     let proxy_vars = super::proxy::read_and_transform_proxy_vars();
     if !proxy_vars.is_empty() {
-        info!("Injecting proxy variables for docker build");
-        for (key, value) in &proxy_vars {
-            cmd.arg("--build-arg").arg(format!("{}={}", key, value));
-        }
-    }
+        let gateway_ip = options.buildkit_host.and_then(|host| {
+            let container_name = host.strip_prefix("docker-container://").unwrap_or(host);
+            super::buildkit::resolve_host_gateway_ip(options.container_cli, container_name)
+        });
+        let effective_proxy_vars =
+            super::proxy::apply_host_gateway(&mut cmd, &proxy_vars, gateway_ip.as_deref());
 
-    // Add --add-host when a proxy URL was transformed to host.docker.internal.
-    // Build containers inside BuildKit need this to resolve the host address.
-    if super::proxy::needs_host_gateway(&proxy_vars) {
-        if let Some(buildkit_host) = options.buildkit_host {
-            // Remote builders can't resolve the "host-gateway" magic value.
-            // Extract container name from docker-container:// URL and resolve the gateway IP.
-            let container_name = buildkit_host
-                .strip_prefix("docker-container://")
-                .unwrap_or(buildkit_host);
-            if let Some(ip) =
-                super::buildkit::resolve_host_gateway_ip(options.container_cli, container_name)
-            {
-                cmd.arg("--add-host")
-                    .arg(format!("host.docker.internal:{}", ip));
-            }
-        } else {
-            cmd.arg("--add-host")
-                .arg("host.docker.internal:host-gateway");
+        info!("Injecting proxy variables for docker build");
+        for (key, value) in &effective_proxy_vars {
+            cmd.arg("--build-arg").arg(format!("{}={}", key, value));
         }
     }
 
