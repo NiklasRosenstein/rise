@@ -248,7 +248,7 @@ fn build_with_buildx(
         .arg("linux/amd64");
 
     // Use the managed builder if available
-    if let Some(builder) = builder_name {
+    if let Some(ref builder) = builder_name {
         cmd.arg("--builder").arg(builder);
     }
 
@@ -269,8 +269,10 @@ fn build_with_buildx(
         cmd.arg("--secret").arg(format!("id={},env={}", key, key));
     }
 
-    // Add --add-host when a proxy URL was transformed to host.docker.internal
-    if proxy::needs_host_gateway(secrets) {
+    // Add --add-host when a proxy URL was transformed to host.docker.internal.
+    // Skip for remote builders — host-gateway is not supported by the remote driver.
+    // Managed BuildKit daemons already have this mapping on the daemon container itself.
+    if builder_name.is_none() && proxy::needs_host_gateway(secrets) {
         cmd.arg("--add-host")
             .arg("host.docker.internal:host-gateway");
     }
