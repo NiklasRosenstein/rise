@@ -182,6 +182,48 @@ fn get_config_hash_label_from_container(container_cli: &str, daemon_name: &str) 
     None
 }
 
+/// Get proxy hash label from container
+fn get_proxy_hash_label(container_cli: &str, daemon_name: &str) -> Option<String> {
+    let output = Command::new(container_cli)
+        .args([
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"rise.proxy_hash\"}}",
+            daemon_name,
+        ])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let label_value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !label_value.is_empty() && label_value != "<no value>" {
+            return Some(label_value);
+        }
+    }
+
+    None
+}
+
+/// Compute expected proxy hash from proxy vars (None if no proxy vars)
+fn compute_proxy_hash(proxy_vars: &std::collections::HashMap<String, String>) -> Option<String> {
+    if proxy_vars.is_empty() {
+        return None;
+    }
+
+    let mut sorted_keys: Vec<&String> = proxy_vars.keys().collect();
+    sorted_keys.sort();
+
+    let mut input = String::new();
+    for key in &sorted_keys {
+        input.push_str(key);
+        input.push('=');
+        input.push_str(&proxy_vars[*key]);
+        input.push('\n');
+    }
+
+    Some(compute_string_hash(&input))
+}
+
 /// Get daemon version label from container
 fn get_daemon_version_label(container_cli: &str, daemon_name: &str) -> Option<String> {
     let output = Command::new(container_cli)
@@ -306,6 +348,7 @@ fn create_buildkit_daemon(
     daemon_name: &str,
     ssl_cert_file: Option<&Path>,
     network_name: Option<&str>,
+    proxy_vars: &std::collections::HashMap<String, String>,
 ) -> Result<String> {
     if let Some(cert_path) = ssl_cert_file {
         info!(
@@ -408,6 +451,27 @@ fn create_buildkit_daemon(
         }
     }
 
+    // Pass proxy environment variables so the daemon can fetch images through the proxy
+    if !proxy_vars.is_empty() {
+        info!("Passing proxy environment variables to BuildKit daemon");
+        let mut sorted_keys: Vec<&String> = proxy_vars.keys().collect();
+        sorted_keys.sort();
+
+        let mut proxy_hash_input = String::new();
+        for key in &sorted_keys {
+            let value = &proxy_vars[*key];
+            cmd.arg("-e").arg(format!("{}={}", key, value));
+            proxy_hash_input.push_str(key);
+            proxy_hash_input.push('=');
+            proxy_hash_input.push_str(value);
+            proxy_hash_input.push('\n');
+        }
+
+        let proxy_hash = compute_string_hash(&proxy_hash_input);
+        cmd.arg("--label")
+            .arg(format!("rise.proxy_hash={}", proxy_hash));
+    }
+
     cmd.arg("moby/buildkit");
 
     let status = cmd.status().context("Failed to start BuildKit daemon")?;
@@ -436,11 +500,17 @@ pub(crate) fn ensure_managed_buildkit_daemon(
 ) -> Result<String> {
     let daemon_name = "rise-buildkit";
 
+    // Read proxy vars (transformed for container use) so the daemon can fetch images through proxy
+    let proxy_vars = super::proxy::read_and_transform_proxy_vars();
+
     // Read network configuration from environment
     let network_name = super::env_var_non_empty("RISE_MANAGED_BUILDKIT_NETWORK_NAME");
 
     // Get expected config hash (None if no insecure registries configured)
     let expected_config_hash = generate_buildkit_config().map(|(_, hash)| hash);
+
+    // Get expected proxy hash
+    let expected_proxy_hash = compute_proxy_hash(&proxy_vars);
 
     // Get current daemon state
     let current_state = get_daemon_state(container_cli.command(), daemon_name);
@@ -459,6 +529,21 @@ pub(crate) fn ensure_managed_buildkit_daemon(
                 daemon_name,
                 ssl_cert_file,
                 network_name.as_deref(),
+                &proxy_vars,
+            );
+        }
+
+        // Check if proxy configuration has changed
+        let current_proxy_hash = get_proxy_hash_label(container_cli.command(), daemon_name);
+        if current_proxy_hash != expected_proxy_hash {
+            info!("Proxy configuration has changed, recreating daemon");
+            stop_buildkit_daemon(container_cli, daemon_name)?;
+            return create_buildkit_daemon(
+                container_cli,
+                daemon_name,
+                ssl_cert_file,
+                network_name.as_deref(),
+                &proxy_vars,
             );
         }
     }
@@ -566,6 +651,7 @@ pub(crate) fn ensure_managed_buildkit_daemon(
         daemon_name,
         ssl_cert_file,
         network_name.as_deref(),
+        &proxy_vars,
     )
 }
 
