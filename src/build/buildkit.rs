@@ -711,6 +711,42 @@ pub(crate) fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) ->
     Ok(builder_name.to_string())
 }
 
+/// Resolve the gateway IP of a container (i.e. the host IP reachable from inside
+/// that container). Used to pass a concrete IP for `--add-host host.docker.internal:<ip>`
+/// to buildx build, since the remote driver cannot resolve the `host-gateway` magic value
+/// but build containers need to reach the host (e.g. for proxy).
+pub(crate) fn resolve_host_gateway_ip(container_cli: &str, container_name: &str) -> Option<String> {
+    // Get the default bridge network gateway. This is the host IP reachable from the container.
+    // We use .NetworkSettings.Gateway (the default network) rather than iterating all networks
+    // to avoid concatenated IPs when the container is on multiple networks.
+    let output = Command::new(container_cli)
+        .args([
+            "inspect",
+            "--format",
+            "{{.NetworkSettings.Gateway}}",
+            container_name,
+        ])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !ip.is_empty() {
+            debug!(
+                "Resolved host gateway IP for '{}': {}",
+                container_name, ip
+            );
+            return Some(ip);
+        }
+    }
+
+    warn!(
+        "Failed to resolve host gateway IP for container '{}'",
+        container_name
+    );
+    None
+}
+
 /// Warn user about SSL certificate issues when managed BuildKit is disabled
 pub(crate) fn check_ssl_cert_and_warn(method: &BuildMethod, managed_buildkit: bool) {
     if super::env_var_non_empty("SSL_CERT_FILE").is_some()

@@ -270,11 +270,23 @@ fn build_with_buildx(
     }
 
     // Add --add-host when a proxy URL was transformed to host.docker.internal.
-    // Skip for remote builders — host-gateway is not supported by the remote driver.
-    // Managed BuildKit daemons already have this mapping on the daemon container itself.
-    if builder_name.is_none() && proxy::needs_host_gateway(secrets) {
-        cmd.arg("--add-host")
-            .arg("host.docker.internal:host-gateway");
+    // Build containers inside BuildKit need this to resolve the host address.
+    if proxy::needs_host_gateway(secrets) {
+        if builder_name.is_some() {
+            // Remote builders can't resolve the "host-gateway" magic value.
+            // Resolve the actual gateway IP from the daemon container instead.
+            if let Some(ref builder) = builder_name {
+                if let Some(ip) =
+                    super::buildkit::resolve_host_gateway_ip(container_cli, builder)
+                {
+                    cmd.arg("--add-host")
+                        .arg(format!("host.docker.internal:{}", ip));
+                }
+            }
+        } else {
+            cmd.arg("--add-host")
+                .arg("host.docker.internal:host-gateway");
+        }
     }
 
     cmd.arg(app_path);
