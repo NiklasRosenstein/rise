@@ -181,10 +181,9 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
             let container_name = buildkit_host
                 .strip_prefix("docker-container://")
                 .unwrap_or(buildkit_host);
-            if let Some(ip) = super::buildkit::resolve_host_gateway_ip(
-                options.container_cli,
-                container_name,
-            ) {
+            if let Some(ip) =
+                super::buildkit::resolve_host_gateway_ip(options.container_cli, container_name)
+            {
                 cmd.arg("--add-host")
                     .arg(format!("host.docker.internal:{}", ip));
             }

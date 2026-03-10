@@ -732,10 +732,7 @@ pub(crate) fn resolve_host_gateway_ip(container_cli: &str, container_name: &str)
     if output.status.success() {
         let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !ip.is_empty() {
-            debug!(
-                "Resolved host gateway IP for '{}': {}",
-                container_name, ip
-            );
+            debug!("Resolved host gateway IP for '{}': {}", container_name, ip);
             return Some(ip);
         }
     }

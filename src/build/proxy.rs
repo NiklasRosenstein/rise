@@ -104,6 +104,30 @@ pub(crate) fn needs_host_gateway(vars: &HashMap<String, String>) -> bool {
     vars.values().any(|v| v.contains("host.docker.internal"))
 }
 
+/// Prefix for transformed secret env vars.
+///
+/// `--secret id=KEY,env=KEY` reads from the subprocess environment, but we can't
+/// override the original proxy vars (the docker CLI needs them). Instead we store
+/// the transformed values under a prefixed name and use `--secret id=KEY,env=_RISE_SECRET_KEY`.
+const SECRET_ENV_PREFIX: &str = "_RISE_SECRET_";
+
+/// Set transformed secret values in a Command's environment under prefixed names,
+/// and add the corresponding `--secret` flags.
+///
+/// This keeps the original proxy env vars intact for the docker CLI while passing
+/// the transformed (host.docker.internal) values into the build container.
+pub(crate) fn add_secrets_to_command(
+    cmd: &mut std::process::Command,
+    secrets: &HashMap<String, String>,
+) {
+    for (key, value) in secrets {
+        let env_key = format!("{}{}", SECRET_ENV_PREFIX, key);
+        cmd.env(&env_key, value);
+        cmd.arg("--secret")
+            .arg(format!("id={},env={}", key, env_key));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

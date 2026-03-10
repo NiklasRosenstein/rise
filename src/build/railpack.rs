@@ -264,10 +264,9 @@ fn build_with_buildx(
         cmd.arg("--load");
     }
 
-    // Add secrets
-    for key in secrets.keys() {
-        cmd.arg("--secret").arg(format!("id={},env={}", key, key));
-    }
+    // Add secrets via prefixed env vars so the docker CLI keeps its original
+    // proxy vars while build containers get the transformed values.
+    proxy::add_secrets_to_command(&mut cmd, secrets);
 
     // Add --add-host when a proxy URL was transformed to host.docker.internal.
     // Build containers inside BuildKit need this to resolve the host address.
@@ -276,9 +275,7 @@ fn build_with_buildx(
             // Remote builders can't resolve the "host-gateway" magic value.
             // Resolve the actual gateway IP from the daemon container instead.
             if let Some(ref builder) = builder_name {
-                if let Some(ip) =
-                    super::buildkit::resolve_host_gateway_ip(container_cli, builder)
-                {
+                if let Some(ip) = super::buildkit::resolve_host_gateway_ip(container_cli, builder) {
                     cmd.arg("--add-host")
                         .arg(format!("host.docker.internal:{}", ip));
                 }
@@ -389,10 +386,9 @@ pub(crate) fn build_with_buildctl(
         cmd.arg("--local").arg(format!("{}={}", name, path));
     }
 
-    // Add secrets
-    for key in secrets.keys() {
-        cmd.arg("--secret").arg(format!("id={},env={}", key, key));
-    }
+    // Add secrets via prefixed env vars so the CLI keeps its original
+    // proxy vars while build containers get the transformed values.
+    proxy::add_secrets_to_command(&mut cmd, secrets);
 
     // Add no-cache flag if requested
     if no_cache {
