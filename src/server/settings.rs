@@ -382,6 +382,10 @@ pub struct HealthProbeConfig {
     pub failure_threshold: i32,
 }
 
+fn default_network_policy_allow_kube_apiserver() -> bool {
+    true
+}
+
 // Default functions for pod security settings
 fn default_pod_security_enabled() -> bool {
     true
@@ -570,6 +574,16 @@ pub enum DeploymentControllerSettings {
         /// Default: {"app.kubernetes.io/name": "ingress-nginx"}
         #[serde(default = "default_ingress_controller_labels")]
         ingress_controller_labels: std::collections::HashMap<String, String>,
+
+        /// Allow egress to the Kubernetes API server in NetworkPolicy (default: true)
+        /// Looks up the ClusterIP of the `kubernetes` service in the `default` namespace
+        /// and adds an egress rule for TCP/443. We use an IP lookup rather than pod selector
+        /// labels because the labels on kube-apiserver pods are not standardized across
+        /// Kubernetes distributions (e.g. `component: kube-apiserver` vs `component: apiserver`).
+        /// The `kubernetes` service in the `default` namespace is part of the Kubernetes spec
+        /// and always exists. The API server requires authentication, so this is safe.
+        #[serde(default = "default_network_policy_allow_kube_apiserver")]
+        network_policy_allow_kube_apiserver: bool,
 
         /// Additional CIDR ranges to allow egress to (exempted from default blocks)
         /// Useful for development environments where pods need to reach host IPs

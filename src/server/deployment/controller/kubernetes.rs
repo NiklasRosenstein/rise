@@ -267,6 +267,7 @@ pub struct KubernetesControllerConfig {
     pub extra_service_token_audiences: std::collections::HashMap<String, String>,
     pub ingress_controller_namespace: String,
     pub ingress_controller_labels: std::collections::HashMap<String, String>,
+    pub network_policy_allow_kube_apiserver: bool,
     pub network_policy_egress_allow_cidrs: Vec<String>,
     pub pod_security_enabled: bool,
     pub pod_resources: Option<crate::server::settings::PodResourceLimits>,
@@ -305,6 +306,10 @@ pub struct KubernetesController {
     extra_service_token_audiences: std::collections::HashMap<String, String>,
     ingress_controller_namespace: String,
     ingress_controller_labels: std::collections::HashMap<String, String>,
+    network_policy_allow_kube_apiserver: bool,
+    /// Cached ClusterIP of the `kubernetes` service in the `default` namespace.
+    /// Refreshed periodically; on lookup failure the previous value is retained.
+    kube_api_server_ip: tokio::sync::Mutex<Option<(String, std::time::Instant)>>,
     network_policy_egress_allow_cidrs: Vec<String>,
     pod_security_enabled: bool,
     pod_resources: Option<crate::server::settings::PodResourceLimits>,
@@ -350,6 +355,8 @@ impl KubernetesController {
             extra_service_token_audiences: config.extra_service_token_audiences,
             ingress_controller_namespace: config.ingress_controller_namespace,
             ingress_controller_labels: config.ingress_controller_labels,
+            network_policy_allow_kube_apiserver: config.network_policy_allow_kube_apiserver,
+            kube_api_server_ip: tokio::sync::Mutex::new(None),
             network_policy_egress_allow_cidrs: config.network_policy_egress_allow_cidrs,
             pod_security_enabled: config.pod_security_enabled,
             pod_resources: config.pod_resources,
@@ -2117,6 +2124,50 @@ impl KubernetesController {
         Ok(())
     }
 
+    /// Look up the ClusterIP of the `kubernetes` service in the `default` namespace.
+    ///
+    /// The result is cached for 5 minutes. On lookup failure, a previously cached value is
+    /// retained so that a transient error doesn't remove a working egress rule.
+    ///
+    /// We use the service ClusterIP rather than pod selector labels because the labels on
+    /// kube-apiserver pods are not standardized across Kubernetes distributions (e.g. kubeadm
+    /// uses `component: kube-apiserver`, others use `component: apiserver`, and managed clusters
+    /// like EKS/GKE may not expose API server pods at all). The `kubernetes` service in the
+    /// `default` namespace is part of the Kubernetes spec and always exists with a stable,
+    /// immutable ClusterIP.
+    async fn get_kubernetes_api_server_ip(&self) -> Option<String> {
+        const TTL: Duration = Duration::from_secs(5 * 60);
+
+        let mut cache = self.kube_api_server_ip.lock().await;
+        if let Some((ip, fetched_at)) = cache.as_ref() {
+            if fetched_at.elapsed() < TTL {
+                return Some(ip.clone());
+            }
+        }
+
+        let svc_api: Api<Service> = Api::namespaced(self.kube_client.clone(), "default");
+        match svc_api.get("kubernetes").await {
+            Ok(svc) => {
+                let ip = svc
+                    .spec
+                    .and_then(|s| s.cluster_ip)
+                    .filter(|ip| ip.parse::<std::net::IpAddr>().is_ok());
+                if let Some(ip) = ip {
+                    *cache = Some((ip.clone(), std::time::Instant::now()));
+                    Some(ip)
+                } else {
+                    warn!("kubernetes service in default namespace has no valid ClusterIP");
+                    cache.as_ref().map(|(ip, _)| ip.clone())
+                }
+            }
+            Err(e) => {
+                warn!("Failed to look up kubernetes service ClusterIP: {:?}", e);
+                // Retain the previous cached value if we had one
+                cache.as_ref().map(|(ip, _)| ip.clone())
+            }
+        }
+    }
+
     /// Apply NetworkPolicy with drift detection
     async fn apply_network_policy(
         &self,
@@ -2128,12 +2179,23 @@ impl KubernetesController {
         let np_name = Self::network_policy_name(project, deployment);
         let np_api: Api<NetworkPolicy> = Api::namespaced(self.kube_client.clone(), namespace);
 
+        let kube_api_server_ip = if self.network_policy_allow_kube_apiserver {
+            self.get_kubernetes_api_server_ip().await
+        } else {
+            None
+        };
+
         match np_api.get(&np_name).await {
             Ok(existing_np) => {
                 let current_version = existing_np.metadata.resource_version.as_deref();
 
                 if self.needs_apply(deployment_id, "network-policy", current_version) {
-                    let np = self.create_network_policy(project, deployment, namespace);
+                    let np = self.create_network_policy(
+                        project,
+                        deployment,
+                        namespace,
+                        kube_api_server_ip.as_deref(),
+                    );
                     let result = np_api
                         .patch(
                             &np_name,
@@ -2152,7 +2214,12 @@ impl KubernetesController {
                 }
             }
             Err(kube::Error::Api(err)) if err.code == 404 => {
-                let np = self.create_network_policy(project, deployment, namespace);
+                let np = self.create_network_policy(
+                    project,
+                    deployment,
+                    namespace,
+                    kube_api_server_ip.as_deref(),
+                );
                 let result = np_api.create(&PostParams::default(), &np).await?;
                 self.update_version_cache(
                     deployment_id,
@@ -2324,12 +2391,14 @@ impl KubernetesController {
     }
 
     /// Create NetworkPolicy for a deployment group
-    /// Restricts in-cluster egress while allowing DNS, Rise backend, and external traffic
+    /// Restricts in-cluster egress while allowing DNS, Rise backend, Kubernetes API server,
+    /// and external traffic
     fn create_network_policy(
         &self,
         project: &Project,
         deployment: &Deployment,
         namespace: &str,
+        kube_api_server_ip: Option<&str>,
     ) -> NetworkPolicy {
         use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 
@@ -2435,7 +2504,29 @@ impl KubernetesController {
             }
         }
 
-        // Rule 2.5: Additional allowed CIDR ranges (for development environments)
+        // Rule 2.5: Kubernetes API server (always allowed, requires authentication)
+        // Uses the ClusterIP of the `kubernetes` service rather than pod selectors because
+        // kube-apiserver pod labels are not standardized across distributions.
+        // See `get_kubernetes_api_server_ip()` for details.
+        if let Some(api_server_ip) = kube_api_server_ip {
+            let prefix_len = if api_server_ip.contains(':') { 128 } else { 32 };
+            egress_rules.push(NetworkPolicyEgressRule {
+                to: Some(vec![NetworkPolicyPeer {
+                    ip_block: Some(IPBlock {
+                        cidr: format!("{}/{}", api_server_ip, prefix_len),
+                        except: None,
+                    }),
+                    ..Default::default()
+                }]),
+                ports: Some(vec![NetworkPolicyPort {
+                    protocol: Some("TCP".to_string()),
+                    port: Some(IntOrString::Int(443)),
+                    ..Default::default()
+                }]),
+            });
+        }
+
+        // Rule 2.75: Additional allowed CIDR ranges (for development environments)
         // These are explicitly allowed destinations, useful for reaching host IPs in Minikube
         for cidr in &self.network_policy_egress_allow_cidrs {
             egress_rules.push(NetworkPolicyEgressRule {
@@ -5133,6 +5224,8 @@ mod tests {
                 );
                 labels
             },
+            network_policy_allow_kube_apiserver: false,
+            kube_api_server_ip: tokio::sync::Mutex::new(None),
             network_policy_egress_allow_cidrs: vec![],
             pod_security_enabled: true,
             pod_resources: None,
@@ -5774,10 +5867,118 @@ mod tests {
                 );
                 labels
             },
+            network_policy_allow_kube_apiserver: false,
+            kube_api_server_ip: tokio::sync::Mutex::new(None),
             network_policy_egress_allow_cidrs: vec![],
             pod_security_enabled: true,
             pod_resources: None,
             health_probes: None,
         }
+    }
+
+    fn create_test_project_and_deployment() -> (Project, Deployment) {
+        use crate::db::models::{Deployment, Project, ProjectStatus};
+        use uuid::Uuid;
+
+        let project = Project {
+            id: Uuid::new_v4(),
+            name: "test-project".to_string(),
+            status: ProjectStatus::Running,
+            access_class: "public".to_string(),
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        let deployment = Deployment {
+            id: Uuid::new_v4(),
+            project_id: project.id,
+            deployment_id: "20240108-103000".to_string(),
+            created_by_id: Uuid::new_v4(),
+            deployment_group: "default".to_string(),
+            status: crate::db::models::DeploymentStatus::Deploying,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::json!({}),
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            deploying_started_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+        (project, deployment)
+    }
+
+    #[tokio::test]
+    async fn test_network_policy_includes_kube_api_server_ipv4() {
+        let controller = create_mock_controller();
+        let (project, deployment) = create_test_project_and_deployment();
+        let np = controller.create_network_policy(&project, &deployment, "ns", Some("10.96.0.1"));
+
+        let egress = np.spec.as_ref().unwrap().egress.as_ref().unwrap();
+        let api_rule = egress.iter().find(|r| {
+            r.to.as_ref().is_some_and(|peers| {
+                peers.iter().any(|p| {
+                    p.ip_block
+                        .as_ref()
+                        .is_some_and(|b| b.cidr == "10.96.0.1/32")
+                })
+            })
+        });
+        assert!(api_rule.is_some(), "Expected IPv4 API server egress rule");
+        let ports = api_rule.unwrap().ports.as_ref().unwrap();
+        assert!(ports
+            .iter()
+            .any(|p| p.port
+                == Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(443))));
+    }
+
+    #[tokio::test]
+    async fn test_network_policy_includes_kube_api_server_ipv6() {
+        let controller = create_mock_controller();
+        let (project, deployment) = create_test_project_and_deployment();
+        let np = controller.create_network_policy(&project, &deployment, "ns", Some("fd00::1"));
+
+        let egress = np.spec.as_ref().unwrap().egress.as_ref().unwrap();
+        let api_rule = egress.iter().find(|r| {
+            r.to.as_ref().is_some_and(|peers| {
+                peers
+                    .iter()
+                    .any(|p| p.ip_block.as_ref().is_some_and(|b| b.cidr == "fd00::1/128"))
+            })
+        });
+        assert!(
+            api_rule.is_some(),
+            "Expected IPv6 API server egress rule with /128 prefix"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_network_policy_omits_kube_api_server_when_none() {
+        let controller = create_mock_controller();
+        let (project, deployment) = create_test_project_and_deployment();
+        let np = controller.create_network_policy(&project, &deployment, "ns", None);
+
+        let egress = np.spec.as_ref().unwrap().egress.as_ref().unwrap();
+        let has_api_rule = egress.iter().any(|r| {
+            r.ports.as_ref().is_some_and(|ports| {
+                ports.iter().any(|p| {
+                    p.port
+                        == Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(443))
+                })
+            })
+        });
+        assert!(
+            !has_api_rule,
+            "Expected no API server egress rule when IP is None"
+        );
     }
 }
