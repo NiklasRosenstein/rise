@@ -3,12 +3,12 @@ use reqwest::Client;
 use serde::Deserialize;
 use std::io::{self, IsTerminal, Write as _};
 use std::time::{Duration, Instant};
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::api::models::{Deployment, DeploymentStatus};
 use crate::config::Config;
 
-use super::core::{fetch_deployment, parse_duration};
+use super::core::{fetch_deployment, open_log_stream, parse_duration, LogStreamError};
 
 // Project info for fetching project URL
 #[derive(Deserialize)]
@@ -402,6 +402,171 @@ async fn fetch_project_info(
     Ok(project_info)
 }
 
+/// Check if the deployment status indicates logs should be available for streaming.
+fn should_stream_logs(status: &DeploymentStatus) -> bool {
+    matches!(
+        status,
+        DeploymentStatus::Deploying | DeploymentStatus::Unhealthy
+    )
+}
+
+/// Stream logs from a deployment while monitoring its status.
+///
+/// Opens an SSE log stream and polls deployment status every 3 seconds.
+/// Returns the final deployment when a terminal state is reached.
+async fn stream_logs_with_status_polling(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    deployment_id: &str,
+    timeout: Duration,
+    start_time: Instant,
+) -> Result<Deployment> {
+    let mut log_stream = None;
+    let mut retry_count: usize = 0;
+    const MAX_RETRIES: usize = 10;
+    const RETRY_DELAY: Duration = Duration::from_secs(2);
+
+    let mut status_interval = tokio::time::interval(Duration::from_secs(3));
+    status_interval.tick().await; // consume first immediate tick
+
+    // Try initial connection
+    match open_log_stream(http_client, backend_url, token, project, deployment_id, 100).await {
+        Ok(s) => log_stream = Some(s),
+        Err(LogStreamError::Gone) => {
+            return fetch_deployment(http_client, backend_url, token, project, deployment_id).await;
+        }
+        Err(e) => {
+            debug!("Initial log stream connection failed: {:?}", e);
+        }
+    }
+
+    loop {
+        if start_time.elapsed() >= timeout {
+            bail!(
+                "Timeout waiting for deployment to complete after {:?}",
+                timeout
+            );
+        }
+
+        if let Some(ref mut stream) = log_stream {
+            tokio::select! {
+                biased; // prefer draining log lines over status checks
+                line = stream.recv() => {
+                    match line {
+                        Some(Ok(text)) => println!("{}", text),
+                        Some(Err(e)) => {
+                            debug!("Log stream error: {:?}", e);
+                            log_stream = None;
+                        }
+                        None => {
+                            debug!("Log stream ended");
+                            log_stream = None;
+                        }
+                    }
+                }
+                _ = status_interval.tick() => {
+                    let deployment = fetch_deployment(
+                        http_client, backend_url, token, project, deployment_id,
+                    ).await?;
+                    if is_terminal_state(&deployment.status) {
+                        drain_log_stream(stream).await;
+                        return Ok(deployment);
+                    }
+                }
+            }
+        } else {
+            // No active log stream - try to reconnect or poll status
+            if retry_count >= MAX_RETRIES {
+                debug!("Max log stream retries exceeded, falling back to status-only polling");
+                return status_only_polling(
+                    http_client,
+                    backend_url,
+                    token,
+                    project,
+                    deployment_id,
+                    timeout,
+                    start_time,
+                )
+                .await;
+            }
+
+            tokio::select! {
+                _ = tokio::time::sleep(RETRY_DELAY) => {
+                    retry_count += 1;
+                    match open_log_stream(
+                        http_client, backend_url, token, project, deployment_id, 100,
+                    ).await {
+                        Ok(s) => {
+                            log_stream = Some(s);
+                            retry_count = 0;
+                        }
+                        Err(LogStreamError::Gone) => {
+                            return fetch_deployment(
+                                http_client, backend_url, token, project, deployment_id,
+                            ).await;
+                        }
+                        Err(e) => {
+                            debug!("Log stream reconnect failed (attempt {}): {:?}", retry_count, e);
+                        }
+                    }
+                }
+                _ = status_interval.tick() => {
+                    let deployment = fetch_deployment(
+                        http_client, backend_url, token, project, deployment_id,
+                    ).await?;
+                    if is_terminal_state(&deployment.status) {
+                        return Ok(deployment);
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Drain remaining log lines from the log stream, waiting up to 2 seconds.
+async fn drain_log_stream(stream: &mut super::core::LogStream) {
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(2);
+    loop {
+        tokio::select! {
+            line = stream.recv() => {
+                match line {
+                    Some(Ok(text)) => println!("{}", text),
+                    _ => break,
+                }
+            }
+            _ = tokio::time::sleep_until(deadline) => break,
+        }
+    }
+}
+
+/// Fall back to status-only polling when log streaming is unavailable.
+async fn status_only_polling(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    deployment_id: &str,
+    timeout: Duration,
+    start_time: Instant,
+) -> Result<Deployment> {
+    loop {
+        let deployment =
+            fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
+        if is_terminal_state(&deployment.status) {
+            return Ok(deployment);
+        }
+        if start_time.elapsed() >= timeout {
+            bail!(
+                "Timeout waiting for deployment to complete after {:?}",
+                timeout
+            );
+        }
+        tokio::time::sleep(Duration::from_secs(3)).await;
+    }
+}
+
 /// Main follow function with enhanced UX
 pub async fn follow_deployment_with_ui(
     http_client: &Client,
@@ -438,48 +603,44 @@ pub async fn follow_deployment_with_ui(
     print!("{}", ansi::HIDE_CURSOR);
     io::stdout().flush().unwrap();
 
-    let result = async {
+    // Phase 1: Status polling with spinner UI
+    // Poll until deployment reaches Deploying state (logs available) or a terminal state.
+    let phase1_result: Result<Deployment> = async {
         loop {
-            // Fetch deployment status
             let deployment =
                 fetch_deployment(http_client, backend_url, &token, project, deployment_id).await?;
 
-            // Parse controller metadata
             let controller_phase = parse_controller_metadata(&deployment.controller_metadata)
                 .map(|m| m.reconcile_phase);
 
-            // Check if this is a state change
             if state.should_log_state_change(&deployment, &controller_phase) {
-                // Clear any existing live section before logging
                 live_section.clear_previous();
-
-                // Log state change to history
                 log_state_change(
                     project,
                     deployment_id,
                     &deployment.status,
                     &controller_phase,
                 );
-
-                // Reset line count so next render works correctly
                 live_section.last_line_count = 0;
             } else {
-                // Only show live section when status is stable (spinner animation)
                 let output = live_section.render(&deployment, &state, &controller_phase);
                 print!("{}", output);
                 io::stdout().flush().unwrap();
             }
 
-            // Update state
             state.update(&deployment, controller_phase);
             state.spinner_frame = (state.spinner_frame + 1) % SPINNER_FRAMES.len();
 
-            // Check if deployment reached terminal state
+            // Terminal state reached before Deploying - skip to Phase 3
             if is_terminal_state(&deployment.status) {
                 return Ok(deployment);
             }
 
-            // Check timeout
+            // Deploying (or later) - transition to Phase 2 for log streaming
+            if should_stream_logs(&deployment.status) {
+                return Ok(deployment);
+            }
+
             if start_time.elapsed() >= timeout {
                 bail!(
                     "Timeout waiting for deployment to complete after {:?}",
@@ -487,33 +648,60 @@ pub async fn follow_deployment_with_ui(
                 );
             }
 
-            // Wait before next poll (1 second for 2x faster spinner)
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     }
     .await;
 
-    // Always show cursor again before returning
-    print!("{}", ansi::SHOW_CURSOR);
-    io::stdout().flush().unwrap();
+    let deployment = match phase1_result {
+        Ok(d) => d,
+        Err(e) => {
+            print!("{}", ansi::SHOW_CURSOR);
+            io::stdout().flush().unwrap();
+            return Err(e);
+        }
+    };
 
-    // Print project URL if deployment became active (Healthy in default group)
-    if let Ok(ref deployment) = result {
-        if deployment.status == DeploymentStatus::Healthy
-            && deployment.deployment_group == "default"
+    // Phase 2: Log streaming + status monitoring (only if not already terminal)
+    let final_deployment = if !is_terminal_state(&deployment.status) {
+        // Clear spinner UI and restore cursor
+        live_section.clear_previous();
+        print!("{}", ansi::SHOW_CURSOR);
+        io::stdout().flush().unwrap();
+
+        println!("--- Logs ---");
+
+        stream_logs_with_status_polling(
+            http_client,
+            backend_url,
+            &token,
+            project,
+            deployment_id,
+            timeout,
+            start_time,
+        )
+        .await?
+    } else {
+        print!("{}", ansi::SHOW_CURSOR);
+        io::stdout().flush().unwrap();
+        deployment
+    };
+
+    // Phase 3: Print project URL if deployment became active (Healthy in default group)
+    if final_deployment.status == DeploymentStatus::Healthy
+        && final_deployment.deployment_group == "default"
+    {
+        if let Ok(project_info) =
+            fetch_project_info(http_client, backend_url, &token, project).await
         {
-            if let Ok(project_info) =
-                fetch_project_info(http_client, backend_url, &token, project).await
-            {
-                if let Some(url) = project_info.primary_url {
-                    println!();
-                    println!("Project URL: {}", url);
-                }
+            if let Some(url) = project_info.primary_url {
+                println!();
+                println!("Project URL: {}", url);
             }
         }
     }
 
-    result
+    Ok(final_deployment)
 }
 
 /// Simple fallback for non-TTY environments (pipes, redirects)
@@ -528,15 +716,14 @@ async fn follow_deployment_simple(
     let start_time = Instant::now();
     let mut state = FollowState::new();
 
-    loop {
+    // Phase 1: Status polling (print state changes as text lines)
+    let deployment = loop {
         let deployment =
             fetch_deployment(http_client, backend_url, token, project, deployment_id).await?;
 
-        // Parse controller metadata
         let controller_phase =
             parse_controller_metadata(&deployment.controller_metadata).map(|m| m.reconcile_phase);
 
-        // Log state changes only (not every poll)
         if state.should_log_state_change(&deployment, &controller_phase) {
             log_state_change(
                 project,
@@ -546,24 +733,14 @@ async fn follow_deployment_simple(
             );
         }
 
-        // Update state
         state.update(&deployment, controller_phase);
 
         if is_terminal_state(&deployment.status) {
-            // Print project URL if deployment became active (Healthy in default group)
-            if deployment.status == DeploymentStatus::Healthy
-                && deployment.deployment_group == "default"
-            {
-                if let Ok(project_info) =
-                    fetch_project_info(http_client, backend_url, token, project).await
-                {
-                    if let Some(url) = project_info.primary_url {
-                        println!();
-                        println!("Project URL: {}", url);
-                    }
-                }
-            }
-            return Ok(deployment);
+            break deployment;
+        }
+
+        if should_stream_logs(&deployment.status) {
+            break deployment;
         }
 
         if start_time.elapsed() >= timeout {
@@ -571,5 +748,38 @@ async fn follow_deployment_simple(
         }
 
         tokio::time::sleep(Duration::from_secs(1)).await;
+    };
+
+    // Phase 2: Log streaming + status monitoring (only if not terminal)
+    let final_deployment = if !is_terminal_state(&deployment.status) {
+        println!("--- Logs ---");
+
+        stream_logs_with_status_polling(
+            http_client,
+            backend_url,
+            token,
+            project,
+            deployment_id,
+            timeout,
+            start_time,
+        )
+        .await?
+    } else {
+        deployment
+    };
+
+    // Phase 3: Print project URL if deployment became active (Healthy in default group)
+    if final_deployment.status == DeploymentStatus::Healthy
+        && final_deployment.deployment_group == "default"
+    {
+        if let Ok(project_info) = fetch_project_info(http_client, backend_url, token, project).await
+        {
+            if let Some(url) = project_info.primary_url {
+                println!();
+                println!("Project URL: {}", url);
+            }
+        }
     }
+
+    Ok(final_deployment)
 }
