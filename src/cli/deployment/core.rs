@@ -1053,3 +1053,142 @@ fn parse_duration_to_seconds(duration: &str) -> anyhow::Result<i64> {
         ))
     }
 }
+
+// ============================================================================
+// Log streaming helpers (used by follow_ui for inline log display)
+// ============================================================================
+
+/// Error type for log stream connection attempts.
+pub(super) enum LogStreamError {
+    /// Server returned 503 - pod/logs not ready yet
+    NotReady,
+    /// Server returned 410 - deployment gone/terminated
+    Gone,
+    /// Other error
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Debug for LogStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogStreamError::NotReady => write!(f, "NotReady"),
+            LogStreamError::Gone => write!(f, "Gone"),
+            LogStreamError::Other(e) => write!(f, "Other({:?})", e),
+        }
+    }
+}
+
+/// SSE log stream that yields parsed log lines.
+///
+/// Wraps an SSE byte stream from the deployment logs endpoint and provides
+/// a simple async interface for receiving individual log lines.
+pub(super) struct LogStream {
+    stream: futures::stream::BoxStream<'static, Result<bytes::Bytes, reqwest::Error>>,
+    buffer: String,
+}
+
+impl LogStream {
+    /// Receive the next log line from the stream.
+    /// Returns `None` when the stream ends.
+    pub async fn recv(&mut self) -> Option<Result<String>> {
+        use futures::StreamExt;
+
+        loop {
+            // Try to extract a complete line from the buffer
+            if let Some(newline_pos) = self.buffer.find('\n') {
+                let line: String = self.buffer.drain(..=newline_pos).collect();
+                let line = line.trim_end();
+
+                // Parse SSE format: "data: ..." lines contain log content
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if !data.is_empty() {
+                        return Some(Ok(data.to_string()));
+                    }
+                    continue;
+                } else if line.is_empty() || line.starts_with(':') {
+                    // SSE comment or empty line, skip
+                    continue;
+                } else {
+                    return Some(Ok(line.to_string()));
+                }
+            }
+
+            // Need more data from the stream
+            match self.stream.next().await {
+                Some(Ok(chunk)) => {
+                    let text = String::from_utf8_lossy(&chunk);
+                    self.buffer.push_str(&text);
+                }
+                Some(Err(e)) => {
+                    return Some(Err(anyhow::anyhow!("Log stream error: {}", e)));
+                }
+                None => {
+                    // Stream ended - process any remaining buffer content
+                    if !self.buffer.is_empty() {
+                        let remaining = std::mem::take(&mut self.buffer);
+                        let line = remaining.trim();
+                        if let Some(data) = line.strip_prefix("data: ") {
+                            if !data.is_empty() {
+                                return Some(Ok(data.to_string()));
+                            }
+                        } else if !line.is_empty() && !line.starts_with(':') {
+                            return Some(Ok(line.to_string()));
+                        }
+                    }
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// Open an SSE log stream for a deployment.
+///
+/// Connects to the deployment logs SSE endpoint with `follow=true` and the
+/// specified `tail` line count.
+pub(super) async fn open_log_stream(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    deployment_id: &str,
+    tail: usize,
+) -> Result<LogStream, LogStreamError> {
+    use futures::StreamExt;
+
+    let url = format!(
+        "{}/api/v1/projects/{}/deployments/{}/logs?follow=true&tail={}",
+        backend_url, project, deployment_id, tail
+    );
+
+    let response = http_client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| LogStreamError::Other(anyhow::anyhow!("Failed to connect: {}", e)))?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+        return Err(LogStreamError::NotReady);
+    }
+    if status == reqwest::StatusCode::GONE {
+        return Err(LogStreamError::Gone);
+    }
+    if !status.is_success() {
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(LogStreamError::Other(anyhow::anyhow!(
+            "Failed to open log stream ({}): {}",
+            status,
+            error_text
+        )));
+    }
+
+    Ok(LogStream {
+        stream: response.bytes_stream().boxed(),
+        buffer: String::new(),
+    })
+}
