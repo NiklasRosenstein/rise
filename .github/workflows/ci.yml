@@ -390,6 +390,9 @@ jobs:
       - name: Run e2e build tests (no proxy)
         run: RISE_BIN=./target/release/rise bash tests/e2e-build/run.sh --no-proxy
 
+      - name: Run e2e build tests (with proxy)
+        run: RISE_BIN=./target/release/rise bash tests/e2e-build/run.sh
+
   e2e-minikube:
     name: Minikube end-to-end smoke tests
     runs-on: ubuntu-latest
