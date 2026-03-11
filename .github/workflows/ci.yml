@@ -382,7 +382,7 @@ jobs:
           experimental: true
 
       - name: Install mise tools
-        run: mise use -g pack "ubi:railwayapp/railpack" "github:moby/buildkit"
+        run: mise use -g pack railpack buildkit
 
       - name: Build Rise CLI
         run: cargo build --release --features cli

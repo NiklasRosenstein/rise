@@ -1,8 +1,12 @@
+[tool_alias]
+railpack = "github:railwayapp/railpack"
+buildkit = "github:moby/buildkit"
+
 [tools]
 minikube = "1.37.0"
 pack = "0.39.0"
-"ubi:railwayapp/railpack" = "0.15.1"
-"github:moby/buildkit" = "0.28.0"
+railpack = "0.15.1"
+buildkit = "0.28.0"
 "cargo:sqlx-cli" = "latest"
 "cargo:cargo-all-features" = "latest"
 mdbook = "latest"
