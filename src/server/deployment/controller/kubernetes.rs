@@ -2438,9 +2438,11 @@ impl KubernetesController {
             ports: None, // Allow all ports from ingress controller
         });
 
-        // Rule: Allow traffic from all pods in the same namespace
+        // Rule: Allow traffic from all pods in the same namespace.
         // This enables apps that schedule additional workloads (e.g. worker pods)
         // to communicate back to the app via cluster-internal networking.
+        // Note: A podSelector with no namespaceSelector scopes to the NetworkPolicy's
+        // own namespace. An empty podSelector ({}) matches all pods in that namespace.
         ingress_rules.push(k8s_openapi::api::networking::v1::NetworkPolicyIngressRule {
             from: Some(vec![NetworkPolicyPeer {
                 pod_selector: Some(LabelSelector::default()),
@@ -2451,9 +2453,10 @@ impl KubernetesController {
 
         let mut egress_rules = vec![];
 
-        // Rule 0: Allow traffic to all pods in the same namespace
+        // Rule 0: Allow traffic to all pods in the same namespace.
         // This enables apps to communicate with additional workloads they schedule
         // (e.g. worker pods, sidecars) via cluster-internal networking.
+        // See ingress rule above for why podSelector alone (no namespaceSelector) is correct.
         egress_rules.push(NetworkPolicyEgressRule {
             to: Some(vec![NetworkPolicyPeer {
                 pod_selector: Some(LabelSelector::default()),
