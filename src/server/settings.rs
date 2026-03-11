@@ -674,22 +674,28 @@ impl Settings {
     /// Substitute environment variables in a string value
     /// Replaces ${VAR_NAME} or ${VAR_NAME:-default} with environment variable values
     fn substitute_env_vars_in_string(s: &str) -> String {
+        Self::substitute_env_vars_in_string_with(s, &|name| env::var(name).ok())
+    }
+
+    fn substitute_env_vars_in_string_with(
+        s: &str,
+        env_lookup: &impl Fn(&str) -> Option<String>,
+    ) -> String {
         let re = regex::Regex::new(r"\$\{([^}:]+)(?::-([^}]*))?\}").unwrap();
 
         re.replace_all(s, |caps: &regex::Captures| {
             let var_name = &caps[1];
             let default_value = caps.get(2).map(|m| m.as_str());
 
-            match env::var(var_name) {
-                Ok(val) => val,
-                Err(_) => default_value.unwrap_or("").to_string(),
-            }
+            env_lookup(var_name).unwrap_or_else(|| default_value.unwrap_or("").to_string())
         })
         .to_string()
     }
 
-    /// Convert a config::Value to a serde_json::Value, performing environment variable substitution
-    fn config_value_to_json(value: &config::Value) -> serde_json::Value {
+    fn config_value_to_json_with(
+        value: &config::Value,
+        env_lookup: &impl Fn(&str) -> Option<String>,
+    ) -> serde_json::Value {
         use config::ValueKind;
 
         match &value.kind {
@@ -704,18 +710,20 @@ impl Settings {
                 .unwrap_or(serde_json::Value::Null),
             ValueKind::String(s) => {
                 // Perform environment variable substitution
-                serde_json::Value::String(Self::substitute_env_vars_in_string(s))
+                serde_json::Value::String(Self::substitute_env_vars_in_string_with(s, env_lookup))
             }
             ValueKind::Table(table) => {
                 let mut map = serde_json::Map::new();
                 for (k, v) in table.iter() {
-                    map.insert(k.clone(), Self::config_value_to_json(v));
+                    map.insert(k.clone(), Self::config_value_to_json_with(v, env_lookup));
                 }
                 serde_json::Value::Object(map)
             }
             ValueKind::Array(arr) => {
-                let vec: Vec<serde_json::Value> =
-                    arr.iter().map(Self::config_value_to_json).collect();
+                let vec: Vec<serde_json::Value> = arr
+                    .iter()
+                    .map(|value| Self::config_value_to_json_with(value, env_lookup))
+                    .collect();
                 serde_json::Value::Array(vec)
             }
         }
@@ -794,16 +802,24 @@ impl Settings {
         let run_mode = env::var("RISE_CONFIG_RUN_MODE").unwrap_or_else(|_| "development".into());
         let config_dir = env::var("RISE_CONFIG_DIR").unwrap_or_else(|_| "config".into());
 
+        Self::new_with_env(&config_dir, &run_mode, &|name| env::var(name).ok())
+    }
+
+    fn new_with_env(
+        config_dir: &str,
+        run_mode: &str,
+        env_lookup: &impl Fn(&str) -> Option<String>,
+    ) -> Result<Self, ConfigError> {
         let mut builder = Config::builder();
 
         // Load config files in order, trying both .toml and .yaml/.yml extensions.
         // TOML takes precedence if both exist.
 
         // 1. Load environment-specific config (required)
-        Self::try_add_config_file(&mut builder, &config_dir, &run_mode, true)?;
+        Self::try_add_config_file(&mut builder, config_dir, run_mode, true)?;
 
         // 2. Load local config (optional, not checked into git)
-        Self::try_add_config_file(&mut builder, &config_dir, "local", false)?;
+        Self::try_add_config_file(&mut builder, config_dir, "local", false)?;
 
         // Build config and substitute environment variables
         let config = builder.build()?;
@@ -817,7 +833,7 @@ impl Settings {
         // Convert config values to serde_json::Value (with env var substitution in strings)
         let mut json_map = serde_json::Map::new();
         for (k, v) in root_value.iter() {
-            json_map.insert(k.clone(), Self::config_value_to_json(v));
+            json_map.insert(k.clone(), Self::config_value_to_json_with(v, env_lookup));
         }
         let json_value = serde_json::Value::Object(json_map);
 
@@ -835,7 +851,7 @@ impl Settings {
 
         // Special handling for DATABASE_URL environment variable (common convention)
         // This takes precedence over both TOML config and RISE_DATABASE__URL
-        if let Ok(database_url) = env::var("DATABASE_URL") {
+        if let Some(database_url) = env_lookup("DATABASE_URL") {
             if !database_url.is_empty() {
                 settings.database.url = database_url;
             }
@@ -945,48 +961,45 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::{Mutex, OnceLock};
-
-    fn env_var_test_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     #[test]
     fn test_substitute_env_vars_in_string_basic() {
-        let _guard = env_var_test_lock().lock().unwrap();
-        env::set_var("TEST_VAR", "test_value");
-        let result = Settings::substitute_env_vars_in_string("${TEST_VAR}");
+        let result = Settings::substitute_env_vars_in_string_with("${TEST_VAR}", &|name| {
+            (name == "TEST_VAR").then(|| "test_value".to_string())
+        });
         assert_eq!(result, "test_value");
-        env::remove_var("TEST_VAR");
     }
 
     #[test]
     fn test_substitute_env_vars_in_string_with_default() {
-        let _guard = env_var_test_lock().lock().unwrap();
-        env::remove_var("MISSING_VAR");
-        let result = Settings::substitute_env_vars_in_string("${MISSING_VAR:-default_value}");
+        let result =
+            Settings::substitute_env_vars_in_string_with("${MISSING_VAR:-default_value}", &|_| {
+                None
+            });
         assert_eq!(result, "default_value");
     }
 
     #[test]
     fn test_substitute_env_vars_in_string_override_default() {
-        let _guard = env_var_test_lock().lock().unwrap();
-        env::set_var("OVERRIDE_VAR", "actual_value");
-        let result = Settings::substitute_env_vars_in_string("${OVERRIDE_VAR:-default_value}");
+        let result = Settings::substitute_env_vars_in_string_with(
+            "${OVERRIDE_VAR:-default_value}",
+            &|name| (name == "OVERRIDE_VAR").then(|| "actual_value".to_string()),
+        );
         assert_eq!(result, "actual_value");
-        env::remove_var("OVERRIDE_VAR");
     }
 
     #[test]
     fn test_substitute_env_vars_in_string_multiple() {
-        let _guard = env_var_test_lock().lock().unwrap();
-        env::set_var("VAR1", "value1");
-        env::set_var("VAR2", "value2");
-        let result = Settings::substitute_env_vars_in_string("${VAR1} and ${VAR2}");
+        let result =
+            Settings::substitute_env_vars_in_string_with(
+                "${VAR1} and ${VAR2}",
+                &|name| match name {
+                    "VAR1" => Some("value1".to_string()),
+                    "VAR2" => Some("value2".to_string()),
+                    _ => None,
+                },
+            );
         assert_eq!(result, "value1 and value2");
-        env::remove_var("VAR1");
-        env::remove_var("VAR2");
     }
 
     #[test]
@@ -997,7 +1010,6 @@ mod tests {
 
     #[test]
     fn test_unused_fields_warning() {
-        let _guard = env_var_test_lock().lock().unwrap();
         // This test verifies that unused fields are detected during deserialization
         // We can't easily test the warning output itself, but we can verify the config
         // still loads successfully even with unknown fields
@@ -1046,17 +1058,10 @@ unknown_top_level: "also unknown"
         )
         .unwrap();
 
-        // Set environment variables to point to our test config
-        env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
-        env::set_var("RISE_CONFIG_RUN_MODE", "development");
-
         // This should load successfully despite unknown fields
         // (The warnings would appear in logs)
-        let result = Settings::new();
-
-        // Clean up env vars
-        env::remove_var("RISE_CONFIG_DIR");
-        env::remove_var("RISE_CONFIG_RUN_MODE");
+        let result =
+            Settings::new_with_env(temp_dir.path().to_str().unwrap(), "development", &|_| None);
 
         // Config should load successfully (warnings are logged, not errors)
         assert!(
@@ -1090,7 +1095,6 @@ unknown_top_level: "also unknown"
 
     #[test]
     fn test_settings_load_with_extra_service_token_audiences() {
-        let _guard = env_var_test_lock().lock().unwrap();
         use std::fs;
         use tempfile::TempDir;
 
@@ -1132,13 +1136,8 @@ deployment_controller:
         )
         .unwrap();
 
-        env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
-        env::set_var("RISE_CONFIG_RUN_MODE", "development");
-
-        let result = Settings::new();
-
-        env::remove_var("RISE_CONFIG_DIR");
-        env::remove_var("RISE_CONFIG_RUN_MODE");
+        let result =
+            Settings::new_with_env(temp_dir.path().to_str().unwrap(), "development", &|_| None);
 
         let settings = result.expect("config with extra service token audiences should load");
         let Some(DeploymentControllerSettings::Kubernetes {
@@ -1157,7 +1156,6 @@ deployment_controller:
 
     #[test]
     fn test_run_mode_config_is_required_even_if_local_exists() {
-        let _guard = env_var_test_lock().lock().unwrap();
         use std::fs;
         use tempfile::TempDir;
 
@@ -1184,13 +1182,8 @@ auth:
         )
         .unwrap();
 
-        env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
-        env::set_var("RISE_CONFIG_RUN_MODE", "production");
-
-        let result = Settings::new();
-
-        env::remove_var("RISE_CONFIG_DIR");
-        env::remove_var("RISE_CONFIG_RUN_MODE");
+        let result =
+            Settings::new_with_env(temp_dir.path().to_str().unwrap(), "production", &|_| None);
 
         assert!(
             result.is_err(),
