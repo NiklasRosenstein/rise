@@ -1,3 +1,4 @@
+use super::controller::DeploymentUrls;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
@@ -119,6 +120,41 @@ pub fn normalize_deployment_group(deployment_group: &str) -> String {
     result.trim_matches('-').to_string()
 }
 
+/// Generate the Rise system environment variables for a deployment.
+///
+/// Returns `(key, value)` pairs for:
+/// - `RISE_ISSUER` — Rise server URL (base URL for all Rise endpoints and JWT issuer)
+/// - `RISE_APP_URL` — Canonical URL where the app is accessible
+/// - `RISE_APP_URLS` — JSON array of all URLs where the app can be accessed
+/// - `RISE_DEPLOYMENT_GROUP` — The deployment group name (e.g. "default", "mr/123")
+/// - `RISE_DEPLOYMENT_GROUP_NORMALIZED` — The group name normalized for URLs (e.g. "mr--123")
+pub fn rise_system_env_vars(
+    public_url: &str,
+    deployment_group: &str,
+    deployment_urls: &DeploymentUrls,
+) -> Vec<(String, String)> {
+    let mut all_urls = vec![deployment_urls.default_url.clone()];
+    all_urls.extend(deployment_urls.custom_domain_urls.clone());
+    let app_urls_json = serde_json::to_string(&all_urls).unwrap_or_else(|_| "[]".to_string());
+
+    vec![
+        ("RISE_ISSUER".to_string(), public_url.to_string()),
+        (
+            "RISE_APP_URL".to_string(),
+            deployment_urls.primary_url.clone(),
+        ),
+        ("RISE_APP_URLS".to_string(), app_urls_json),
+        (
+            "RISE_DEPLOYMENT_GROUP".to_string(),
+            deployment_group.to_string(),
+        ),
+        (
+            "RISE_DEPLOYMENT_GROUP_NORMALIZED".to_string(),
+            normalize_deployment_group(deployment_group),
+        ),
+    ]
+}
+
 // Request to create a deployment
 #[derive(Debug, Deserialize)]
 pub struct CreateDeploymentRequest {
@@ -155,4 +191,47 @@ pub struct UpdateDeploymentStatusRequest {
     pub status: DeploymentStatus,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_rise_system_env_vars_default_group() {
+        let urls = DeploymentUrls {
+            default_url: "https://myapp.rise.dev".to_string(),
+            primary_url: "https://myapp.rise.dev".to_string(),
+            custom_domain_urls: vec![],
+        };
+
+        let vars = rise_system_env_vars("https://rise.dev", "default", &urls);
+
+        let map: std::collections::HashMap<_, _> = vars.into_iter().collect();
+        assert_eq!(map["RISE_ISSUER"], "https://rise.dev");
+        assert_eq!(map["RISE_APP_URL"], "https://myapp.rise.dev");
+        assert_eq!(map["RISE_APP_URLS"], r#"["https://myapp.rise.dev"]"#);
+        assert_eq!(map["RISE_DEPLOYMENT_GROUP"], "default");
+        assert_eq!(map["RISE_DEPLOYMENT_GROUP_NORMALIZED"], "default");
+    }
+
+    #[test]
+    fn test_rise_system_env_vars_custom_group_with_domains() {
+        let urls = DeploymentUrls {
+            default_url: "https://myapp-mr--42.rise.dev".to_string(),
+            primary_url: "https://custom.example.com".to_string(),
+            custom_domain_urls: vec!["https://custom.example.com".to_string()],
+        };
+
+        let vars = rise_system_env_vars("https://rise.dev", "mr/42", &urls);
+
+        let map: std::collections::HashMap<_, _> = vars.into_iter().collect();
+        assert_eq!(map["RISE_APP_URL"], "https://custom.example.com");
+        assert_eq!(
+            map["RISE_APP_URLS"],
+            r#"["https://myapp-mr--42.rise.dev","https://custom.example.com"]"#
+        );
+        assert_eq!(map["RISE_DEPLOYMENT_GROUP"], "mr/42");
+        assert_eq!(map["RISE_DEPLOYMENT_GROUP_NORMALIZED"], "mr--42");
+    }
 }
