@@ -155,10 +155,6 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if !options.buildpacks.is_empty() {
                 warn!("--buildpack flags are ignored when using docker build method");
             }
-            if options.railpack_embed_ssl_cert {
-                warn!("--railpack-embed-ssl-cert flag is ignored when using docker build method");
-            }
-
             build_image_with_dockerfile(DockerBuildOptions {
                 app_path: &options.app_path,
                 dockerfile: dockerfile.as_deref(),
@@ -181,10 +177,6 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if options.managed_buildkit.is_some() {
                 warn!("--managed-buildkit flag is ignored when using pack build method");
             }
-            if options.railpack_embed_ssl_cert {
-                warn!("--railpack-embed-ssl-cert flag is ignored when using pack build method");
-            }
-
             build_image_with_buildpacks(
                 &options.app_path,
                 &options.image_tag,
@@ -218,7 +210,6 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 use_buildctl,
                 push: options.push,
                 buildkit_host: buildkit_host.as_deref(),
-                embed_ssl_cert: options.railpack_embed_ssl_cert,
                 env: &options.env,
                 no_cache: options.no_cache,
             })?;
@@ -233,10 +224,6 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if options.explicit_container_cli {
                 warn!("--container-cli flag is ignored when using buildctl build method");
             }
-            if options.railpack_embed_ssl_cert {
-                warn!("--railpack-embed-ssl-cert flag is ignored when using buildctl build method");
-            }
-
             // Check for SSL certificate
             let ssl_cert_file = env_var_non_empty("SSL_CERT_FILE");
             let ssl_cert_path = ssl_cert_file.as_ref().and_then(|p| {

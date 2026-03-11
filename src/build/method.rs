@@ -60,10 +60,6 @@ pub struct BuildArgs {
     #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
     pub managed_buildkit: Option<bool>,
 
-    /// Embed SSL certificate into Railpack build plan for build-time RUN command support
-    #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
-    pub railpack_embed_ssl_cert: Option<bool>,
-
     /// Path to Dockerfile (relative to app path / rise.toml location). Defaults to "Dockerfile" or "Containerfile"
     #[arg(long)]
     pub dockerfile: Option<String>,
@@ -100,7 +96,6 @@ pub(crate) struct BuildOptions {
     /// Some(true) = explicitly enable managed buildkit
     /// Some(false) = explicitly disable managed buildkit
     pub managed_buildkit: Option<bool>,
-    pub railpack_embed_ssl_cert: bool,
     pub push: bool,
     /// Path to Dockerfile (relative to app_path / rise.toml location)
     pub dockerfile: Option<String>,
@@ -203,16 +198,6 @@ impl BuildOptions {
                 .or_else(|| crate::build::parse_bool_env_var("RISE_MANAGED_BUILDKIT"))
                 .or_else(|| project_config.as_ref().and_then(|c| c.managed_buildkit))
                 .or(config.managed_buildkit),
-            railpack_embed_ssl_cert: build_args
-                .railpack_embed_ssl_cert
-                .or_else(|| crate::build::parse_bool_env_var("RISE_RAILPACK_EMBED_SSL_CERT"))
-                .or_else(|| {
-                    project_config
-                        .as_ref()
-                        .and_then(|c| c.railpack_embed_ssl_cert)
-                })
-                .unwrap_or_else(|| config.get_railpack_embed_ssl_cert()),
-
             dockerfile: build_args
                 .dockerfile
                 .clone()
