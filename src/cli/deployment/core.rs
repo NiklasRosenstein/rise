@@ -523,27 +523,15 @@ pub async fn create_deployment(
             None => config.get_container_cli().command().to_string(),
         };
 
-        // Login to registry
-        if !deployment_info.credentials.username.is_empty() {
-            info!("Logging into registry");
-            if let Err(e) = build::docker_login(
-                &container_cli,
-                &deployment_info.credentials.registry_url,
-                &deployment_info.credentials.username,
-                &deployment_info.credentials.password,
-            ) {
-                update_deployment_status(
-                    http_client,
-                    backend_url,
-                    &token,
-                    &deployment_info.deployment_id,
-                    "Failed",
-                    Some(&e.to_string()),
-                )
-                .await?;
-                return Err(e);
-            }
-        }
+        login_to_registry(
+            http_client,
+            backend_url,
+            &token,
+            &container_cli,
+            &deployment_info.credentials,
+            &deployment_info.deployment_id,
+        )
+        .await?;
 
         // Pull the source image for linux/amd64
         if let Err(e) = build::docker_pull(&container_cli, source_image, "linux/amd64") {
@@ -639,27 +627,15 @@ pub async fn create_deployment(
         );
 
         // Step 2: Login to registry if credentials provided
-        if !deployment_info.credentials.username.is_empty() {
-            info!("Logging into registry");
-            let login_cli = options.container_cli.command().to_string();
-            if let Err(e) = build::docker_login(
-                &login_cli,
-                &deployment_info.credentials.registry_url,
-                &deployment_info.credentials.username,
-                &deployment_info.credentials.password,
-            ) {
-                update_deployment_status(
-                    http_client,
-                    backend_url,
-                    &token,
-                    &deployment_info.deployment_id,
-                    "Failed",
-                    Some(&e.to_string()),
-                )
-                .await?;
-                return Err(e);
-            }
-        }
+        login_to_registry(
+            http_client,
+            backend_url,
+            &token,
+            options.container_cli.command(),
+            &deployment_info.credentials,
+            &deployment_info.deployment_id,
+        )
+        .await?;
 
         // Step 3: Update status to 'building'
         update_deployment_status(
@@ -721,6 +697,39 @@ pub async fn create_deployment(
 
     Ok(())
 }
+/// Login to the container registry, marking the deployment as Failed on error.
+async fn login_to_registry(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    container_cli: &str,
+    credentials: &RegistryCredentials,
+    deployment_id: &str,
+) -> Result<()> {
+    if credentials.username.is_empty() {
+        return Ok(());
+    }
+    info!("Logging into registry");
+    if let Err(e) = build::docker_login(
+        container_cli,
+        &credentials.registry_url,
+        &credentials.username,
+        &credentials.password,
+    ) {
+        update_deployment_status(
+            http_client,
+            backend_url,
+            token,
+            deployment_id,
+            "Failed",
+            Some(&e.to_string()),
+        )
+        .await?;
+        return Err(e);
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn call_create_deployment_api(
     http_client: &Client,

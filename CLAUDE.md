@@ -162,6 +162,11 @@ For user-facing documentation, see the [`/docs`](./docs) directory. Key topics i
 - Configuration: [docs/configuration.md](docs/configuration.md)
 - OAuth extension (end-user authentication): [docs/user-guide/oauth.md](docs/user-guide/oauth.md)
 
+## Git Branching
+
+- The default development branch is `develop`. PRs for feature work should target `develop`, not `main`.
+- Always target the branch your feature branch was created from when opening a PR.
+
 ## Guidelines
 
 - Build features in small increments with frequent commits. Use Git history as a reference for what was done and why.
