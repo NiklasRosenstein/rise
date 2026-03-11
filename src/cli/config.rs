@@ -250,7 +250,6 @@ impl Config {
         self.managed_buildkit = Some(enabled);
         self.save()
     }
-
 }
 
 /// Auto-detect which container CLI is available.
