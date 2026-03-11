@@ -46,6 +46,10 @@ deployment_controller:
   namespace_format: "${RISE_NAMESPACE_FORMAT:-rise-{project_name}}"
   auth_backend_url: "${RISE_AUTH_BACKEND_URL}"
   auth_signin_url: "${PUBLIC_URL}"
+  # Optional extra projected service account tokens mounted in every app pod at
+  # /var/run/secrets/rise/tokens/<name>
+  # extra_service_token_audiences:
+  #   vault: "https://vault.example.com"
   access_classes:
     public:
       display_name: "Public"
