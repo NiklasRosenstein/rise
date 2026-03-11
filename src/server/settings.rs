@@ -671,12 +671,6 @@ impl Settings {
         Ok(serde_json::to_value(schema)?)
     }
 
-    /// Substitute environment variables in a string value
-    /// Replaces ${VAR_NAME} or ${VAR_NAME:-default} with environment variable values
-    fn substitute_env_vars_in_string(s: &str) -> String {
-        Self::substitute_env_vars_in_string_with(s, &|name| env::var(name).ok())
-    }
-
     fn substitute_env_vars_in_string_with(
         s: &str,
         env_lookup: &impl Fn(&str) -> Option<String>,
@@ -1004,7 +998,7 @@ mod tests {
 
     #[test]
     fn test_substitute_env_vars_in_string_no_substitution() {
-        let result = Settings::substitute_env_vars_in_string("plain_value");
+        let result = Settings::substitute_env_vars_in_string_with("plain_value", &|_| None);
         assert_eq!(result, "plain_value");
     }
 
