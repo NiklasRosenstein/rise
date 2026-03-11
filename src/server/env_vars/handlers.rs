@@ -1,6 +1,7 @@
 use super::models::{EnvVarResponse, EnvVarValueResponse, EnvVarsResponse, SetEnvVarRequest};
 use crate::db::models::User;
 use crate::db::{env_vars as db_env_vars, projects};
+use crate::server::deployment::models as deployment_models;
 use crate::server::extensions::InjectedEnvVarValue;
 use crate::server::state::AppState;
 use axum::{
@@ -527,7 +528,7 @@ pub async fn get_project_env_var_value(
 ///
 /// Returns:
 /// - User-set environment variables
-/// - System vars (PORT, RISE_ISSUER, RISE_APP_URL, RISE_APP_URLS)
+/// - System vars: PORT plus those from [`deployment_models::rise_system_env_vars`]
 /// - Extension-injected vars
 ///
 /// Protected vars are masked. This enables `rise run` to inject the same env vars as a real deployment.
@@ -649,51 +650,53 @@ pub async fn preview_deployment_env_vars(
         );
     }
 
-    env_map.insert(
-        "RISE_ISSUER".to_string(),
-        EnvVarResponse {
-            key: "RISE_ISSUER".to_string(),
-            value: state.public_url.clone(),
-            is_secret: false,
-            is_protected: false,
-        },
-    );
-
-    // Get project URLs from deployment backend (if available)
+    // System vars from rise_system_env_vars() — requires deployment URLs from the backend.
+    // When URLs are unavailable (e.g. no deployment controller configured), fall back to
+    // inserting only the URL-independent vars (RISE_ISSUER, RISE_DEPLOYMENT_GROUP*).
     match state
         .deployment_backend
         .get_project_urls(&project, &deployment_group)
         .await
     {
         Ok(urls) => {
-            env_map.insert(
-                "RISE_APP_URL".to_string(),
-                EnvVarResponse {
-                    key: "RISE_APP_URL".to_string(),
-                    value: urls.primary_url.clone(),
-                    is_secret: false,
-                    is_protected: false,
-                },
-            );
-
-            let mut all_urls = vec![urls.default_url.clone()];
-            all_urls.extend(urls.custom_domain_urls);
-            let urls_json = serde_json::to_string(&all_urls).unwrap_or_else(|_| "[]".to_string());
-            env_map.insert(
-                "RISE_APP_URLS".to_string(),
-                EnvVarResponse {
-                    key: "RISE_APP_URLS".to_string(),
-                    value: urls_json,
-                    is_secret: false,
-                    is_protected: false,
-                },
-            );
+            for (key, value) in
+                deployment_models::rise_system_env_vars(&state.public_url, &deployment_group, &urls)
+            {
+                env_map.insert(
+                    key.clone(),
+                    EnvVarResponse {
+                        key,
+                        value,
+                        is_secret: false,
+                        is_protected: false,
+                    },
+                );
+            }
         }
         Err(e) => {
             tracing::debug!(
                 "Could not compute project URLs for preview (no deployment controller?): {:?}",
                 e
             );
+            // Insert URL-independent system vars only
+            for (key, value) in [
+                ("RISE_ISSUER", state.public_url.clone()),
+                ("RISE_DEPLOYMENT_GROUP", deployment_group.clone()),
+                (
+                    "RISE_DEPLOYMENT_GROUP_NORMALIZED",
+                    deployment_models::normalize_deployment_group(&deployment_group),
+                ),
+            ] {
+                env_map.insert(
+                    key.to_string(),
+                    EnvVarResponse {
+                        key: key.to_string(),
+                        value,
+                        is_secret: false,
+                        is_protected: false,
+                    },
+                );
+            }
         }
     }
 

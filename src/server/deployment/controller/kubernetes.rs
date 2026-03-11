@@ -734,24 +734,7 @@ impl KubernetesController {
     /// (e.g., "mr/26" → "mr--26", "mr-26" → "mr-26")
     /// Ensures it matches the regex: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
     fn sanitize_label_value(value: &str) -> String {
-        let mut result = String::new();
-        let mut last_was_invalid = false;
-
-        for ch in value.chars() {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
-                result.push(ch);
-                last_was_invalid = false;
-            } else {
-                // Replace invalid character(s) with '--' (only once per sequence)
-                if !last_was_invalid {
-                    result.push_str("--");
-                    last_was_invalid = true;
-                }
-            }
-        }
-
-        // Ensure it doesn't start or end with invalid characters
-        result.trim_matches('-').to_string()
+        crate::server::deployment::models::normalize_deployment_group(value)
     }
 
     /// Get the escaped deployment group name for use in resource names
