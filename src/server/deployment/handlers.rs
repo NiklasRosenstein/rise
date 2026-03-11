@@ -228,6 +228,7 @@ fn convert_status_to_db(status: DeploymentStatus) -> DbDeploymentStatus {
 /// - RISE_APP_URL: Canonical URL where the app is accessible
 /// - RISE_APP_URLS: JSON array of all URLs where the app can be accessed
 /// - RISE_DEPLOYMENT_GROUP: The deployment group name (e.g. "default", "staging", "mr/123")
+/// - RISE_DEPLOYMENT_GROUP_NORMALIZED: The deployment group name normalized for URLs (e.g. "default", "staging", "mr--123")
 ///
 /// These environment variables are visible in the Rise UI and allow deployed applications
 /// to validate Rise-issued JWTs (via /.well-known/openid-configuration), call Rise APIs,
@@ -334,6 +335,29 @@ async fn insert_rise_env_vars(
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to insert RISE_DEPLOYMENT_GROUP: {}", e),
+        )
+    })?;
+
+    // 5. Insert RISE_DEPLOYMENT_GROUP_NORMALIZED
+    let normalized_group =
+        crate::server::deployment::models::normalize_deployment_group(&deployment.deployment_group);
+    crate::db::env_vars::upsert_deployment_env_var(
+        &state.db_pool,
+        deployment.id,
+        "RISE_DEPLOYMENT_GROUP_NORMALIZED",
+        &normalized_group,
+        false, // Not a secret
+        false, // is_retrievable
+    )
+    .await
+    .map_err(|e| {
+        error!(
+            "Failed to insert RISE_DEPLOYMENT_GROUP_NORMALIZED env var: {}",
+            e
+        );
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to insert RISE_DEPLOYMENT_GROUP_NORMALIZED: {}", e),
         )
     })?;
 

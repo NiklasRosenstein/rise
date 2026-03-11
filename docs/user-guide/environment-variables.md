@@ -85,6 +85,7 @@ Rise automatically injects these variables into every deployment:
 | `RISE_APP_URL` | Canonical URL (primary custom domain or default URL) | `https://myapp.example.com` |
 | `RISE_APP_URLS` | JSON array of all URLs for the app | `["https://myapp.app.example.com"]` |
 | `RISE_DEPLOYMENT_GROUP` | Deployment group name | `default` |
+| `RISE_DEPLOYMENT_GROUP_NORMALIZED` | Deployment group name normalized for URLs (slashes replaced with `--`) | `mr--123` |
 
 `PORT` defaults to 8080. Override it per-deployment with `--http-port` on `rise deploy`, or set it permanently with `rise env set my-app PORT 3000`.
 

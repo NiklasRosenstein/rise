@@ -97,6 +97,28 @@ fn default_group() -> String {
 /// This group drives the overall project status and is used for primary deployments
 pub const DEFAULT_DEPLOYMENT_GROUP: &str = "default";
 
+/// Normalize a deployment group name for use in URLs and resource names.
+///
+/// Replaces sequences of characters that are not alphanumeric, `-`, `_`, or `.`
+/// with `--` (e.g., `mr/123` → `mr--123`). This matches the normalization used
+/// in the `{deployment_group}` placeholder of `staging_ingress_url_template`.
+pub fn normalize_deployment_group(deployment_group: &str) -> String {
+    let mut result = String::new();
+    let mut last_was_invalid = false;
+
+    for ch in deployment_group.chars() {
+        if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' || ch == '.' {
+            result.push(ch);
+            last_was_invalid = false;
+        } else if !last_was_invalid {
+            result.push_str("--");
+            last_was_invalid = true;
+        }
+    }
+
+    result.trim_matches('-').to_string()
+}
+
 // Request to create a deployment
 #[derive(Debug, Deserialize)]
 pub struct CreateDeploymentRequest {
