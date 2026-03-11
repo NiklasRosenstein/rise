@@ -161,6 +161,9 @@ start_mitmproxy() {
         fi
     done
     docker exec "$MITMPROXY_CTR" cat /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem >> "$CA_BUNDLE"
+    # Make world-readable so pack buildpack processes (which run as a non-root user
+    # inside the container) can read the bind-mounted certificate file
+    chmod 644 "$CA_BUNDLE"
 
     echo "mitmproxy ready (proxy via ${PROXY_HOST}:8080)"
 }
