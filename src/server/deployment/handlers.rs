@@ -73,6 +73,10 @@ async fn check_deploy_permission(
 }
 
 /// Validate group name format: must be 'default' or match [a-z0-9][a-z0-9/-]*[a-z0-9]
+/// with additional constraints:
+/// - No consecutive hyphens (`--`) to avoid collisions with normalized names
+///   (e.g. `mr/123` normalizes to `mr--123`, so `mr--123` as a raw group name is disallowed)
+/// - Normalized result must be <= 63 chars (Kubernetes label value limit)
 fn is_valid_group_name(name: &str) -> bool {
     if name == models::DEFAULT_DEPLOYMENT_GROUP {
         return true;
@@ -82,9 +86,26 @@ fn is_valid_group_name(name: &str) -> bool {
         return false;
     }
 
-    Regex::new(r"^[a-z0-9][a-z0-9/-]*[a-z0-9]$")
+    // Disallow consecutive hyphens to prevent collisions with normalized names
+    if name.contains("--") {
+        return false;
+    }
+
+    let valid_pattern = Regex::new(r"^[a-z0-9][a-z0-9/-]*[a-z0-9]$")
         .unwrap()
-        .is_match(name)
+        .is_match(name);
+
+    if !valid_pattern {
+        return false;
+    }
+
+    // Ensure the normalized result fits within Kubernetes label value limit (63 chars)
+    let normalized = models::normalize_deployment_group(name);
+    if normalized.len() > 63 {
+        return false;
+    }
+
+    true
 }
 
 /// Parse expiration duration string (e.g., "7d", "2h", "30m") to DateTime
@@ -410,7 +431,7 @@ pub async fn create_deployment(
         return Err((
             StatusCode::BAD_REQUEST,
             format!(
-                "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (max 100 chars)",
+                "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (no consecutive hyphens, normalized length max 63 chars)",
                 payload.group
             ),
         ));
@@ -1273,7 +1294,7 @@ pub async fn stop_deployments_by_group(
         return Err((
             StatusCode::BAD_REQUEST,
             format!(
-                "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9]",
+                "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (no consecutive hyphens, normalized length max 63 chars)",
                 query.group
             ),
         ));

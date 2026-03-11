@@ -88,7 +88,7 @@ Resources follow consistent naming patterns:
 | Ingress | `{escaped_group}` | `default`, `mr--26` |
 | Secret | `rise-registry-creds` | `rise-registry-creds` |
 
-**Character escaping**: Deployment group names containing invalid Kubernetes characters (e.g., `/`, `@`) are escaped with `--`. For example, `mr/26` becomes `mr--26`.
+**Character escaping**: Sequences of characters not in `[A-Za-z0-9-_.]` are replaced with `--`. For example, `mr/26` becomes `mr--26`. Consecutive hyphens (`--`) are disallowed in group names to prevent collisions, and the normalized result must be at most 63 characters (Kubernetes label value limit).
 
 ### Deployment Groups and URLs
 

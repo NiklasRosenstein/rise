@@ -729,10 +729,13 @@ impl KubernetesController {
         format!("rise-{}", project.name)
     }
 
-    /// Sanitize a string to be a valid Kubernetes label value
-    /// Replaces sequences of invalid characters with '--' to avoid collisions
-    /// (e.g., "mr/26" → "mr--26", "mr-26" → "mr-26")
-    /// Ensures it matches the regex: (([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?
+    /// Sanitize a string to be a valid Kubernetes label value.
+    /// Delegates to [`normalize_deployment_group`] which replaces sequences of invalid
+    /// characters with `--` (e.g., "mr/26" → "mr--26") and trims non-alphanumeric
+    /// leading/trailing characters.
+    ///
+    /// The result is guaranteed to be <= 63 chars because deployment group validation
+    /// (`is_valid_group_name`) rejects names whose normalized form exceeds this limit.
     fn sanitize_label_value(value: &str) -> String {
         crate::server::deployment::models::normalize_deployment_group(value)
     }

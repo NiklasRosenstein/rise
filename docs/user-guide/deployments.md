@@ -116,7 +116,7 @@ rise deploy --group staging
 
 Each custom group gets its own URL: `https://{project}-{group}.preview.example.com`
 
-Group names must match `[a-z0-9][a-z0-9/-]*[a-z0-9]` (max 100 characters). When a new deployment in a group reaches `Healthy`, the previous deployment in that group is `Superseded`.
+Group names must match `[a-z0-9][a-z0-9/-]*[a-z0-9]` (no consecutive hyphens `--`, normalized length max 63 characters). When a new deployment in a group reaches `Healthy`, the previous deployment in that group is `Superseded`.
 
 ### Auto-Expiration
 
