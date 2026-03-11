@@ -6,6 +6,7 @@
 #   ./tests/e2e-build/run.sh                       # all backends
 #   ./tests/e2e-build/run.sh docker:buildx pack     # specific backends
 #   ./tests/e2e-build/run.sh --no-proxy             # skip proxy tests
+#   ./tests/e2e-build/run.sh --only-proxy           # only proxy tests
 #   RISE_BIN=./target/debug/rise ./tests/e2e-build/run.sh
 #
 set -uo pipefail
@@ -19,6 +20,7 @@ BASE_PORT=18000
 PASSED=0
 FAILED=0
 NO_PROXY=false
+ONLY_PROXY=false
 RESULTS=()  # "PASS|FAIL|SKIP: label" entries for summary
 
 ALL_BACKENDS=(docker:build docker:buildx docker:buildctl pack railpack:buildx railpack:buildctl)
@@ -28,6 +30,7 @@ REQUESTED_BACKENDS=()
 for arg in "$@"; do
     case "$arg" in
         --no-proxy) NO_PROXY=true ;;
+        --only-proxy) ONLY_PROXY=true ;;
         *) REQUESTED_BACKENDS+=("$arg") ;;
     esac
 done
@@ -267,7 +270,7 @@ run_proxy_test() {
 
 echo "=== Rise Build E2E Tests ==="
 echo "Backends: ${REQUESTED_BACKENDS[*]}"
-echo "Proxy tests: $(if $NO_PROXY; then echo disabled; else echo enabled; fi)"
+echo "Proxy tests: $(if $NO_PROXY; then echo disabled; elif $ONLY_PROXY; then echo only; else echo enabled; fi)"
 echo ""
 
 # Start mitmproxy once for all proxy tests
@@ -283,7 +286,9 @@ for backend in "${REQUESTED_BACKENDS[@]}"; do
     basic_port=$((BASE_PORT + port_offset))
     port_offset=$((port_offset + 1))
 
-    run_basic_test "$backend" "$basic_port"
+    if ! $ONLY_PROXY; then
+        run_basic_test "$backend" "$basic_port"
+    fi
 
     if ! $NO_PROXY; then
         case "$backend" in

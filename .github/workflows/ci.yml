@@ -391,7 +391,7 @@ jobs:
         run: RISE_BIN=./target/release/rise bash tests/e2e-build/run.sh --no-proxy
 
       - name: Run e2e build tests (with proxy)
-        run: RISE_BIN=./target/release/rise bash tests/e2e-build/run.sh
+        run: RISE_BIN=./target/release/rise bash tests/e2e-build/run.sh --only-proxy
 
   e2e-minikube:
     name: Minikube end-to-end smoke tests
