@@ -227,10 +227,11 @@ fn convert_status_to_db(status: DeploymentStatus) -> DbDeploymentStatus {
 /// - RISE_ISSUER: Rise server URL (base URL for all Rise endpoints and JWT issuer)
 /// - RISE_APP_URL: Canonical URL where the app is accessible
 /// - RISE_APP_URLS: JSON array of all URLs where the app can be accessed
+/// - RISE_DEPLOYMENT_GROUP: The deployment group name (e.g. "default", "staging", "mr/123")
 ///
 /// These environment variables are visible in the Rise UI and allow deployed applications
 /// to validate Rise-issued JWTs (via /.well-known/openid-configuration), call Rise APIs,
-/// and know their own URLs.
+/// and know their own URLs and deployment context.
 async fn insert_rise_env_vars(
     state: &AppState,
     deployment: &crate::db::models::Deployment,
@@ -315,6 +316,24 @@ async fn insert_rise_env_vars(
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             format!("Failed to insert RISE_APP_URL: {}", e),
+        )
+    })?;
+
+    // 4. Insert RISE_DEPLOYMENT_GROUP
+    crate::db::env_vars::upsert_deployment_env_var(
+        &state.db_pool,
+        deployment.id,
+        "RISE_DEPLOYMENT_GROUP",
+        &deployment.deployment_group,
+        false, // Not a secret
+        false, // is_retrievable
+    )
+    .await
+    .map_err(|e| {
+        error!("Failed to insert RISE_DEPLOYMENT_GROUP env var: {}", e);
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to insert RISE_DEPLOYMENT_GROUP: {}", e),
         )
     })?;
 
