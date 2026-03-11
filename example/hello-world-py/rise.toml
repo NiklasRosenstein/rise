@@ -9,11 +9,4 @@ custom_domains = []
 
 [build]
 backend = "pack"
-builder = "paketobuildpacks/builder-jammy-base"
-
-# Specify Python buildpack explicitly
-buildpacks = ["paketo-buildpacks/python"]
-
-# Optional: Set Python version and other config via environment variables
-# Note: CLI -e flags will be appended to these (merged)
-env = ["BP_CPYTHON_VERSION=3.12", "BP_PIP_VERSION=latest"]
+builder = "heroku/builder:24"

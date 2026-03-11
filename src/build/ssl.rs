@@ -104,7 +104,7 @@ pub(crate) fn embed_ssl_cert_in_plan(plan_file: &Path, ssl_cert_file: &Path) -> 
     // Create certificate installation command
     let cert_command = serde_json::json!({
         "name": "ssl_ca_cert",
-        "path": "/etc/ssl/certs/ca-certificates.crt",
+        "path": SSL_CERT_PATHS[0],
         "customName": "rise: install SSL certificate"
     });
 

@@ -11,6 +11,11 @@ use crate::config::{ContainerCli, ContainerRuntime};
 
 use super::method::{requires_buildkit, BuildMethod};
 
+/// Daemon version label value. Bump this whenever the managed BuildKit daemon
+/// creation parameters change (e.g. new flags, image updates) to force
+/// recreation of stale daemons.
+const DAEMON_VERSION: &str = "2";
+
 /// Compute SHA256 hash of a file
 pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
     let contents = fs::read(path).context("Failed to read certificate file")?;
@@ -177,6 +182,70 @@ fn get_config_hash_label_from_container(container_cli: &str, daemon_name: &str) 
     None
 }
 
+/// Get proxy hash label from container
+fn get_proxy_hash_label(container_cli: &str, daemon_name: &str) -> Option<String> {
+    let output = Command::new(container_cli)
+        .args([
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"rise.proxy_hash\"}}",
+            daemon_name,
+        ])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let label_value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !label_value.is_empty() && label_value != "<no value>" {
+            return Some(label_value);
+        }
+    }
+
+    None
+}
+
+/// Compute expected proxy hash from proxy vars (None if no proxy vars)
+fn compute_proxy_hash(proxy_vars: &std::collections::HashMap<String, String>) -> Option<String> {
+    if proxy_vars.is_empty() {
+        return None;
+    }
+
+    let mut sorted_keys: Vec<&String> = proxy_vars.keys().collect();
+    sorted_keys.sort();
+
+    let mut input = String::new();
+    for key in &sorted_keys {
+        input.push_str(key);
+        input.push('=');
+        input.push_str(&proxy_vars[*key]);
+        input.push('\n');
+    }
+
+    Some(compute_string_hash(&input))
+}
+
+/// Get daemon version label from container
+fn get_daemon_version_label(container_cli: &str, daemon_name: &str) -> Option<String> {
+    let output = Command::new(container_cli)
+        .args([
+            "inspect",
+            "--format",
+            "{{index .Config.Labels \"rise.daemon_version\"}}",
+            daemon_name,
+        ])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let label_value = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !label_value.is_empty() && label_value != "<no value>" {
+            return Some(label_value);
+        }
+    }
+
+    None
+}
+
 /// Represents the state of a BuildKit daemon
 #[derive(Debug, PartialEq)]
 enum DaemonState {
@@ -279,6 +348,7 @@ fn create_buildkit_daemon(
     daemon_name: &str,
     ssl_cert_file: Option<&Path>,
     network_name: Option<&str>,
+    proxy_vars: &std::collections::HashMap<String, String>,
 ) -> Result<String> {
     if let Some(cert_path) = ssl_cert_file {
         info!(
@@ -307,7 +377,9 @@ fn create_buildkit_daemon(
         "-d",
         "--add-host",
         "host.docker.internal:host-gateway",
-    ]);
+        "--label",
+    ])
+    .arg(format!("rise.daemon_version={}", DAEMON_VERSION));
 
     // Podman with cgroup v2 does not delegate the memory controller to containers
     // by default, which causes runc (used internally by BuildKit) to fail with:
@@ -379,6 +451,27 @@ fn create_buildkit_daemon(
         }
     }
 
+    // Pass proxy environment variables so the daemon can fetch images through the proxy
+    if !proxy_vars.is_empty() {
+        info!("Passing proxy environment variables to BuildKit daemon");
+        let mut sorted_keys: Vec<&String> = proxy_vars.keys().collect();
+        sorted_keys.sort();
+
+        let mut proxy_hash_input = String::new();
+        for key in &sorted_keys {
+            let value = &proxy_vars[*key];
+            cmd.arg("-e").arg(format!("{}={}", key, value));
+            proxy_hash_input.push_str(key);
+            proxy_hash_input.push('=');
+            proxy_hash_input.push_str(value);
+            proxy_hash_input.push('\n');
+        }
+
+        let proxy_hash = compute_string_hash(&proxy_hash_input);
+        cmd.arg("--label")
+            .arg(format!("rise.proxy_hash={}", proxy_hash));
+    }
+
     cmd.arg("moby/buildkit");
 
     let status = cmd.status().context("Failed to start BuildKit daemon")?;
@@ -407,14 +500,53 @@ pub(crate) fn ensure_managed_buildkit_daemon(
 ) -> Result<String> {
     let daemon_name = "rise-buildkit";
 
+    // Read proxy vars (transformed for container use) so the daemon can fetch images through proxy
+    let proxy_vars = super::proxy::read_and_transform_proxy_vars();
+
     // Read network configuration from environment
     let network_name = super::env_var_non_empty("RISE_MANAGED_BUILDKIT_NETWORK_NAME");
 
     // Get expected config hash (None if no insecure registries configured)
     let expected_config_hash = generate_buildkit_config().map(|(_, hash)| hash);
 
+    // Get expected proxy hash
+    let expected_proxy_hash = compute_proxy_hash(&proxy_vars);
+
     // Get current daemon state
     let current_state = get_daemon_state(container_cli.command(), daemon_name);
+
+    // Check daemon version — recreate if outdated (e.g. missing --add-host flag)
+    if current_state != DaemonState::NotFound {
+        let current_version = get_daemon_version_label(container_cli.command(), daemon_name);
+        if current_version.as_deref() != Some(DAEMON_VERSION) {
+            info!(
+                "BuildKit daemon version changed ({:?} -> {}), recreating",
+                current_version, DAEMON_VERSION
+            );
+            stop_buildkit_daemon(container_cli, daemon_name)?;
+            return create_buildkit_daemon(
+                container_cli,
+                daemon_name,
+                ssl_cert_file,
+                network_name.as_deref(),
+                &proxy_vars,
+            );
+        }
+
+        // Check if proxy configuration has changed
+        let current_proxy_hash = get_proxy_hash_label(container_cli.command(), daemon_name);
+        if current_proxy_hash != expected_proxy_hash {
+            info!("Proxy configuration has changed, recreating daemon");
+            stop_buildkit_daemon(container_cli, daemon_name)?;
+            return create_buildkit_daemon(
+                container_cli,
+                daemon_name,
+                ssl_cert_file,
+                network_name.as_deref(),
+                &proxy_vars,
+            );
+        }
+    }
 
     match (ssl_cert_file, &current_state) {
         // Certificate provided, daemon has matching cert
@@ -519,6 +651,7 @@ pub(crate) fn ensure_managed_buildkit_daemon(
         daemon_name,
         ssl_cert_file,
         network_name.as_deref(),
+        &proxy_vars,
     )
 }
 
@@ -576,6 +709,108 @@ pub(crate) fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) ->
 
     info!("Buildx builder '{}' created successfully", builder_name);
     Ok(builder_name.to_string())
+}
+
+/// Resolve the gateway IP of a container (i.e. the host IP reachable from inside
+/// that container). Used to pass a concrete IP for `--add-host host.docker.internal:<ip>`
+/// to buildx build, since the remote driver cannot resolve the `host-gateway` magic value
+/// but build containers need to reach the host (e.g. for proxy).
+pub(crate) fn resolve_host_gateway_ip(container_cli: &str, container_name: &str) -> Option<String> {
+    // Prefer reading the resolved host.docker.internal IP from the container's /etc/hosts.
+    // The daemon is created with `--add-host host.docker.internal:host-gateway`, and the
+    // container runtime resolves `host-gateway` to a concrete IP at creation time. Reading
+    // it back gives us the correct host IP even through VM layers (e.g. Podman Machine),
+    // where NetworkSettings.Gateway returns the bridge IP inside the VM rather than the
+    // actual host IP.
+    if let Some(ip) = resolve_from_etc_hosts(container_cli, container_name) {
+        debug!(
+            "Resolved host gateway IP for '{}' from /etc/hosts: {}",
+            container_name, ip
+        );
+        return Some(ip);
+    }
+
+    // Fallback: use the default bridge network gateway from container inspection.
+    let output = Command::new(container_cli)
+        .args([
+            "inspect",
+            "--format",
+            "{{.NetworkSettings.Gateway}}",
+            container_name,
+        ])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !ip.is_empty() {
+            debug!(
+                "Resolved host gateway IP for '{}' from NetworkSettings.Gateway: {}",
+                container_name, ip
+            );
+            return Some(ip);
+        }
+    }
+
+    warn!(
+        "Failed to resolve host gateway IP for container '{}'",
+        container_name
+    );
+    None
+}
+
+/// Read the resolved `host.docker.internal` IP from a container's /etc/hosts file.
+fn resolve_from_etc_hosts(container_cli: &str, container_name: &str) -> Option<String> {
+    let output = Command::new(container_cli)
+        .args(["exec", container_name, "cat", "/etc/hosts"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let hosts = String::from_utf8_lossy(&output.stdout);
+    for line in hosts.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.contains("host.docker.internal") {
+            let ip = line.split_whitespace().next()?;
+            return Some(ip.to_string());
+        }
+    }
+
+    None
+}
+
+/// Resolve the host gateway IP for a BuildKit container and apply it to proxy
+/// variables on the given command.
+///
+/// `container_name` is the BuildKit container (or buildx builder) to resolve
+/// the gateway IP from.  When `had_remote_host` is true but resolution fails,
+/// a warning is emitted so the user knows proxy routing may break.
+///
+/// Returns the (potentially rewritten) proxy/secret variables.
+pub(crate) fn resolve_and_apply_host_gateway(
+    cmd: &mut std::process::Command,
+    container_cli: &str,
+    vars: &std::collections::HashMap<String, String>,
+    container_name: Option<&str>,
+    had_remote_host: bool,
+) -> std::collections::HashMap<String, String> {
+    let gateway_ip = container_name.and_then(|name| resolve_host_gateway_ip(container_cli, name));
+
+    if had_remote_host && gateway_ip.is_none() && super::proxy::needs_host_gateway(vars) {
+        warn!(
+            "Proxy configuration references host.docker.internal but the host gateway IP \
+             could not be resolved for the remote BuildKit driver. Proxy routing may fail \
+             inside the build container."
+        );
+    }
+
+    super::proxy::apply_host_gateway(cmd, vars, gateway_ip.as_deref())
 }
 
 /// Warn user about SSL certificate issues when managed BuildKit is disabled

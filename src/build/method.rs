@@ -24,7 +24,7 @@ pub(crate) enum BuildMethod {
 /// Build-related CLI arguments that can be flattened into command structs
 #[derive(Debug, Clone, Args)]
 pub struct BuildArgs {
-    /// Build backend (docker, pack, railpack[:buildx], railpack:buildctl)
+    /// Build backend (docker[:build|:buildx|:buildctl], pack, railpack[:buildx|:buildctl])
     #[arg(long)]
     pub backend: Option<String>,
 
@@ -254,14 +254,14 @@ impl BuildMethod {
         match backend {
             "docker" | "docker:build" => Ok(BuildMethod::Docker { use_buildx: false }),
             "docker:buildx" => Ok(BuildMethod::Docker { use_buildx: true }),
-            "buildctl" => Ok(BuildMethod::Buildctl),
+            "buildctl" | "docker:buildctl" => Ok(BuildMethod::Buildctl),
             "pack" => Ok(BuildMethod::Pack),
             "railpack" | "railpack:buildx" => Ok(BuildMethod::Railpack {
                 use_buildctl: false,
             }),
             "railpack:buildctl" => Ok(BuildMethod::Railpack { use_buildctl: true }),
             _ => bail!(
-                "Invalid build backend '{}'. Supported: docker, docker:build, docker:buildx, buildctl, pack, railpack, railpack:buildctl",
+                "Invalid build backend '{}'. Supported: docker, docker:build, docker:buildx, buildctl, docker:buildctl, pack, railpack, railpack:buildctl",
                 backend
             ),
         }

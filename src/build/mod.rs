@@ -42,6 +42,23 @@ pub(crate) fn env_var_non_empty(key: &str) -> Option<String> {
         .and_then(|v| if v.is_empty() { None } else { Some(v) })
 }
 
+/// Resolve the `SSL_CERT_FILE` environment variable, returning `Some(path)` if
+/// the variable is set and the file exists. Logs a warning when the variable is
+/// set but points to a non-existent file.
+pub(crate) fn resolve_ssl_cert_file() -> Option<std::path::PathBuf> {
+    let ssl_cert_file = env_var_non_empty("SSL_CERT_FILE")?;
+    let path = std::path::PathBuf::from(&ssl_cert_file);
+    if path.exists() {
+        Some(path)
+    } else {
+        warn!(
+            "SSL_CERT_FILE set to '{}' but file not found",
+            ssl_cert_file
+        );
+        None
+    }
+}
+
 /// Parse a boolean environment variable.
 ///
 /// Returns `Some(true)` for "true"/"1", `Some(false)` for "false"/"0",
@@ -225,16 +242,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 warn!("--container-cli flag is ignored when using buildctl build method");
             }
             // Check for SSL certificate
-            let ssl_cert_file = env_var_non_empty("SSL_CERT_FILE");
-            let ssl_cert_path = ssl_cert_file.as_ref().and_then(|p| {
-                let path = Path::new(p);
-                if path.exists() {
-                    Some(path.to_path_buf())
-                } else {
-                    warn!("SSL_CERT_FILE set to '{}' but file not found", p);
-                    None
-                }
-            });
+            let ssl_cert_path = resolve_ssl_cert_file();
 
             // Construct dockerfile path
             let original_dockerfile_path = dockerfile
@@ -258,13 +266,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
 
             // Parse env vars into HashMap for secrets
             let mut secrets = proxy::read_and_transform_proxy_vars();
-            for env_var in &options.env {
-                if let Some((key, value)) = env_var.split_once('=') {
-                    secrets.insert(key.to_string(), value.to_string());
-                } else if let Ok(value) = std::env::var(env_var) {
-                    secrets.insert(env_var.to_string(), value);
-                }
-            }
+            secrets.extend(proxy::parse_env_vars(&options.env)?);
 
             // Add SSL cert using named build context (bind mount)
             // RAII cleanup via SslCertContext drop
@@ -297,6 +299,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 &local_contexts,
                 BuildctlFrontend::Dockerfile,
                 options.no_cache,
+                container_cli.command(),
             )?;
 
             // Note: SslCertContext cleanup is automatic via RAII when it goes out of scope
