@@ -726,7 +726,97 @@ pub async fn create_deployment(
 
     // Branch based on whether user provided a pre-built image
     if let Some(ref user_image) = payload.image {
-        // Path 1: Pre-built image deployment
+        if payload.push_image {
+            // Path 1a: Push-image deployment — CLI will pull and push to Rise registry
+            // Skip digest resolution: the image will be pushed to the internal registry by tag,
+            // and the controller uses get_image_tag() (the no-digest path) to pull from there.
+            info!("Creating push-image deployment with image: {}", user_image);
+
+            let credentials = state
+                .registry_provider
+                .get_credentials(&payload.project)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to get credentials: {}", e),
+                    )
+                })?;
+            let image_tag = state.registry_provider.get_image_tag(
+                &payload.project,
+                &deployment_id,
+                ImageTagType::ClientFacing,
+            );
+
+            let deployment = create_deployment_with_hooks(
+                &state,
+                db_deployments::CreateDeploymentParams {
+                    deployment_id: &deployment_id,
+                    project_id: project.id,
+                    created_by_id: user.id,
+                    status: DbDeploymentStatus::Pending,
+                    image: Some(user_image), // Store original user input for display
+                    image_digest: None, // No digest — controller will use internal registry tag
+                    rolled_back_from_deployment_id: None,
+                    deployment_group: &payload.group,
+                    expires_at,
+                    http_port: effective_http_port as i32,
+                    is_active: false,
+                },
+                &project,
+            )
+            .await?;
+
+            info!(
+                "Created push-image deployment {} for project {}",
+                deployment_id, payload.project
+            );
+
+            // Copy project environment variables to deployment
+            crate::db::env_vars::copy_project_env_vars_to_deployment(
+                &state.db_pool,
+                project.id,
+                deployment.id,
+            )
+            .await
+            .map_err(|e| {
+                error!(
+                    "Failed to copy environment variables for deployment {}: {}",
+                    deployment_id, e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to copy environment variables: {}", e),
+                )
+            })?;
+
+            crate::db::env_vars::upsert_deployment_env_var(
+                &state.db_pool,
+                deployment.id,
+                "PORT",
+                &effective_http_port.to_string(),
+                false,
+                false,
+            )
+            .await
+            .map_err(|e| {
+                error!("Failed to insert PORT env var: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to insert PORT env var: {}", e),
+                )
+            })?;
+
+            insert_rise_env_vars(&state, &deployment, &project).await?;
+
+            return Ok(Json(CreateDeploymentResponse {
+                deployment_id,
+                image_tag,
+                credentials,
+            }));
+        }
+
+        // Path 1b: Direct pre-built image deployment (no push)
         info!("Creating deployment with pre-built image: {}", user_image);
 
         // Normalize image reference (add registry and namespace if missing)
@@ -764,14 +854,14 @@ pub async fn create_deployment(
                 deployment_id: &deployment_id,
                 project_id: project.id,
                 created_by_id: user.id,
-                status: DbDeploymentStatus::Pushed, // Pre-built images skip build/push, go straight to Pushed
-                image: Some(user_image),            // Store original user input
-                image_digest: Some(&image_digest),  // Store resolved digest
-                rolled_back_from_deployment_id: None, // Not a rollback
-                deployment_group: &payload.group,   // deployment_group
-                expires_at,                         // expires_at
-                http_port: effective_http_port as i32, // http_port
-                is_active: false,                   // Deployments start as inactive
+                status: DbDeploymentStatus::Pushed,
+                image: Some(user_image),
+                image_digest: Some(&image_digest),
+                rolled_back_from_deployment_id: None,
+                deployment_group: &payload.group,
+                expires_at,
+                http_port: effective_http_port as i32,
+                is_active: false,
             },
             &project,
         )
@@ -825,7 +915,7 @@ pub async fn create_deployment(
         // Return response with digest as image_tag and empty credentials
         Ok(Json(CreateDeploymentResponse {
             deployment_id,
-            image_tag: image_digest, // Return digest for consistency
+            image_tag: image_digest,
             credentials: crate::server::registry::models::RegistryCredentials {
                 registry_url: String::new(),
                 username: String::new(),
