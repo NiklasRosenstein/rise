@@ -44,7 +44,7 @@ env = ["NODE_ENV=production", "BUILD_VERSION"]
 | `buildpacks` | Array | Buildpacks to use (pack backend only) |
 | `env` | Array | Build-time environment variables (format: `KEY=VALUE` or `KEY` to read from shell) |
 | `container_cli` | String | Container CLI: `docker` or `podman` |
-| `managed_buildkit` | Boolean | Enable managed BuildKit daemon for SSL support |
+| `managed_buildkit` | Boolean | Enable/disable managed BuildKit daemon (auto-enables when `SSL_CERT_FILE` is set) |
 | `no_cache` | Boolean | Disable build cache |
 
 ### Full Example

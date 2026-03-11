@@ -6,18 +6,38 @@ When building behind corporate proxies (Zscaler, Cloudflare) or in environments 
 
 Rise can manage a BuildKit daemon container with SSL certificates automatically mounted.
 
-### Enabling
+### Auto-Detection (Default)
+
+When no explicit setting is provided, managed BuildKit **automatically enables** if:
+
+1. The build method requires BuildKit (`docker:buildx`, `buildctl`, `railpack`)
+2. `SSL_CERT_FILE` is set in the environment
+3. `BUILDKIT_HOST` is not already set
+
+This means in most corporate/proxy environments, managed BuildKit "just works" without any flags.
+
+### Disabling
+
+If you don't need managed BuildKit (e.g., you manage your own daemon or don't need SSL certificate support), disable it explicitly:
 
 ```bash
 # CLI flag
-rise deploy --managed-buildkit
+rise deploy --managed-buildkit=false
 
 # Environment variable
-export RISE_MANAGED_BUILDKIT=true
+export RISE_MANAGED_BUILDKIT=false
 
 # rise.toml
 [build]
-managed_buildkit = true
+managed_buildkit = false
+```
+
+### Force Enabling
+
+To force managed BuildKit even without `SSL_CERT_FILE` (e.g., for insecure registries):
+
+```bash
+rise deploy --managed-buildkit
 ```
 
 ### How It Works
@@ -53,10 +73,10 @@ For Railpack builds, when `SSL_CERT_FILE` is set, Rise automatically embeds the 
 
 Unlike the Docker injection above, this **does** embed the certificate in the final image.
 
-**Use `--managed-buildkit` together** for comprehensive SSL support (daemon-level + build-level):
+When `SSL_CERT_FILE` is set, managed BuildKit also auto-enables, giving comprehensive SSL support at both the daemon and build level:
 
 ```bash
-rise deploy --backend railpack --managed-buildkit
+rise deploy --backend railpack
 ```
 
 ## Proxy Support
@@ -86,7 +106,7 @@ When using the managed BuildKit daemon with Docker Compose services (e.g., a loc
 
 ```bash
 export RISE_MANAGED_BUILDKIT_NETWORK_NAME=rise_default
-rise deploy --managed-buildkit
+rise deploy
 ```
 
 The daemon is recreated if the network name changes.
@@ -99,6 +119,8 @@ For local HTTP registries, configure BuildKit to allow insecure connections:
 export RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES="rise-registry:5000,localhost:5000"
 rise deploy --managed-buildkit
 ```
+
+Note: `--managed-buildkit` is needed here since insecure registries typically don't involve `SSL_CERT_FILE`, so auto-detection won't enable it.
 
 This generates a `buildkitd.toml` config at `~/.rise/buildkitd.toml`. For local development only.
 
