@@ -230,9 +230,6 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if !options.buildpacks.is_empty() {
                 warn!("--buildpack flags are ignored when using buildctl build method");
             }
-            if options.explicit_container_cli {
-                warn!("--container-cli flag is ignored when using buildctl build method");
-            }
             if options.railpack_embed_ssl_cert {
                 warn!("--railpack-embed-ssl-cert flag is ignored when using buildctl build method");
             }
@@ -304,6 +301,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 &local_contexts,
                 BuildctlFrontend::Dockerfile,
                 options.no_cache,
+                container_cli.command(),
             )?;
 
             // Note: SslCertContext cleanup is automatic via RAII when it goes out of scope

@@ -272,7 +272,10 @@ echo ""
 
 # Start mitmproxy once for all proxy tests
 if ! $NO_PROXY; then
-    start_mitmproxy
+    if ! start_mitmproxy; then
+        echo "ERROR: Failed to start mitmproxy; proxy-based tests require Docker and the mitmproxy image." >&2
+        exit 1
+    fi
 fi
 
 port_offset=0

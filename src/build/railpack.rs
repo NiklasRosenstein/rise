@@ -106,11 +106,8 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
     };
 
     // Read proxy vars and parse user-provided env vars before railpack prepare
-    let proxy_vars = proxy::read_and_transform_proxy_vars();
+    let mut all_secrets = proxy::read_and_transform_proxy_vars();
     let user_env_vars = proxy::parse_env_vars(options.env)?;
-
-    // Combine proxy vars and user env vars for secrets
-    let mut all_secrets = proxy_vars.clone();
     all_secrets.extend(user_env_vars);
 
     // Add SSL env vars before railpack prepare so they are declared in the plan
@@ -145,7 +142,20 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             .arg(format!("{}={}", key, all_secrets[key]));
     }
 
-    debug!("Executing command: {:?}", cmd);
+    // Log command with redacted secret values
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        let redacted_env: Vec<String> = all_secrets
+            .keys()
+            .map(|k| format!("--env {}=<redacted>", k))
+            .collect();
+        debug!(
+            "Executing: railpack prepare {} --plan-out {} --info-out {} {}",
+            options.app_path,
+            plan_file.display(),
+            info_file.display(),
+            redacted_env.join(" ")
+        );
+    }
 
     let status = cmd.status().context("Failed to execute railpack prepare")?;
 
@@ -199,6 +209,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             &HashMap::new(), // No local contexts for Railpack
             BuildctlFrontend::Railpack,
             options.no_cache,
+            options.container_cli,
         )?;
     } else {
         build_with_buildx(
@@ -280,9 +291,17 @@ fn build_with_buildx(
     }
 
     // Resolve host gateway IP and rewrite proxy URLs in secrets.
-    let gateway_ip = builder_name
-        .as_ref()
-        .and_then(|b| super::buildkit::resolve_host_gateway_ip(container_cli, b));
+    // Prefer the BuildKit container name from BUILDKIT_HOST (docker-container://...)
+    // over the builder name, since they may differ.
+    let gateway_ip = {
+        let container_name = std::env::var("BUILDKIT_HOST")
+            .ok()
+            .and_then(|h| h.strip_prefix("docker-container://").map(str::to_string))
+            .or_else(|| builder_name.clone());
+        container_name
+            .as_deref()
+            .and_then(|name| super::buildkit::resolve_host_gateway_ip(container_cli, name))
+    };
     let effective_secrets = proxy::apply_host_gateway(&mut cmd, secrets, gateway_ip.as_deref());
 
     // Add secrets via prefixed env vars so the docker CLI keeps its original
@@ -336,6 +355,7 @@ pub(crate) fn build_with_buildctl(
     local_contexts: &HashMap<String, String>,
     frontend: BuildctlFrontend,
     no_cache: bool,
+    container_cli: &str,
 ) -> Result<()> {
     // Check buildctl availability
     let buildctl_check = Command::new("buildctl").arg("--version").output();
@@ -422,7 +442,7 @@ pub(crate) fn build_with_buildctl(
         ));
         cmd.stdout(std::process::Stdio::piped());
 
-        debug!("Executing command: {:?} | docker load", cmd);
+        debug!("Executing command: {:?} | {} load", cmd, container_cli);
 
         let mut buildctl_child = cmd.spawn().context("Failed to execute buildctl build")?;
         let buildctl_stdout = buildctl_child
@@ -430,11 +450,11 @@ pub(crate) fn build_with_buildctl(
             .take()
             .context("Failed to capture buildctl stdout")?;
 
-        let docker_load = Command::new("docker")
+        let docker_load = Command::new(container_cli)
             .arg("load")
             .stdin(buildctl_stdout)
             .status()
-            .context("Failed to execute docker load")?;
+            .with_context(|| format!("Failed to execute {} load", container_cli))?;
 
         let buildctl_status = buildctl_child
             .wait()
@@ -443,7 +463,7 @@ pub(crate) fn build_with_buildctl(
             bail!("buildctl build failed with status: {}", buildctl_status);
         }
         if !docker_load.success() {
-            bail!("docker load failed with status: {}", docker_load);
+            bail!("{} load failed with status: {}", container_cli, docker_load);
         }
     }
 

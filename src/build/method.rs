@@ -276,7 +276,7 @@ impl BuildMethod {
             }),
             "railpack:buildctl" => Ok(BuildMethod::Railpack { use_buildctl: true }),
             _ => bail!(
-                "Invalid build backend '{}'. Supported: docker, docker:build, docker:buildx, docker:buildctl, pack, railpack, railpack:buildctl",
+                "Invalid build backend '{}'. Supported: docker, docker:build, docker:buildx, buildctl, docker:buildctl, pack, railpack, railpack:buildctl",
                 backend
             ),
         }

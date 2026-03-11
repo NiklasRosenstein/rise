@@ -36,7 +36,7 @@ env = ["NODE_ENV=production", "BUILD_VERSION"]
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `backend` | String | Build backend: `docker`, `docker:build`, `docker:buildx`, `docker:buildctl`, `pack`, `railpack`, `railpack:buildctl` |
+| `backend` | String | Build backend: `docker`, `docker:build`, `docker:buildx`, `buildctl`, `docker:buildctl`, `pack`, `railpack`, `railpack:buildctl` |
 | `dockerfile` | String | Path to Dockerfile, relative to `rise.toml` (default: `Dockerfile` or `Containerfile`) |
 | `build_context` | String | Default build context path for Docker builds, relative to `rise.toml` |
 | `build_contexts` | Object | Named build contexts for multi-stage Docker builds (format: `{ "name" = "path" }`) |
