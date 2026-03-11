@@ -74,11 +74,17 @@ pub(crate) fn format_for_pack(vars: &HashMap<String, String>) -> Vec<String> {
         .collect()
 }
 
-/// Add secret references to railpack plan.json
+/// Adds secret references to a railpack plan.json so the frontend exposes
+/// them as environment variables during build commands.
 ///
-/// BuildKit secrets must be passed via CLI flags (--secret id=KEY,env=KEY),
-/// not embedded in the plan JSON. This function only adds references to the
-/// secrets in each step so the railpack frontend knows to expose them.
+/// Two locations are updated:
+/// - Top-level `secrets` array: tells the railpack frontend to mount these
+///   secrets as environment variables (via SecretAsEnv) into every command.
+/// - Per-step `secrets` array: tells railpack to invalidate the step's
+///   build cache when these secrets change.
+///
+/// The actual secret values are passed separately via CLI flags
+/// (`--secret id=KEY,env=KEY`) to docker buildx / buildctl.
 pub(crate) fn add_secret_refs_to_plan(
     plan_file: &Path,
     vars: &HashMap<String, String>,
@@ -105,6 +111,26 @@ pub(crate) fn add_secret_refs_to_plan(
 
     let plan_obj = plan.as_object_mut().unwrap();
 
+    // Add secret names to the top-level "secrets" array.
+    // The railpack frontend uses this list to mount secrets as environment variables
+    // (via llb.AddSecret with SecretAsEnv=true) into every build command.
+    let plan_secrets = if let Some(existing) = plan_obj.get_mut("secrets") {
+        existing
+            .as_array_mut()
+            .context("plan 'secrets' field is not an array")?
+    } else {
+        plan_obj.insert("secrets".to_string(), Value::Array(vec![]));
+        plan_obj
+            .get_mut("secrets")
+            .unwrap()
+            .as_array_mut()
+            .unwrap()
+    };
+
+    for key in vars.keys() {
+        plan_secrets.push(Value::String(key.clone()));
+    }
+
     // Get the steps array
     let steps = plan_obj
         .get_mut("steps")
@@ -115,7 +141,9 @@ pub(crate) fn add_secret_refs_to_plan(
         anyhow::bail!("plan.json has empty 'steps' array");
     }
 
-    // Add secret references to all steps
+    // Also add secret references to each step's "secrets" array.
+    // The per-step secrets control cache invalidation: when a listed secret
+    // changes, the step's build cache is invalidated.
     for step in steps {
         if !step.is_object() {
             continue;
@@ -123,7 +151,6 @@ pub(crate) fn add_secret_refs_to_plan(
 
         let step_obj = step.as_object_mut().unwrap();
 
-        // Get or create step's secrets array
         let step_secrets = if let Some(existing) = step_obj.get_mut("secrets") {
             existing
                 .as_array_mut()
@@ -133,7 +160,6 @@ pub(crate) fn add_secret_refs_to_plan(
             step_obj.get_mut("secrets").unwrap().as_array_mut().unwrap()
         };
 
-        // Add each proxy variable name to the step's secrets
         for key in vars.keys() {
             step_secrets.push(Value::String(key.clone()));
         }
@@ -255,13 +281,15 @@ mod tests {
         let modified = fs::read_to_string(&plan_file).unwrap();
         let plan: serde_json::Value = serde_json::from_str(&modified).unwrap();
 
-        // Check step secrets (should have references)
+        // Top-level secrets should be present (controls env var mounting)
+        let top_secrets = plan["secrets"].as_array().unwrap();
+        assert_eq!(top_secrets.len(), 1);
+        assert_eq!(top_secrets[0], "HTTP_PROXY");
+
+        // Step secrets should also be present (controls cache invalidation)
         let step_secrets = plan["steps"][0]["secrets"].as_array().unwrap();
         assert_eq!(step_secrets.len(), 1);
         assert_eq!(step_secrets[0], "HTTP_PROXY");
-
-        // Top-level secrets should NOT be present
-        assert!(plan.get("secrets").is_none());
     }
 
     #[test]
@@ -293,6 +321,12 @@ mod tests {
         let modified = fs::read_to_string(&plan_file).unwrap();
         let plan: serde_json::Value = serde_json::from_str(&modified).unwrap();
 
+        // Top-level secrets
+        let top_secrets = plan["secrets"].as_array().unwrap();
+        assert_eq!(top_secrets.len(), 1);
+        assert_eq!(top_secrets[0], "HTTP_PROXY");
+
+        // All steps should have the secret reference
         let steps = plan["steps"].as_array().unwrap();
         assert_eq!(steps.len(), 3);
 
