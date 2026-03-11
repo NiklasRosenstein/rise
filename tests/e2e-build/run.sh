@@ -222,7 +222,12 @@ run_basic_test() {
 
     # Run container
     docker rm -f "$ctr" 2>/dev/null || true
-    docker run -d --name "$ctr" -p "${port}:8000" "$tag" >/dev/null
+    if ! docker run -d --name "$ctr" -p "${port}:8000" "$tag" >/dev/null; then
+        log_fail "$test_label (container failed to start)"
+        echo "  Container logs (if available):"
+        docker logs "$ctr" 2>&1 | tail -10 | sed 's/^/    /' || true
+        return
+    fi
 
     # Verify HTTP response
     if wait_for_http "http://localhost:${port}/" "rise-e2e-ok" 30; then

@@ -25,7 +25,7 @@ Rise supports multiple build backends for creating container images from your ap
 | Native `--push`* | | Partial | x | | Partial | x |
 | Local output | Direct | `--load` | `docker load` pipe | Direct | `--load` | `docker load` pipe |
 | Managed BuildKit | | x | x | N/A | x | x |
-| Build contexts | x | x | x | | | |
+| Build contexts | x | x | | | | |
 
 \*Native `--push`: Whether the build command supports pushing directly. "Partial" means some CLI frontends (e.g., Podman buildx) don't support the `--push` flag; Rise detects this and falls back to a separate push step. Either way, images always get pushed when deploying — this only affects the internal mechanism.
 

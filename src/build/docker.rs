@@ -170,6 +170,18 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
             let container_name = host.strip_prefix("docker-container://").unwrap_or(host);
             super::buildkit::resolve_host_gateway_ip(options.container_cli, container_name)
         });
+
+        if options.buildkit_host.is_some()
+            && gateway_ip.is_none()
+            && super::proxy::needs_host_gateway(&proxy_vars)
+        {
+            warn!(
+                "Proxy configuration references host.docker.internal but the host gateway IP \
+                 could not be resolved for the remote BuildKit driver. Proxy routing may fail \
+                 inside the build container."
+            );
+        }
+
         let effective_proxy_vars =
             super::proxy::apply_host_gateway(&mut cmd, &proxy_vars, gateway_ip.as_deref());
 

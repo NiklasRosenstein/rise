@@ -293,15 +293,25 @@ fn build_with_buildx(
     // Resolve host gateway IP and rewrite proxy URLs in secrets.
     // Prefer the BuildKit container name from BUILDKIT_HOST (docker-container://...)
     // over the builder name, since they may differ.
+    let buildkit_host_env = std::env::var("BUILDKIT_HOST").ok();
     let gateway_ip = {
-        let container_name = std::env::var("BUILDKIT_HOST")
-            .ok()
+        let container_name = buildkit_host_env
+            .as_deref()
             .and_then(|h| h.strip_prefix("docker-container://").map(str::to_string))
             .or_else(|| builder_name.clone());
         container_name
             .as_deref()
             .and_then(|name| super::buildkit::resolve_host_gateway_ip(container_cli, name))
     };
+
+    if buildkit_host_env.is_some() && gateway_ip.is_none() && proxy::needs_host_gateway(secrets) {
+        warn!(
+            "Proxy configuration references host.docker.internal but the host gateway IP \
+             could not be resolved for the remote BuildKit driver. Proxy routing may fail \
+             inside the build container."
+        );
+    }
+
     let effective_secrets = proxy::apply_host_gateway(&mut cmd, secrets, gateway_ip.as_deref());
 
     // Add secrets via prefixed env vars so the docker CLI keeps its original
@@ -339,7 +349,7 @@ fn build_with_buildx(
 ///
 /// The `secrets` HashMap contains environment variable secrets:
 /// - key: environment variable name
-/// - value: value is ignored (secrets are read from the current environment)
+/// - value: the actual secret value (passed to the build via prefixed env vars)
 ///
 /// The `local_contexts` HashMap contains named build contexts:
 /// - key: context name (e.g., "rise-internal-ssl-cert")
