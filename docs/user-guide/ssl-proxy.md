@@ -2,6 +2,23 @@
 
 When building behind corporate proxies (Zscaler, Cloudflare) or in environments with custom CA certificates, builds may fail with SSL certificate verification errors. Rise provides several mechanisms to handle this.
 
+## Quick Start
+
+For most corporate proxy setups, you need two things:
+
+```bash
+# Point to your custom CA certificate bundle
+export SSL_CERT_FILE=/path/to/ca-bundle.crt
+
+# Set your proxy (Rise auto-detects these)
+export HTTPS_PROXY=http://proxy.corp.example:3128
+
+# Deploy with managed BuildKit (recommended for SSL support)
+rise deploy --managed-buildkit
+```
+
+Rise will automatically inject the certificate into builds and transform proxy URLs for container environments.
+
 ## Managed BuildKit Daemon
 
 Rise can manage a BuildKit daemon container with SSL certificates automatically mounted.
@@ -23,8 +40,24 @@ managed_buildkit = true
 ### How It Works
 
 1. If `BUILDKIT_HOST` is already set, Rise uses your existing daemon
-2. Otherwise, Rise creates a `rise-buildkit` container with SSL certificates mounted (if `SSL_CERT_FILE` is set)
-3. If `SSL_CERT_FILE` changes, the daemon is automatically recreated
+2. Otherwise, Rise creates a `rise-buildkit` container with:
+   - SSL certificates mounted (if `SSL_CERT_FILE` is set)
+   - `--add-host host.docker.internal:host-gateway` for host network access
+   - Proxy environment variables passed through to the daemon
+   - `--cgroupns=host` when running under Podman (see [Container Runtime Differences](#container-runtime-differences))
+3. The daemon is automatically recreated when its configuration changes (see below)
+
+### Daemon Lifecycle
+
+The managed daemon is recreated when any of the following change:
+
+- SSL certificate content
+- Proxy variable values (`HTTP_PROXY`, `HTTPS_PROXY`, `NO_PROXY` and lowercase variants)
+- Network configuration (`RISE_MANAGED_BUILDKIT_NETWORK_NAME`)
+- Insecure registry configuration (`RISE_MANAGED_BUILDKIT_INSECURE_REGISTRIES`)
+- Internal Rise version updates (e.g., new daemon flags)
+
+You don't need to manually stop or restart the daemon — Rise handles this automatically.
 
 ### Backend Compatibility
 
@@ -94,6 +127,46 @@ Since builds run in containers, `localhost` and `127.0.0.1` addresses are automa
 
 No configuration is needed — proxy support is fully automatic.
 
+### How Proxy Variables Are Injected Per Backend
+
+Each backend uses a different mechanism to pass proxy variables into the build:
+
+| Backend | Mechanism | Example |
+|---------|-----------|---------|
+| `docker` / `docker:build` | `--build-arg` | `--build-arg HTTPS_PROXY=http://...` |
+| `docker:buildx` | `--build-arg` | `--build-arg HTTPS_PROXY=http://...` |
+| `pack` | `--env` | `--env HTTPS_PROXY=http://...` |
+| `railpack:buildx` | BuildKit secrets | `--secret id=HTTPS_PROXY,env=_RISE_SECRET_HTTPS_PROXY` |
+| `railpack:buildctl` / `buildctl` | BuildKit secrets | `--secret id=HTTPS_PROXY,env=_RISE_SECRET_HTTPS_PROXY` |
+
+The `_RISE_SECRET_` prefix in the railpack/buildctl backends exists because the `docker` CLI itself reads proxy variables from its own environment. Since `--secret id=KEY,env=KEY` reads from the subprocess environment, storing the *transformed* proxy value (with `host.docker.internal`) under the original name would interfere with the CLI's own proxy settings. The prefixed name avoids this conflict while BuildKit sees the secret under the original key name.
+
+### Host Gateway Resolution
+
+When using `docker:buildx` with a managed BuildKit daemon, Rise needs to resolve a concrete IP address for `host.docker.internal`. This is necessary because the buildx remote driver cannot resolve the `host-gateway` magic value.
+
+Resolution order:
+
+1. **Primary**: Read `/etc/hosts` from inside the BuildKit daemon container to find the `host.docker.internal` entry
+2. **Fallback**: Use `NetworkSettings.Gateway` from `docker inspect`
+
+The `/etc/hosts` method is preferred because it correctly handles VM layers. With Podman Machine, `NetworkSettings.Gateway` returns the `podman0` bridge IP *inside* the VM, which is not reachable from the host. The `/etc/hosts` file contains the actual host IP as resolved by the container runtime's `--add-host host.docker.internal:host-gateway` flag.
+
+## Container Runtime Differences
+
+### Docker Desktop
+
+Works out of the box. `host.docker.internal` is natively supported, and BuildKit runs without additional flags.
+
+### Podman / Podman Machine
+
+Rise detects Podman and applies the following adjustments automatically:
+
+- **`--cgroupns=host`** is added to the managed BuildKit daemon container. This is needed for cgroup v2 memory controller delegation — without it, runc can fail inside the BuildKit container.
+- **`--push` fallback**: Some Podman buildx implementations don't support the `--push` flag. Rise detects this and falls back to building with `--load` followed by a separate `docker push` step.
+- **Host gateway IP**: Resolved from `/etc/hosts` inside the daemon container rather than `NetworkSettings.Gateway`, which returns an unreachable VM-internal bridge IP when using Podman Machine (see [Host Gateway Resolution](#host-gateway-resolution)).
+- **Container cleanup**: The managed daemon is removed with `rm -f` instead of `stop` because Podman does not always clean up `--rm` containers reliably on stop.
+
 ## BuildKit Network Connectivity
 
 When using the managed BuildKit daemon with Docker Compose services (e.g., a local registry), connect BuildKit to your compose network:
@@ -134,7 +207,3 @@ rise deploy --backend railpack
 - **`docker:build` does not support SSL cert injection.** Use `docker:buildx` instead, which uses BuildKit secrets to mount certificates during `RUN` steps.
 - **Paketo buildpacks ignore `SSL_CERT_FILE` for their own downloads.** Paketo buildpack binaries use statically-linked Go TLS which doesn't read system CA bundles. Use `heroku/builder:24` instead, which correctly respects `SSL_CERT_FILE`.
 - **`buildctl` non-push builds pipe through `docker load`.** When building locally (not pushing directly to a registry), `buildctl` outputs a tar archive that is loaded via `docker load`, which is slower than `docker buildx` for local development.
-
-## Podman Desktop
-
-If using Podman Desktop behind a corporate proxy, you may need to configure SSL certificates in Podman's machine settings. Consult Podman Desktop documentation for your proxy setup.

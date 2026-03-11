@@ -2,23 +2,39 @@
 
 Rise supports multiple build backends for creating container images from your application code. Building happens automatically as part of `rise deploy`, or you can build standalone with `rise build`.
 
+> **Note:** Rise currently targets `linux/amd64` exclusively. The `--platform linux/amd64` flag is added to build commands where supported.
+
 ## Build Backends
 
-| Backend | Build Tool | Best For |
-|---------|------------|----------|
-| `docker` / `docker:build` | docker build | Simple local builds, maximum compatibility |
-| `docker:buildx` | docker buildx build | BuildKit features (secrets, caching, multi-platform) |
-| `docker:buildctl` / `buildctl` | buildctl | Dockerfile builds via buildctl (no Docker daemon needed) |
-| `pack` | pack CLI | Cloud Native Buildpacks (no Dockerfile needed) |
-| `railpack` / `railpack:buildx` | railpack + buildx | Railway Railpacks with BuildKit |
-| `railpack:buildctl` | railpack + buildctl | Railpacks with direct buildctl |
+| Backend | Build Tool | Invocation | Best For |
+|---------|------------|------------|----------|
+| `docker` / `docker:build` | docker build | `docker build` | Simple local builds, maximum compatibility |
+| `docker:buildx` | docker buildx build | `docker buildx build` | BuildKit features (secrets, caching, multi-platform) |
+| `docker:buildctl` / `buildctl` | buildctl | `buildctl build` | Dockerfile builds via buildctl (no Docker daemon needed) |
+| `pack` | pack CLI | `pack build` | Cloud Native Buildpacks (no Dockerfile needed) |
+| `railpack` / `railpack:buildx` | railpack + buildx | `railpack prepare` then `docker buildx build` | Railway Railpacks with BuildKit |
+| `railpack:buildctl` | railpack + buildctl | `railpack prepare` then `buildctl build` | Railpacks with direct buildctl |
+
+## Feature Matrix
+
+| Feature | docker:build | docker:buildx | buildctl | pack | railpack:buildx | railpack:buildctl |
+|---|:---:|:---:|:---:|:---:|:---:|:---:|
+| Requires BuildKit | | x | x | | x | x |
+| SSL cert injection | | x | x | x | x | x |
+| Proxy support | x | x | x | x | x | x |
+| Native `--push`* | | Partial | x | | Partial | x |
+| Local output | Direct | `--load` | `docker load` pipe | Direct | `--load` | `docker load` pipe |
+| Managed BuildKit | | x | x | N/A | x | x |
+| Build contexts | x | x | x | | | |
+
+\*Native `--push`: Whether the build command supports pushing directly. "Partial" means some CLI frontends (e.g., Podman buildx) don't support the `--push` flag; Rise detects this and falls back to a separate push step. Either way, images always get pushed when deploying — this only affects the internal mechanism.
 
 ## Auto-Detection
 
 When `--backend` is not specified, Rise detects the build method automatically:
 
-- If `Dockerfile` or `Containerfile` exists in the project directory → `docker` backend
-- Otherwise → error (you must specify a backend explicitly)
+- If `Dockerfile` or `Containerfile` exists in the project directory → `docker:buildx` (if buildx is available, otherwise `docker:build`)
+- Otherwise → `railpack:buildx`
 
 Override auto-detection with `--backend` or in `rise.toml`:
 
@@ -39,6 +55,11 @@ backend = "pack"
 rise build myapp:latest --backend docker
 rise deploy --backend docker:buildx
 ```
+
+### How It Works
+
+- **`docker:build`**: Runs `docker build` with `--build-arg` for environment variables and `--platform linux/amd64`. Does not support SSL certificate injection.
+- **`docker:buildx`**: Runs `docker buildx build` via a managed BuildKit daemon. Adds `--platform linux/amd64` and uses `--load` (local) or `--push` (deploy). SSL certificates are injected by preprocessing the Dockerfile to add BuildKit bind mounts to each `RUN` step.
 
 ### Custom Dockerfile Path
 
@@ -93,6 +114,10 @@ rise build myapp:latest --backend pack
 rise deploy --backend pack --builder heroku/builder:24
 ```
 
+### How It Works
+
+Runs `pack build` with `--docker-host inherit --network host`. Environment variables are passed via `--env KEY=VALUE`. SSL certificates are volume-mounted to all common distro paths (Debian, RedHat, Alpine, etc.) with matching SSL environment variables set.
+
 Configure builder and buildpacks in `rise.toml`:
 
 ```toml
@@ -110,6 +135,13 @@ Uses Railway Railpacks with BuildKit:
 rise build myapp:latest --backend railpack
 rise deploy --backend railpack:buildctl
 ```
+
+### How It Works
+
+Railpack builds are a two-step process:
+
+1. **Prepare**: `railpack prepare` generates a build plan (JSON) from your application code. Environment variables and secrets are declared at this stage.
+2. **Build**: The plan is built using either `docker buildx build` (with the `railpack-frontend` BuildKit frontend) or `buildctl build` (with the `gateway.v0` frontend). Environment variables are passed as BuildKit secrets, not build args.
 
 If builds fail with the error `requested experimental feature mergeop has been disabled`, create a custom buildx builder:
 

@@ -716,9 +716,21 @@ pub(crate) fn ensure_buildx_builder(container_cli: &str, buildkit_host: &str) ->
 /// to buildx build, since the remote driver cannot resolve the `host-gateway` magic value
 /// but build containers need to reach the host (e.g. for proxy).
 pub(crate) fn resolve_host_gateway_ip(container_cli: &str, container_name: &str) -> Option<String> {
-    // Get the default bridge network gateway. This is the host IP reachable from the container.
-    // We use .NetworkSettings.Gateway (the default network) rather than iterating all networks
-    // to avoid concatenated IPs when the container is on multiple networks.
+    // Prefer reading the resolved host.docker.internal IP from the container's /etc/hosts.
+    // The daemon is created with `--add-host host.docker.internal:host-gateway`, and the
+    // container runtime resolves `host-gateway` to a concrete IP at creation time. Reading
+    // it back gives us the correct host IP even through VM layers (e.g. Podman Machine),
+    // where NetworkSettings.Gateway returns the bridge IP inside the VM rather than the
+    // actual host IP.
+    if let Some(ip) = resolve_from_etc_hosts(container_cli, container_name) {
+        debug!(
+            "Resolved host gateway IP for '{}' from /etc/hosts: {}",
+            container_name, ip
+        );
+        return Some(ip);
+    }
+
+    // Fallback: use the default bridge network gateway from container inspection.
     let output = Command::new(container_cli)
         .args([
             "inspect",
@@ -732,7 +744,10 @@ pub(crate) fn resolve_host_gateway_ip(container_cli: &str, container_name: &str)
     if output.status.success() {
         let ip = String::from_utf8_lossy(&output.stdout).trim().to_string();
         if !ip.is_empty() {
-            debug!("Resolved host gateway IP for '{}': {}", container_name, ip);
+            debug!(
+                "Resolved host gateway IP for '{}' from NetworkSettings.Gateway: {}",
+                container_name, ip
+            );
             return Some(ip);
         }
     }
@@ -741,6 +756,32 @@ pub(crate) fn resolve_host_gateway_ip(container_cli: &str, container_name: &str)
         "Failed to resolve host gateway IP for container '{}'",
         container_name
     );
+    None
+}
+
+/// Read the resolved `host.docker.internal` IP from a container's /etc/hosts file.
+fn resolve_from_etc_hosts(container_cli: &str, container_name: &str) -> Option<String> {
+    let output = Command::new(container_cli)
+        .args(["exec", container_name, "cat", "/etc/hosts"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let hosts = String::from_utf8_lossy(&output.stdout);
+    for line in hosts.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+        if line.contains("host.docker.internal") {
+            let ip = line.split_whitespace().next()?;
+            return Some(ip.to_string());
+        }
+    }
+
     None
 }
 
