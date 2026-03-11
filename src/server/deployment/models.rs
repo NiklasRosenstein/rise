@@ -101,8 +101,12 @@ pub const DEFAULT_DEPLOYMENT_GROUP: &str = "default";
 /// Normalize a deployment group name for use in URLs and resource names.
 ///
 /// Replaces sequences of characters that are not alphanumeric, `-`, `_`, or `.`
-/// with `--` (e.g., `mr/123` → `mr--123`). This matches the normalization used
-/// in the `{deployment_group}` placeholder of `staging_ingress_url_template`.
+/// with `--` (e.g., `mr/123` → `mr--123`). The result is also trimmed so it
+/// starts and ends with an alphanumeric character, satisfying the Kubernetes
+/// label value regex: `(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])?`
+///
+/// This matches the normalization used in the `{deployment_group}` placeholder
+/// of `staging_ingress_url_template`.
 pub fn normalize_deployment_group(deployment_group: &str) -> String {
     let mut result = String::new();
     let mut last_was_invalid = false;
@@ -117,7 +121,9 @@ pub fn normalize_deployment_group(deployment_group: &str) -> String {
         }
     }
 
-    result.trim_matches('-').to_string()
+    result
+        .trim_matches(|c: char| !c.is_ascii_alphanumeric())
+        .to_string()
 }
 
 /// Generate the Rise system environment variables for a deployment.
@@ -196,6 +202,36 @@ pub struct UpdateDeploymentStatusRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_normalize_deployment_group() {
+        // Basic cases
+        assert_eq!(normalize_deployment_group("default"), "default");
+        assert_eq!(normalize_deployment_group("mr/123"), "mr--123");
+        assert_eq!(normalize_deployment_group("mr-123"), "mr-123");
+
+        // Leading/trailing invalid chars are trimmed to alphanumeric boundary
+        assert_eq!(normalize_deployment_group("/leading"), "leading");
+        assert_eq!(normalize_deployment_group("trailing/"), "trailing");
+        assert_eq!(normalize_deployment_group("/both/"), "both");
+
+        // Leading/trailing dots and underscores are also trimmed
+        assert_eq!(normalize_deployment_group(".dotted."), "dotted");
+        assert_eq!(normalize_deployment_group("_underscored_"), "underscored");
+        assert_eq!(normalize_deployment_group("_.-mixed-._"), "mixed");
+
+        // Consecutive invalid chars collapse to a single --
+        assert_eq!(normalize_deployment_group("mr//123"), "mr--123");
+        assert_eq!(normalize_deployment_group("a///b"), "a--b");
+
+        // Empty and all-invalid inputs
+        assert_eq!(normalize_deployment_group(""), "");
+        assert_eq!(normalize_deployment_group("/"), "");
+        assert_eq!(normalize_deployment_group("///"), "");
+
+        // Dots and underscores in the middle are preserved
+        assert_eq!(normalize_deployment_group("a.b_c"), "a.b_c");
+    }
 
     #[test]
     fn test_rise_system_env_vars_default_group() {
