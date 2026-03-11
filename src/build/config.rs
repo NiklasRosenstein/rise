@@ -66,9 +66,6 @@ pub struct BuildConfig {
     /// Enable managed BuildKit daemon with SSL certificate support
     pub managed_buildkit: Option<bool>,
 
-    /// Embed SSL certificate into Railpack build plan
-    pub railpack_embed_ssl_cert: Option<bool>,
-
     /// Path to Dockerfile (relative to rise.toml location). Defaults to "Dockerfile" or "Containerfile"
     pub dockerfile: Option<String>,
 

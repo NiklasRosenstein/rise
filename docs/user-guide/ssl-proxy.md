@@ -49,25 +49,11 @@ The `docker:build` backend does not support this feature. Use `docker:buildx` in
 
 ## SSL Certificate Embedding (Railpack)
 
-For Railpack builds, the `--railpack-embed-ssl-cert` flag embeds certificates directly into the Railpack build plan:
-
-```bash
-rise deploy --backend railpack --railpack-embed-ssl-cert
-```
-
-This is **automatically enabled** when `SSL_CERT_FILE` is set. Disable explicitly with `--railpack-embed-ssl-cert=false`.
+For Railpack builds, when `SSL_CERT_FILE` is set, Rise automatically embeds the certificate into the Railpack build plan. This ensures `RUN` commands during the build can access the certificate for SSL verification.
 
 Unlike the Docker injection above, this **does** embed the certificate in the final image.
 
-Configure in `rise.toml`:
-
-```toml
-[build]
-backend = "railpack"
-railpack_embed_ssl_cert = true
-```
-
-**Use both flags together** for comprehensive SSL support (daemon-level + build-level):
+**Use `--managed-buildkit` together** for comprehensive SSL support (daemon-level + build-level):
 
 ```bash
 rise deploy --backend railpack --managed-buildkit

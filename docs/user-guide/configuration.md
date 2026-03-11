@@ -45,7 +45,6 @@ env = ["NODE_ENV=production", "BUILD_VERSION"]
 | `env` | Array | Build-time environment variables (format: `KEY=VALUE` or `KEY` to read from shell) |
 | `container_cli` | String | Container CLI: `docker` or `podman` |
 | `managed_buildkit` | Boolean | Enable managed BuildKit daemon for SSL support |
-| `railpack_embed_ssl_cert` | Boolean | Embed SSL certificate in Railpack builds |
 | `no_cache` | Boolean | Disable build cache |
 
 ### Full Example
@@ -117,6 +116,5 @@ The CLI stores global configuration in `~/.config/rise/config.json`, including:
 - Backend URL
 - Container CLI preference (`docker` or `podman`)
 - Managed BuildKit setting
-- Railpack SSL cert embedding setting
 
 This file is created automatically on first `rise login`.
