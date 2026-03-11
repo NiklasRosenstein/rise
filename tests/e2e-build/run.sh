@@ -177,7 +177,7 @@ check_proxy_traffic_since() {
     local offset="$1"
     local logs
     logs=$(docker logs "$MITMPROXY_CTR" 2>&1 | tail -n +"$((offset + 1))")
-    if echo "$logs" | grep -qiE 'pypi\.org|pythonhosted\.org|files\.pythonhosted'; then
+    if echo "$logs" | grep -qiE 'pypi\.org|pythonhosted\.org|files\.pythonhosted|ghcr\.io|registry\.npmjs\.org|nixos\.org'; then
         return 0
     fi
     echo "  Proxy log (new lines since offset $offset):"
