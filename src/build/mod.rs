@@ -18,7 +18,7 @@ mod ssl;
 pub use method::BuildArgs;
 pub(crate) use method::{BuildMethod, BuildOptions};
 pub(crate) use railpack::{build_with_buildctl, BuildctlFrontend, RailpackBuildOptions};
-pub(crate) use registry::docker_login;
+pub(crate) use registry::{docker_login, docker_pull, docker_push, docker_tag};
 
 use anyhow::{bail, Result};
 use std::collections::HashMap;

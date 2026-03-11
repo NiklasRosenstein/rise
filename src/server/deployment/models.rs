@@ -115,6 +115,8 @@ pub struct CreateDeploymentRequest {
     pub from_deployment: Option<String>, // Optional source deployment ID to create from
     #[serde(default)]
     pub use_source_env_vars: bool, // If true and from_deployment is set, copy env vars from source (default: false = use current project env vars)
+    #[serde(default)]
+    pub push_image: bool, // If true with image, CLI will pull and push image to Rise registry
 }
 
 // Response from creating a deployment

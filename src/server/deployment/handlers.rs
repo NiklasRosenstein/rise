@@ -757,6 +757,40 @@ pub async fn create_deployment(
 
         info!("Successfully resolved image to digest: {}", image_digest);
 
+        // Determine status and credentials based on push_image flag
+        let (initial_status, credentials, image_tag) = if payload.push_image {
+            // push_image: CLI will pull and push to Rise registry, so we need credentials
+            let credentials = state
+                .registry_provider
+                .get_credentials(&payload.project)
+                .await
+                .map_err(|e| {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        format!("Failed to get credentials: {}", e),
+                    )
+                })?;
+            let image_tag = state.registry_provider.get_image_tag(
+                &payload.project,
+                &deployment_id,
+                ImageTagType::ClientFacing,
+            );
+            (DbDeploymentStatus::Pending, credentials, image_tag)
+        } else {
+            // Direct deploy: skip build/push, go straight to Pushed
+            let empty_credentials = crate::server::registry::models::RegistryCredentials {
+                registry_url: String::new(),
+                username: String::new(),
+                password: String::new(),
+                expires_in: None,
+            };
+            (
+                DbDeploymentStatus::Pushed,
+                empty_credentials,
+                image_digest.clone(),
+            )
+        };
+
         // Create deployment record with image fields set and invoke extension hooks
         let deployment = create_deployment_with_hooks(
             &state,
@@ -764,22 +798,22 @@ pub async fn create_deployment(
                 deployment_id: &deployment_id,
                 project_id: project.id,
                 created_by_id: user.id,
-                status: DbDeploymentStatus::Pushed, // Pre-built images skip build/push, go straight to Pushed
-                image: Some(user_image),            // Store original user input
-                image_digest: Some(&image_digest),  // Store resolved digest
+                status: initial_status,
+                image: Some(user_image), // Store original user input
+                image_digest: Some(&image_digest), // Store resolved digest
                 rolled_back_from_deployment_id: None, // Not a rollback
-                deployment_group: &payload.group,   // deployment_group
-                expires_at,                         // expires_at
+                deployment_group: &payload.group, // deployment_group
+                expires_at,              // expires_at
                 http_port: effective_http_port as i32, // http_port
-                is_active: false,                   // Deployments start as inactive
+                is_active: false,        // Deployments start as inactive
             },
             &project,
         )
         .await?;
 
         info!(
-            "Created pre-built image deployment {} for project {}",
-            deployment_id, payload.project
+            "Created pre-built image deployment {} for project {} (push_image: {})",
+            deployment_id, payload.project, payload.push_image
         );
 
         // Copy project environment variables to deployment
@@ -822,16 +856,11 @@ pub async fn create_deployment(
         // Insert Rise-provided environment variables
         insert_rise_env_vars(&state, &deployment, &project).await?;
 
-        // Return response with digest as image_tag and empty credentials
+        // Return response with image_tag and credentials
         Ok(Json(CreateDeploymentResponse {
             deployment_id,
-            image_tag: image_digest, // Return digest for consistency
-            credentials: crate::server::registry::models::RegistryCredentials {
-                registry_url: String::new(),
-                username: String::new(),
-                password: String::new(),
-                expires_in: None,
-            },
+            image_tag,
+            credentials,
         }))
     } else {
         // Path 2: Build from source (current behavior)

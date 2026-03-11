@@ -71,6 +71,10 @@ struct DeployArgs {
     /// Required when using --image. Defaults to 8080 for buildpack builds.
     #[arg(long)]
     http_port: Option<u16>,
+    /// Push the --image to the Rise registry instead of deploying it directly.
+    /// Pulls the image locally (platform linux/amd64) and pushes to the internal registry.
+    #[arg(long)]
+    push_image: bool,
     #[command(flatten)]
     build_args: build::BuildArgs,
 }
@@ -984,6 +988,18 @@ async fn main() -> Result<()> {
                     std::process::exit(1);
                 }
 
+                // --push-image requires --image
+                if args.push_image && args.image.is_none() {
+                    eprintln!("Error: --push-image requires --image");
+                    std::process::exit(1);
+                }
+
+                // --push-image is incompatible with --from
+                if args.push_image && args.from.is_some() {
+                    eprintln!("Error: --push-image cannot be used with --from");
+                    std::process::exit(1);
+                }
+
                 // For pre-built images, --http-port is required since we can't infer it
                 if let Some(image) = &args.image {
                     if args.http_port.is_none() {
@@ -1015,6 +1031,7 @@ async fn main() -> Result<()> {
                         build_args: &args.build_args,
                         from_deployment: args.from.as_deref(),
                         use_source_env_vars: args.use_source_env_vars,
+                        push_image: args.push_image,
                     },
                 )
                 .await?;
