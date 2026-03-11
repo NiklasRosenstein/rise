@@ -193,7 +193,7 @@ backend_flags() {
         docker:buildx|docker:buildctl)
             echo "--managed-buildkit=true" ;;
         railpack:buildx|railpack:buildctl)
-            echo "--managed-buildkit=true --railpack-embed-ssl-cert=true" ;;
+            echo "--managed-buildkit=true" ;;
         pack)
             echo "--builder heroku/builder:24" ;;
     esac
