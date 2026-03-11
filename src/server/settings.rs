@@ -423,10 +423,6 @@ fn default_failure_threshold() -> i32 {
     3
 }
 
-fn default_extra_service_token_audiences() -> std::collections::HashMap<String, String> {
-    std::collections::HashMap::new()
-}
-
 /// Deployment controller configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -563,7 +559,7 @@ pub enum DeploymentControllerSettings {
         /// Extra projected service account tokens to mount into every deployed app pod.
         /// Key becomes the in-pod filename under /var/run/secrets/rise/tokens/, value is the audience.
         /// Example: {"vault": "https://vault.example.com"}
-        #[serde(default = "default_extra_service_token_audiences")]
+        #[serde(default)]
         extra_service_token_audiences: std::collections::HashMap<String, String>,
 
         /// Ingress controller namespace for NetworkPolicy ingress rules (default: "ingress-nginx")
