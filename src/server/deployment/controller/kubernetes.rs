@@ -2111,19 +2111,6 @@ impl KubernetesController {
         Ok(())
     }
 
-    /// Look up the ClusterIP of the `kubernetes` service in the `default` namespace.
-    /// This is used to allow egress to the Kubernetes API server in NetworkPolicies.
-    async fn get_kubernetes_api_server_ip(&self) -> Option<String> {
-        let svc_api: Api<Service> = Api::namespaced(self.kube_client.clone(), "default");
-        match svc_api.get("kubernetes").await {
-            Ok(svc) => svc.spec.and_then(|s| s.cluster_ip).filter(|ip| !ip.is_empty()),
-            Err(e) => {
-                warn!("Failed to look up kubernetes service ClusterIP: {:?}", e);
-                None
-            }
-        }
-    }
-
     /// Apply NetworkPolicy with drift detection
     async fn apply_network_policy(
         &self,
@@ -2135,19 +2122,12 @@ impl KubernetesController {
         let np_name = Self::network_policy_name(project, deployment);
         let np_api: Api<NetworkPolicy> = Api::namespaced(self.kube_client.clone(), namespace);
 
-        let kube_api_server_ip = self.get_kubernetes_api_server_ip().await;
-
         match np_api.get(&np_name).await {
             Ok(existing_np) => {
                 let current_version = existing_np.metadata.resource_version.as_deref();
 
                 if self.needs_apply(deployment_id, "network-policy", current_version) {
-                    let np = self.create_network_policy(
-                        project,
-                        deployment,
-                        namespace,
-                        kube_api_server_ip.as_deref(),
-                    );
+                    let np = self.create_network_policy(project, deployment, namespace);
                     let result = np_api
                         .patch(
                             &np_name,
@@ -2166,12 +2146,7 @@ impl KubernetesController {
                 }
             }
             Err(kube::Error::Api(err)) if err.code == 404 => {
-                let np = self.create_network_policy(
-                    project,
-                    deployment,
-                    namespace,
-                    kube_api_server_ip.as_deref(),
-                );
+                let np = self.create_network_policy(project, deployment, namespace);
                 let result = np_api.create(&PostParams::default(), &np).await?;
                 self.update_version_cache(
                     deployment_id,
@@ -2350,7 +2325,6 @@ impl KubernetesController {
         project: &Project,
         deployment: &Deployment,
         namespace: &str,
-        kube_api_server_ip: Option<&str>,
     ) -> NetworkPolicy {
         use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
 
@@ -2457,22 +2431,32 @@ impl KubernetesController {
         }
 
         // Rule 2.5: Kubernetes API server (always allowed, requires authentication)
-        if let Some(api_server_ip) = kube_api_server_ip {
-            egress_rules.push(NetworkPolicyEgressRule {
-                to: Some(vec![NetworkPolicyPeer {
-                    ip_block: Some(IPBlock {
-                        cidr: format!("{}/32", api_server_ip),
-                        except: None,
+        // Target kube-apiserver pods in kube-system by component label
+        egress_rules.push(NetworkPolicyEgressRule {
+            to: Some(vec![NetworkPolicyPeer {
+                namespace_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert(
+                            "kubernetes.io/metadata.name".to_string(),
+                            "kube-system".to_string(),
+                        );
+                        labels
                     }),
                     ..Default::default()
-                }]),
-                ports: Some(vec![NetworkPolicyPort {
-                    protocol: Some("TCP".to_string()),
-                    port: Some(IntOrString::Int(443)),
+                }),
+                pod_selector: Some(LabelSelector {
+                    match_labels: Some({
+                        let mut labels = BTreeMap::new();
+                        labels.insert("component".to_string(), "kube-apiserver".to_string());
+                        labels
+                    }),
                     ..Default::default()
-                }]),
-            });
-        }
+                }),
+                ..Default::default()
+            }]),
+            ports: None, // Allow all ports to the API server
+        });
 
         // Rule 2.75: Additional allowed CIDR ranges (for development environments)
         // These are explicitly allowed destinations, useful for reaching host IPs in Minikube
