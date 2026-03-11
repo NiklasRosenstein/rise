@@ -30,7 +30,6 @@ pub(crate) struct RailpackBuildOptions<'a> {
     pub use_buildctl: bool,
     pub push: bool,
     pub buildkit_host: Option<&'a str>,
-    pub embed_ssl_cert: bool,
     pub env: &'a [String],
     pub no_cache: bool,
 }
@@ -173,21 +172,15 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
 
     info!("✓ Railpack prepare completed");
 
-    // Embed SSL certificate if requested
-    if options.embed_ssl_cert {
-        if let Some(ssl_cert_file) = super::env_var_non_empty("SSL_CERT_FILE") {
-            let cert_path = Path::new(&ssl_cert_file);
-            if cert_path.exists() {
-                embed_ssl_cert_in_plan(&plan_file, cert_path)?;
-            } else {
-                warn!(
-                    "SSL_CERT_FILE set to '{}' but file not found",
-                    ssl_cert_file
-                );
-            }
+    // Embed SSL certificate if SSL_CERT_FILE is set
+    if let Some(ssl_cert_file) = super::env_var_non_empty("SSL_CERT_FILE") {
+        let cert_path = Path::new(&ssl_cert_file);
+        if cert_path.exists() {
+            embed_ssl_cert_in_plan(&plan_file, cert_path)?;
         } else {
             warn!(
-                "--railpack-embed-ssl-cert enabled but SSL_CERT_FILE environment variable not set"
+                "SSL_CERT_FILE set to '{}' but file not found",
+                ssl_cert_file
             );
         }
     }

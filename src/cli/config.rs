@@ -132,7 +132,6 @@ pub struct Config {
     pub backend_url: Option<String>,
     pub container_cli: Option<String>,
     pub managed_buildkit: Option<bool>,
-    pub railpack_embed_ssl_cert: Option<bool>,
 }
 
 impl Config {
@@ -251,31 +250,6 @@ impl Config {
         self.managed_buildkit = Some(enabled);
         self.save()
     }
-
-    /// Get whether to embed SSL certificate in Railpack builds
-    /// Checks RISE_RAILPACK_EMBED_SSL_CERT environment variable first, then falls back to config file
-    /// Defaults to true if SSL_CERT_FILE is set in the environment
-    #[allow(dead_code)]
-    pub fn get_railpack_embed_ssl_cert(&self) -> bool {
-        #[cfg(not(test))]
-        if let Some(val) = crate::build::parse_bool_env_var("RISE_RAILPACK_EMBED_SSL_CERT") {
-            return val;
-        }
-        if let Some(enabled) = self.railpack_embed_ssl_cert {
-            return enabled;
-        }
-        #[cfg(not(test))]
-        return crate::build::env_var_non_empty("SSL_CERT_FILE").is_some();
-        #[cfg(test)]
-        false
-    }
-
-    /// Set whether to embed SSL certificate in Railpack builds
-    #[allow(dead_code)]
-    pub fn set_railpack_embed_ssl_cert(&mut self, enabled: bool) -> Result<()> {
-        self.railpack_embed_ssl_cert = Some(enabled);
-        self.save()
-    }
 }
 
 /// Auto-detect which container CLI is available.
@@ -368,21 +342,6 @@ mod tests {
 
         let c = config(|c| c.managed_buildkit = Some(false));
         assert!(!c.get_managed_buildkit());
-    }
-
-    #[test]
-    fn test_railpack_embed_ssl_cert_default_false() {
-        // In tests, env vars are ignored, so default is always false
-        assert!(!Config::default().get_railpack_embed_ssl_cert());
-    }
-
-    #[test]
-    fn test_railpack_embed_ssl_cert_from_config() {
-        let c = config(|c| c.railpack_embed_ssl_cert = Some(true));
-        assert!(c.get_railpack_embed_ssl_cert());
-
-        let c = config(|c| c.railpack_embed_ssl_cert = Some(false));
-        assert!(!c.get_railpack_embed_ssl_cert());
     }
 
     #[test]
