@@ -223,7 +223,7 @@ access_class = "public"
 
 [build]
 backend = "pack"
-builder = "paketobuildpacks/builder-jammy-base"
+builder = "heroku/builder:24"
 "#,
         )
         .unwrap();

@@ -90,7 +90,7 @@ Uses Cloud Native Buildpacks via the `pack` CLI:
 
 ```bash
 rise build myapp:latest --backend pack
-rise deploy --backend pack --builder paketobuildpacks/builder-jammy-base
+rise deploy --backend pack --builder heroku/builder:24
 ```
 
 Configure builder and buildpacks in `rise.toml`:

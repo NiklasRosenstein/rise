@@ -27,7 +27,7 @@ pub(crate) fn build_image_with_buildpacks(
         );
     }
 
-    let builder_image = builder.unwrap_or("paketobuildpacks/builder-jammy-base");
+    let builder_image = builder.unwrap_or("heroku/builder:24");
     info!("Using builder: {}", builder_image);
 
     let mut cmd = Command::new("pack");

@@ -30,7 +30,7 @@ managed_buildkit = true
 
 | Backend | Managed BuildKit | Notes |
 |---------|:---:|-------|
-| `pack` | N/A | Supports `SSL_CERT_FILE` natively |
+| `pack` | N/A | SSL support depends on builder; heroku/builder:24 works, paketo builders don't respect `SSL_CERT_FILE` for buildpack-level downloads |
 | `docker` / `docker:build` | No | Use `docker:buildx` for SSL support |
 | `docker:buildx` | Yes | Full SSL via BuildKit secrets |
 | `buildctl` | Yes | Full SSL via BuildKit secrets |
@@ -57,7 +57,7 @@ rise deploy --backend railpack --railpack-embed-ssl-cert
 
 This is **automatically enabled** when `SSL_CERT_FILE` is set. Disable explicitly with `--railpack-embed-ssl-cert=false`.
 
-Unlike the Docker injection above, this **does** embed the certificate in the final image.
+Unlike the Docker injection above, this **does** embed the certificate in the final image. In addition to embedding the cert file, this also injects SSL environment variables (`SSL_CERT_FILE`, `REQUESTS_CA_BUNDLE`, `NODE_EXTRA_CA_CERTS`, etc.) as build secrets so that build-time package managers can find the certificates.
 
 Configure in `rise.toml`:
 
@@ -128,6 +128,12 @@ docker run --platform linux/amd64 --privileged --name my-buildkit --rm -d \
 export BUILDKIT_HOST=docker-container://my-buildkit
 rise deploy --backend railpack
 ```
+
+## Known Limitations
+
+- **`docker:build` does not support SSL cert injection.** Use `docker:buildx` instead, which uses BuildKit secrets to mount certificates during `RUN` steps.
+- **Paketo buildpacks ignore `SSL_CERT_FILE` for their own downloads.** Paketo buildpack binaries use statically-linked Go TLS which doesn't read system CA bundles. Use `heroku/builder:24` instead, which correctly respects `SSL_CERT_FILE`.
+- **`buildctl` non-push builds pipe through `docker load`.** When building locally (not pushing directly to a registry), `buildctl` outputs a tar archive that is loaded via `docker load`, which is slower than `docker buildx` for local development.
 
 ## Podman Desktop
 

@@ -436,7 +436,9 @@ pub(crate) fn build_with_buildctl(
             .status()
             .context("Failed to execute docker load")?;
 
-        let buildctl_status = buildctl_child.wait().context("Failed to wait for buildctl")?;
+        let buildctl_status = buildctl_child
+            .wait()
+            .context("Failed to wait for buildctl")?;
         if !buildctl_status.success() {
             bail!("buildctl build failed with status: {}", buildctl_status);
         }
