@@ -785,6 +785,34 @@ fn resolve_from_etc_hosts(container_cli: &str, container_name: &str) -> Option<S
     None
 }
 
+/// Resolve the host gateway IP for a BuildKit container and apply it to proxy
+/// variables on the given command.
+///
+/// `container_name` is the BuildKit container (or buildx builder) to resolve
+/// the gateway IP from.  When `had_remote_host` is true but resolution fails,
+/// a warning is emitted so the user knows proxy routing may break.
+///
+/// Returns the (potentially rewritten) proxy/secret variables.
+pub(crate) fn resolve_and_apply_host_gateway(
+    cmd: &mut std::process::Command,
+    container_cli: &str,
+    vars: &std::collections::HashMap<String, String>,
+    container_name: Option<&str>,
+    had_remote_host: bool,
+) -> std::collections::HashMap<String, String> {
+    let gateway_ip = container_name.and_then(|name| resolve_host_gateway_ip(container_cli, name));
+
+    if had_remote_host && gateway_ip.is_none() && super::proxy::needs_host_gateway(vars) {
+        warn!(
+            "Proxy configuration references host.docker.internal but the host gateway IP \
+             could not be resolved for the remote BuildKit driver. Proxy routing may fail \
+             inside the build container."
+        );
+    }
+
+    super::proxy::apply_host_gateway(cmd, vars, gateway_ip.as_deref())
+}
+
 /// Warn user about SSL certificate issues when managed BuildKit is disabled
 pub(crate) fn check_ssl_cert_and_warn(method: &BuildMethod, managed_buildkit: bool) {
     if super::env_var_non_empty("SSL_CERT_FILE").is_some()

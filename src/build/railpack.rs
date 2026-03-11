@@ -111,15 +111,13 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
 
     // Add SSL env vars before railpack prepare so they are declared in the plan
     // and exposed as secrets during build-time RUN steps.
-    if options.embed_ssl_cert {
-        if let Some(ssl_cert_file) = super::env_var_non_empty("SSL_CERT_FILE") {
-            if Path::new(&ssl_cert_file).exists() {
-                let ssl_cert_target = super::ssl::SSL_CERT_PATHS[0];
-                for var in super::ssl::SSL_ENV_VARS {
-                    all_secrets
-                        .entry(var.to_string())
-                        .or_insert_with(|| ssl_cert_target.to_string());
-                }
+    if let Some(ssl_cert_file) = super::env_var_non_empty("SSL_CERT_FILE") {
+        if Path::new(&ssl_cert_file).exists() {
+            let ssl_cert_target = super::ssl::SSL_CERT_PATHS[0];
+            for var in super::ssl::SSL_ENV_VARS {
+                all_secrets
+                    .entry(var.to_string())
+                    .or_insert_with(|| ssl_cert_target.to_string());
             }
         }
     }
@@ -276,36 +274,25 @@ fn build_with_buildx(
         cmd.arg("--no-cache");
     }
 
-    if push && buildx_supports_push {
-        cmd.arg("--push");
-    } else {
-        // For local builds, use --load to ensure image is available in local daemon
-        cmd.arg("--load");
-    }
+    let needs_fallback_push =
+        super::docker::configure_buildx_output(&mut cmd, push, buildx_supports_push);
 
     // Resolve host gateway IP and rewrite proxy URLs in secrets.
     // Prefer the BuildKit container name from BUILDKIT_HOST (docker-container://...)
     // over the builder name, since they may differ.
     let buildkit_host_env = std::env::var("BUILDKIT_HOST").ok();
-    let gateway_ip = {
-        let container_name = buildkit_host_env
-            .as_deref()
-            .and_then(|h| h.strip_prefix("docker-container://").map(str::to_string))
-            .or_else(|| builder_name.clone());
-        container_name
-            .as_deref()
-            .and_then(|name| super::buildkit::resolve_host_gateway_ip(container_cli, name))
-    };
+    let container_name = buildkit_host_env
+        .as_deref()
+        .and_then(|h| h.strip_prefix("docker-container://"))
+        .or(builder_name.as_deref());
 
-    if buildkit_host_env.is_some() && gateway_ip.is_none() && proxy::needs_host_gateway(secrets) {
-        warn!(
-            "Proxy configuration references host.docker.internal but the host gateway IP \
-             could not be resolved for the remote BuildKit driver. Proxy routing may fail \
-             inside the build container."
-        );
-    }
-
-    let effective_secrets = proxy::apply_host_gateway(&mut cmd, secrets, gateway_ip.as_deref());
+    let effective_secrets = super::buildkit::resolve_and_apply_host_gateway(
+        &mut cmd,
+        container_cli,
+        secrets,
+        container_name,
+        buildkit_host_env.is_some(),
+    );
 
     // Add secrets via prefixed env vars so the docker CLI keeps its original
     // proxy vars while build containers get the transformed values.
@@ -327,7 +314,7 @@ fn build_with_buildx(
         );
     }
 
-    if push && !buildx_supports_push {
+    if needs_fallback_push {
         docker_push(container_cli, image_tag)?;
     }
 

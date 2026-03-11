@@ -10,6 +10,25 @@ use super::dockerfile_ssl::{
 };
 use super::registry::docker_push;
 
+/// Configure buildx output flags (`--push` / `--load`) on a command.
+///
+/// Returns `true` when a fallback `docker push` is needed after the build
+/// (i.e. push was requested but `--push` is not supported).
+pub(crate) fn configure_buildx_output(
+    cmd: &mut Command,
+    push: bool,
+    buildx_supports_push: bool,
+) -> bool {
+    if push && buildx_supports_push {
+        cmd.arg("--push");
+        false
+    } else {
+        // Without --push, load into the local daemon so a subsequent push can work.
+        cmd.arg("--load");
+        push
+    }
+}
+
 /// Check if buildx is available for the given container CLI
 pub(crate) fn is_buildx_available(container_cli: &str) -> bool {
     Command::new(container_cli)
@@ -49,16 +68,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     }
 
     // Check for SSL certificate and determine if preprocessing is needed
-    let ssl_cert_file = super::env_var_non_empty("SSL_CERT_FILE");
-    let ssl_cert_path = ssl_cert_file.as_ref().and_then(|p| {
-        let path = Path::new(p);
-        if path.exists() {
-            Some(path.to_path_buf())
-        } else {
-            warn!("SSL_CERT_FILE set to '{}' but file not found", p);
-            None
-        }
-    });
+    let ssl_cert_path = super::resolve_ssl_cert_file();
 
     // Warn if SSL cert is set but buildx is not being used
     if ssl_cert_path.is_some() && !options.use_buildx {
@@ -98,9 +108,6 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     };
 
     let mut cmd = Command::new(options.container_cli);
-
-    // Some buildx frontends (e.g. Podman) do not support `--push`.
-    let supports_push_flag = options.use_buildx && options.buildx_supports_push;
 
     if options.use_buildx {
         // Check buildx availability
@@ -166,24 +173,17 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
     // Add proxy build arguments with host gateway resolution
     let proxy_vars = super::proxy::read_and_transform_proxy_vars();
     if !proxy_vars.is_empty() {
-        let gateway_ip = options.buildkit_host.and_then(|host| {
-            let container_name = host.strip_prefix("docker-container://").unwrap_or(host);
-            super::buildkit::resolve_host_gateway_ip(options.container_cli, container_name)
-        });
+        let container_name = options
+            .buildkit_host
+            .map(|h| h.strip_prefix("docker-container://").unwrap_or(h));
 
-        if options.buildkit_host.is_some()
-            && gateway_ip.is_none()
-            && super::proxy::needs_host_gateway(&proxy_vars)
-        {
-            warn!(
-                "Proxy configuration references host.docker.internal but the host gateway IP \
-                 could not be resolved for the remote BuildKit driver. Proxy routing may fail \
-                 inside the build container."
-            );
-        }
-
-        let effective_proxy_vars =
-            super::proxy::apply_host_gateway(&mut cmd, &proxy_vars, gateway_ip.as_deref());
+        let effective_proxy_vars = super::buildkit::resolve_and_apply_host_gateway(
+            &mut cmd,
+            options.container_cli,
+            &proxy_vars,
+            container_name,
+            options.buildkit_host.is_some(),
+        );
 
         info!("Injecting proxy variables for docker build");
         for (key, value) in &effective_proxy_vars {
@@ -216,13 +216,11 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
         }
     }
 
-    if options.push && supports_push_flag {
-        // Only use --push with buildx
-        cmd.arg("--push");
-    } else if options.use_buildx {
-        // Without --push, load into the local daemon so a subsequent push can work.
-        cmd.arg("--load");
-    }
+    let needs_fallback_push = if options.use_buildx {
+        configure_buildx_output(&mut cmd, options.push, options.buildx_supports_push)
+    } else {
+        options.push
+    };
 
     debug!("Executing command: {:?}", cmd);
 
@@ -240,8 +238,7 @@ pub(crate) fn build_image_with_dockerfile(options: DockerBuildOptions) -> Result
         );
     }
 
-    // If push was requested but --push flag wasn't supported, need separate push
-    if options.push && !supports_push_flag {
+    if needs_fallback_push {
         docker_push(options.container_cli, options.image_tag)?;
     }
 
