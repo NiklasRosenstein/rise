@@ -59,12 +59,12 @@ trap cleanup EXIT
 
 log_pass() {
     echo "[PASS] $1"
-    ((PASSED++))
+    PASSED=$((PASSED + 1))
 }
 
 log_fail() {
     echo "[FAIL] $1"
-    ((FAILED++))
+    FAILED=$((FAILED + 1))
 }
 
 safe_name() {
@@ -92,7 +92,7 @@ wait_for_http() {
             return 0
         fi
         sleep 1
-        ((elapsed++))
+        elapsed=$((elapsed + 1))
     done
     return 1
 }
@@ -130,7 +130,7 @@ start_mitmproxy() {
     local attempts=0
     while ! docker exec "$MITMPROXY_CTR" test -f /root/.mitmproxy/mitmproxy-ca-cert.pem 2>/dev/null; do
         sleep 1
-        ((attempts++))
+        attempts=$((attempts + 1))
         if [[ $attempts -ge 15 ]]; then
             echo "  ERROR: mitmproxy CA cert not generated after 15s"
             return 1
