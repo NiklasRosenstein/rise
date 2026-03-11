@@ -189,7 +189,7 @@ backend_flags() {
         railpack:buildx|railpack:buildctl)
             echo "--managed-buildkit=true --railpack-embed-ssl-cert=true" ;;
         pack)
-            echo "--builder paketobuildpacks/builder-jammy-base -b paketo-buildpacks/python" ;;
+            echo "--builder heroku/builder:24" ;;
     esac
 }
 
