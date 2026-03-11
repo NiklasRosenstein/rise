@@ -945,9 +945,16 @@ impl Settings {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::{Mutex, OnceLock};
+
+    fn env_var_test_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
 
     #[test]
     fn test_substitute_env_vars_in_string_basic() {
+        let _guard = env_var_test_lock().lock().unwrap();
         env::set_var("TEST_VAR", "test_value");
         let result = Settings::substitute_env_vars_in_string("${TEST_VAR}");
         assert_eq!(result, "test_value");
@@ -956,6 +963,7 @@ mod tests {
 
     #[test]
     fn test_substitute_env_vars_in_string_with_default() {
+        let _guard = env_var_test_lock().lock().unwrap();
         env::remove_var("MISSING_VAR");
         let result = Settings::substitute_env_vars_in_string("${MISSING_VAR:-default_value}");
         assert_eq!(result, "default_value");
@@ -963,6 +971,7 @@ mod tests {
 
     #[test]
     fn test_substitute_env_vars_in_string_override_default() {
+        let _guard = env_var_test_lock().lock().unwrap();
         env::set_var("OVERRIDE_VAR", "actual_value");
         let result = Settings::substitute_env_vars_in_string("${OVERRIDE_VAR:-default_value}");
         assert_eq!(result, "actual_value");
@@ -971,6 +980,7 @@ mod tests {
 
     #[test]
     fn test_substitute_env_vars_in_string_multiple() {
+        let _guard = env_var_test_lock().lock().unwrap();
         env::set_var("VAR1", "value1");
         env::set_var("VAR2", "value2");
         let result = Settings::substitute_env_vars_in_string("${VAR1} and ${VAR2}");
@@ -987,6 +997,7 @@ mod tests {
 
     #[test]
     fn test_unused_fields_warning() {
+        let _guard = env_var_test_lock().lock().unwrap();
         // This test verifies that unused fields are detected during deserialization
         // We can't easily test the warning output itself, but we can verify the config
         // still loads successfully even with unknown fields
@@ -1079,6 +1090,7 @@ unknown_top_level: "also unknown"
 
     #[test]
     fn test_settings_load_with_extra_service_token_audiences() {
+        let _guard = env_var_test_lock().lock().unwrap();
         use std::fs;
         use tempfile::TempDir;
 
@@ -1145,6 +1157,7 @@ deployment_controller:
 
     #[test]
     fn test_run_mode_config_is_required_even_if_local_exists() {
+        let _guard = env_var_test_lock().lock().unwrap();
         use std::fs;
         use tempfile::TempDir;
 
