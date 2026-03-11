@@ -439,6 +439,31 @@ deployment_controller:
 
 This mode is useful when you have a wildcard certificate or want to manage certificates externally.
 
+#### Extra Projected Service Account Tokens
+
+You can configure additional projected service account tokens that Rise mounts into every deployed app pod. This is useful for systems like Vault that expect a Kubernetes service account token with a custom audience.
+
+```yaml
+deployment_controller:
+  type: kubernetes
+  # ... other settings ...
+  extra_service_token_audiences:
+    vault: "https://vault.example.com"
+    metrics: "metrics-service"
+```
+
+With this configuration:
+- Rise adds a single projected volume to each app pod
+- The volume is mounted at `/var/run/secrets/rise/tokens`
+- Each map key becomes a filename in that directory
+- Each file contains a Kubernetes service account token minted for the configured audience
+
+Examples:
+- `/var/run/secrets/rise/tokens/vault`
+- `/var/run/secrets/rise/tokens/metrics`
+
+Token rotation and lifetime use Kubernetes defaults; Rise does not currently set `expirationSeconds`.
+
 #### Cert-Manager Setup
 
 To use cert-manager with Rise custom domains:

@@ -423,6 +423,10 @@ fn default_failure_threshold() -> i32 {
     3
 }
 
+fn default_extra_service_token_audiences() -> std::collections::HashMap<String, String> {
+    std::collections::HashMap::new()
+}
+
 /// Deployment controller configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -555,6 +559,12 @@ pub enum DeploymentControllerSettings {
         /// Example: {"rise.local": "192.168.49.1"}
         #[serde(default)]
         host_aliases: std::collections::HashMap<String, String>,
+
+        /// Extra projected service account tokens to mount into every deployed app pod.
+        /// Key becomes the in-pod filename under /var/run/secrets/rise/tokens/, value is the audience.
+        /// Example: {"vault": "https://vault.example.com"}
+        #[serde(default = "default_extra_service_token_audiences")]
+        extra_service_token_audiences: std::collections::HashMap<String, String>,
 
         /// Ingress controller namespace for NetworkPolicy ingress rules (default: "ingress-nginx")
         #[serde(default = "default_ingress_controller_namespace")]
@@ -748,6 +758,38 @@ impl Settings {
         }
     }
 
+    fn validate_extra_service_token_audiences(
+        audiences: &std::collections::HashMap<String, String>,
+    ) -> Result<(), ConfigError> {
+        let token_name_re = regex::Regex::new(r"^[A-Za-z0-9._-]+$").map_err(|e| {
+            ConfigError::Message(format!("Failed to compile token name regex: {}", e))
+        })?;
+
+        for (name, audience) in audiences {
+            if name.is_empty() {
+                return Err(ConfigError::Message(
+                    "extra_service_token_audiences contains an empty token name".to_string(),
+                ));
+            }
+
+            if name == "." || name == ".." || !token_name_re.is_match(name) {
+                return Err(ConfigError::Message(format!(
+                    "extra_service_token_audiences token name '{}' is invalid; use only letters, numbers, '.', '_' or '-'",
+                    name
+                )));
+            }
+
+            if audience.trim().is_empty() {
+                return Err(ConfigError::Message(format!(
+                    "extra_service_token_audiences token '{}' has an empty audience",
+                    name
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn new() -> Result<Self, ConfigError> {
         let run_mode = env::var("RISE_CONFIG_RUN_MODE").unwrap_or_else(|_| "development".into());
         let config_dir = env::var("RISE_CONFIG_DIR").unwrap_or_else(|_| "config".into());
@@ -819,6 +861,7 @@ impl Settings {
             ref production_ingress_url_template,
             ref staging_ingress_url_template,
             ref access_classes,
+            ref extra_service_token_audiences,
             ..
         }) = settings.deployment_controller
         {
@@ -841,6 +884,8 @@ impl Settings {
                     "{deployment_group}",
                 )?;
             }
+
+            Self::validate_extra_service_token_audiences(extra_service_token_audiences)?;
 
             // Filter out null access classes (used to remove inherited entries)
             // and validate the remaining ones
@@ -1007,6 +1052,94 @@ unknown_top_level: "also unknown"
             result.is_ok(),
             "Config should load despite unknown fields: {:?}",
             result.err()
+        );
+    }
+
+    #[test]
+    fn test_validate_extra_service_token_audiences_accepts_empty_map() {
+        let audiences = std::collections::HashMap::new();
+        assert!(Settings::validate_extra_service_token_audiences(&audiences).is_ok());
+    }
+
+    #[test]
+    fn test_validate_extra_service_token_audiences_rejects_invalid_name() {
+        let mut audiences = std::collections::HashMap::new();
+        audiences.insert(
+            "vault/token".to_string(),
+            "https://vault.example.com".to_string(),
+        );
+
+        let error = Settings::validate_extra_service_token_audiences(&audiences)
+            .expect_err("invalid token name should fail validation");
+
+        assert!(error
+            .to_string()
+            .contains("extra_service_token_audiences token name 'vault/token' is invalid"));
+    }
+
+    #[test]
+    fn test_settings_load_with_extra_service_token_audiences() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("development.yaml");
+
+        fs::write(
+            &config_path,
+            r#"
+server:
+  host: "0.0.0.0"
+  port: 3000
+  public_url: "http://localhost:3000"
+  jwt_signing_secret: "test-secret-key-for-testing-123456"
+
+database:
+  url: "postgres://test@localhost/test"
+
+auth:
+  issuer: "http://localhost:5556"
+  client_id: "test"
+  client_secret: "test"
+
+deployment_controller:
+  type: "kubernetes"
+  production_ingress_url_template: "{project_name}.test.local"
+  namespace_format: "rise-{project_name}"
+  auth_backend_url: "http://localhost:3000"
+  auth_signin_url: "http://localhost:3000"
+  extra_service_token_audiences:
+    vault: "https://vault.example.com"
+  access_classes:
+    public:
+      display_name: "Public"
+      description: "Test public access"
+      ingress_class: "nginx"
+      access_requirement: None
+"#,
+        )
+        .unwrap();
+
+        env::set_var("RISE_CONFIG_DIR", temp_dir.path().to_str().unwrap());
+        env::set_var("RISE_CONFIG_RUN_MODE", "development");
+
+        let result = Settings::new();
+
+        env::remove_var("RISE_CONFIG_DIR");
+        env::remove_var("RISE_CONFIG_RUN_MODE");
+
+        let settings = result.expect("config with extra service token audiences should load");
+        let Some(DeploymentControllerSettings::Kubernetes {
+            extra_service_token_audiences,
+            ..
+        }) = settings.deployment_controller
+        else {
+            panic!("expected kubernetes deployment_controller");
+        };
+
+        assert_eq!(
+            extra_service_token_audiences.get("vault"),
+            Some(&"https://vault.example.com".to_string())
         );
     }
 

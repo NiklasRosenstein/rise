@@ -4,8 +4,9 @@ use chrono::{DateTime, Utc};
 use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec, ReplicaSet};
 use k8s_openapi::api::core::v1::{
     Capabilities, Container, ContainerPort, Event, HTTPGetAction, HostAlias, LocalObjectReference,
-    Namespace, PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ResourceRequirements,
-    SeccompProfile, Secret, SecurityContext, Service, ServicePort, ServiceSpec,
+    Namespace, PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ProjectedVolumeSource,
+    ResourceRequirements, SeccompProfile, Secret, SecurityContext, Service,
+    ServiceAccountTokenProjection, ServicePort, ServiceSpec, Volume, VolumeMount, VolumeProjection,
 };
 use k8s_openapi::api::networking::v1::{
     HTTPIngressPath, HTTPIngressRuleValue, IPBlock, Ingress, IngressBackend, IngressRule,
@@ -41,6 +42,8 @@ const ANNOTATION_LAST_REFRESH: &str = "rise.dev/last-refresh";
 
 /// Image pull secret name used for private registry authentication
 const IMAGE_PULL_SECRET_NAME: &str = "rise-registry-creds";
+const EXTRA_SERVICE_TOKENS_VOLUME_NAME: &str = "rise-extra-service-tokens";
+const EXTRA_SERVICE_TOKENS_MOUNT_PATH: &str = "/var/run/secrets/rise/tokens";
 
 /// Finalizer name for Kubernetes namespaces
 /// Added when a namespace is created for a project, removed when namespace cleanup is complete.
@@ -261,6 +264,7 @@ pub struct KubernetesControllerConfig {
     pub access_classes: std::collections::HashMap<String, crate::server::settings::AccessClass>,
     /// Host aliases to inject into pod specs (hostname -> IP address)
     pub host_aliases: std::collections::HashMap<String, String>,
+    pub extra_service_token_audiences: std::collections::HashMap<String, String>,
     pub ingress_controller_namespace: String,
     pub ingress_controller_labels: std::collections::HashMap<String, String>,
     pub network_policy_egress_allow_cidrs: Vec<String>,
@@ -298,6 +302,7 @@ pub struct KubernetesController {
     resource_versions: Arc<std::sync::RwLock<std::collections::HashMap<String, String>>>,
     /// Host aliases to inject into pod specs (hostname -> IP address)
     host_aliases: std::collections::HashMap<String, String>,
+    extra_service_token_audiences: std::collections::HashMap<String, String>,
     ingress_controller_namespace: String,
     ingress_controller_labels: std::collections::HashMap<String, String>,
     network_policy_egress_allow_cidrs: Vec<String>,
@@ -342,6 +347,7 @@ impl KubernetesController {
             access_classes: config.access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: config.host_aliases,
+            extra_service_token_audiences: config.extra_service_token_audiences,
             ingress_controller_namespace: config.ingress_controller_namespace,
             ingress_controller_labels: config.ingress_controller_labels,
             network_policy_egress_allow_cidrs: config.network_policy_egress_allow_cidrs,
@@ -2640,6 +2646,54 @@ impl KubernetesController {
         })
     }
 
+    fn create_extra_service_token_volume(&self) -> Option<Volume> {
+        if self.extra_service_token_audiences.is_empty() {
+            return None;
+        }
+
+        let mut token_names: Vec<_> = self.extra_service_token_audiences.keys().cloned().collect();
+        token_names.sort();
+
+        let sources = token_names
+            .into_iter()
+            .map(|name| VolumeProjection {
+                service_account_token: Some(ServiceAccountTokenProjection {
+                    audience: Some(
+                        self.extra_service_token_audiences
+                            .get(&name)
+                            .expect("token name collected from map keys")
+                            .clone(),
+                    ),
+                    path: name,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            })
+            .collect();
+
+        Some(Volume {
+            name: EXTRA_SERVICE_TOKENS_VOLUME_NAME.to_string(),
+            projected: Some(ProjectedVolumeSource {
+                sources: Some(sources),
+                ..Default::default()
+            }),
+            ..Default::default()
+        })
+    }
+
+    fn create_extra_service_token_volume_mount(&self) -> Option<VolumeMount> {
+        if self.extra_service_token_audiences.is_empty() {
+            return None;
+        }
+
+        Some(VolumeMount {
+            name: EXTRA_SERVICE_TOKENS_VOLUME_NAME.to_string(),
+            mount_path: EXTRA_SERVICE_TOKENS_MOUNT_PATH.to_string(),
+            read_only: Some(true),
+            ..Default::default()
+        })
+    }
+
     /// Create Deployment resource
     async fn create_deployment(
         &self,
@@ -2690,6 +2744,13 @@ impl KubernetesController {
                 crate::server::registry::ImageTagType::Internal,
             )
         };
+
+        let volumes = self
+            .create_extra_service_token_volume()
+            .map(|volume| vec![volume]);
+        let volume_mounts = self
+            .create_extra_service_token_volume_mount()
+            .map(|mount| vec![mount]);
 
         K8sDeployment {
             metadata: ObjectMeta {
@@ -2751,8 +2812,10 @@ impl KubernetesController {
                                 .create_http_probe(metadata.http_port as i32, ProbeType::Liveness),
                             readiness_probe: self
                                 .create_http_probe(metadata.http_port as i32, ProbeType::Readiness),
+                            volume_mounts,
                             ..Default::default()
                         }],
+                        volumes,
                         node_selector: if self.node_selector.is_empty() {
                             None
                         } else {
@@ -5060,6 +5123,7 @@ mod tests {
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
+            extra_service_token_audiences: std::collections::HashMap::new(),
             ingress_controller_namespace: "ingress-nginx".to_string(),
             ingress_controller_labels: {
                 let mut labels = std::collections::HashMap::new();
@@ -5074,6 +5138,154 @@ mod tests {
             pod_resources: None,
             health_probes: None,
         }
+    }
+
+    fn sample_project() -> crate::db::models::Project {
+        use crate::db::models::ProjectStatus;
+        use uuid::Uuid;
+
+        crate::db::models::Project {
+            id: Uuid::new_v4(),
+            name: "test-project".to_string(),
+            status: ProjectStatus::Running,
+            access_class: "public".to_string(),
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn sample_deployment(project_id: uuid::Uuid) -> crate::db::models::Deployment {
+        crate::db::models::Deployment {
+            id: uuid::Uuid::new_v4(),
+            project_id,
+            deployment_id: "20240108-103000".to_string(),
+            created_by_id: uuid::Uuid::new_v4(),
+            deployment_group: "default".to_string(),
+            status: crate::db::models::DeploymentStatus::Deploying,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::json!({}),
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            deploying_started_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
+
+    fn sample_metadata(namespace: &str, deployment_name: &str) -> KubernetesMetadata {
+        KubernetesMetadata {
+            namespace: Some(namespace.to_string()),
+            deployment_name: Some(deployment_name.to_string()),
+            service_name: Some("default".to_string()),
+            ingress_name: Some("default".to_string()),
+            image_tag: None,
+            http_port: 8080,
+            reconcile_phase: ReconcilePhase::Completed,
+            previous_deployment: None,
+            pod_status: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn test_create_deployment_omits_extra_service_token_projection_when_not_configured() {
+        let controller = create_mock_controller();
+        let project = sample_project();
+        let deployment = sample_deployment(project.id);
+        let metadata = sample_metadata("rise-test-project", "test-project-20240108-103000");
+
+        let generated = controller
+            .create_deployment(&project, &deployment, &metadata, vec![])
+            .await;
+
+        let pod_spec = generated
+            .spec
+            .and_then(|spec| spec.template.spec)
+            .expect("pod spec should be present");
+
+        assert!(pod_spec.volumes.is_none());
+        assert!(pod_spec.containers[0].volume_mounts.is_none());
+    }
+
+    #[tokio::test]
+    async fn test_create_deployment_adds_extra_service_token_projection() {
+        let mut controller = create_mock_controller();
+        controller.extra_service_token_audiences = std::collections::HashMap::from([
+            ("vault".to_string(), "https://vault.example.com".to_string()),
+            ("metrics".to_string(), "metrics-service".to_string()),
+        ]);
+
+        let project = sample_project();
+        let deployment = sample_deployment(project.id);
+        let metadata = sample_metadata("rise-test-project", "test-project-20240108-103000");
+
+        let generated = controller
+            .create_deployment(&project, &deployment, &metadata, vec![])
+            .await;
+
+        let pod_spec = generated
+            .spec
+            .and_then(|spec| spec.template.spec)
+            .expect("pod spec should be present");
+
+        let volumes = pod_spec.volumes.expect("volumes should be present");
+        assert_eq!(volumes.len(), 1);
+        assert_eq!(volumes[0].name, EXTRA_SERVICE_TOKENS_VOLUME_NAME);
+
+        let projected = volumes[0]
+            .projected
+            .as_ref()
+            .expect("projected volume should be present");
+        let sources = projected
+            .sources
+            .as_ref()
+            .expect("projected volume sources should be present");
+        assert_eq!(sources.len(), 2);
+
+        let mut actual_sources: Vec<(String, String)> = sources
+            .iter()
+            .map(|projection| {
+                let token = projection
+                    .service_account_token
+                    .as_ref()
+                    .expect("serviceAccountToken projection should be present");
+                (
+                    token.path.clone(),
+                    token
+                        .audience
+                        .clone()
+                        .expect("audience should be populated"),
+                )
+            })
+            .collect();
+        actual_sources.sort();
+
+        assert_eq!(
+            actual_sources,
+            vec![
+                ("metrics".to_string(), "metrics-service".to_string()),
+                ("vault".to_string(), "https://vault.example.com".to_string()),
+            ]
+        );
+
+        let volume_mounts = pod_spec.containers[0]
+            .volume_mounts
+            .as_ref()
+            .expect("volume mounts should be present");
+        assert_eq!(volume_mounts.len(), 1);
+        assert_eq!(volume_mounts[0].name, EXTRA_SERVICE_TOKENS_VOLUME_NAME);
+        assert_eq!(volume_mounts[0].mount_path, EXTRA_SERVICE_TOKENS_MOUNT_PATH);
+        assert_eq!(volume_mounts[0].read_only, Some(true));
     }
 
     #[test]
@@ -5552,6 +5764,7 @@ mod tests {
             access_classes,
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
+            extra_service_token_audiences: std::collections::HashMap::new(),
             ingress_controller_namespace: "ingress-nginx".to_string(),
             ingress_controller_labels: {
                 let mut labels = std::collections::HashMap::new();
