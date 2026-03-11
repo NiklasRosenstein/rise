@@ -527,7 +527,7 @@ pub async fn get_project_env_var_value(
 ///
 /// Returns:
 /// - User-set environment variables
-/// - System vars (PORT, RISE_ISSUER, RISE_APP_URL, RISE_APP_URLS)
+/// - System vars (PORT, RISE_ISSUER, RISE_APP_URL, RISE_APP_URLS, RISE_DEPLOYMENT_GROUP, RISE_DEPLOYMENT_GROUP_NORMALIZED)
 /// - Extension-injected vars
 ///
 /// Protected vars are masked. This enables `rise run` to inject the same env vars as a real deployment.
@@ -696,6 +696,29 @@ pub async fn preview_deployment_env_vars(
             );
         }
     }
+
+    // Deployment group vars
+    env_map.insert(
+        "RISE_DEPLOYMENT_GROUP".to_string(),
+        EnvVarResponse {
+            key: "RISE_DEPLOYMENT_GROUP".to_string(),
+            value: deployment_group.clone(),
+            is_secret: false,
+            is_protected: false,
+        },
+    );
+
+    let normalized_group =
+        crate::server::deployment::models::normalize_deployment_group(&deployment_group);
+    env_map.insert(
+        "RISE_DEPLOYMENT_GROUP_NORMALIZED".to_string(),
+        EnvVarResponse {
+            key: "RISE_DEPLOYMENT_GROUP_NORMALIZED".to_string(),
+            value: normalized_group,
+            is_secret: false,
+            is_protected: false,
+        },
+    );
 
     // 3. Collect extension env vars
     for (_, extension) in state.extension_registry.iter() {

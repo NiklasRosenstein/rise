@@ -245,7 +245,7 @@ async fn insert_rise_env_vars(
         "RISE_ISSUER",
         &state.public_url,
         false, // Not a secret
-        false, // is_retrievable
+        false, // is_protected
     )
     .await
     .map_err(|e| {
@@ -291,7 +291,7 @@ async fn insert_rise_env_vars(
         "RISE_APP_URLS",
         &app_urls_json,
         false, // Not a secret
-        false, // is_retrievable
+        false, // is_protected
     )
     .await
     .map_err(|e| {
@@ -309,7 +309,7 @@ async fn insert_rise_env_vars(
         "RISE_APP_URL",
         &canonical_url,
         false, // Not a secret
-        false, // is_retrievable
+        false, // is_protected
     )
     .await
     .map_err(|e| {
@@ -320,14 +320,14 @@ async fn insert_rise_env_vars(
         )
     })?;
 
-    // 4. Insert RISE_DEPLOYMENT_GROUP
+    // 3. Insert RISE_DEPLOYMENT_GROUP
     crate::db::env_vars::upsert_deployment_env_var(
         &state.db_pool,
         deployment.id,
         "RISE_DEPLOYMENT_GROUP",
         &deployment.deployment_group,
         false, // Not a secret
-        false, // is_retrievable
+        false, // is_protected
     )
     .await
     .map_err(|e| {
@@ -338,7 +338,7 @@ async fn insert_rise_env_vars(
         )
     })?;
 
-    // 5. Insert RISE_DEPLOYMENT_GROUP_NORMALIZED
+    // 4. Insert RISE_DEPLOYMENT_GROUP_NORMALIZED
     let normalized_group =
         crate::server::deployment::models::normalize_deployment_group(&deployment.deployment_group);
     crate::db::env_vars::upsert_deployment_env_var(
@@ -347,7 +347,7 @@ async fn insert_rise_env_vars(
         "RISE_DEPLOYMENT_GROUP_NORMALIZED",
         &normalized_group,
         false, // Not a secret
-        false, // is_retrievable
+        false, // is_protected
     )
     .await
     .map_err(|e| {
@@ -720,7 +720,7 @@ pub async fn create_deployment(
             "PORT",
             &final_http_port.to_string(),
             false, // not a secret
-            false, // is_retrievable
+            false, // is_protected
         )
         .await
         .map_err(|e| {
@@ -941,7 +941,7 @@ pub async fn create_deployment(
             "PORT",
             &effective_http_port.to_string(),
             false, // not a secret
-            false, // is_retrievable
+            false, // is_protected
         )
         .await
         .map_err(|e| {
@@ -1040,7 +1040,7 @@ pub async fn create_deployment(
             "PORT",
             &effective_http_port.to_string(),
             false, // not a secret
-            false, // is_retrievable
+            false, // is_protected
         )
         .await
         .map_err(|e| {
