@@ -76,7 +76,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
         })?;
     }
 
-    let plan_file = build_dir.join("plan.json");
+    let plan_file = build_dir.join("railpack-plan.json");
     let info_file = build_dir.join("info.json");
 
     // Set up cleanup guards
@@ -112,6 +112,21 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
     // Combine proxy vars and user env vars for secrets
     let mut all_secrets = proxy_vars.clone();
     all_secrets.extend(user_env_vars);
+
+    // Add SSL env vars before railpack prepare so they are declared in the plan
+    // and exposed as secrets during build-time RUN steps.
+    if options.embed_ssl_cert {
+        if let Some(ssl_cert_file) = super::env_var_non_empty("SSL_CERT_FILE") {
+            if Path::new(&ssl_cert_file).exists() {
+                let ssl_cert_target = super::ssl::SSL_CERT_PATHS[0];
+                for var in super::ssl::SSL_ENV_VARS {
+                    all_secrets
+                        .entry(var.to_string())
+                        .or_insert_with(|| ssl_cert_target.to_string());
+                }
+            }
+        }
+    }
 
     info!("Running railpack prepare for: {}", options.app_path);
 
@@ -362,45 +377,72 @@ pub(crate) fn build_with_buildctl(
         }
     }
 
-    cmd.arg("--output");
-
     // Set BUILDKIT_HOST if provided
     if let Some(host) = buildkit_host {
         cmd.env("BUILDKIT_HOST", host);
     }
 
-    // Add local contexts (named build contexts)
+    // Add local contexts (named build contexts).
+    // Each named context needs both --local (to register the source)
+    // and --opt context:<name>=local:<name> (to map it for the Dockerfile frontend).
     for (name, path) in local_contexts {
         cmd.arg("--local").arg(format!("{}={}", name, path));
+        cmd.arg("--opt")
+            .arg(format!("context:{}=local:{}", name, name));
     }
 
     // Add secrets via prefixed env vars so the CLI keeps its original
     // proxy vars while build containers get the transformed values.
     proxy::add_secrets_to_command(&mut cmd, secrets);
 
-    // Add no-cache flag if requested
+    // Disable build cache via frontend option (buildctl has no --no-cache flag)
     if no_cache {
-        cmd.arg("--no-cache");
+        cmd.arg("--opt").arg("no-cache=");
     }
 
+    // --output must be last: its value is the next positional arg
     if push {
-        cmd.arg(format!(
+        cmd.arg("--output").arg(format!(
             "type=image,name={},push=true,platform=linux/amd64",
             image_tag
         ));
+
+        debug!("Executing command: {:?}", cmd);
+
+        let status = cmd.status().context("Failed to execute buildctl build")?;
+        if !status.success() {
+            bail!("buildctl build failed with status: {}", status);
+        }
     } else {
-        cmd.arg(format!(
-            "type=image,name={},platform=linux/amd64",
+        // Output as docker tar stream and pipe into `docker load` so the
+        // image is available in the local Docker daemon.
+        cmd.arg("--output").arg(format!(
+            "type=docker,name={},platform=linux/amd64",
             image_tag
         ));
-    }
+        cmd.stdout(std::process::Stdio::piped());
 
-    debug!("Executing command: {:?}", cmd);
+        debug!("Executing command: {:?} | docker load", cmd);
 
-    let status = cmd.status().context("Failed to execute buildctl build")?;
+        let mut buildctl_child = cmd.spawn().context("Failed to execute buildctl build")?;
+        let buildctl_stdout = buildctl_child
+            .stdout
+            .take()
+            .context("Failed to capture buildctl stdout")?;
 
-    if !status.success() {
-        bail!("buildctl build failed with status: {}", status);
+        let docker_load = Command::new("docker")
+            .arg("load")
+            .stdin(buildctl_stdout)
+            .status()
+            .context("Failed to execute docker load")?;
+
+        let buildctl_status = buildctl_child.wait().context("Failed to wait for buildctl")?;
+        if !buildctl_status.success() {
+            bail!("buildctl build failed with status: {}", buildctl_status);
+        }
+        if !docker_load.success() {
+            bail!("docker load failed with status: {}", docker_load);
+        }
     }
 
     Ok(())

@@ -8,7 +8,7 @@
 #   ./tests/e2e-build/run.sh --no-proxy             # skip proxy tests
 #   RISE_BIN=./target/debug/rise ./tests/e2e-build/run.sh
 #
-set -euo pipefail
+set -uo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 FIXTURE_DIR="$SCRIPT_DIR/fixture"
@@ -19,6 +19,7 @@ BASE_PORT=18000
 PASSED=0
 FAILED=0
 NO_PROXY=false
+RESULTS=()  # "PASS|FAIL|SKIP: label" entries for summary
 
 ALL_BACKENDS=(docker:build docker:buildx docker:buildctl pack railpack:buildx railpack:buildctl)
 REQUESTED_BACKENDS=()
@@ -60,11 +61,18 @@ trap cleanup EXIT
 log_pass() {
     echo "[PASS] $1"
     PASSED=$((PASSED + 1))
+    RESULTS+=("PASS: $1")
 }
 
 log_fail() {
     echo "[FAIL] $1"
     FAILED=$((FAILED + 1))
+    RESULTS+=("FAIL: $1")
+}
+
+log_skip() {
+    echo "[SKIP] $1"
+    RESULTS+=("SKIP: $1")
 }
 
 safe_name() {
@@ -122,13 +130,13 @@ done
 
 start_mitmproxy() {
     docker rm -f "$MITMPROXY_CTR" 2>/dev/null || true
-    echo "  Starting mitmproxy..."
+    echo "Starting mitmproxy..."
     docker run -d --name "$MITMPROXY_CTR" -p 8080:8080 \
         mitmproxy/mitmproxy mitmdump --set ssl_insecure=true >/dev/null
 
     # Wait for mitmproxy to generate its CA cert (up to 15s)
     local attempts=0
-    while ! docker exec "$MITMPROXY_CTR" test -f /root/.mitmproxy/mitmproxy-ca-cert.pem 2>/dev/null; do
+    while ! docker exec "$MITMPROXY_CTR" test -f /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem 2>/dev/null; do
         sleep 1
         attempts=$((attempts + 1))
         if [[ $attempts -ge 15 ]]; then
@@ -136,49 +144,54 @@ start_mitmproxy() {
             return 1
         fi
     done
-}
 
-get_combined_ca_bundle() {
-    local tmp_ca
-    tmp_ca=$(mktemp /tmp/rise-e2e-ca-XXXXXX.pem)
-    TEMP_FILES_TO_CLEAN+=("$tmp_ca")
+    # Determine the host IP that containers can use to reach host port 8080
+    PROXY_HOST=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo "172.17.0.1")
 
-    # System CAs (try common locations)
-    local system_ca=""
+    # Build combined CA bundle (system CAs + mitmproxy CA)
+    CA_BUNDLE=$(mktemp /tmp/rise-e2e-ca-XXXXXX.pem)
+    TEMP_FILES_TO_CLEAN+=("$CA_BUNDLE")
     for ca_path in /etc/ssl/certs/ca-certificates.crt /etc/pki/tls/certs/ca-bundle.crt /etc/ssl/cert.pem; do
         if [[ -f "$ca_path" ]]; then
-            system_ca="$ca_path"
+            cat "$ca_path" > "$CA_BUNDLE"
             break
         fi
     done
+    docker exec "$MITMPROXY_CTR" cat /home/mitmproxy/.mitmproxy/mitmproxy-ca-cert.pem >> "$CA_BUNDLE"
 
-    if [[ -n "$system_ca" ]]; then
-        cat "$system_ca" > "$tmp_ca"
-    fi
-
-    # Append mitmproxy CA
-    docker exec "$MITMPROXY_CTR" cat /root/.mitmproxy/mitmproxy-ca-cert.pem >> "$tmp_ca"
-    echo "$tmp_ca"
+    echo "mitmproxy ready (proxy via ${PROXY_HOST}:8080)"
 }
 
-restart_mitmproxy() {
-    docker rm -f "$MITMPROXY_CTR" 2>/dev/null || true
-    start_mitmproxy
+# Get current mitmproxy log line count (for checking new traffic after a build)
+mitmproxy_log_offset() {
+    docker logs "$MITMPROXY_CTR" 2>&1 | wc -l
 }
 
-check_proxy_traffic() {
-    # Check mitmproxy logs for pypi.org or pythonhosted.org traffic
+check_proxy_traffic_since() {
+    local offset="$1"
     local logs
-    logs=$(docker logs "$MITMPROXY_CTR" 2>&1)
+    logs=$(docker logs "$MITMPROXY_CTR" 2>&1 | tail -n +"$((offset + 1))")
     if echo "$logs" | grep -qiE 'pypi\.org|pythonhosted\.org|files\.pythonhosted'; then
         return 0
     fi
-    echo "  Proxy log snippet:"
+    echo "  Proxy log (new lines since offset $offset):"
     echo "$logs" | tail -20 | sed 's/^/    /'
     return 1
 }
 
 # --- Test functions ---
+
+backend_flags() {
+    local backend="$1"
+    case "$backend" in
+        docker:buildx|docker:buildctl)
+            echo "--managed-buildkit=true" ;;
+        railpack:buildx|railpack:buildctl)
+            echo "--managed-buildkit=true --railpack-embed-ssl-cert=true" ;;
+        pack)
+            echo "--builder paketobuildpacks/builder-jammy-base -b paketo-buildpacks/python" ;;
+    esac
+}
 
 run_basic_test() {
     local backend="$1"
@@ -195,21 +208,8 @@ run_basic_test() {
     echo ""
     echo "--- Basic test: $backend ---"
 
-    # Build flags per backend
-    local -a flags=()
-    case "$backend" in
-        docker:buildctl)
-            flags+=(--managed-buildkit)
-            ;;
-        pack)
-            flags+=(--builder paketobuildpacks/builder-jammy-base -b paketo-buildpacks/python)
-            ;;
-        railpack:buildctl)
-            flags+=(--managed-buildkit)
-            ;;
-    esac
-
-    if ! rise_build "$tag" "$FIXTURE_DIR" --backend "$backend" "${flags[@]}"; then
+    # shellcheck disable=SC2046
+    if ! rise_build "$tag" "$FIXTURE_DIR" --backend "$backend" --no-cache $(backend_flags "$backend"); then
         log_fail "$test_label (build failed)"
         return
     fi
@@ -232,56 +232,31 @@ run_basic_test() {
 
 run_proxy_test() {
     local backend="$1"
-    local port="$2"
     local name
     name="$(safe_name "$backend")"
     local tag="rise-e2e-proxy-${name}:latest"
-    local ctr="rise-e2e-proxy-${name}"
     local test_label="${backend} - proxy build"
 
     IMAGES_TO_CLEAN+=("$tag")
-    CONTAINERS_TO_CLEAN+=("$ctr")
 
     echo ""
     echo "--- Proxy test: $backend ---"
 
-    # Restart mitmproxy for clean logs
-    restart_mitmproxy
+    local offset
+    offset=$(mitmproxy_log_offset)
 
-    local ca_bundle
-    ca_bundle=$(get_combined_ca_bundle)
-
-    # Determine the host IP that containers can use to reach host port 8080
-    local proxy_host
-    proxy_host=$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo "172.17.0.1")
-
-    # Build flags per backend (all proxy builds use --no-cache)
-    local -a flags=(--no-cache)
-    case "$backend" in
-        docker:buildx)
-            flags+=(--managed-buildkit)
-            ;;
-        docker:buildctl)
-            flags+=(--managed-buildkit)
-            ;;
-        railpack:buildx)
-            flags+=(--managed-buildkit)
-            ;;
-        railpack:buildctl)
-            flags+=(--managed-buildkit)
-            ;;
-    esac
-
-    if ! HTTP_PROXY="http://${proxy_host}:8080" \
-         HTTPS_PROXY="http://${proxy_host}:8080" \
-         SSL_CERT_FILE="$ca_bundle" \
-         rise_build "$tag" "$FIXTURE_DIR" --backend "$backend" "${flags[@]}"; then
+    # shellcheck disable=SC2046
+    if ! HTTP_PROXY="http://${PROXY_HOST}:8080" \
+         HTTPS_PROXY="http://${PROXY_HOST}:8080" \
+         SSL_CERT_FILE="$CA_BUNDLE" \
+         rise_build "$tag" "$FIXTURE_DIR" --backend "$backend" --no-cache \
+         $(backend_flags "$backend"); then
         log_fail "$test_label (build failed)"
         return
     fi
 
     # Verify proxy traffic
-    if check_proxy_traffic; then
+    if check_proxy_traffic_since "$offset"; then
         log_pass "$test_label"
     else
         log_fail "$test_label (no proxy traffic detected)"
@@ -295,22 +270,41 @@ echo "Backends: ${REQUESTED_BACKENDS[*]}"
 echo "Proxy tests: $(if $NO_PROXY; then echo disabled; else echo enabled; fi)"
 echo ""
 
+# Start mitmproxy once for all proxy tests
+if ! $NO_PROXY; then
+    start_mitmproxy
+fi
+
 port_offset=0
 for backend in "${REQUESTED_BACKENDS[@]}"; do
     basic_port=$((BASE_PORT + port_offset))
-    proxy_port=$((BASE_PORT + port_offset + 1))
-    port_offset=$((port_offset + 2))
+    port_offset=$((port_offset + 1))
 
     run_basic_test "$backend" "$basic_port"
 
     if ! $NO_PROXY; then
-        run_proxy_test "$backend" "$proxy_port"
+        case "$backend" in
+            docker:build)
+                log_skip "${backend} - proxy build (docker:build does not support SSL cert injection)"
+                ;;
+            *)
+                run_proxy_test "$backend"
+                ;;
+        esac
     fi
 done
 
 # Summary
 echo ""
 echo "========================================="
+for r in "${RESULTS[@]}"; do
+    case "$r" in
+        PASS:*) echo "  ✓ ${r#PASS: }" ;;
+        FAIL:*) echo "  ✗ ${r#FAIL: }" ;;
+        SKIP:*) echo "  - ${r#SKIP: }" ;;
+    esac
+done
+echo "-----------------------------------------"
 echo "  PASSED: $PASSED    FAILED: $FAILED"
 echo "========================================="
 
