@@ -302,6 +302,9 @@ pub struct KubernetesController {
     ingress_controller_namespace: String,
     ingress_controller_labels: std::collections::HashMap<String, String>,
     network_policy_allow_kube_apiserver: bool,
+    /// Cached ClusterIP of the `kubernetes` service in the `default` namespace.
+    /// Immutable per the Kubernetes spec, so we look it up once and cache forever.
+    kube_api_server_ip: tokio::sync::OnceCell<Option<String>>,
     network_policy_egress_allow_cidrs: Vec<String>,
     pod_security_enabled: bool,
     pod_resources: Option<crate::server::settings::PodResourceLimits>,
@@ -347,6 +350,7 @@ impl KubernetesController {
             ingress_controller_namespace: config.ingress_controller_namespace,
             ingress_controller_labels: config.ingress_controller_labels,
             network_policy_allow_kube_apiserver: config.network_policy_allow_kube_apiserver,
+            kube_api_server_ip: tokio::sync::OnceCell::new(),
             network_policy_egress_allow_cidrs: config.network_policy_egress_allow_cidrs,
             pod_security_enabled: config.pod_security_enabled,
             pod_resources: config.pod_resources,
@@ -2116,21 +2120,35 @@ impl KubernetesController {
 
     /// Look up the ClusterIP of the `kubernetes` service in the `default` namespace.
     ///
+    /// The result is cached because the ClusterIP is immutable per the Kubernetes spec.
+    ///
     /// We use the service ClusterIP rather than pod selector labels because the labels on
     /// kube-apiserver pods are not standardized across Kubernetes distributions (e.g. kubeadm
     /// uses `component: kube-apiserver`, others use `component: apiserver`, and managed clusters
     /// like EKS/GKE may not expose API server pods at all). The `kubernetes` service in the
     /// `default` namespace is part of the Kubernetes spec and always exists with a stable,
     /// immutable ClusterIP.
-    async fn get_kubernetes_api_server_ip(&self) -> Option<String> {
-        let svc_api: Api<Service> = Api::namespaced(self.kube_client.clone(), "default");
-        match svc_api.get("kubernetes").await {
-            Ok(svc) => svc.spec.and_then(|s| s.cluster_ip).filter(|ip| !ip.is_empty()),
-            Err(e) => {
-                warn!("Failed to look up kubernetes service ClusterIP: {:?}", e);
-                None
-            }
-        }
+    async fn get_kubernetes_api_server_ip(&self) -> Option<&str> {
+        self.kube_api_server_ip
+            .get_or_init(|| async {
+                let svc_api: Api<Service> =
+                    Api::namespaced(self.kube_client.clone(), "default");
+                match svc_api.get("kubernetes").await {
+                    Ok(svc) => svc
+                        .spec
+                        .and_then(|s| s.cluster_ip)
+                        .filter(|ip| !ip.is_empty()),
+                    Err(e) => {
+                        warn!(
+                            "Failed to look up kubernetes service ClusterIP: {:?}",
+                            e
+                        );
+                        None
+                    }
+                }
+            })
+            .await
+            .as_deref()
     }
 
     /// Apply NetworkPolicy with drift detection
@@ -2159,7 +2177,7 @@ impl KubernetesController {
                         project,
                         deployment,
                         namespace,
-                        kube_api_server_ip.as_deref(),
+                        kube_api_server_ip,
                     );
                     let result = np_api
                         .patch(
