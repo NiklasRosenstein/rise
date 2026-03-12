@@ -185,11 +185,24 @@ impl Config {
     /// Get the authentication token
     /// Checks RISE_TOKEN environment variable first, then falls back to config file
     pub fn get_token(&self) -> Option<String> {
-        #[cfg(not(test))]
-        if let Ok(token) = std::env::var("RISE_TOKEN") {
-            return Some(token);
+        let token = {
+            #[cfg(not(test))]
+            if let Ok(token) = std::env::var("RISE_TOKEN") {
+                Some(token)
+            } else {
+                self.token.clone()
+            }
+            #[cfg(test)]
+            {
+                self.token.clone()
+            }
+        };
+
+        if let Some(token) = token.as_deref() {
+            crate::login::token_utils::log_token_debug(token);
         }
-        self.token.clone()
+
+        token
     }
 
     /// Set the backend URL

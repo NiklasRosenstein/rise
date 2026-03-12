@@ -1,7 +1,56 @@
 use anyhow::{Context, Result};
+use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
 use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
 use serde::Deserialize;
+use serde_json::Value;
+
+#[derive(Debug)]
+struct JwtDebugParts {
+    header: Value,
+    claims: Value,
+}
+
+/// Log the JWT header and claims at debug level without exposing the signature.
+pub fn log_token_debug(token: &str) {
+    if !tracing::enabled!(tracing::Level::DEBUG) {
+        return;
+    }
+
+    match decode_jwt_debug_parts(token) {
+        Ok(parts) => tracing::debug!(
+            "CLI token header: {}\nCLI token claims: {}",
+            parts.header,
+            parts.claims
+        ),
+        Err(error) => tracing::debug!("Failed to decode CLI token for debug logging: {error}"),
+    }
+}
+
+fn decode_jwt_debug_parts(token: &str) -> Result<JwtDebugParts> {
+    let header = jsonwebtoken::decode_header(token).context("Failed to decode token header")?;
+    let header = serde_json::to_value(header).context("Failed to serialize token header")?;
+    let claims = decode_jwt_claims(token)?;
+
+    Ok(JwtDebugParts { header, claims })
+}
+
+fn decode_jwt_claims(token: &str) -> Result<Value> {
+    let mut parts = token.split('.');
+    let _header = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Token is missing JWT header"))?;
+    let claims = parts
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Token is missing JWT claims"))?;
+
+    let decoded = general_purpose::URL_SAFE_NO_PAD
+        .decode(claims)
+        .or_else(|_| general_purpose::URL_SAFE.decode(claims))
+        .context("Failed to base64url-decode token claims")?;
+
+    serde_json::from_slice(&decoded).context("Failed to parse token claims JSON")
+}
 
 #[derive(Debug, Deserialize)]
 struct TokenClaims {
@@ -62,4 +111,43 @@ pub fn format_token_expiration(token: &str) -> Result<String> {
     };
 
     Ok(format!("{} ({})", formatted_date, relative))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn encode_segment(json: &str) -> String {
+        general_purpose::URL_SAFE_NO_PAD.encode(json)
+    }
+
+    #[test]
+    fn decode_jwt_debug_parts_reads_header_and_claims_without_signature() {
+        let token = format!(
+            "{}.{}.signature",
+            encode_segment(r#"{"alg":"RS256","typ":"JWT"}"#),
+            encode_segment(r#"{"sub":"service-account","aud":"demo-project"}"#),
+        );
+
+        let parts = decode_jwt_debug_parts(&token).expect("token should decode");
+
+        assert_eq!(parts.header["alg"], "RS256");
+        assert_eq!(parts.header["typ"], "JWT");
+        assert_eq!(parts.claims["sub"], "service-account");
+        assert_eq!(parts.claims["aud"], "demo-project");
+    }
+
+    #[test]
+    fn decode_jwt_debug_parts_rejects_invalid_claims() {
+        let token = format!(
+            "{}.{}.signature",
+            encode_segment(r#"{"alg":"RS256","typ":"JWT"}"#),
+            encode_segment("not-json"),
+        );
+
+        let error = decode_jwt_debug_parts(&token).expect_err("claims should fail to decode");
+        assert!(error
+            .to_string()
+            .contains("Failed to parse token claims JSON"));
+    }
 }
