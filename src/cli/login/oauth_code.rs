@@ -323,7 +323,7 @@ pub async fn handle_authorization_code_flow(
     }
 
     // Store the token
-    log_token_debug(&exchange_response.token);
+    log_token_debug(&exchange_response.token, "OAuth login response");
     config
         .set_token(exchange_response.token.clone())
         .context("Failed to save authentication token")?;

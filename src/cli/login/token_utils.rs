@@ -12,24 +12,27 @@ struct JwtDebugParts {
 }
 
 /// Log the JWT header and claims at debug level without exposing the signature.
-pub fn log_token_debug(token: &str) {
+pub fn log_token_debug(token: &str, source: &str) {
     if !tracing::enabled!(tracing::Level::DEBUG) {
         return;
     }
 
+    tracing::debug!("Using token from {source}");
+
     match decode_jwt_debug_parts(token) {
-        Ok(parts) => tracing::debug!(
-            "CLI token header: {}\nCLI token claims: {}",
-            parts.header,
-            parts.claims
-        ),
-        Err(error) => tracing::debug!("Failed to decode CLI token for debug logging: {error}"),
+        Ok(parts) => tracing::debug!("Token header.claims is {}.{}", parts.header, parts.claims),
+        Err(error) => {
+            tracing::debug!("Failed to decode token header.claims for debug logging: {error}")
+        }
     }
 }
 
 fn decode_jwt_debug_parts(token: &str) -> Result<JwtDebugParts> {
     let header = jsonwebtoken::decode_header(token).context("Failed to decode token header")?;
-    let header = serde_json::to_value(header).context("Failed to serialize token header")?;
+    let mut header = serde_json::to_value(header).context("Failed to serialize token header")?;
+    if let Value::Object(header_obj) = &mut header {
+        header_obj.retain(|_, value| !value.is_null());
+    }
     let claims = decode_jwt_claims(token)?;
 
     Ok(JwtDebugParts { header, claims })
@@ -135,6 +138,20 @@ mod tests {
         assert_eq!(parts.header["typ"], "JWT");
         assert_eq!(parts.claims["sub"], "service-account");
         assert_eq!(parts.claims["aud"], "demo-project");
+    }
+
+    #[test]
+    fn token_header_claims_string_matches_expected_format() {
+        let token = format!(
+            "{}.{}.signature",
+            encode_segment(r#"{"alg":"RS256"}"#),
+            encode_segment(r#"{"sub":"service-account"}"#),
+        );
+
+        let parts = decode_jwt_debug_parts(&token).expect("token should decode");
+        let combined = format!("{}.{}", parts.header, parts.claims);
+
+        assert_eq!(combined, r#"{"alg":"RS256"}.{"sub":"service-account"}"#);
     }
 
     #[test]

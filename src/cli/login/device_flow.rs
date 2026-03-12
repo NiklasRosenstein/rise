@@ -168,7 +168,7 @@ pub async fn handle_device_flow(
                 }
 
                 // Store the token
-                log_token_debug(&token);
+                log_token_debug(&token, "device flow response");
                 config
                     .set_token(token.clone())
                     .context("Failed to save authentication token")?;
