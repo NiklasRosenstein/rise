@@ -3,6 +3,10 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 
+pub fn normalize_backend_url(url: &str) -> String {
+    url.trim_end_matches('/').to_string()
+}
+
 /// The container runtime engine behind the CLI command.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ContainerRuntime {
@@ -128,7 +132,6 @@ pub struct Config {
     pub backend_url: Option<String>,
     pub container_cli: Option<String>,
     pub managed_buildkit: Option<bool>,
-    pub railpack_embed_ssl_cert: Option<bool>,
 }
 
 impl Config {
@@ -191,7 +194,7 @@ impl Config {
 
     /// Set the backend URL
     pub fn set_backend_url(&mut self, url: String) -> Result<()> {
-        self.backend_url = Some(url);
+        self.backend_url = Some(normalize_backend_url(&url));
         self.save()
     }
 
@@ -200,10 +203,11 @@ impl Config {
     pub fn get_backend_url(&self) -> String {
         #[cfg(not(test))]
         if let Ok(url) = std::env::var("RISE_URL") {
-            return url;
+            return normalize_backend_url(&url);
         }
         self.backend_url
-            .clone()
+            .as_deref()
+            .map(normalize_backend_url)
             .unwrap_or_else(|| "http://localhost:3000".to_string())
     }
 
@@ -244,31 +248,6 @@ impl Config {
     #[allow(dead_code)]
     pub fn set_managed_buildkit(&mut self, enabled: bool) -> Result<()> {
         self.managed_buildkit = Some(enabled);
-        self.save()
-    }
-
-    /// Get whether to embed SSL certificate in Railpack builds
-    /// Checks RISE_RAILPACK_EMBED_SSL_CERT environment variable first, then falls back to config file
-    /// Defaults to true if SSL_CERT_FILE is set in the environment
-    #[allow(dead_code)]
-    pub fn get_railpack_embed_ssl_cert(&self) -> bool {
-        #[cfg(not(test))]
-        if let Some(val) = crate::build::parse_bool_env_var("RISE_RAILPACK_EMBED_SSL_CERT") {
-            return val;
-        }
-        if let Some(enabled) = self.railpack_embed_ssl_cert {
-            return enabled;
-        }
-        #[cfg(not(test))]
-        return crate::build::env_var_non_empty("SSL_CERT_FILE").is_some();
-        #[cfg(test)]
-        false
-    }
-
-    /// Set whether to embed SSL certificate in Railpack builds
-    #[allow(dead_code)]
-    pub fn set_railpack_embed_ssl_cert(&mut self, enabled: bool) -> Result<()> {
-        self.railpack_embed_ssl_cert = Some(enabled);
         self.save()
     }
 }
@@ -327,6 +306,20 @@ mod tests {
     }
 
     #[test]
+    fn test_backend_url_trailing_slash_is_trimmed() {
+        let c = config(|c| c.backend_url = Some("https://api.example.com/".to_string()));
+        assert_eq!(c.get_backend_url(), "https://api.example.com");
+    }
+
+    #[test]
+    fn test_normalize_backend_url_trims_multiple_trailing_slashes() {
+        assert_eq!(
+            normalize_backend_url("https://api.example.com///"),
+            "https://api.example.com"
+        );
+    }
+
+    #[test]
     fn test_token_none_by_default() {
         assert_eq!(Config::default().get_token(), None);
     }
@@ -349,21 +342,6 @@ mod tests {
 
         let c = config(|c| c.managed_buildkit = Some(false));
         assert!(!c.get_managed_buildkit());
-    }
-
-    #[test]
-    fn test_railpack_embed_ssl_cert_default_false() {
-        // In tests, env vars are ignored, so default is always false
-        assert!(!Config::default().get_railpack_embed_ssl_cert());
-    }
-
-    #[test]
-    fn test_railpack_embed_ssl_cert_from_config() {
-        let c = config(|c| c.railpack_embed_ssl_cert = Some(true));
-        assert!(c.get_railpack_embed_ssl_cert());
-
-        let c = config(|c| c.railpack_embed_ssl_cert = Some(false));
-        assert!(!c.get_railpack_embed_ssl_cert());
     }
 
     #[test]

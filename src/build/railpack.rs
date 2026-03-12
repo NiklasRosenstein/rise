@@ -8,6 +8,7 @@ use std::process::Command;
 use tracing::{debug, info, warn};
 
 use super::buildkit::ensure_buildx_builder;
+use super::proxy;
 use super::registry::docker_push;
 use super::ssl::embed_ssl_cert_in_plan;
 
@@ -29,34 +30,8 @@ pub(crate) struct RailpackBuildOptions<'a> {
     pub use_buildctl: bool,
     pub push: bool,
     pub buildkit_host: Option<&'a str>,
-    pub embed_ssl_cert: bool,
     pub env: &'a [String],
     pub no_cache: bool,
-}
-
-/// Parse environment variables from CLI format to HashMap
-/// Supports both KEY=VALUE and KEY (reads from current environment)
-fn parse_env_vars(env: &[String]) -> Result<HashMap<String, String>> {
-    let mut result = HashMap::new();
-
-    for env_var in env {
-        if let Some((key, value)) = env_var.split_once('=') {
-            // KEY=VALUE format
-            result.insert(key.to_string(), value.to_string());
-        } else {
-            // KEY format - read from environment
-            if let Ok(value) = std::env::var(env_var) {
-                result.insert(env_var.to_string(), value);
-            } else {
-                bail!(
-                    "Environment variable '{}' is not set in current environment",
-                    env_var
-                );
-            }
-        }
-    }
-
-    Ok(result)
 }
 
 /// RAII guard for cleaning up temp files and directories
@@ -100,7 +75,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
         })?;
     }
 
-    let plan_file = build_dir.join("plan.json");
+    let plan_file = build_dir.join("railpack-plan.json");
     let info_file = build_dir.join("info.json");
 
     // Set up cleanup guards
@@ -129,9 +104,28 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
         None
     };
 
+    // Read proxy vars and parse user-provided env vars before railpack prepare
+    let mut all_secrets = proxy::read_and_transform_proxy_vars();
+    let user_env_vars = proxy::parse_env_vars(options.env)?;
+    all_secrets.extend(user_env_vars);
+
+    // Add SSL env vars before railpack prepare so they are declared in the plan
+    // and exposed as secrets during build-time RUN steps.
+    if let Some(ssl_cert_file) = super::env_var_non_empty("SSL_CERT_FILE") {
+        if Path::new(&ssl_cert_file).exists() {
+            let ssl_cert_target = super::ssl::SSL_CERT_PATHS[0];
+            for var in super::ssl::SSL_ENV_VARS {
+                all_secrets
+                    .entry(var.to_string())
+                    .or_insert_with(|| ssl_cert_target.to_string());
+            }
+        }
+    }
+
     info!("Running railpack prepare for: {}", options.app_path);
 
-    // Run railpack prepare
+    // Run railpack prepare with --env flags so secrets are declared in the plan
+    // (this enables railpack's secrets-hash cache invalidation mechanism)
     let mut cmd = Command::new("railpack");
     cmd.arg("prepare")
         .arg(options.app_path)
@@ -140,7 +134,25 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
         .arg("--info-out")
         .arg(&info_file);
 
-    debug!("Executing command: {:?}", cmd);
+    for key in all_secrets.keys() {
+        cmd.arg("--env")
+            .arg(format!("{}={}", key, all_secrets[key]));
+    }
+
+    // Log command with redacted secret values
+    if tracing::enabled!(tracing::Level::DEBUG) {
+        let redacted_env: Vec<String> = all_secrets
+            .keys()
+            .map(|k| format!("--env {}=<redacted>", k))
+            .collect();
+        debug!(
+            "Executing: railpack prepare {} --plan-out {} --info-out {} {}",
+            options.app_path,
+            plan_file.display(),
+            info_file.display(),
+            redacted_env.join(" ")
+        );
+    }
 
     let status = cmd.status().context("Failed to execute railpack prepare")?;
 
@@ -158,37 +170,17 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
 
     info!("✓ Railpack prepare completed");
 
-    // Embed SSL certificate if requested
-    if options.embed_ssl_cert {
-        if let Some(ssl_cert_file) = super::env_var_non_empty("SSL_CERT_FILE") {
-            let cert_path = Path::new(&ssl_cert_file);
-            if cert_path.exists() {
-                embed_ssl_cert_in_plan(&plan_file, cert_path)?;
-            } else {
-                warn!(
-                    "SSL_CERT_FILE set to '{}' but file not found",
-                    ssl_cert_file
-                );
-            }
+    // Embed SSL certificate if SSL_CERT_FILE is set
+    if let Some(ssl_cert_file) = super::env_var_non_empty("SSL_CERT_FILE") {
+        let cert_path = Path::new(&ssl_cert_file);
+        if cert_path.exists() {
+            embed_ssl_cert_in_plan(&plan_file, cert_path)?;
         } else {
             warn!(
-                "--railpack-embed-ssl-cert enabled but SSL_CERT_FILE environment variable not set"
+                "SSL_CERT_FILE set to '{}' but file not found",
+                ssl_cert_file
             );
         }
-    }
-
-    let proxy_vars = super::proxy::read_and_transform_proxy_vars();
-
-    // Parse user-provided environment variables into HashMap
-    let user_env_vars = parse_env_vars(options.env)?;
-
-    // Combine proxy vars and user env vars for secrets
-    let mut all_secrets = proxy_vars.clone();
-    all_secrets.extend(user_env_vars);
-
-    if !all_secrets.is_empty() {
-        info!("Adding environment variable references to railpack plan");
-        super::proxy::add_secret_refs_to_plan(&plan_file, &all_secrets)?;
     }
 
     // Debug log plan contents
@@ -208,6 +200,7 @@ pub(crate) fn build_image_with_railpacks(options: RailpackBuildOptions) -> Resul
             &HashMap::new(), // No local contexts for Railpack
             BuildctlFrontend::Railpack,
             options.no_cache,
+            options.container_cli,
         )?;
     } else {
         build_with_buildx(
@@ -240,10 +233,7 @@ fn build_with_buildx(
     no_cache: bool,
 ) -> Result<()> {
     // Check buildx availability
-    let buildx_check = Command::new(container_cli)
-        .args(["buildx", "version"])
-        .output();
-    if buildx_check.is_err() {
+    if !super::docker::is_buildx_available(container_cli) {
         bail!(
             "{} buildx not available. Install buildx or use railpack:buildctl backend instead.",
             container_cli
@@ -275,7 +265,7 @@ fn build_with_buildx(
         .arg("linux/amd64");
 
     // Use the managed builder if available
-    if let Some(builder) = builder_name {
+    if let Some(ref builder) = builder_name {
         cmd.arg("--builder").arg(builder);
     }
 
@@ -284,17 +274,29 @@ fn build_with_buildx(
         cmd.arg("--no-cache");
     }
 
-    if push && buildx_supports_push {
-        cmd.arg("--push");
-    } else {
-        // For local builds, use --load to ensure image is available in local daemon
-        cmd.arg("--load");
-    }
+    let needs_fallback_push =
+        super::docker::configure_buildx_output(&mut cmd, push, buildx_supports_push);
 
-    // Add secrets
-    for key in secrets.keys() {
-        cmd.arg("--secret").arg(format!("id={},env={}", key, key));
-    }
+    // Resolve host gateway IP and rewrite proxy URLs in secrets.
+    // Prefer the BuildKit container name from BUILDKIT_HOST (docker-container://...)
+    // over the builder name, since they may differ.
+    let buildkit_host_env = std::env::var("BUILDKIT_HOST").ok();
+    let container_name = buildkit_host_env
+        .as_deref()
+        .and_then(|h| h.strip_prefix("docker-container://"))
+        .or(builder_name.as_deref());
+
+    let effective_secrets = super::buildkit::resolve_and_apply_host_gateway(
+        &mut cmd,
+        container_cli,
+        secrets,
+        container_name,
+        buildkit_host_env.is_some(),
+    );
+
+    // Add secrets via prefixed env vars so the docker CLI keeps its original
+    // proxy vars while build containers get the transformed values.
+    proxy::add_secrets_to_command(&mut cmd, &effective_secrets);
 
     cmd.arg(app_path);
 
@@ -312,7 +314,7 @@ fn build_with_buildx(
         );
     }
 
-    if push && !buildx_supports_push {
+    if needs_fallback_push {
         docker_push(container_cli, image_tag)?;
     }
 
@@ -327,7 +329,7 @@ fn build_with_buildx(
 ///
 /// The `secrets` HashMap contains environment variable secrets:
 /// - key: environment variable name
-/// - value: value is ignored (secrets are read from the current environment)
+/// - value: the actual secret value (passed to the build via prefixed env vars)
 ///
 /// The `local_contexts` HashMap contains named build contexts:
 /// - key: context name (e.g., "rise-internal-ssl-cert")
@@ -343,6 +345,7 @@ pub(crate) fn build_with_buildctl(
     local_contexts: &HashMap<String, String>,
     frontend: BuildctlFrontend,
     no_cache: bool,
+    container_cli: &str,
 ) -> Result<()> {
     // Check buildctl availability
     let buildctl_check = Command::new("buildctl").arg("--version").output();
@@ -384,46 +387,74 @@ pub(crate) fn build_with_buildctl(
         }
     }
 
-    cmd.arg("--output");
-
     // Set BUILDKIT_HOST if provided
     if let Some(host) = buildkit_host {
         cmd.env("BUILDKIT_HOST", host);
     }
 
-    // Add local contexts (named build contexts)
+    // Add local contexts (named build contexts).
+    // Each named context needs both --local (to register the source)
+    // and --opt context:<name>=local:<name> (to map it for the Dockerfile frontend).
     for (name, path) in local_contexts {
         cmd.arg("--local").arg(format!("{}={}", name, path));
+        cmd.arg("--opt")
+            .arg(format!("context:{}=local:{}", name, name));
     }
 
-    // Add secrets
-    for key in secrets.keys() {
-        cmd.arg("--secret").arg(format!("id={},env={}", key, key));
-    }
+    // Add secrets via prefixed env vars so the CLI keeps its original
+    // proxy vars while build containers get the transformed values.
+    proxy::add_secrets_to_command(&mut cmd, secrets);
 
-    // Add no-cache flag if requested
+    // Disable build cache via frontend option (buildctl has no --no-cache flag)
     if no_cache {
-        cmd.arg("--no-cache");
+        cmd.arg("--opt").arg("no-cache=");
     }
 
+    // --output must be last: its value is the next positional arg
     if push {
-        cmd.arg(format!(
+        cmd.arg("--output").arg(format!(
             "type=image,name={},push=true,platform=linux/amd64",
             image_tag
         ));
+
+        debug!("Executing command: {:?}", cmd);
+
+        let status = cmd.status().context("Failed to execute buildctl build")?;
+        if !status.success() {
+            bail!("buildctl build failed with status: {}", status);
+        }
     } else {
-        cmd.arg(format!(
-            "type=image,name={},platform=linux/amd64",
+        // Output as docker tar stream and pipe into `docker load` so the
+        // image is available in the local Docker daemon.
+        cmd.arg("--output").arg(format!(
+            "type=docker,name={},platform=linux/amd64",
             image_tag
         ));
-    }
+        cmd.stdout(std::process::Stdio::piped());
 
-    debug!("Executing command: {:?}", cmd);
+        debug!("Executing command: {:?} | {} load", cmd, container_cli);
 
-    let status = cmd.status().context("Failed to execute buildctl build")?;
+        let mut buildctl_child = cmd.spawn().context("Failed to execute buildctl build")?;
+        let buildctl_stdout = buildctl_child
+            .stdout
+            .take()
+            .context("Failed to capture buildctl stdout")?;
 
-    if !status.success() {
-        bail!("buildctl build failed with status: {}", status);
+        let docker_load = Command::new(container_cli)
+            .arg("load")
+            .stdin(buildctl_stdout)
+            .status()
+            .with_context(|| format!("Failed to execute {} load", container_cli))?;
+
+        let buildctl_status = buildctl_child
+            .wait()
+            .context("Failed to wait for buildctl")?;
+        if !buildctl_status.success() {
+            bail!("buildctl build failed with status: {}", buildctl_status);
+        }
+        if !docker_load.success() {
+            bail!("{} load failed with status: {}", container_cli, docker_load);
+        }
     }
 
     Ok(())

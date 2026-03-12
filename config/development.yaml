@@ -55,6 +55,10 @@ deployment_controller:
   ingress_schema: "http" # Use http for local development
   host_aliases:
     rise.local: "192.168.49.1" # Minikube host IP
+  # Extra projected service account tokens mounted in every app pod at
+  # /var/run/secrets/rise/tokens/<name>
+  # extra_service_token_audiences:
+  #   vault: "https://vault.example.com"
   network_policy_egress_allow_cidrs:
     - "192.168.49.0/24" # Minikube host network
   access_classes:

@@ -156,11 +156,16 @@ cargo build --all-features     # Full build with CLI + backend
 ## User-Facing Documentation
 
 For user-facing documentation, see the [`/docs`](./docs) directory. Key topics include:
-- Build backends (Docker, Pack, Railpack): [docs/builds.md](docs/builds.md)
-- SSL certificate handling: [docs/builds.md](docs/builds.md)
+- Build backends (Docker, Pack, Railpack): [docs/user-guide/builds.md](docs/user-guide/builds.md)
+- SSL & proxy configuration: [docs/user-guide/ssl-proxy.md](docs/user-guide/ssl-proxy.md)
 - Architecture and process design: [docs/development.md](docs/development.md)
 - Configuration: [docs/configuration.md](docs/configuration.md)
-- OAuth extension (end-user authentication): [docs/oauth.md](docs/oauth.md)
+- OAuth extension (end-user authentication): [docs/user-guide/oauth.md](docs/user-guide/oauth.md)
+
+## Git Branching
+
+- The default development branch is `develop`. PRs for feature work should target `develop`, not `main`.
+- Always target the branch your feature branch was created from when opening a PR.
 
 ## Guidelines
 

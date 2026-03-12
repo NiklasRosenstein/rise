@@ -36,7 +36,7 @@ env = ["NODE_ENV=production", "BUILD_VERSION"]
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `backend` | String | Build backend: `docker`, `docker:build`, `docker:buildx`, `buildctl`, `pack`, `railpack`, `railpack:buildctl` |
+| `backend` | String | Build backend: `docker`, `docker:build`, `docker:buildx`, `buildctl`, `docker:buildctl`, `pack`, `railpack`, `railpack:buildctl` |
 | `dockerfile` | String | Path to Dockerfile, relative to `rise.toml` (default: `Dockerfile` or `Containerfile`) |
 | `build_context` | String | Default build context path for Docker builds, relative to `rise.toml` |
 | `build_contexts` | Object | Named build contexts for multi-stage Docker builds (format: `{ "name" = "path" }`) |
@@ -44,8 +44,7 @@ env = ["NODE_ENV=production", "BUILD_VERSION"]
 | `buildpacks` | Array | Buildpacks to use (pack backend only) |
 | `env` | Array | Build-time environment variables (format: `KEY=VALUE` or `KEY` to read from shell) |
 | `container_cli` | String | Container CLI: `docker` or `podman` |
-| `managed_buildkit` | Boolean | Enable managed BuildKit daemon for SSL support |
-| `railpack_embed_ssl_cert` | Boolean | Embed SSL certificate in Railpack builds |
+| `managed_buildkit` | Boolean | Enable/disable managed BuildKit daemon (auto-enables when `SSL_CERT_FILE` is set) |
 | `no_cache` | Boolean | Disable build cache |
 
 ### Full Example
@@ -117,6 +116,5 @@ The CLI stores global configuration in `~/.config/rise/config.json`, including:
 - Backend URL
 - Container CLI preference (`docker` or `podman`)
 - Managed BuildKit setting
-- Railpack SSL cert embedding setting
 
 This file is created automatically on first `rise login`.

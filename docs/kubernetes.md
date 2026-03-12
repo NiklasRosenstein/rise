@@ -88,7 +88,7 @@ Resources follow consistent naming patterns:
 | Ingress | `{escaped_group}` | `default`, `mr--26` |
 | Secret | `rise-registry-creds` | `rise-registry-creds` |
 
-**Character escaping**: Deployment group names containing invalid Kubernetes characters (e.g., `/`, `@`) are escaped with `--`. For example, `mr/26` becomes `mr--26`.
+**Character escaping**: Sequences of characters not in `[A-Za-z0-9-_.]` are replaced with `--`. For example, `mr/26` becomes `mr--26`. Consecutive hyphens (`--`) are disallowed in group names to prevent collisions, and the normalized result must be at most 63 characters (Kubernetes label value limit).
 
 ### Deployment Groups and URLs
 
@@ -438,6 +438,31 @@ deployment_controller:
 ```
 
 This mode is useful when you have a wildcard certificate or want to manage certificates externally.
+
+#### Extra Projected Service Account Tokens
+
+You can configure additional projected service account tokens that Rise mounts into every deployed app pod. This is useful for systems like Vault that expect a Kubernetes service account token with a custom audience.
+
+```yaml
+deployment_controller:
+  type: kubernetes
+  # ... other settings ...
+  extra_service_token_audiences:
+    vault: "https://vault.example.com"
+    metrics: "metrics-service"
+```
+
+With this configuration:
+- Rise adds a single projected volume to each app pod
+- The volume is mounted at `/var/run/secrets/rise/tokens`
+- Each map key becomes a filename in that directory
+- Each file contains a Kubernetes service account token minted for the configured audience
+
+Examples:
+- `/var/run/secrets/rise/tokens/vault`
+- `/var/run/secrets/rise/tokens/metrics`
+
+Token rotation and lifetime use Kubernetes defaults; Rise does not currently set `expirationSeconds`.
 
 #### Cert-Manager Setup
 

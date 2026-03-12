@@ -424,6 +424,8 @@ pub struct DeploymentOptions<'a> {
     pub build_args: &'a build::BuildArgs,
     pub from_deployment: Option<&'a str>,
     pub use_source_env_vars: bool,
+    /// When true with --image, pull the image locally and push to Rise registry.
+    pub push_image: bool,
 }
 
 pub async fn create_deployment(
@@ -472,6 +474,7 @@ pub async fn create_deployment(
         deploy_opts.http_port,
         deploy_opts.from_deployment,
         deploy_opts.use_source_env_vars,
+        deploy_opts.push_image,
     )
     .await?;
 
@@ -506,7 +509,100 @@ pub async fn create_deployment(
         }
     });
 
-    if deploy_opts.image.is_some() || deploy_opts.from_deployment.is_some() {
+    if deploy_opts.image.is_some() && deploy_opts.push_image {
+        // Push-image path: pull image locally, tag it, and push to Rise registry
+        let source_image = deploy_opts.image.unwrap();
+        info!(
+            "Pulling and pushing image '{}' to Rise registry",
+            source_image
+        );
+
+        // Determine container CLI from config/build args
+        let container_cli = match &deploy_opts.build_args.container_cli {
+            Some(cli) => cli.clone(),
+            None => config.get_container_cli().command().to_string(),
+        };
+
+        login_to_registry(
+            http_client,
+            backend_url,
+            &token,
+            &container_cli,
+            &deployment_info.credentials,
+            &deployment_info.deployment_id,
+        )
+        .await?;
+
+        // Pull the source image for linux/amd64
+        if let Err(e) = build::docker_pull(&container_cli, source_image, "linux/amd64") {
+            update_deployment_status(
+                http_client,
+                backend_url,
+                &token,
+                &deployment_info.deployment_id,
+                "Failed",
+                Some(&e.to_string()),
+            )
+            .await?;
+            return Err(e);
+        }
+
+        // Tag it with the Rise registry image tag
+        if let Err(e) = build::docker_tag(&container_cli, source_image, &deployment_info.image_tag)
+        {
+            update_deployment_status(
+                http_client,
+                backend_url,
+                &token,
+                &deployment_info.deployment_id,
+                "Failed",
+                Some(&e.to_string()),
+            )
+            .await?;
+            return Err(e);
+        }
+
+        // Update status to Building (reusing existing state for push phase)
+        update_deployment_status(
+            http_client,
+            backend_url,
+            &token,
+            &deployment_info.deployment_id,
+            "Building",
+            None,
+        )
+        .await?;
+
+        // Push to Rise registry
+        if let Err(e) = build::docker_push(&container_cli, &deployment_info.image_tag) {
+            update_deployment_status(
+                http_client,
+                backend_url,
+                &token,
+                &deployment_info.deployment_id,
+                "Failed",
+                Some(&e.to_string()),
+            )
+            .await?;
+            return Err(e);
+        }
+
+        // Mark as pushed (controller will take over deployment)
+        update_deployment_status(
+            http_client,
+            backend_url,
+            &token,
+            &deployment_info.deployment_id,
+            "Pushed",
+            None,
+        )
+        .await?;
+
+        info!(
+            "✓ Successfully pushed {} to {}",
+            source_image, deployment_info.image_tag
+        );
+    } else if deploy_opts.image.is_some() || deploy_opts.from_deployment.is_some() {
         // Pre-built image path or redeploy from existing deployment: Skip build/push, backend already marked as Pushed
         if let Some(from_deployment) = &deploy_opts.from_deployment {
             info!(
@@ -531,27 +627,15 @@ pub async fn create_deployment(
         );
 
         // Step 2: Login to registry if credentials provided
-        if !deployment_info.credentials.username.is_empty() {
-            info!("Logging into registry");
-            let login_cli = options.container_cli.command().to_string();
-            if let Err(e) = build::docker_login(
-                &login_cli,
-                &deployment_info.credentials.registry_url,
-                &deployment_info.credentials.username,
-                &deployment_info.credentials.password,
-            ) {
-                update_deployment_status(
-                    http_client,
-                    backend_url,
-                    &token,
-                    &deployment_info.deployment_id,
-                    "Failed",
-                    Some(&e.to_string()),
-                )
-                .await?;
-                return Err(e);
-            }
-        }
+        login_to_registry(
+            http_client,
+            backend_url,
+            &token,
+            options.container_cli.command(),
+            &deployment_info.credentials,
+            &deployment_info.deployment_id,
+        )
+        .await?;
 
         // Step 3: Update status to 'building'
         update_deployment_status(
@@ -613,6 +697,39 @@ pub async fn create_deployment(
 
     Ok(())
 }
+/// Login to the container registry, marking the deployment as Failed on error.
+async fn login_to_registry(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    container_cli: &str,
+    credentials: &RegistryCredentials,
+    deployment_id: &str,
+) -> Result<()> {
+    if credentials.username.is_empty() {
+        return Ok(());
+    }
+    info!("Logging into registry");
+    if let Err(e) = build::docker_login(
+        container_cli,
+        &credentials.registry_url,
+        &credentials.username,
+        &credentials.password,
+    ) {
+        update_deployment_status(
+            http_client,
+            backend_url,
+            token,
+            deployment_id,
+            "Failed",
+            Some(&e.to_string()),
+        )
+        .await?;
+        return Err(e);
+    }
+    Ok(())
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn call_create_deployment_api(
     http_client: &Client,
@@ -625,6 +742,7 @@ async fn call_create_deployment_api(
     http_port: Option<u16>,
     from_deployment: Option<&str>,
     use_source_env_vars: bool,
+    push_image: bool,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
@@ -656,6 +774,11 @@ async fn call_create_deployment_api(
     if let Some(source_deployment_id) = from_deployment {
         payload["from_deployment"] = serde_json::json!(source_deployment_id);
         payload["use_source_env_vars"] = serde_json::json!(use_source_env_vars);
+    }
+
+    // Add push_image field if set
+    if push_image {
+        payload["push_image"] = serde_json::json!(true);
     }
 
     let response = http_client
@@ -929,4 +1052,143 @@ fn parse_duration_to_seconds(duration: &str) -> anyhow::Result<i64> {
             duration
         ))
     }
+}
+
+// ============================================================================
+// Log streaming helpers (used by follow_ui for inline log display)
+// ============================================================================
+
+/// Error type for log stream connection attempts.
+pub(super) enum LogStreamError {
+    /// Server returned 503 - pod/logs not ready yet
+    NotReady,
+    /// Server returned 410 - deployment gone/terminated
+    Gone,
+    /// Other error
+    Other(anyhow::Error),
+}
+
+impl std::fmt::Debug for LogStreamError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LogStreamError::NotReady => write!(f, "NotReady"),
+            LogStreamError::Gone => write!(f, "Gone"),
+            LogStreamError::Other(e) => write!(f, "Other({:?})", e),
+        }
+    }
+}
+
+/// SSE log stream that yields parsed log lines.
+///
+/// Wraps an SSE byte stream from the deployment logs endpoint and provides
+/// a simple async interface for receiving individual log lines.
+pub(super) struct LogStream {
+    stream: futures::stream::BoxStream<'static, Result<bytes::Bytes, reqwest::Error>>,
+    buffer: String,
+}
+
+impl LogStream {
+    /// Receive the next log line from the stream.
+    /// Returns `None` when the stream ends.
+    pub async fn recv(&mut self) -> Option<Result<String>> {
+        use futures::StreamExt;
+
+        loop {
+            // Try to extract a complete line from the buffer
+            if let Some(newline_pos) = self.buffer.find('\n') {
+                let line: String = self.buffer.drain(..=newline_pos).collect();
+                let line = line.trim_end();
+
+                // Parse SSE format: "data: ..." lines contain log content
+                if let Some(data) = line.strip_prefix("data: ") {
+                    if !data.is_empty() {
+                        return Some(Ok(data.to_string()));
+                    }
+                    continue;
+                } else if line.is_empty() || line.starts_with(':') {
+                    // SSE comment or empty line, skip
+                    continue;
+                } else {
+                    return Some(Ok(line.to_string()));
+                }
+            }
+
+            // Need more data from the stream
+            match self.stream.next().await {
+                Some(Ok(chunk)) => {
+                    let text = String::from_utf8_lossy(&chunk);
+                    self.buffer.push_str(&text);
+                }
+                Some(Err(e)) => {
+                    return Some(Err(anyhow::anyhow!("Log stream error: {}", e)));
+                }
+                None => {
+                    // Stream ended - process any remaining buffer content
+                    if !self.buffer.is_empty() {
+                        let remaining = std::mem::take(&mut self.buffer);
+                        let line = remaining.trim();
+                        if let Some(data) = line.strip_prefix("data: ") {
+                            if !data.is_empty() {
+                                return Some(Ok(data.to_string()));
+                            }
+                        } else if !line.is_empty() && !line.starts_with(':') {
+                            return Some(Ok(line.to_string()));
+                        }
+                    }
+                    return None;
+                }
+            }
+        }
+    }
+}
+
+/// Open an SSE log stream for a deployment.
+///
+/// Connects to the deployment logs SSE endpoint with `follow=true` and the
+/// specified `tail` line count.
+pub(super) async fn open_log_stream(
+    http_client: &Client,
+    backend_url: &str,
+    token: &str,
+    project: &str,
+    deployment_id: &str,
+    tail: usize,
+) -> Result<LogStream, LogStreamError> {
+    use futures::StreamExt;
+
+    let url = format!(
+        "{}/api/v1/projects/{}/deployments/{}/logs?follow=true&tail={}",
+        backend_url, project, deployment_id, tail
+    );
+
+    let response = http_client
+        .get(&url)
+        .bearer_auth(token)
+        .send()
+        .await
+        .map_err(|e| LogStreamError::Other(anyhow::anyhow!("Failed to connect: {}", e)))?;
+
+    let status = response.status();
+    if status == reqwest::StatusCode::SERVICE_UNAVAILABLE {
+        return Err(LogStreamError::NotReady);
+    }
+    if status == reqwest::StatusCode::GONE {
+        return Err(LogStreamError::Gone);
+    }
+    if !status.is_success() {
+        let error_text = response
+            .text()
+            .await
+            .unwrap_or_else(|_| "Unknown error".to_string());
+        return Err(LogStreamError::Other(anyhow::anyhow!(
+            "Failed to open log stream ({}): {}",
+            status,
+            error_text
+        )));
+    }
+
+    Ok(LogStream {
+        stream: response.bytes_stream().boxed(),
+        buffer: String::new(),
+    })
 }

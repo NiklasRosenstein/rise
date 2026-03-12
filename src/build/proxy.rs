@@ -1,8 +1,7 @@
 // Proxy environment variable handling for build backends
 
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use std::collections::HashMap;
-use std::path::Path;
 use tracing::{debug, warn};
 
 /// Proxy environment variable names to support (both uppercase and lowercase)
@@ -74,85 +73,92 @@ pub(crate) fn format_for_pack(vars: &HashMap<String, String>) -> Vec<String> {
         .collect()
 }
 
-/// Add secret references to railpack plan.json
-///
-/// BuildKit secrets must be passed via CLI flags (--secret id=KEY,env=KEY),
-/// not embedded in the plan JSON. This function only adds references to the
-/// secrets in each step so the railpack frontend knows to expose them.
-pub(crate) fn add_secret_refs_to_plan(
-    plan_file: &Path,
-    vars: &HashMap<String, String>,
-) -> Result<()> {
-    use serde_json::Value;
+/// Parse environment variables from CLI format to HashMap.
+/// Supports both KEY=VALUE and KEY (reads from current environment).
+/// Fails if a KEY-only variable is not set in the current environment.
+pub(crate) fn parse_env_vars(env: &[String]) -> Result<HashMap<String, String>> {
+    let mut result = HashMap::new();
 
-    debug!(
-        "Adding {} secret references to {}",
-        vars.len(),
-        plan_file.display()
-    );
-
-    // Read and parse plan.json
-    let plan_contents = std::fs::read_to_string(plan_file)
-        .with_context(|| format!("Failed to read plan file: {}", plan_file.display()))?;
-
-    let mut plan: Value = serde_json::from_str(&plan_contents)
-        .with_context(|| format!("Failed to parse plan.json: {}", plan_file.display()))?;
-
-    // Ensure plan is an object
-    if !plan.is_object() {
-        anyhow::bail!("plan.json root is not an object");
-    }
-
-    let plan_obj = plan.as_object_mut().unwrap();
-
-    // Get the steps array
-    let steps = plan_obj
-        .get_mut("steps")
-        .and_then(|s| s.as_array_mut())
-        .context("plan.json missing 'steps' array")?;
-
-    if steps.is_empty() {
-        anyhow::bail!("plan.json has empty 'steps' array");
-    }
-
-    // Add secret references to all steps
-    for step in steps {
-        if !step.is_object() {
-            continue;
-        }
-
-        let step_obj = step.as_object_mut().unwrap();
-
-        // Get or create step's secrets array
-        let step_secrets = if let Some(existing) = step_obj.get_mut("secrets") {
-            existing
-                .as_array_mut()
-                .context("step 'secrets' field is not an array")?
+    for env_var in env {
+        if let Some((key, value)) = env_var.split_once('=') {
+            result.insert(key.to_string(), value.to_string());
         } else {
-            step_obj.insert("secrets".to_string(), Value::Array(vec![]));
-            step_obj.get_mut("secrets").unwrap().as_array_mut().unwrap()
-        };
-
-        // Add each proxy variable name to the step's secrets
-        for key in vars.keys() {
-            step_secrets.push(Value::String(key.clone()));
+            // KEY format - read from environment
+            if let Ok(value) = std::env::var(env_var) {
+                result.insert(env_var.to_string(), value);
+            } else {
+                bail!(
+                    "Environment variable '{}' is not set in current environment",
+                    env_var
+                );
+            }
         }
     }
 
-    // Write modified plan back
-    let modified_plan =
-        serde_json::to_string_pretty(&plan).context("Failed to serialize modified plan.json")?;
+    Ok(result)
+}
 
-    std::fs::write(plan_file, modified_plan).with_context(|| {
-        format!(
-            "Failed to write modified plan.json: {}",
-            plan_file.display()
-        )
-    })?;
+/// Check if any proxy variable values reference host.docker.internal,
+/// indicating that --add-host host.docker.internal:host-gateway is needed.
+pub(crate) fn needs_host_gateway(vars: &HashMap<String, String>) -> bool {
+    vars.values().any(|v| v.contains("host.docker.internal"))
+}
 
-    debug!("✓ Added secret references to railpack plan");
+/// Apply host gateway resolution to a build command and return updated vars.
+///
+/// When vars contain `host.docker.internal` URLs:
+/// - If `gateway_ip` is Some: replaces the hostname with the concrete IP
+///   and adds `--add-host host.docker.internal:IP` to the command
+/// - If `gateway_ip` is None (local builder): adds `--add-host host.docker.internal:host-gateway`
+///
+/// Returns the (potentially modified) vars. When no host gateway is needed,
+/// returns a clone of the input unchanged.
+pub(crate) fn apply_host_gateway(
+    cmd: &mut std::process::Command,
+    vars: &HashMap<String, String>,
+    gateway_ip: Option<&str>,
+) -> HashMap<String, String> {
+    if !needs_host_gateway(vars) {
+        return vars.clone();
+    }
 
-    Ok(())
+    if let Some(ip) = gateway_ip {
+        cmd.arg("--add-host")
+            .arg(format!("host.docker.internal:{}", ip));
+        // Replace host.docker.internal with concrete IP in values so build
+        // containers don't need DNS resolution for it.
+        vars.iter()
+            .map(|(k, v)| (k.clone(), v.replace("host.docker.internal", ip)))
+            .collect()
+    } else {
+        cmd.arg("--add-host")
+            .arg("host.docker.internal:host-gateway");
+        vars.clone()
+    }
+}
+
+/// Prefix for transformed secret env vars.
+///
+/// `--secret id=KEY,env=KEY` reads from the subprocess environment, but we can't
+/// override the original proxy vars (the docker CLI needs them). Instead we store
+/// the transformed values under a prefixed name and use `--secret id=KEY,env=_RISE_SECRET_KEY`.
+const SECRET_ENV_PREFIX: &str = "_RISE_SECRET_";
+
+/// Set transformed secret values in a Command's environment under prefixed names,
+/// and add the corresponding `--secret` flags.
+///
+/// This keeps the original proxy env vars intact for the docker CLI while passing
+/// the transformed (host.docker.internal) values into the build container.
+pub(crate) fn add_secrets_to_command(
+    cmd: &mut std::process::Command,
+    secrets: &HashMap<String, String>,
+) {
+    for (key, value) in secrets {
+        let env_key = format!("{}{}", SECRET_ENV_PREFIX, key);
+        cmd.env(&env_key, value);
+        cmd.arg("--secret")
+            .arg(format!("id={},env={}", key, env_key));
+    }
 }
 
 #[cfg(test)]
@@ -227,79 +233,53 @@ mod tests {
     }
 
     #[test]
-    fn test_plan_json_secret_refs() {
-        use std::fs;
-        use tempfile::TempDir;
-
-        let temp_dir = TempDir::new().unwrap();
-        let plan_file = temp_dir.path().join("plan.json");
-
-        // Create a simple plan.json
-        let plan = serde_json::json!({
-            "steps": [
-                {
-                    "commands": ["echo hello"]
-                }
-            ]
-        });
-
-        fs::write(&plan_file, serde_json::to_string_pretty(&plan).unwrap()).unwrap();
-
-        // Add secret refs
-        let mut vars = HashMap::new();
-        vars.insert("HTTP_PROXY".to_string(), "http://proxy:3128".to_string());
-
-        add_secret_refs_to_plan(&plan_file, &vars).unwrap();
-
-        // Read back and verify
-        let modified = fs::read_to_string(&plan_file).unwrap();
-        let plan: serde_json::Value = serde_json::from_str(&modified).unwrap();
-
-        // Check step secrets (should have references)
-        let step_secrets = plan["steps"][0]["secrets"].as_array().unwrap();
-        assert_eq!(step_secrets.len(), 1);
-        assert_eq!(step_secrets[0], "HTTP_PROXY");
-
-        // Top-level secrets should NOT be present
-        assert!(plan.get("secrets").is_none());
+    fn test_parse_env_vars_key_value() {
+        let env = vec!["FOO=bar".to_string(), "BAZ=qux".to_string()];
+        let result = parse_env_vars(&env).unwrap();
+        assert_eq!(result.get("FOO").unwrap(), "bar");
+        assert_eq!(result.get("BAZ").unwrap(), "qux");
     }
 
     #[test]
-    fn test_plan_json_secret_refs_all_steps() {
-        use std::fs;
-        use tempfile::TempDir;
+    fn test_parse_env_vars_key_only() {
+        std::env::set_var("TEST_PARSE_ENV_KEY", "from_env");
+        let env = vec!["TEST_PARSE_ENV_KEY".to_string()];
+        let result = parse_env_vars(&env).unwrap();
+        assert_eq!(result.get("TEST_PARSE_ENV_KEY").unwrap(), "from_env");
+        std::env::remove_var("TEST_PARSE_ENV_KEY");
+    }
 
-        let temp_dir = TempDir::new().unwrap();
-        let plan_file = temp_dir.path().join("plan.json");
+    #[test]
+    fn test_parse_env_vars_missing_key() {
+        std::env::remove_var("DEFINITELY_NOT_SET_12345");
+        let env = vec!["DEFINITELY_NOT_SET_12345".to_string()];
+        let result = parse_env_vars(&env);
+        assert!(result.is_err());
+    }
 
-        // Create a plan.json with multiple steps
-        let plan = serde_json::json!({
-            "steps": [
-                {"commands": ["echo step1"]},
-                {"commands": ["echo step2"]},
-                {"commands": ["echo step3"]}
-            ]
-        });
-
-        fs::write(&plan_file, serde_json::to_string_pretty(&plan).unwrap()).unwrap();
-
-        // Add secret refs
+    #[test]
+    fn test_needs_host_gateway_true() {
         let mut vars = HashMap::new();
-        vars.insert("HTTP_PROXY".to_string(), "http://proxy:3128".to_string());
+        vars.insert(
+            "HTTP_PROXY".to_string(),
+            "http://host.docker.internal:3128/".to_string(),
+        );
+        assert!(needs_host_gateway(&vars));
+    }
 
-        add_secret_refs_to_plan(&plan_file, &vars).unwrap();
+    #[test]
+    fn test_needs_host_gateway_false() {
+        let mut vars = HashMap::new();
+        vars.insert(
+            "HTTP_PROXY".to_string(),
+            "http://proxy.example.com:3128/".to_string(),
+        );
+        assert!(!needs_host_gateway(&vars));
+    }
 
-        // Read back and verify all steps have the secret reference
-        let modified = fs::read_to_string(&plan_file).unwrap();
-        let plan: serde_json::Value = serde_json::from_str(&modified).unwrap();
-
-        let steps = plan["steps"].as_array().unwrap();
-        assert_eq!(steps.len(), 3);
-
-        for step in steps {
-            let step_secrets = step["secrets"].as_array().unwrap();
-            assert_eq!(step_secrets.len(), 1);
-            assert_eq!(step_secrets[0], "HTTP_PROXY");
-        }
+    #[test]
+    fn test_needs_host_gateway_empty() {
+        let vars = HashMap::new();
+        assert!(!needs_host_gateway(&vars));
     }
 }

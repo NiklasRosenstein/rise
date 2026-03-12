@@ -24,6 +24,46 @@ pub(crate) fn docker_push(container_cli: &str, image_tag: &str) -> Result<()> {
     Ok(())
 }
 
+/// Pull image from a registry
+pub(crate) fn docker_pull(container_cli: &str, image: &str, platform: &str) -> Result<()> {
+    info!("Pulling image: {} (platform: {})", image, platform);
+
+    let mut cmd = Command::new(container_cli);
+    cmd.arg("pull").arg("--platform").arg(platform).arg(image);
+
+    debug!("Executing command: {:?}", cmd);
+
+    let status = cmd
+        .status()
+        .with_context(|| format!("Failed to execute {} pull", container_cli))?;
+
+    if !status.success() {
+        bail!("{} pull failed with status: {}", container_cli, status);
+    }
+
+    Ok(())
+}
+
+/// Tag a container image
+pub(crate) fn docker_tag(container_cli: &str, source: &str, target: &str) -> Result<()> {
+    info!("Tagging image: {} -> {}", source, target);
+
+    let mut cmd = Command::new(container_cli);
+    cmd.arg("tag").arg(source).arg(target);
+
+    debug!("Executing command: {:?}", cmd);
+
+    let status = cmd
+        .status()
+        .with_context(|| format!("Failed to execute {} tag", container_cli))?;
+
+    if !status.success() {
+        bail!("{} tag failed with status: {}", container_cli, status);
+    }
+
+    Ok(())
+}
+
 /// Login to container registry
 pub(crate) fn docker_login(
     container_cli: &str,

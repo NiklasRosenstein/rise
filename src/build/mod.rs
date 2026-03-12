@@ -18,7 +18,7 @@ mod ssl;
 pub use method::BuildArgs;
 pub(crate) use method::{BuildMethod, BuildOptions};
 pub(crate) use railpack::{build_with_buildctl, BuildctlFrontend, RailpackBuildOptions};
-pub(crate) use registry::docker_login;
+pub(crate) use registry::{docker_login, docker_pull, docker_push, docker_tag};
 
 use anyhow::{bail, Result};
 use std::collections::HashMap;
@@ -40,6 +40,23 @@ pub(crate) fn env_var_non_empty(key: &str) -> Option<String> {
     std::env::var(key)
         .ok()
         .and_then(|v| if v.is_empty() { None } else { Some(v) })
+}
+
+/// Resolve the `SSL_CERT_FILE` environment variable, returning `Some(path)` if
+/// the variable is set and the file exists. Logs a warning when the variable is
+/// set but points to a non-existent file.
+pub(crate) fn resolve_ssl_cert_file() -> Option<std::path::PathBuf> {
+    let ssl_cert_file = env_var_non_empty("SSL_CERT_FILE")?;
+    let path = std::path::PathBuf::from(&ssl_cert_file);
+    if path.exists() {
+        Some(path)
+    } else {
+        warn!(
+            "SSL_CERT_FILE set to '{}' but file not found",
+            ssl_cert_file
+        );
+        None
+    }
 }
 
 /// Parse a boolean environment variable.
@@ -155,10 +172,6 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if !options.buildpacks.is_empty() {
                 warn!("--buildpack flags are ignored when using docker build method");
             }
-            if options.railpack_embed_ssl_cert {
-                warn!("--railpack-embed-ssl-cert flag is ignored when using docker build method");
-            }
-
             build_image_with_dockerfile(DockerBuildOptions {
                 app_path: &options.app_path,
                 dockerfile: dockerfile.as_deref(),
@@ -181,10 +194,6 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if options.managed_buildkit.is_some() {
                 warn!("--managed-buildkit flag is ignored when using pack build method");
             }
-            if options.railpack_embed_ssl_cert {
-                warn!("--railpack-embed-ssl-cert flag is ignored when using pack build method");
-            }
-
             build_image_with_buildpacks(
                 &options.app_path,
                 &options.image_tag,
@@ -218,7 +227,6 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 use_buildctl,
                 push: options.push,
                 buildkit_host: buildkit_host.as_deref(),
-                embed_ssl_cert: options.railpack_embed_ssl_cert,
                 env: &options.env,
                 no_cache: options.no_cache,
             })?;
@@ -233,21 +241,8 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
             if options.explicit_container_cli {
                 warn!("--container-cli flag is ignored when using buildctl build method");
             }
-            if options.railpack_embed_ssl_cert {
-                warn!("--railpack-embed-ssl-cert flag is ignored when using buildctl build method");
-            }
-
             // Check for SSL certificate
-            let ssl_cert_file = env_var_non_empty("SSL_CERT_FILE");
-            let ssl_cert_path = ssl_cert_file.as_ref().and_then(|p| {
-                let path = Path::new(p);
-                if path.exists() {
-                    Some(path.to_path_buf())
-                } else {
-                    warn!("SSL_CERT_FILE set to '{}' but file not found", p);
-                    None
-                }
-            });
+            let ssl_cert_path = resolve_ssl_cert_file();
 
             // Construct dockerfile path
             let original_dockerfile_path = dockerfile
@@ -271,13 +266,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
 
             // Parse env vars into HashMap for secrets
             let mut secrets = proxy::read_and_transform_proxy_vars();
-            for env_var in &options.env {
-                if let Some((key, value)) = env_var.split_once('=') {
-                    secrets.insert(key.to_string(), value.to_string());
-                } else if let Ok(value) = std::env::var(env_var) {
-                    secrets.insert(env_var.to_string(), value);
-                }
-            }
+            secrets.extend(proxy::parse_env_vars(&options.env)?);
 
             // Add SSL cert using named build context (bind mount)
             // RAII cleanup via SslCertContext drop
@@ -310,6 +299,7 @@ pub(crate) fn build_image(options: BuildOptions) -> Result<()> {
                 &local_contexts,
                 BuildctlFrontend::Dockerfile,
                 options.no_cache,
+                container_cli.command(),
             )?;
 
             // Note: SslCertContext cleanup is automatic via RAII when it goes out of scope

@@ -267,6 +267,14 @@
               "default": "per-domain",
               "description": "TLS mode for custom domains - \"shared\": All custom domains share ingress_tls_secret_name (requires it to be set) - \"per-domain\": Each custom domain gets its own tls-{domain} secret (works with cert-manager when custom_domain_ingress_annotations are configured)\n\nDefaults to \"per-domain\""
             },
+            "extra_service_token_audiences": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "default": {},
+              "description": "Extra projected service account tokens to mount into every deployed app pod. Key becomes the in-pod filename under /var/run/secrets/rise/tokens/, value is the audience. Example: {\"vault\": \"https://vault.example.com\"}",
+              "type": "object"
+            },
             "health_probes": {
               "anyOf": [
                 {
@@ -368,6 +376,11 @@
               "default": {},
               "description": "Labels to apply to all managed namespaces Example: {\"environment\": \"production\", \"team\": \"platform\"}",
               "type": "object"
+            },
+            "network_policy_allow_kube_apiserver": {
+              "default": true,
+              "description": "Allow egress to the Kubernetes API server in NetworkPolicy (default: true) Looks up the ClusterIP of the `kubernetes` service in the `default` namespace and adds an egress rule for TCP/443. We use an IP lookup rather than pod selector labels because the labels on kube-apiserver pods are not standardized across Kubernetes distributions (e.g. `component: kube-apiserver` vs `component: apiserver`). The `kubernetes` service in the `default` namespace is part of the Kubernetes spec and always exists. The API server requires authentication, so this is safe.",
+              "type": "boolean"
             },
             "network_policy_egress_allow_cidrs": {
               "default": [],

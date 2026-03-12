@@ -1,7 +1,12 @@
+[tool_alias]
+railpack = "github:railwayapp/railpack"
+buildkit = "github:moby/buildkit"
+
 [tools]
 minikube = "1.37.0"
 pack = "0.39.0"
-"ubi:railwayapp/railpack" = "0.15.1"
+railpack = "0.15.1"
+buildkit = "0.28.0"
 "cargo:sqlx-cli" = "latest"
 "cargo:cargo-all-features" = "latest"
 mdbook = "latest"
@@ -21,20 +26,23 @@ run = "cargo sqlx prepare --check -- --features cli,backend --all-targets"
 [tasks.lint]
 description = "Run all linting checks (clippy, formatting, sqlx, helm)."
 run = """
-SQLX_OFFLINE=true cargo all-features check --all-targets
-SQLX_OFFLINE=true cargo all-features clippy --all-targets -- -D warnings
+cargo all-features check --all-targets
+cargo all-features clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 mise sqlx:check
 helm lint helm/rise
 """
+env.SQLX_OFFLINE = true
 
 [tasks."config:schema:generate"]
 description = "Generate the backend settings JSON schema."
 run = "cargo run --features cli,backend -- backend config-schema > docs/schemas/backend-settings.schema.json"
+env.SQLX_OFFLINE = true
 
 [tasks."config:schema:check"]
 description = "Verify the committed backend settings JSON schema is up to date."
 run = "mise config:schema:generate && git --no-pager diff --exit-code -- docs/schemas/backend-settings.schema.json"
+env.SQLX_OFFLINE = true
 
 [tasks."docs:serve"]
 description = "Serve documentation with live reload in port 3001."
@@ -182,6 +190,10 @@ kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4
 kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/custom-resources.yaml
 helm install --repo https://kubernetes.github.io/ingress-nginx ingress-nginx --namespace ingress-nginx ingress-nginx --create-namespace
 """
+
+[tasks."test:e2e-build"]
+description = "Run end-to-end build backend tests (all or specific backends)."
+run = "bash tests/e2e-build/run.sh"
 
 [tasks."k3s:down"]
 run = """

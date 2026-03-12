@@ -1,4 +1,4 @@
-use crate::config::Config;
+use crate::config::{normalize_backend_url, Config};
 use crate::login::token_utils::format_token_expiration;
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -45,6 +45,8 @@ pub async fn handle_device_flow(
     config: &mut Config,
     backend_url_to_save: Option<&str>,
 ) -> Result<()> {
+    let backend_url = normalize_backend_url(backend_url);
+
     eprintln!("⚠️  Warning: Device flow may not be supported by all identity providers.");
     eprintln!("   For best results, use the browser flow: rise login");
     eprintln!();

@@ -24,7 +24,7 @@ pub(crate) enum BuildMethod {
 /// Build-related CLI arguments that can be flattened into command structs
 #[derive(Debug, Clone, Args)]
 pub struct BuildArgs {
-    /// Build backend (docker, pack, railpack[:buildx], railpack:buildctl)
+    /// Build backend (docker[:build|:buildx|:buildctl], pack, railpack[:buildx|:buildctl])
     #[arg(long)]
     pub backend: Option<String>,
 
@@ -59,10 +59,6 @@ pub struct BuildArgs {
     /// Enable managed BuildKit daemon with SSL certificate support
     #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
     pub managed_buildkit: Option<bool>,
-
-    /// Embed SSL certificate into Railpack build plan for build-time RUN command support
-    #[arg(long, value_parser = clap::value_parser!(bool), default_missing_value = "true", num_args = 0..=1)]
-    pub railpack_embed_ssl_cert: Option<bool>,
 
     /// Path to Dockerfile (relative to app path / rise.toml location). Defaults to "Dockerfile" or "Containerfile"
     #[arg(long)]
@@ -100,7 +96,6 @@ pub(crate) struct BuildOptions {
     /// Some(true) = explicitly enable managed buildkit
     /// Some(false) = explicitly disable managed buildkit
     pub managed_buildkit: Option<bool>,
-    pub railpack_embed_ssl_cert: bool,
     pub push: bool,
     /// Path to Dockerfile (relative to app_path / rise.toml location)
     pub dockerfile: Option<String>,
@@ -203,16 +198,6 @@ impl BuildOptions {
                 .or_else(|| crate::build::parse_bool_env_var("RISE_MANAGED_BUILDKIT"))
                 .or_else(|| project_config.as_ref().and_then(|c| c.managed_buildkit))
                 .or(config.managed_buildkit),
-            railpack_embed_ssl_cert: build_args
-                .railpack_embed_ssl_cert
-                .or_else(|| crate::build::parse_bool_env_var("RISE_RAILPACK_EMBED_SSL_CERT"))
-                .or_else(|| {
-                    project_config
-                        .as_ref()
-                        .and_then(|c| c.railpack_embed_ssl_cert)
-                })
-                .unwrap_or_else(|| config.get_railpack_embed_ssl_cert()),
-
             dockerfile: build_args
                 .dockerfile
                 .clone()
@@ -269,14 +254,14 @@ impl BuildMethod {
         match backend {
             "docker" | "docker:build" => Ok(BuildMethod::Docker { use_buildx: false }),
             "docker:buildx" => Ok(BuildMethod::Docker { use_buildx: true }),
-            "buildctl" => Ok(BuildMethod::Buildctl),
+            "buildctl" | "docker:buildctl" => Ok(BuildMethod::Buildctl),
             "pack" => Ok(BuildMethod::Pack),
             "railpack" | "railpack:buildx" => Ok(BuildMethod::Railpack {
                 use_buildctl: false,
             }),
             "railpack:buildctl" => Ok(BuildMethod::Railpack { use_buildctl: true }),
             _ => bail!(
-                "Invalid build backend '{}'. Supported: docker, docker:build, docker:buildx, buildctl, pack, railpack, railpack:buildctl",
+                "Invalid build backend '{}'. Supported: docker, docker:build, docker:buildx, buildctl, docker:buildctl, pack, railpack, railpack:buildctl",
                 backend
             ),
         }

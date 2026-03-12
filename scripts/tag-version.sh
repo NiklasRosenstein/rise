@@ -1,6 +1,8 @@
 #!/bin/bash
 set -e
 
+CLAUDE="${CLAUDE:-claude}"
+
 # Check prerequisites
 check_prerequisites() {
     local missing=()
@@ -13,7 +15,7 @@ check_prerequisites() {
         missing+=("cargo")
     fi
 
-    if [ "$SKIP_AI_RELEASE_NOTES" = false ] && ! command -v claude &> /dev/null; then
+    if [ "$SKIP_AI_RELEASE_NOTES" = false ] && ! command -v "$CLAUDE" &> /dev/null; then
         missing+=("claude (Claude CLI)")
     fi
 
@@ -143,7 +145,7 @@ ${COMMITS}
 EOF
 
     # Call Claude CLI to generate summary (required unless --skip-ai-release-notes is set)
-    if ! RELEASE_SUMMARY=$(claude -p "$(cat "$TEMP_PROMPT")"); then
+    if ! RELEASE_SUMMARY=$("$CLAUDE" -p "$(cat "$TEMP_PROMPT")"); then
         rm "$TEMP_PROMPT"
         echo "Error: Failed to generate AI summary with Claude CLI."
         echo "Use --skip-ai-release-notes to bypass AI note generation."
