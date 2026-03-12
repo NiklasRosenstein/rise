@@ -566,13 +566,26 @@ pub async fn run_entra_sync_loop(
         interval_secs
     );
 
+    let mut shutdown = std::pin::pin!(async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    });
+
     loop {
-        interval.tick().await;
+        tokio::select! {
+            _ = interval.tick() => {}
+            _ = &mut shutdown => {
+                tracing::info!("Entra active sync shutting down");
+                break;
+            }
+        }
 
         tracing::debug!("Running Entra active sync cycle");
         if let Err(e) = sync_once(&pool, &mut client).await {
             tracing::error!("Entra active sync failed: {:?}", e);
         }
+        tracing::info!("Next Entra active sync in {}s", interval_secs);
     }
 }
 

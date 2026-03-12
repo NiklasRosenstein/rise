@@ -28,6 +28,8 @@ auth:
     - "admin@example.com"
   # Allow all users to create teams (default: true). Set to false to restrict team creation to admins only.
   allow_team_creation: true
+  # Allow all users to list all teams (default: true). Set to false so non-admins only see their own teams.
+  allow_list_all_teams: true
   platform_access:
     policy: restrictive
     allowed_user_emails:
