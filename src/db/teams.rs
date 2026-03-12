@@ -439,3 +439,36 @@ pub async fn get_team_names_for_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
 
     Ok(records.into_iter().map(|r| r.name).collect())
 }
+
+/// Remove all members from a team (all roles)
+pub async fn remove_all_team_members<'a, E>(executor: E, team_id: Uuid) -> Result<u64>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let result = sqlx::query!("DELETE FROM team_members WHERE team_id = $1", team_id)
+        .execute(executor)
+        .await
+        .context("Failed to remove all team members")?;
+
+    Ok(result.rows_affected())
+}
+
+/// Get all member user IDs for a team (any role)
+pub async fn get_all_member_user_ids<'a, E>(executor: E, team_id: Uuid) -> Result<Vec<Uuid>>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
+    let records = sqlx::query!(
+        r#"
+        SELECT DISTINCT user_id
+        FROM team_members
+        WHERE team_id = $1
+        "#,
+        team_id
+    )
+    .fetch_all(executor)
+    .await
+    .context("Failed to get team member user IDs")?;
+
+    Ok(records.into_iter().map(|r| r.user_id).collect())
+}

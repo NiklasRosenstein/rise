@@ -94,6 +94,17 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         controller_handles.push(handle);
     }
 
+    // Start Entra active sync if configured
+    if let Some(settings::ActiveSyncSource::Entra) = &settings.auth.active_sync_source {
+        info!("Starting Entra ID active sync");
+        let pool = state.db_pool.clone();
+        let auth_settings = settings.auth.clone();
+        let handle = tokio::spawn(async move {
+            auth::entra_sync::run_entra_sync_loop(pool, auth_settings).await;
+        });
+        controller_handles.push(handle);
+    }
+
     // Public routes (no authentication)
     let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))

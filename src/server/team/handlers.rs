@@ -541,8 +541,8 @@ pub async fn list_teams(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
 ) -> Result<Json<Vec<ApiTeam>>, (StatusCode, String)> {
-    // Admins can see all teams, others only see teams they have access to
-    let teams = if state.is_admin(&user.email) {
+    // Admins can see all teams; other users see all teams if allow_list_all_teams is enabled
+    let teams = if state.is_admin(&user.email) || state.auth_settings.allow_list_all_teams {
         db_teams::list(&state.db_pool).await.map_err(|e| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,

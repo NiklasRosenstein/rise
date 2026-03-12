@@ -86,8 +86,38 @@
         }
       ]
     },
+    "ActiveSyncSource": {
+      "description": "Supported active sync sources for pulling users and groups",
+      "oneOf": [
+        {
+          "description": "Microsoft Entra ID (Azure AD) - uses Microsoft Graph API to pull users and groups assigned to the configured app registration.",
+          "enum": [
+            "Entra"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "AuthSettings": {
       "properties": {
+        "active_sync_interval_secs": {
+          "default": 300,
+          "description": "Interval in seconds for active sync polling (default: 300 = 5 minutes)",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "active_sync_source": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ActiveSyncSource"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional active sync source for pulling users and groups from an external IdP. When configured, Rise will periodically query the IdP for users and groups assigned to the app and sync them as Rise teams."
+        },
         "admin_users": {
           "default": [],
           "description": "List of admin user emails (have full permissions)",
@@ -95,6 +125,11 @@
             "type": "string"
           },
           "type": "array"
+        },
+        "allow_list_all_teams": {
+          "default": false,
+          "description": "Allow all users to list all teams (default: true). When false, non-admin users only see teams they are members of.",
+          "type": "boolean"
         },
         "allow_team_creation": {
           "default": true,

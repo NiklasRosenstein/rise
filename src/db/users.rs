@@ -72,6 +72,47 @@ pub async fn find_or_create(pool: &PgPool, email: &str) -> Result<User> {
     create(pool, email).await
 }
 
+/// Find user by email, or create if not exists (using a mutable connection for transactions)
+pub async fn find_or_create_with_executor(
+    conn: &mut sqlx::PgConnection,
+    email: &str,
+) -> Result<User> {
+    // Try to insert; if the user already exists, do nothing (avoids unnecessary writes/locks)
+    let inserted = sqlx::query_as!(
+        User,
+        r#"
+        INSERT INTO users (email)
+        VALUES ($1)
+        ON CONFLICT (email) DO NOTHING
+        RETURNING id, email, created_at, updated_at
+        "#,
+        email
+    )
+    .fetch_optional(&mut *conn)
+    .await
+    .context("Failed to insert user")?;
+
+    if let Some(user) = inserted {
+        return Ok(user);
+    }
+
+    // User already exists; fetch it
+    let user = sqlx::query_as!(
+        User,
+        r#"
+        SELECT id, email, created_at, updated_at
+        FROM users
+        WHERE email = $1
+        "#,
+        email
+    )
+    .fetch_one(&mut *conn)
+    .await
+    .context("Failed to find existing user after insert conflict")?;
+
+    Ok(user)
+}
+
 /// Batch fetch user emails by IDs
 pub async fn get_emails_batch(
     pool: &PgPool,
