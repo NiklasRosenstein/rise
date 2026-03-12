@@ -127,7 +127,7 @@
           "type": "array"
         },
         "allow_list_all_teams": {
-          "default": true,
+          "default": false,
           "description": "Allow all users to list all teams (default: true). When false, non-admin users only see teams they are members of.",
           "type": "boolean"
         },
