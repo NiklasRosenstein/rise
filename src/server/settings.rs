@@ -141,7 +141,7 @@ fn default_allow_team_creation() -> bool {
 }
 
 fn default_allow_list_all_teams() -> bool {
-    true
+    false // Backward compatible - non-admins only see their own teams by default
 }
 
 #[derive(Debug, Deserialize, Clone, JsonSchema)]

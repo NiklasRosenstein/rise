@@ -423,21 +423,16 @@ async fn sync_once(pool: &PgPool, client: &mut GraphClient) -> Result<()> {
     for team in all_idp_teams {
         if !synced_team_names.contains(&team.name) {
             // This IdP-managed team is no longer assigned in Entra — remove all members
-            let member_ids = teams::get_all_member_user_ids(&mut *tx, team.id)
+            let removed = teams::remove_all_team_members(&mut *tx, team.id)
                 .await
-                .context("Failed to get member IDs for cleanup")?;
+                .context("Failed to remove members during cleanup")?;
 
-            if !member_ids.is_empty() {
+            if removed > 0 {
                 tracing::info!(
-                    "Removing {} members from IdP-managed team '{}' (no longer assigned in Entra)",
-                    member_ids.len(),
+                    "Removed {} members from IdP-managed team '{}' (no longer assigned in Entra)",
+                    removed,
                     team.name
                 );
-                for uid in &member_ids {
-                    teams::remove_all_user_roles(&mut *tx, team.id, *uid)
-                        .await
-                        .context("Failed to remove member during cleanup")?;
-                }
             }
         }
     }
@@ -505,7 +500,7 @@ async fn sync_group(
     // Resolve member emails to user IDs (create users if needed)
     let mut expected_user_ids: HashSet<Uuid> = HashSet::new();
     for email in &group.member_emails {
-        let user = users::find_or_create_with_executor(&mut **tx, email)
+        let user = users::find_or_create_with_executor(tx, email)
             .await
             .with_context(|| format!("Failed to find/create user '{}'", email))?;
         expected_user_ids.insert(user.id);
@@ -567,9 +562,23 @@ pub async fn run_entra_sync_loop(
     );
 
     let mut shutdown = std::pin::pin!(async {
-        tokio::signal::ctrl_c()
-            .await
-            .expect("failed to install Ctrl+C handler");
+        let ctrl_c = tokio::signal::ctrl_c();
+
+        #[cfg(unix)]
+        let terminate = async {
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("failed to install SIGTERM handler")
+                .recv()
+                .await;
+        };
+
+        #[cfg(not(unix))]
+        let terminate = std::future::pending::<()>();
+
+        tokio::select! {
+            _ = ctrl_c => {}
+            _ = terminate => {}
+        }
     });
 
     loop {
@@ -589,13 +598,17 @@ pub async fn run_entra_sync_loop(
     }
 }
 
-/// Truncate a string for logging purposes
+/// Truncate a string for logging purposes (UTF-8 safe)
 fn truncate_string(s: &str, max_len: usize) -> &str {
-    if s.len() > max_len {
-        &s[..max_len]
-    } else {
-        s
+    if s.len() <= max_len {
+        return s;
     }
+    // Find the last valid char boundary at or before max_len
+    let mut end = max_len;
+    while end > 0 && !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
 }
 
 // ============================================================================
