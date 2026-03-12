@@ -1,5 +1,5 @@
 use crate::config::{normalize_backend_url, Config};
-use crate::login::token_utils::format_token_expiration;
+use crate::login::token_utils::{format_token_expiration, log_token_debug};
 use anyhow::{Context, Result};
 use axum::{extract::Query, response::IntoResponse, routing::get, Router};
 use base64::{engine::general_purpose::URL_SAFE_NO_PAD, Engine as _};
@@ -323,6 +323,7 @@ pub async fn handle_authorization_code_flow(
     }
 
     // Store the token
+    log_token_debug(&exchange_response.token, "OAuth login response");
     config
         .set_token(exchange_response.token.clone())
         .context("Failed to save authentication token")?;

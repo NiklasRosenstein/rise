@@ -187,8 +187,14 @@ impl Config {
     pub fn get_token(&self) -> Option<String> {
         #[cfg(not(test))]
         if let Ok(token) = std::env::var("RISE_TOKEN") {
+            crate::login::token_utils::log_token_debug(&token, "RISE_TOKEN environment variable");
             return Some(token);
         }
+
+        if let Some(token) = self.token.as_deref() {
+            crate::login::token_utils::log_token_debug(token, "~/.config/rise/config.json");
+        }
+
         self.token.clone()
     }
 
