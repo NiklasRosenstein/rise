@@ -130,6 +130,7 @@ impl EcrProvider {
             username,
             password,
             expires_in,
+            auth_method: Default::default(),
         })
     }
 }

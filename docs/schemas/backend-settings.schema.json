@@ -987,6 +987,59 @@
             "type"
           ],
           "type": "object"
+        },
+        {
+          "description": "GitLab container registry — mints scoped JWTs per deployment",
+          "properties": {
+            "client_registry_url": {
+              "default": null,
+              "description": "Optional client-facing registry URL override",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "gitlab_url": {
+              "description": "GitLab instance URL (e.g., \"https://gitlab.com\")",
+              "type": "string"
+            },
+            "mint_pull_secrets": {
+              "default": false,
+              "description": "When true, the Kubernetes controller creates and manages image pull secrets in each project namespace. Set to false if the cluster has its own pull mechanism.",
+              "type": "boolean"
+            },
+            "namespace": {
+              "description": "Full image path prefix within the registry (e.g., \"my-org/my-project\" or \"my-org/my-project/rise-apps\")",
+              "type": "string"
+            },
+            "registry_url": {
+              "description": "Registry URL (e.g., \"registry.gitlab.com\")",
+              "type": "string"
+            },
+            "token": {
+              "description": "Personal Access Token or Deploy Token",
+              "type": "string"
+            },
+            "type": {
+              "enum": [
+                "gitlab"
+              ],
+              "type": "string"
+            },
+            "username": {
+              "description": "GitLab username for JWT auth endpoint",
+              "type": "string"
+            }
+          },
+          "required": [
+            "gitlab_url",
+            "namespace",
+            "registry_url",
+            "token",
+            "type",
+            "username"
+          ],
+          "type": "object"
         }
       ]
     },

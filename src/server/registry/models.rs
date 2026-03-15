@@ -1,5 +1,18 @@
 use serde::{Deserialize, Serialize};
 
+/// How the CLI should apply registry credentials before pushing
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum RegistryAuthMethod {
+    /// Use `docker/podman login` (default; works for ECR, OCI registries)
+    #[default]
+    LoginCredentials,
+    /// Write a `registrytoken` entry directly into the container CLI's auth config file.
+    /// Used when a bearer JWT must be injected without going through the login handshake
+    /// (e.g., GitLab scoped JWTs).
+    RegistryToken,
+}
+
 /// Registry credentials response
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct RegistryCredentials {
@@ -13,6 +26,9 @@ pub struct RegistryCredentials {
     /// How long the credentials are valid (in seconds)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<u64>,
+    /// How the CLI should apply these credentials
+    #[serde(default)]
+    pub auth_method: RegistryAuthMethod,
 }
 
 /// Registry credentials request
@@ -77,4 +93,33 @@ pub struct OciClientAuthConfig {
 
 fn default_namespace() -> String {
     String::new()
+}
+
+/// Configuration for GitLab container registry
+///
+/// Credentials are minted as short-lived scoped JWTs from GitLab's JWT auth endpoint,
+/// injected into the container CLI's auth config (not via `docker login`).
+#[cfg(feature = "backend")]
+#[derive(Debug, Clone, Deserialize)]
+pub struct GitLabRegistryConfig {
+    /// GitLab instance URL (e.g., "https://gitlab.com")
+    pub gitlab_url: String,
+    /// Registry URL (e.g., "registry.gitlab.com")
+    pub registry_url: String,
+    /// Full image path prefix within the registry
+    /// (e.g., "my-org/my-project" or "my-org/my-project/rise-apps")
+    /// Images are stored at `<registry>/<namespace>/<app>:<tag>`
+    pub namespace: String,
+    /// GitLab username for authenticating against the JWT endpoint
+    pub username: String,
+    /// Personal Access Token or Deploy Token
+    pub token: String,
+    /// When true, the Kubernetes controller creates and manages an image pull secret
+    /// in each project namespace using the PAT. Set to false if the cluster already
+    /// has its own image pull mechanism configured.
+    #[serde(default)]
+    pub mint_pull_secrets: bool,
+    /// Optional client-facing registry URL override (defaults to registry_url)
+    #[serde(default)]
+    pub client_registry_url: Option<String>,
 }

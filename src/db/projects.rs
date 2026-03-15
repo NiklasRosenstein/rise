@@ -134,6 +134,30 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
     Ok(project)
 }
 
+/// Find multiple projects by their IDs in a single query
+pub async fn find_by_ids(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Project>> {
+    let projects = sqlx::query_as!(
+        Project,
+        r#"
+        SELECT
+            id, name,
+            status as "status: ProjectStatus",
+            access_class,
+            owner_user_id, owner_team_id,
+            finalizers,
+            created_at, updated_at
+        FROM projects
+        WHERE id = ANY($1)
+        "#,
+        ids
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to find projects by IDs")?;
+
+    Ok(projects)
+}
+
 /// Create a new project
 pub async fn create(
     pool: &PgPool,

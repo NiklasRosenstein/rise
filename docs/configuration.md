@@ -274,6 +274,28 @@ registry_url = "registry.example.com"
 namespace = "rise-apps"
 ```
 
+#### GitLab Container Registry
+
+```yaml
+registry:
+  type: gitlab
+  gitlab_url: "https://gitlab.com"         # GitLab instance URL
+  registry_url: "registry.gitlab.com"      # Registry host
+  namespace: "my-org/my-group/rise-apps"   # Image path prefix in the registry
+  username: "${GITLAB_USERNAME}"
+  token: "${GITLAB_TOKEN}"                 # Personal Access Token or Deploy Token
+  mint_pull_secrets: true                  # Create K8s image pull secrets per project namespace
+  # client_registry_url: ~                 # Optional: override URL returned to CLI clients
+```
+
+**How it works:**
+- **CLI pushes**: the backend mints a short-lived (~15 min) scoped JWT from GitLab's JWT auth endpoint (`GET /jwt/auth?service=container_registry&scope=repository:<path>:push,pull`). The JWT is injected directly into the container CLI's auth config file rather than via `docker login`.
+- **Kubernetes pull secrets**: when `mint_pull_secrets: true`, the controller creates a standard `kubernetes.io/dockerconfigjson` secret with the PAT in each project namespace. The container runtime uses the PAT to obtain its own JWT from GitLab on each pull.
+- **`mint_pull_secrets: false`**: disable pull secret management when the cluster has its own image pull mechanism (e.g., pre-configured service account or node credentials).
+
+**Token requirements:**
+The GitLab token must have `read_registry` and `write_registry` scopes (or equivalent deploy token permissions).
+
 ### Controller Settings (Optional)
 
 ```toml

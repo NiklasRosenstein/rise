@@ -28,7 +28,10 @@ use crate::db::deployments as db_deployments;
 use crate::db::models::{Deployment, DeploymentStatus, Project};
 use crate::db::projects as db_projects;
 use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
-use crate::server::registry::RegistryProvider;
+use crate::server::registry::{
+    models::{RegistryAuthMethod, RegistryCredentials},
+    RegistryProvider,
+};
 use crate::server::settings::AccessRequirement;
 use crate::server::state::ControllerState;
 
@@ -547,6 +550,12 @@ impl KubernetesController {
 
     /// Refresh image pull secrets for all projects with active deployments
     async fn refresh_image_pull_secrets(&self) -> Result<()> {
+        // Skip if the registry provider doesn't require pull secret management
+        if !self.registry_provider.requires_pull_secret() {
+            debug!("Registry provider does not require pull secret management, skipping refresh");
+            return Ok(());
+        }
+
         // Skip if using externally-managed secrets
         if self.image_pull_secret_name.is_some() {
             debug!("Using externally-managed imagePullSecret, skipping refresh");
@@ -565,11 +574,11 @@ impl KubernetesController {
                 .await?;
         let deployments = [healthy_deployments, unhealthy_deployments].concat();
 
-        // Group deployments by namespace to avoid refreshing the same secret multiple times
-        use std::collections::HashSet;
-        let mut namespaces_to_refresh = HashSet::new();
+        // Group deployments by namespace, collecting the project_id for each
+        use std::collections::{HashMap, HashSet};
+        let mut namespace_to_project_id: HashMap<String, uuid::Uuid> = HashMap::new();
 
-        for deployment in deployments {
+        for deployment in &deployments {
             let metadata: Option<KubernetesMetadata> =
                 serde_json::from_value(deployment.controller_metadata.clone()).ok();
 
@@ -581,13 +590,34 @@ impl KubernetesController {
                 continue;
             };
 
-            namespaces_to_refresh.insert(namespace);
+            namespace_to_project_id
+                .entry(namespace)
+                .or_insert(deployment.project_id);
+        }
+
+        // Batch-fetch all needed projects in one query
+        let project_ids: Vec<uuid::Uuid> = namespace_to_project_id
+            .values()
+            .copied()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let projects = db_projects::find_by_ids(&self.state.db_pool, &project_ids).await?;
+        let project_name_map: HashMap<uuid::Uuid, String> =
+            projects.into_iter().map(|p| (p.id, p.name)).collect();
+
+        // Build final namespace -> project_name map
+        let mut namespaces_to_refresh: HashMap<String, String> = HashMap::new();
+        for (namespace, project_id) in namespace_to_project_id {
+            if let Some(name) = project_name_map.get(&project_id) {
+                namespaces_to_refresh.insert(namespace, name.clone());
+            }
         }
 
         // Refresh secret for each namespace
-        for namespace in namespaces_to_refresh {
+        for (namespace, project_name) in namespaces_to_refresh {
             if let Err(e) = self
-                .refresh_namespace_pull_secret(&namespace, provider)
+                .refresh_namespace_pull_secret(&namespace, &project_name, provider)
                 .await
             {
                 warn!(
@@ -606,6 +636,7 @@ impl KubernetesController {
     async fn refresh_namespace_pull_secret(
         &self,
         namespace: &str,
+        project_name: &str,
         provider: &Arc<dyn RegistryProvider>,
     ) -> Result<()> {
         let secret_api: Api<Secret> = Api::namespaced(self.kube_client.clone(), namespace);
@@ -653,13 +684,12 @@ impl KubernetesController {
         }
 
         // Get fresh credentials and create/update secret
-        let (username, password) = provider.get_pull_credentials().await?;
+        let credentials = provider.get_k8s_pull_credentials(project_name).await?;
 
         let secret = self.create_dockerconfigjson_secret(
             IMAGE_PULL_SECRET_NAME,
             provider.registry_host(),
-            &username,
-            &password,
+            &credentials,
         )?;
 
         secret_api
@@ -682,23 +712,26 @@ impl KubernetesController {
         &self,
         name: &str,
         registry_host: &str,
-        username: &str,
-        password: &str,
+        credentials: &RegistryCredentials,
     ) -> Result<Secret> {
         use base64::Engine;
 
-        // Create docker config JSON
-        let auth =
-            base64::engine::general_purpose::STANDARD.encode(format!("{}:{}", username, password));
-        let docker_config = serde_json::json!({
-            "auths": {
-                registry_host: {
-                    "username": username,
-                    "password": password,
+        let auths_entry = match credentials.auth_method {
+            RegistryAuthMethod::LoginCredentials => {
+                let auth = base64::engine::general_purpose::STANDARD
+                    .encode(format!("{}:{}", credentials.username, credentials.password));
+                serde_json::json!({
+                    "username": credentials.username,
+                    "password": credentials.password,
                     "auth": auth,
-                }
+                })
             }
-        });
+            RegistryAuthMethod::RegistryToken => {
+                serde_json::json!({ "registrytoken": credentials.password })
+            }
+        };
+
+        let docker_config = serde_json::json!({ "auths": { registry_host: auths_entry } });
 
         let docker_config_bytes = docker_config.to_string().into_bytes();
 
@@ -1599,12 +1632,13 @@ impl KubernetesController {
                 let current_version = existing_secret.metadata.resource_version.as_deref();
 
                 if self.needs_apply(deployment_id, "image-pull-secret", current_version) {
-                    let (username, password) = registry_provider.get_pull_credentials().await?;
+                    let credentials = registry_provider
+                        .get_k8s_pull_credentials(&project.name)
+                        .await?;
                     let secret = self.create_dockerconfigjson_secret(
                         secret_name,
                         registry_provider.registry_host(),
-                        &username,
-                        &password,
+                        &credentials,
                     )?;
                     let result = secret_api
                         .patch(
@@ -1628,12 +1662,13 @@ impl KubernetesController {
                 }
             }
             Err(kube::Error::Api(err)) if err.code == 404 => {
-                let (username, password) = registry_provider.get_pull_credentials().await?;
+                let credentials = registry_provider
+                    .get_k8s_pull_credentials(&project.name)
+                    .await?;
                 let secret = self.create_dockerconfigjson_secret(
                     secret_name,
                     registry_provider.registry_host(),
-                    &username,
-                    &password,
+                    &credentials,
                 )?;
                 let result = secret_api.create(&PostParams::default(), &secret).await?;
                 self.update_version_cache(
@@ -2887,17 +2922,19 @@ impl KubernetesController {
                     spec: Some(PodSpec {
                         security_context: self.create_pod_security_context(),
                         image_pull_secrets: {
-                            // Determine which secret to use (if any)
-                            let secret_name = self
-                                .image_pull_secret_name
-                                .as_deref()
-                                .or(Some(IMAGE_PULL_SECRET_NAME));
-
-                            secret_name.map(|name| {
-                                vec![LocalObjectReference {
-                                    name: name.to_string(),
-                                }]
-                            })
+                            if self.registry_provider.requires_pull_secret() {
+                                let secret_name = self
+                                    .image_pull_secret_name
+                                    .as_deref()
+                                    .or(Some(IMAGE_PULL_SECRET_NAME));
+                                secret_name.map(|name| {
+                                    vec![LocalObjectReference {
+                                        name: name.to_string(),
+                                    }]
+                                })
+                            } else {
+                                None
+                            }
                         },
                         containers: vec![Container {
                             name: "app".to_string(),
@@ -3492,6 +3529,16 @@ impl DeploymentBackend for KubernetesController {
                 }
 
                 ReconcilePhase::CreatingImagePullSecret => {
+                    // Skip entirely when the registry provider manages pull credentials externally
+                    if !self.registry_provider.requires_pull_secret() {
+                        debug!(
+                            project = project.name,
+                            "Registry provider does not require pull secret management, skipping"
+                        );
+                        metadata.reconcile_phase = ReconcilePhase::CreatingBackendService;
+                        continue;
+                    }
+
                     let namespace = metadata
                         .namespace
                         .as_ref()
@@ -3536,15 +3583,14 @@ impl DeploymentBackend for KubernetesController {
 
                     // Using registry provider - create/update secret dynamically
                     let provider = &self.registry_provider;
-                    let (username, password) = provider.get_pull_credentials().await?;
+                    let credentials = provider.get_k8s_pull_credentials(&project.name).await?;
                     let secret_api: Api<Secret> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
                     let secret = self.create_dockerconfigjson_secret(
                         IMAGE_PULL_SECRET_NAME,
                         provider.registry_host(),
-                        &username,
-                        &password,
+                        &credentials,
                     )?;
 
                     // Use server-side apply to upsert the secret (creates or updates as needed)
@@ -4939,6 +4985,7 @@ mod tests {
                 password: "test".to_string(),
                 registry_url: "localhost:5000".to_string(),
                 expires_in: None,
+                auth_method: Default::default(),
             })
         }
 

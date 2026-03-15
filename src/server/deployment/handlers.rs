@@ -694,6 +694,7 @@ pub async fn create_deployment(
                 username: String::new(),
                 password: String::new(),
                 expires_in: None,
+                auth_method: Default::default(),
             },
         }));
     }
@@ -895,6 +896,7 @@ pub async fn create_deployment(
                 username: String::new(),
                 password: String::new(),
                 expires_in: None,
+                auth_method: Default::default(),
             },
         }))
     } else {
