@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET\n            status = 'Stopped',\n            termination_reason = 'UserStopped',\n            controller_metadata = '{}',\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            created_at, updated_at\n        ",
+  "query": "\n        UPDATE deployments\n        SET\n            status = 'Superseded',\n            termination_reason = 'Superseded',\n            controller_metadata = '{}',\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            termination_reason as \"termination_reason: _\",\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at,\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -113,11 +113,16 @@
       },
       {
         "ordinal": 19,
-        "name": "created_at",
+        "name": "first_healthy_at",
         "type_info": "Timestamptz"
       },
       {
         "ordinal": 20,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 21,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -147,9 +152,10 @@
       false,
       false,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "b45864deabb647bd09fc2d4583683f98a9ceb4da76d9081eb3e9bf0bd5a93857"
+  "hash": "c9b1152445ccdcbe7b22d5bebf4504e1e08805f056abd17944977a1b703cda9d"
 }

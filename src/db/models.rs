@@ -129,6 +129,7 @@ pub struct Deployment {
     pub needs_reconcile: bool,
     pub is_active: bool,
     pub deploying_started_at: Option<DateTime<Utc>>,
+    pub first_healthy_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

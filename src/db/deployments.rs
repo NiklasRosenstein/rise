@@ -35,6 +35,7 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Dep
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -68,6 +69,7 @@ pub async fn get_deployments_batch(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -101,6 +103,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Deployment>> {
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -132,6 +135,7 @@ pub async fn find_by_deployment_id(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -166,6 +170,7 @@ pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         "#,
         params.deployment_id,
@@ -209,6 +214,7 @@ pub async fn update_status(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -236,6 +242,10 @@ pub async fn update_status(
             deploying_started_at = CASE
                 WHEN $2 = 'Deploying' AND deploying_started_at IS NULL THEN NOW()
                 ELSE deploying_started_at
+            END,
+            first_healthy_at = CASE
+                WHEN $2 = 'Healthy' AND first_healthy_at IS NULL THEN NOW()
+                ELSE first_healthy_at
             END
         WHERE id = $1
         RETURNING
@@ -247,6 +257,7 @@ pub async fn update_status(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -288,6 +299,7 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -317,6 +329,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -350,6 +363,7 @@ pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<V
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -387,6 +401,7 @@ pub async fn update_controller_metadata(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         "#,
@@ -433,6 +448,7 @@ pub async fn mark_cancelled(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         "#,
         id
@@ -467,6 +483,7 @@ pub async fn mark_stopped(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         "#,
         id
@@ -501,6 +518,7 @@ pub async fn mark_superseded(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         "#,
         id
@@ -535,6 +553,7 @@ pub async fn mark_expired(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         "#,
         id
@@ -556,6 +575,7 @@ pub async fn mark_healthy(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         SET
             status = 'Healthy',
             error_message = NULL,
+            first_healthy_at = COALESCE(first_healthy_at, NOW()),
             updated_at = NOW()
         WHERE id = $1
         RETURNING
@@ -568,6 +588,7 @@ pub async fn mark_healthy(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         "#,
         id
@@ -601,6 +622,7 @@ pub async fn mark_unhealthy(pool: &PgPool, id: Uuid, reason: String) -> Result<D
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         "#,
         id,
@@ -638,6 +660,7 @@ pub async fn mark_terminating(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         "#,
         id,
@@ -671,6 +694,7 @@ pub async fn mark_cancelling(pool: &PgPool, id: Uuid) -> Result<Deployment> {
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         "#,
         id
@@ -730,6 +754,7 @@ pub async fn find_needing_reconcile(pool: &PgPool, limit: i64) -> Result<Vec<Dep
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         FROM deployments
         WHERE needs_reconcile = TRUE
@@ -767,6 +792,7 @@ pub async fn find_active_for_project_and_group(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -804,6 +830,7 @@ pub async fn find_non_terminal_for_project_and_group(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -841,6 +868,7 @@ pub async fn find_active_deployment_for_group(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -878,6 +906,7 @@ pub async fn find_last_for_project_and_group(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         FROM deployments
         WHERE project_id = $1
@@ -911,6 +940,7 @@ pub async fn find_expired(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> 
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             created_at, updated_at
         FROM deployments
         WHERE expires_at IS NOT NULL
@@ -953,6 +983,7 @@ pub async fn list_for_project_and_group(
                 image, image_digest, rolled_back_from_deployment_id,
                 http_port, needs_reconcile, is_active,
                 deploying_started_at,
+                first_healthy_at,
                 created_at, updated_at
             FROM deployments
             WHERE project_id = $1 AND deployment_group = $2
@@ -981,6 +1012,7 @@ pub async fn list_for_project_and_group(
                 image, image_digest, rolled_back_from_deployment_id,
                 http_port, needs_reconcile, is_active,
                 deploying_started_at,
+                first_healthy_at,
                 created_at, updated_at
             FROM deployments
             WHERE project_id = $1
@@ -1134,6 +1166,7 @@ pub async fn get_active_deployments_for_project(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -1168,6 +1201,7 @@ pub async fn find_stuck_pre_pushed_before(
             image, image_digest, rolled_back_from_deployment_id,
             http_port, needs_reconcile, is_active,
             deploying_started_at,
+            first_healthy_at,
             termination_reason as "termination_reason: _",
             created_at, updated_at
         FROM deployments
@@ -1464,5 +1498,69 @@ mod tests {
 
         // Verify deploying_started_at remains unchanged across valid non-Deploying transitions
         assert_eq!(deployment.deploying_started_at, Some(first_timestamp));
+    }
+
+    #[cfg(feature = "backend")]
+    #[sqlx::test]
+    async fn first_healthy_at_set_once_on_healthy_transition(pool: PgPool) {
+        use uuid::Uuid;
+
+        let project_id = Uuid::new_v4();
+        let user_id = Uuid::new_v4();
+
+        sqlx::query!(
+            "INSERT INTO users (id, email) VALUES ($1, $2)",
+            user_id,
+            "test@example.com"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        sqlx::query!(
+            "INSERT INTO projects (id, name, owner_user_id, access_class, status) VALUES ($1, $2, $3, $4, $5)",
+            project_id,
+            "test-project",
+            user_id,
+            "public",
+            "Stopped"
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let deployment = create(
+            &pool,
+            CreateDeploymentParams {
+                deployment_id: "test-deploy",
+                project_id,
+                created_by_id: user_id,
+                status: DeploymentStatus::Deploying,
+                image: None,
+                image_digest: None,
+                rolled_back_from_deployment_id: None,
+                deployment_group: "default",
+                expires_at: None,
+                http_port: 8080,
+                is_active: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        assert!(deployment.first_healthy_at.is_none());
+
+        let deployment = mark_healthy(&pool, deployment.id).await.unwrap();
+        let first_healthy_at = deployment.first_healthy_at.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+
+        let deployment = mark_unhealthy(&pool, deployment.id, "temporary failure".to_string())
+            .await
+            .unwrap();
+        assert_eq!(deployment.first_healthy_at, Some(first_healthy_at));
+
+        let deployment = mark_healthy(&pool, deployment.id).await.unwrap();
+        assert_eq!(deployment.first_healthy_at, Some(first_healthy_at));
     }
 }

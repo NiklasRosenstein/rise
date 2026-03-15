@@ -11,7 +11,7 @@ use std::time::Duration;
 use tokio::time::interval;
 use tracing::{debug, error, info, warn};
 
-use crate::db::models::{Deployment, DeploymentStatus, Project};
+use crate::db::models::{Deployment, DeploymentStatus, Project, TerminationReason};
 use crate::db::{deployments as db_deployments, projects};
 use crate::server::deployment::state_machine;
 use crate::server::state::ControllerState;
@@ -29,6 +29,30 @@ pub struct HealthStatus {
     pub message: Option<String>,
     pub last_check: DateTime<Utc>,
     pub pod_status: Option<serde_json::Value>,
+}
+
+fn has_been_healthy(deployment: &Deployment) -> bool {
+    deployment.first_healthy_at.is_some()
+}
+
+fn normalize_reconcile_result_for_recovery(
+    deployment: &Deployment,
+    mut result: ReconcileResult,
+) -> ReconcileResult {
+    if has_been_healthy(deployment) && result.status == DeploymentStatus::Failed {
+        warn!(
+            "Deployment {} was healthy before; preserving it as Unhealthy instead of auto-failing",
+            deployment.deployment_id
+        );
+        result.status = DeploymentStatus::Unhealthy;
+    }
+
+    result
+}
+
+fn should_queue_failed_cleanup(deployment: &Deployment) -> bool {
+    deployment.termination_reason != Some(TerminationReason::Failed)
+        && !has_been_healthy(deployment)
 }
 
 /// URLs where a deployment can be accessed
@@ -353,7 +377,10 @@ impl DeploymentController {
             .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
 
         // Call backend reconcile
-        let result = self.backend.reconcile(&deployment, &project).await?;
+        let result = normalize_reconcile_result_for_recovery(
+            &deployment,
+            self.backend.reconcile(&deployment, &project).await?,
+        );
 
         // Store status for later comparison
         let new_status = result.status.clone();
@@ -381,7 +408,11 @@ impl DeploymentController {
         .await?;
 
         if let Some(error) = result.error_message {
-            db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
+            if new_status == DeploymentStatus::Failed {
+                db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
+            } else if new_status == DeploymentStatus::Unhealthy {
+                db_deployments::mark_unhealthy(&self.state.db_pool, deployment.id, error).await?;
+            }
         } else if new_status == DeploymentStatus::Healthy {
             // Find active deployment IN THIS GROUP *before* marking new as Healthy
             // This prevents a race condition where the query would return the new deployment
@@ -717,11 +748,7 @@ impl DeploymentController {
             db_deployments::find_by_status(&self.state.db_pool, DeploymentStatus::Failed).await?;
 
         for deployment in failed {
-            // Failed deployments that already came through termination have this reason set.
-            if matches!(
-                deployment.termination_reason,
-                Some(crate::db::models::TerminationReason::Failed)
-            ) {
+            if !should_queue_failed_cleanup(&deployment) {
                 continue;
             }
 
@@ -885,5 +912,64 @@ impl DeploymentController {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Utc;
+    use uuid::Uuid;
+
+    fn sample_deployment(first_healthy_at: Option<DateTime<Utc>>) -> Deployment {
+        Deployment {
+            id: Uuid::new_v4(),
+            deployment_id: "deploy-123".to_string(),
+            project_id: Uuid::new_v4(),
+            created_by_id: Uuid::new_v4(),
+            status: DeploymentStatus::Unhealthy,
+            deployment_group: "default".to_string(),
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::json!({}),
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            deploying_started_at: None,
+            first_healthy_at,
+            created_at: Utc::now(),
+            updated_at: Utc::now(),
+        }
+    }
+
+    #[test]
+    fn normalize_reconcile_result_keeps_previously_healthy_deployments_recoverable() {
+        let deployment = sample_deployment(Some(Utc::now()));
+        let result = normalize_reconcile_result_for_recovery(
+            &deployment,
+            ReconcileResult {
+                status: DeploymentStatus::Failed,
+                controller_metadata: serde_json::json!({}),
+                error_message: Some("pod crash loop".to_string()),
+            },
+        );
+
+        assert_eq!(result.status, DeploymentStatus::Unhealthy);
+        assert_eq!(result.error_message.as_deref(), Some("pod crash loop"));
+    }
+
+    #[test]
+    fn failed_cleanup_only_queues_never_healthy_deployments() {
+        let never_healthy = sample_deployment(None);
+        let previously_healthy = sample_deployment(Some(Utc::now()));
+
+        assert!(should_queue_failed_cleanup(&never_healthy));
+        assert!(!should_queue_failed_cleanup(&previously_healthy));
     }
 }
