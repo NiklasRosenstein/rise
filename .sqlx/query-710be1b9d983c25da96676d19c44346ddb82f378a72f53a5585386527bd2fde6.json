@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE deployments\n        SET status = 'Failed', completed_at = NOW(), error_message = $2\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        ",
+  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE project_id = $1\n        ORDER BY created_at DESC\n        ",
   "describe": {
     "columns": [
       {
@@ -95,6 +95,11 @@
       },
       {
         "ordinal": 18,
+        "name": "first_healthy_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 19,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -112,20 +117,19 @@
         }
       },
       {
-        "ordinal": 19,
+        "ordinal": 20,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 20,
+        "ordinal": 21,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -148,9 +152,10 @@
       false,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "b2eeaa29c746bded1124e1a1217de80605567ab4820fa2ad965b8a6cc701f78c"
+  "hash": "710be1b9d983c25da96676d19c44346ddb82f378a72f53a5585386527bd2fde6"
 }

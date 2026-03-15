@@ -97,6 +97,14 @@ fn truncate_optional_text(input: Option<String>, max_chars: usize) -> Option<Str
     input.map(|text| truncate_text(&text, max_chars))
 }
 
+fn reconcile_in_progress_status(deployment: &Deployment) -> DeploymentStatus {
+    if deployment.first_healthy_at.is_some() {
+        DeploymentStatus::Unhealthy
+    } else {
+        DeploymentStatus::Deploying
+    }
+}
+
 /// Kubernetes-specific metadata stored in deployment.controller_metadata
 #[derive(Serialize, Deserialize, Default, Clone)]
 struct KubernetesMetadata {
@@ -3367,12 +3375,8 @@ impl DeploymentBackend for KubernetesController {
             deployment.deployment_id, deployment.status, metadata.reconcile_phase
         );
 
-        // Determine status (preserve Unhealthy during recovery, otherwise Deploying)
-        let status = if deployment.status == DeploymentStatus::Unhealthy {
-            DeploymentStatus::Unhealthy
-        } else {
-            DeploymentStatus::Deploying
-        };
+        // Once a deployment has been healthy, recovery/recreate progress must stay post-deploy.
+        let status = reconcile_in_progress_status(deployment);
 
         // Recovery logic: If deployment is Unhealthy and Deployment is missing, reset to recreate it
         if deployment.status == DeploymentStatus::Unhealthy
@@ -4436,7 +4440,7 @@ impl DeploymentBackend for KubernetesController {
                             .await?;
 
                             return Ok(ReconcileResult {
-                                status: DeploymentStatus::Deploying,
+                                status,
                                 controller_metadata: serde_json::to_value(&metadata)?,
                                 error_message: None,
                             });
@@ -5329,6 +5333,7 @@ mod tests {
             needs_reconcile: false,
             is_active: false,
             deploying_started_at: None,
+            first_healthy_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         }
@@ -5501,6 +5506,7 @@ mod tests {
             needs_reconcile: false,
             is_active: false,
             deploying_started_at: None,
+            first_healthy_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5572,6 +5578,7 @@ mod tests {
             needs_reconcile: false,
             is_active: false,
             deploying_started_at: None,
+            first_healthy_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5625,6 +5632,7 @@ mod tests {
             needs_reconcile: false,
             is_active: false,
             deploying_started_at: None,
+            first_healthy_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5710,6 +5718,7 @@ mod tests {
             needs_reconcile: false,
             is_active: false,
             deploying_started_at: None,
+            first_healthy_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5815,6 +5824,7 @@ mod tests {
             needs_reconcile: false,
             is_active: false,
             deploying_started_at: None,
+            first_healthy_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
@@ -5969,10 +5979,33 @@ mod tests {
             needs_reconcile: false,
             is_active: false,
             deploying_started_at: None,
+            first_healthy_at: None,
             created_at: chrono::Utc::now(),
             updated_at: chrono::Utc::now(),
         };
         (project, deployment)
+    }
+
+    #[test]
+    fn reconcile_in_progress_status_stays_post_deploy_after_first_healthy() {
+        let (_, mut deployment) = create_test_project_and_deployment();
+        deployment.status = DeploymentStatus::Healthy;
+        deployment.first_healthy_at = Some(Utc::now());
+
+        assert_eq!(
+            reconcile_in_progress_status(&deployment),
+            DeploymentStatus::Unhealthy
+        );
+    }
+
+    #[test]
+    fn reconcile_in_progress_status_uses_deploying_before_first_healthy() {
+        let (_, deployment) = create_test_project_and_deployment();
+
+        assert_eq!(
+            reconcile_in_progress_status(&deployment),
+            DeploymentStatus::Deploying
+        );
     }
 
     #[tokio::test]
