@@ -347,6 +347,7 @@ async fn convert_deployment(
     } else {
         Some(super::utils::get_deployment_image_tag(state, &deployment, project).await)
     };
+    let can_rollback = state_machine::can_create_from(&deployment);
 
     Deployment {
         id: deployment.id.to_string(),
@@ -367,6 +368,7 @@ async fn convert_deployment(
         image_digest: deployment.image_digest,
         http_port: deployment.http_port as u16,
         is_active: deployment.is_active,
+        can_rollback,
         created: deployment.created_at.to_rfc3339(),
         updated: deployment.updated_at.to_rfc3339(),
     }
@@ -547,10 +549,15 @@ pub async fn create_deployment(
             )
         })?;
 
-        // Verify source deployment is in a valid state for creating from
-        // Allow Healthy (currently active), Superseded (previously active), and Stopped
-        if !state_machine::is_rollbackable(&source_deployment.status) {
-            return Err((StatusCode::BAD_REQUEST, format!("Cannot create deployment from '{}' with status '{:?}'. Only Healthy, Superseded, or Stopped deployments can be used as source.", from_deployment_id, source_deployment.status)));
+        // Verify the source deployment already has a reusable image.
+        if !state_machine::can_create_from(&source_deployment) {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Cannot create deployment from '{}' because its image is not available yet (status '{}').",
+                    from_deployment_id, source_deployment.status
+                ),
+            ));
         }
 
         // For chained redeployments, follow the chain to find the original source
@@ -1769,7 +1776,12 @@ pub async fn stream_deployment_logs(
         .await
         .map_err(|e| {
             let error_msg = e.to_string();
-            if error_msg.contains("Pod not found") || error_msg.contains("not ready yet") {
+            if error_msg.contains("Pod not found")
+                || error_msg.contains("not ready yet")
+                || error_msg.contains("waiting to start")
+                || error_msg.contains("ContainerCreating")
+                || error_msg.contains("PodInitializing")
+            {
                 (
                     StatusCode::SERVICE_UNAVAILABLE,
                     "Deployment pod not ready yet. Please try again in a moment.".to_string(),

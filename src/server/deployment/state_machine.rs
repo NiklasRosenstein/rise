@@ -1,4 +1,4 @@
-use crate::db::models::DeploymentStatus;
+use crate::db::models::{Deployment, DeploymentStatus};
 use anyhow::{bail, Result};
 
 /// Check if a deployment status is terminal (no further transitions allowed)
@@ -45,13 +45,36 @@ pub fn is_terminable(status: &DeploymentStatus) -> bool {
     )
 }
 
-/// Check if a deployment can be used as a rollback source
-/// Only Healthy and Superseded deployments can be rolled back to
-pub fn is_rollbackable(status: &DeploymentStatus) -> bool {
+/// Check if a deployment can be used as the source for a new rollback/redeploy.
+///
+/// A deployment is reusable once its image is known to be available:
+/// - digest-pinned images are reusable immediately
+/// - rollback deployments are reusable because they point at an earlier image
+/// - locally built images become reusable once they reached `Pushed`
+/// - failed/cancelled deployments are reusable only after rollout actually started
+pub fn can_create_from(deployment: &Deployment) -> bool {
+    if deployment.image_digest.is_some() || deployment.rolled_back_from_deployment_id.is_some() {
+        return true;
+    }
+
+    if matches!(
+        deployment.status,
+        DeploymentStatus::Pushed
+            | DeploymentStatus::Deploying
+            | DeploymentStatus::Healthy
+            | DeploymentStatus::Unhealthy
+            | DeploymentStatus::Terminating
+            | DeploymentStatus::Stopped
+            | DeploymentStatus::Superseded
+            | DeploymentStatus::Expired
+    ) {
+        return true;
+    }
+
     matches!(
-        status,
-        DeploymentStatus::Healthy | DeploymentStatus::Superseded
-    )
+        deployment.status,
+        DeploymentStatus::Cancelling | DeploymentStatus::Cancelled | DeploymentStatus::Failed
+    ) && deployment.deploying_started_at.is_some()
 }
 
 /// Check if a state transition is valid
@@ -114,7 +137,35 @@ pub fn validate_transition(from: &DeploymentStatus, to: &DeploymentStatus) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use uuid::Uuid;
     use DeploymentStatus::*;
+
+    fn deployment(status: DeploymentStatus) -> Deployment {
+        Deployment {
+            id: Uuid::nil(),
+            deployment_id: "20260315-000000".to_string(),
+            project_id: Uuid::nil(),
+            created_by_id: Uuid::nil(),
+            status,
+            deployment_group: "default".to_string(),
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::Value::Null,
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            deploying_started_at: None,
+            first_healthy_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        }
+    }
 
     #[test]
     fn test_terminal_states() {
@@ -157,6 +208,46 @@ mod tests {
 
         assert!(!is_terminable(&Deploying));
         assert!(!is_terminable(&Stopped));
+    }
+
+    #[test]
+    fn test_can_create_from_when_image_is_known_available() {
+        assert!(can_create_from(&deployment(Pushed)));
+        assert!(can_create_from(&deployment(Healthy)));
+        assert!(can_create_from(&deployment(Stopped)));
+        assert!(can_create_from(&deployment(Superseded)));
+    }
+
+    #[test]
+    fn test_can_create_from_rejects_pre_push_states_without_image() {
+        assert!(!can_create_from(&deployment(Pending)));
+        assert!(!can_create_from(&deployment(Building)));
+        assert!(!can_create_from(&deployment(Pushing)));
+    }
+
+    #[test]
+    fn test_can_create_from_requires_rollout_for_failed_or_cancelled_builds() {
+        let failed_before_rollout = deployment(Failed);
+        assert!(!can_create_from(&failed_before_rollout));
+
+        let mut failed_after_rollout = deployment(Failed);
+        failed_after_rollout.deploying_started_at = Some(chrono::Utc::now());
+        assert!(can_create_from(&failed_after_rollout));
+
+        let mut cancelled_after_rollout = deployment(Cancelled);
+        cancelled_after_rollout.deploying_started_at = Some(chrono::Utc::now());
+        assert!(can_create_from(&cancelled_after_rollout));
+    }
+
+    #[test]
+    fn test_can_create_from_allows_digest_and_rollback_sources_immediately() {
+        let mut digest_pinned = deployment(Pending);
+        digest_pinned.image_digest = Some("registry.example/app@sha256:abc".to_string());
+        assert!(can_create_from(&digest_pinned));
+
+        let mut rollback_source = deployment(Failed);
+        rollback_source.rolled_back_from_deployment_id = Some(Uuid::new_v4());
+        assert!(can_create_from(&rollback_source));
     }
 
     #[test]
