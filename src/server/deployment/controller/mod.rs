@@ -55,7 +55,6 @@ fn normalize_reconcile_result_for_recovery(
 
 fn should_queue_failed_cleanup(deployment: &Deployment) -> bool {
     deployment.termination_reason != Some(TerminationReason::Failed)
-        && !has_been_healthy(deployment)
 }
 
 /// URLs where a deployment can be accessed
@@ -971,7 +970,7 @@ mod tests {
     }
 
     #[test]
-    fn normalize_reconcile_result_preserves_failed_during_recreated_deployments() {
+    fn normalize_reconcile_result_preserves_failed_for_invalid_transition_states() {
         let deployment = sample_deployment(DeploymentStatus::Deploying, Some(Utc::now()));
         let result = normalize_reconcile_result_for_recovery(
             &deployment,
@@ -987,11 +986,11 @@ mod tests {
     }
 
     #[test]
-    fn failed_cleanup_only_queues_never_healthy_deployments() {
+    fn failed_cleanup_queues_deployments_regardless_of_health_history() {
         let never_healthy = sample_deployment(DeploymentStatus::Failed, None);
         let previously_healthy = sample_deployment(DeploymentStatus::Failed, Some(Utc::now()));
 
         assert!(should_queue_failed_cleanup(&never_healthy));
-        assert!(!should_queue_failed_cleanup(&previously_healthy));
+        assert!(should_queue_failed_cleanup(&previously_healthy));
     }
 }
