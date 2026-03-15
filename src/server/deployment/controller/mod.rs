@@ -39,7 +39,10 @@ fn normalize_reconcile_result_for_recovery(
     deployment: &Deployment,
     mut result: ReconcileResult,
 ) -> ReconcileResult {
-    if has_been_healthy(deployment) && result.status == DeploymentStatus::Failed {
+    if has_been_healthy(deployment)
+        && result.status == DeploymentStatus::Failed
+        && state_machine::is_valid_transition(&deployment.status, &DeploymentStatus::Unhealthy)
+    {
         warn!(
             "Deployment {} was healthy before; preserving it as Unhealthy instead of auto-failing",
             deployment.deployment_id
@@ -921,13 +924,16 @@ mod tests {
     use chrono::Utc;
     use uuid::Uuid;
 
-    fn sample_deployment(first_healthy_at: Option<DateTime<Utc>>) -> Deployment {
+    fn sample_deployment(
+        status: DeploymentStatus,
+        first_healthy_at: Option<DateTime<Utc>>,
+    ) -> Deployment {
         Deployment {
             id: Uuid::new_v4(),
             deployment_id: "deploy-123".to_string(),
             project_id: Uuid::new_v4(),
             created_by_id: Uuid::new_v4(),
-            status: DeploymentStatus::Unhealthy,
+            status,
             deployment_group: "default".to_string(),
             expires_at: None,
             termination_reason: None,
@@ -950,7 +956,7 @@ mod tests {
 
     #[test]
     fn normalize_reconcile_result_keeps_previously_healthy_deployments_recoverable() {
-        let deployment = sample_deployment(Some(Utc::now()));
+        let deployment = sample_deployment(DeploymentStatus::Healthy, Some(Utc::now()));
         let result = normalize_reconcile_result_for_recovery(
             &deployment,
             ReconcileResult {
@@ -965,9 +971,25 @@ mod tests {
     }
 
     #[test]
+    fn normalize_reconcile_result_preserves_failed_during_recreated_deployments() {
+        let deployment = sample_deployment(DeploymentStatus::Deploying, Some(Utc::now()));
+        let result = normalize_reconcile_result_for_recovery(
+            &deployment,
+            ReconcileResult {
+                status: DeploymentStatus::Failed,
+                controller_metadata: serde_json::json!({}),
+                error_message: Some("image pull backoff".to_string()),
+            },
+        );
+
+        assert_eq!(result.status, DeploymentStatus::Failed);
+        assert_eq!(result.error_message.as_deref(), Some("image pull backoff"));
+    }
+
+    #[test]
     fn failed_cleanup_only_queues_never_healthy_deployments() {
-        let never_healthy = sample_deployment(None);
-        let previously_healthy = sample_deployment(Some(Utc::now()));
+        let never_healthy = sample_deployment(DeploymentStatus::Failed, None);
+        let previously_healthy = sample_deployment(DeploymentStatus::Failed, Some(Utc::now()));
 
         assert!(should_queue_failed_cleanup(&never_healthy));
         assert!(!should_queue_failed_cleanup(&previously_healthy));
