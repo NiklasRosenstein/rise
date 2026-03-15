@@ -85,6 +85,8 @@ pub struct Deployment {
     #[serde(default)]
     pub is_active: bool,
     #[serde(default)]
+    pub can_rollback: bool,
+    #[serde(default)]
     pub created: String,
     #[serde(default)]
     pub updated: String,

@@ -434,6 +434,9 @@ async fn stream_logs_with_status_polling(
     // Try initial connection
     match open_log_stream(http_client, backend_url, token, project, deployment_id, 100).await {
         Ok(s) => log_stream = Some(s),
+        Err(LogStreamError::NotReady) => {
+            debug!("Initial log stream connection deferred: deployment logs are not ready yet");
+        }
         Err(LogStreamError::Gone) => {
             return fetch_deployment(http_client, backend_url, token, project, deployment_id).await;
         }
@@ -494,7 +497,6 @@ async fn stream_logs_with_status_polling(
 
             tokio::select! {
                 _ = tokio::time::sleep(RETRY_DELAY) => {
-                    retry_count += 1;
                     match open_log_stream(
                         http_client, backend_url, token, project, deployment_id, 100,
                     ).await {
@@ -502,12 +504,16 @@ async fn stream_logs_with_status_polling(
                             log_stream = Some(s);
                             retry_count = 0;
                         }
+                        Err(LogStreamError::NotReady) => {
+                            debug!("Log stream not ready yet; will retry");
+                        }
                         Err(LogStreamError::Gone) => {
                             return fetch_deployment(
                                 http_client, backend_url, token, project, deployment_id,
                             ).await;
                         }
                         Err(e) => {
+                            retry_count += 1;
                             debug!("Log stream reconnect failed (attempt {}): {:?}", retry_count, e);
                         }
                     }

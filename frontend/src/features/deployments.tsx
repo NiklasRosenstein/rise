@@ -326,8 +326,8 @@ export function DeploymentsList({ projectName }) {
         return ['Cancelled', 'Stopped', 'Superseded', 'Failed', 'Expired'].includes(status);
     };
 
-    const isRollbackable = (status) => {
-        return ['Healthy', 'Superseded'].includes(status);
+    const isRollbackable = (deployment) => {
+        return Boolean(deployment?.can_rollback);
     };
 
     const handleStopClick = (deployment) => {
@@ -482,7 +482,7 @@ export function DeploymentsList({ projectName }) {
                                         </MonoTd>
                                         <MonoTd className="px-6 py-4 whitespace-nowrap text-sm">
                                             <div className="mono-table-action-slot">
-                                                {isRollbackable(d.status) && (
+                                                {isRollbackable(d) && (
                                                     <Button
                                                         variant="primary"
                                                         size="sm"
@@ -1349,7 +1349,7 @@ export function DeploymentDetail({ projectName, deploymentId }) {
     return (
         <section>
             <div className="flex justify-end items-center mb-4">
-                {(deployment.status === 'Healthy' || deployment.status === 'Superseded') && (
+                {deployment.can_rollback && (
                     <Button
                         variant="secondary"
                         size="sm"

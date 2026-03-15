@@ -97,6 +97,8 @@ mod client_models {
         #[serde(default)]
         pub http_port: u16,
         #[serde(default)]
+        pub can_rollback: bool,
+        #[serde(default)]
         pub created: String,
         #[serde(default)]
         pub updated: String,
