@@ -78,6 +78,7 @@ impl RegistryProvider for OciClientAuthProvider {
             username: String::new(), // Empty - docker CLI uses stored credentials
             password: String::new(), // Empty - docker CLI uses stored credentials
             expires_in: None,
+            auth_method: Default::default(),
         })
     }
 

@@ -40,7 +40,7 @@ Key topics covered:
 - `mise backend:deps` - Start docker-compose services
 - `mise backend:run` (alias: `mise br`) - Run backend
 - `mise setup:hosts` - Configure `/etc/hosts` entries (idempotent)
-- `mise setup:docker` - Configure Docker insecure registries (idempotent)
+- `mise setup:docker` - Configure Docker insecure registries (idempotent, skips if `/etc/docker` is unavailable)
 - `mise minikube:up` - Start Minikube with local registry
 - `mise minikube:down` - Stop and delete Minikube
 

@@ -672,6 +672,28 @@ pub enum RegistrySettings {
         #[serde(default)]
         client_registry_url: Option<String>,
     },
+    /// GitLab container registry — mints scoped JWTs per deployment
+    #[serde(rename = "gitlab")]
+    GitLab {
+        /// GitLab instance URL (e.g., "https://gitlab.com")
+        gitlab_url: String,
+        /// Registry URL (e.g., "registry.gitlab.com")
+        registry_url: String,
+        /// Full image path prefix within the registry
+        /// (e.g., "my-org/my-project" or "my-org/my-project/rise-apps")
+        namespace: String,
+        /// GitLab username for JWT auth endpoint
+        username: String,
+        /// Personal Access Token or Deploy Token
+        token: String,
+        /// When true, the Kubernetes controller creates and manages image pull secrets
+        /// in each project namespace. Set to false if the cluster has its own pull mechanism.
+        #[serde(default)]
+        mint_pull_secrets: bool,
+        /// Optional client-facing registry URL override
+        #[serde(default)]
+        client_registry_url: Option<String>,
+    },
 }
 
 /// Encryption provider configuration

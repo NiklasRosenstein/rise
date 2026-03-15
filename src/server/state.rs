@@ -11,7 +11,10 @@ use crate::server::registry::{
 };
 
 #[cfg(feature = "backend")]
-use crate::server::registry::{models::EcrConfig, providers::EcrProvider};
+use crate::server::registry::{
+    models::{EcrConfig, GitLabRegistryConfig},
+    providers::{EcrProvider, GitLabRegistryProvider},
+};
 use crate::server::settings::{
     AuthSettings, EncryptionSettings, RegistrySettings, ServerSettings, Settings,
 };
@@ -382,11 +385,42 @@ impl AppState {
                     );
                     Arc::new(provider)
                 }
+                #[cfg(feature = "backend")]
+                RegistrySettings::GitLab {
+                    gitlab_url,
+                    registry_url,
+                    namespace,
+                    username,
+                    token,
+                    mint_pull_secrets,
+                    client_registry_url,
+                } => {
+                    let gitlab_config = GitLabRegistryConfig {
+                        gitlab_url: gitlab_url.clone(),
+                        registry_url: registry_url.clone(),
+                        namespace: namespace.clone(),
+                        username: username.clone(),
+                        token: token.clone(),
+                        mint_pull_secrets: *mint_pull_secrets,
+                        client_registry_url: client_registry_url.clone(),
+                    };
+                    let provider = GitLabRegistryProvider::new(gitlab_config)
+                        .context("Failed to initialize GitLab registry provider")?;
+                    tracing::info!("Initialized GitLab registry provider at {}", registry_url);
+                    Arc::new(provider)
+                }
+                #[cfg(not(feature = "backend"))]
+                RegistrySettings::GitLab { registry_url, .. } => {
+                    anyhow::bail!(
+                        "GitLab registry is configured ({}) but the 'backend' feature is not enabled.",
+                        registry_url
+                    )
+                }
             },
             None => {
                 anyhow::bail!(
                     "Registry provider is required for server operation. \
-                     Please configure a registry in settings (ECR or OCI client-auth)"
+                     Please configure a registry in settings (ECR, OCI client-auth, or GitLab)"
                 )
             }
         };

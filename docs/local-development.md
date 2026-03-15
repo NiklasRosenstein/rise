@@ -18,6 +18,7 @@ git clone https://github.com/NiklasRosenstein/rise.git
 cd rise
 
 # Configure /etc/hosts and Docker daemon (idempotent, requires sudo)
+# On WSL with Docker Desktop, `mise setup:docker` skips cleanly if `/etc/docker` is not present.
 mise setup:hosts
 mise setup:docker
 ```

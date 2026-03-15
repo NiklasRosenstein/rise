@@ -395,6 +395,14 @@ pub async fn stop_deployments_by_group(
 // Deployment Creation (merged from deploy.rs)
 // ============================================================================
 
+#[derive(Debug, Deserialize, Default, PartialEq)]
+#[serde(rename_all = "snake_case")]
+enum RegistryAuthMethod {
+    #[default]
+    LoginCredentials,
+    RegistryToken,
+}
+
 #[derive(Debug, Deserialize)]
 struct RegistryCredentials {
     registry_url: String,
@@ -402,6 +410,8 @@ struct RegistryCredentials {
     password: String,
     #[allow(dead_code)]
     expires_in: Option<u64>,
+    #[serde(default)]
+    auth_method: RegistryAuthMethod,
 }
 
 #[derive(Debug, Deserialize)]
@@ -706,16 +716,32 @@ async fn login_to_registry(
     credentials: &RegistryCredentials,
     deployment_id: &str,
 ) -> Result<()> {
-    if credentials.username.is_empty() {
-        return Ok(());
-    }
-    info!("Logging into registry");
-    if let Err(e) = build::docker_login(
-        container_cli,
-        &credentials.registry_url,
-        &credentials.username,
-        &credentials.password,
-    ) {
+    let result = match credentials.auth_method {
+        RegistryAuthMethod::LoginCredentials => {
+            if credentials.username.is_empty() {
+                return Ok(()); // OCI client-auth: credentials managed by docker login
+            }
+            info!("Logging into registry");
+            build::docker_login(
+                container_cli,
+                &credentials.registry_url,
+                &credentials.username,
+                &credentials.password,
+            )
+        }
+        RegistryAuthMethod::RegistryToken => {
+            // Extract the registry host (first path component) from the full registry_url
+            let registry_host = credentials
+                .registry_url
+                .split('/')
+                .next()
+                .unwrap_or(&credentials.registry_url);
+            info!("Injecting registry token for {}", registry_host);
+            build::inject_registry_auth(container_cli, registry_host, &credentials.password)
+        }
+    };
+
+    if let Err(e) = result {
         update_deployment_status(
             http_client,
             backend_url,

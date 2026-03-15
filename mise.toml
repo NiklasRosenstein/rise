@@ -111,7 +111,12 @@ description = "Ensure Docker daemon has insecure-registries configured for the l
 run = """
 set -x
 DAEMON_JSON="/etc/docker/daemon.json"
+DAEMON_DIR=$(dirname "$DAEMON_JSON")
 REQUIRED_REGISTRIES='["rise-registry:5000","localhost:5000","127.0.0.1:5000"]'
+if [ ! -d "$DAEMON_DIR" ]; then
+  echo "Skipping Docker daemon config because $DAEMON_DIR does not exist."
+  exit 0
+fi
 if [ ! -f "$DAEMON_JSON" ]; then
   echo "Creating $DAEMON_JSON with insecure-registries..."
   echo "{\"insecure-registries\": $REQUIRED_REGISTRIES}" | sudo tee "$DAEMON_JSON"
