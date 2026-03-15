@@ -92,7 +92,8 @@ pub(crate) fn inject_registry_auth(container_cli: &str, registry: &str, token: &
     let mut config: serde_json::Value = if auth_file.exists() {
         let content = std::fs::read_to_string(&auth_file)
             .with_context(|| format!("Failed to read {}", auth_file.display()))?;
-        serde_json::from_str(&content).unwrap_or(serde_json::json!({}))
+        serde_json::from_str(&content)
+            .with_context(|| format!("Failed to parse {} as JSON", auth_file.display()))?
     } else {
         serde_json::json!({})
     };

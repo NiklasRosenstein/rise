@@ -66,17 +66,18 @@ impl GitLabRegistryProvider {
 
     async fn fetch_jwt(&self, image_path: &str, actions: &str) -> Result<String> {
         let scope = format!("repository:{}:{}", image_path, actions);
-        let url = format!(
-            "{}/jwt/auth?service=container_registry&scope={}",
-            self.config.gitlab_url.trim_end_matches('/'),
-            scope
-        );
+        let base_url = format!("{}/jwt/auth", self.config.gitlab_url.trim_end_matches('/'));
+        let url = reqwest::Url::parse_with_params(
+            &base_url,
+            &[("service", "container_registry"), ("scope", scope.as_str())],
+        )
+        .context("Failed to build GitLab JWT auth URL")?;
 
         tracing::debug!("Fetching GitLab registry JWT for scope: {}", scope);
 
         let response = self
             .http_client
-            .get(&url)
+            .get(url)
             .basic_auth(&self.config.username, Some(&self.config.token))
             .send()
             .await

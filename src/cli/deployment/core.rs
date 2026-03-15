@@ -730,9 +730,11 @@ async fn login_to_registry(
             )
         }
         RegistryAuthMethod::RegistryToken => {
-            // Extract the registry host (first path component) from the full registry_url
+            // Extract the registry host from the full registry_url, stripping any scheme
             let registry_host = credentials
                 .registry_url
+                .trim_start_matches("https://")
+                .trim_start_matches("http://")
                 .split('/')
                 .next()
                 .unwrap_or(&credentials.registry_url);

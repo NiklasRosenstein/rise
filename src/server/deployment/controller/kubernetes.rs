@@ -574,11 +574,11 @@ impl KubernetesController {
                 .await?;
         let deployments = [healthy_deployments, unhealthy_deployments].concat();
 
-        // Group deployments by namespace, carrying the project name alongside
-        use std::collections::HashMap;
-        let mut namespaces_to_refresh: HashMap<String, String> = HashMap::new();
+        // Group deployments by namespace, collecting the project_id for each
+        use std::collections::{HashMap, HashSet};
+        let mut namespace_to_project_id: HashMap<String, uuid::Uuid> = HashMap::new();
 
-        for deployment in deployments {
+        for deployment in &deployments {
             let metadata: Option<KubernetesMetadata> =
                 serde_json::from_value(deployment.controller_metadata.clone()).ok();
 
@@ -590,14 +590,27 @@ impl KubernetesController {
                 continue;
             };
 
-            if namespaces_to_refresh.contains_key(&namespace) {
-                continue; // already mapped this namespace
-            }
+            namespace_to_project_id
+                .entry(namespace)
+                .or_insert(deployment.project_id);
+        }
 
-            if let Ok(Some(project)) =
-                db_projects::find_by_id(&self.state.db_pool, deployment.project_id).await
-            {
-                namespaces_to_refresh.insert(namespace, project.name);
+        // Batch-fetch all needed projects in one query
+        let project_ids: Vec<uuid::Uuid> = namespace_to_project_id
+            .values()
+            .copied()
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let projects = db_projects::find_by_ids(&self.state.db_pool, &project_ids).await?;
+        let project_name_map: HashMap<uuid::Uuid, String> =
+            projects.into_iter().map(|p| (p.id, p.name)).collect();
+
+        // Build final namespace -> project_name map
+        let mut namespaces_to_refresh: HashMap<String, String> = HashMap::new();
+        for (namespace, project_id) in namespace_to_project_id {
+            if let Some(name) = project_name_map.get(&project_id) {
+                namespaces_to_refresh.insert(namespace, name.clone());
             }
         }
 
