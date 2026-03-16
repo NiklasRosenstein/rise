@@ -319,20 +319,7 @@ async fn apply_env_overrides(
     );
 
     for env_override in overrides {
-        // Validate key
-        if !env_override
-            .key
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_')
-        {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!(
-                    "Invalid env var key '{}' (must be alphanumeric with underscores)",
-                    env_override.key
-                ),
-            ));
-        }
+        validate_env_override(env_override)?;
 
         // Encrypt if secret
         let value_to_store = if env_override.is_secret {
@@ -375,6 +362,49 @@ async fn apply_env_overrides(
                 format!("Failed to set env override '{}': {}", env_override.key, e),
             )
         })?;
+    }
+
+    Ok(())
+}
+
+fn validate_env_override_key(key: &str) -> bool {
+    !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn validate_env_override(env_override: &models::EnvOverride) -> Result<(), (StatusCode, String)> {
+    if !validate_env_override_key(&env_override.key) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Invalid env var key '{}' (must be alphanumeric with underscores)",
+                env_override.key
+            ),
+        ));
+    }
+
+    if env_override.key == "PORT" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "PORT cannot be set via env overrides. Use http_port/--http-port instead.".to_string(),
+        ));
+    }
+
+    if env_override.is_protected && !env_override.is_secret {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Env override '{}' cannot be protected unless it is also secret.",
+                env_override.key
+            ),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_env_overrides(overrides: &[models::EnvOverride]) -> Result<(), (StatusCode, String)> {
+    for env_override in overrides {
+        validate_env_override(env_override)?;
     }
 
     Ok(())
@@ -529,6 +559,8 @@ pub async fn create_deployment(
             ));
         }
     }
+
+    validate_env_overrides(&payload.env_overrides)?;
 
     // Parse expiration duration if provided
     let expires_at = if let Some(ref expires_in) = payload.expires_in {
@@ -1910,4 +1942,68 @@ pub async fn stream_deployment_logs(
     });
 
     Ok(Sse::new(sse_stream).keep_alive(KeepAlive::default()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{validate_env_override, validate_env_override_key};
+    use crate::server::deployment::models::EnvOverride;
+    use axum::http::StatusCode;
+
+    #[test]
+    fn env_override_key_validation_rejects_empty_keys() {
+        assert!(!validate_env_override_key(""));
+        assert!(validate_env_override_key("VALID_KEY_123"));
+    }
+
+    #[test]
+    fn env_override_validation_rejects_port_overrides() {
+        let err = validate_env_override(&EnvOverride {
+            key: "PORT".to_string(),
+            value: "3000".to_string(),
+            is_secret: false,
+            is_protected: false,
+        })
+        .unwrap_err();
+
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            err.1,
+            "PORT cannot be set via env overrides. Use http_port/--http-port instead."
+        );
+    }
+
+    #[test]
+    fn env_override_validation_rejects_protected_non_secrets() {
+        let err = validate_env_override(&EnvOverride {
+            key: "API_KEY".to_string(),
+            value: "value".to_string(),
+            is_secret: false,
+            is_protected: true,
+        })
+        .unwrap_err();
+
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            err.1,
+            "Env override 'API_KEY' cannot be protected unless it is also secret."
+        );
+    }
+
+    #[test]
+    fn env_override_validation_rejects_empty_keys() {
+        let err = validate_env_override(&EnvOverride {
+            key: String::new(),
+            value: "value".to_string(),
+            is_secret: false,
+            is_protected: false,
+        })
+        .unwrap_err();
+
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            err.1,
+            "Invalid env var key '' (must be alphanumeric with underscores)"
+        );
+    }
 }
