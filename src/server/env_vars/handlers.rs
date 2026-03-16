@@ -524,6 +524,110 @@ pub async fn get_project_env_var_value(
     }))
 }
 
+/// Get the decrypted value of a specific retrievable deployment secret
+pub async fn get_deployment_env_var_value(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((project_id_or_name, deployment_id, key)): Path<(String, String, String)>,
+) -> Result<Json<EnvVarValueResponse>, (StatusCode, String)> {
+    // Find project by ID or name
+    let project = if let Ok(uuid) = project_id_or_name.parse() {
+        projects::find_by_id(&state.db_pool, uuid)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get project: {}", e),
+                )
+            })?
+    } else {
+        projects::find_by_name(&state.db_pool, &project_id_or_name)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get project: {}", e),
+                )
+            })?
+    }
+    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+
+    // Check permission (admin bypass)
+    ensure_project_access_or_admin(&state, &user, &project).await?;
+
+    // Get deployment by deployment_id within the project
+    let deployment =
+        crate::db::deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to get deployment: {}", e),
+                )
+            })?
+            .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+
+    // Get the specific environment variable
+    let env_var = db_env_vars::get_deployment_env_var(&state.db_pool, deployment.id, &key)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to get environment variable: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Environment variable '{}' not found", key),
+            )
+        })?;
+
+    // Validate: must be an unprotected secret
+    if !env_var.is_secret || env_var.is_protected {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Environment variable '{}' is a protected secret and cannot be retrieved. \
+                 Update it with --protected=false to allow retrieval.",
+                key
+            ),
+        ));
+    }
+
+    // Decrypt the value
+    let decrypted_value = match &state.encryption_provider {
+        Some(provider) => provider.decrypt(&env_var.value).await.map_err(|e| {
+            tracing::error!(
+                "Failed to decrypt unprotected deployment secret '{}': {:?}",
+                key,
+                e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to decrypt secret '{}': {}", key, e),
+            )
+        })?,
+        None => {
+            return Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Cannot decrypt secrets: no encryption provider configured".to_string(),
+            ))
+        }
+    };
+
+    tracing::info!(
+        "Retrieved decrypted value for secret '{}' in deployment '{}' by user '{}'",
+        key,
+        deployment.deployment_id,
+        user.email
+    );
+
+    Ok(Json(EnvVarValueResponse {
+        value: decrypted_value,
+    }))
+}
+
 /// Preview the full set of environment variables a deployment would receive.
 ///
 /// Returns:

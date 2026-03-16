@@ -299,6 +299,122 @@ async fn insert_rise_env_vars(
     Ok(())
 }
 
+/// Apply env var overrides from the deployment request.
+///
+/// Encrypts secret values and upserts each override into the deployment's env vars.
+/// Called after copying project/source env vars and before upserting PORT.
+async fn apply_env_overrides(
+    state: &AppState,
+    deployment_id: uuid::Uuid,
+    overrides: &[models::EnvOverride],
+) -> Result<(), (StatusCode, String)> {
+    if overrides.is_empty() {
+        return Ok(());
+    }
+
+    info!(
+        "Applying {} env override(s) to deployment {}",
+        overrides.len(),
+        deployment_id
+    );
+
+    for env_override in overrides {
+        let is_protected = validate_env_override(env_override)?;
+
+        // Encrypt if secret
+        let value_to_store = if env_override.is_secret {
+            let provider = state.encryption_provider.as_ref().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "Cannot store secret variables: no encryption provider configured".to_string(),
+                )
+            })?;
+            provider.encrypt(&env_override.value).await.map_err(|e| {
+                error!(
+                    "Failed to encrypt env override '{}': {:?}",
+                    env_override.key, e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to encrypt secret '{}': {}", env_override.key, e),
+                )
+            })?
+        } else {
+            env_override.value.clone()
+        };
+
+        crate::db::env_vars::upsert_deployment_env_var(
+            &state.db_pool,
+            deployment_id,
+            &env_override.key,
+            &value_to_store,
+            env_override.is_secret,
+            is_protected,
+        )
+        .await
+        .map_err(|e| {
+            error!(
+                "Failed to upsert env override '{}': {}",
+                env_override.key, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to set env override '{}': {}", env_override.key, e),
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
+fn validate_env_override_key(key: &str) -> bool {
+    !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn normalize_env_override_is_protected(env_override: &models::EnvOverride) -> bool {
+    env_override.is_protected.unwrap_or(env_override.is_secret)
+}
+
+fn validate_env_override(env_override: &models::EnvOverride) -> Result<bool, (StatusCode, String)> {
+    if !validate_env_override_key(&env_override.key) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Invalid env var key '{}' (must be alphanumeric with underscores)",
+                env_override.key
+            ),
+        ));
+    }
+
+    if env_override.key == "PORT" {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            "PORT cannot be set via env overrides. Use http_port/--http-port instead.".to_string(),
+        ));
+    }
+
+    let is_protected = normalize_env_override_is_protected(env_override);
+    if is_protected && !env_override.is_secret {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            format!(
+                "Env override '{}' cannot be protected unless it is also secret.",
+                env_override.key
+            ),
+        ));
+    }
+
+    Ok(is_protected)
+}
+
+fn validate_env_overrides(overrides: &[models::EnvOverride]) -> Result<(), (StatusCode, String)> {
+    for env_override in overrides {
+        validate_env_override(env_override)?;
+    }
+
+    Ok(())
+}
+
 /// Convert DB DeploymentStatus to API DeploymentStatus
 fn convert_status_from_db(status: DbDeploymentStatus) -> DeploymentStatus {
     match status {
@@ -448,6 +564,8 @@ pub async fn create_deployment(
             ));
         }
     }
+
+    validate_env_overrides(&payload.env_overrides)?;
 
     // Parse expiration duration if provided
     let expires_at = if let Some(ref expires_in) = payload.expires_in {
@@ -651,6 +769,9 @@ pub async fn create_deployment(
             })?;
         }
 
+        // Apply env overrides from the request
+        apply_env_overrides(&state, new_deployment.id, &payload.env_overrides).await?;
+
         // Upsert PORT env var with the final http_port value
         crate::db::env_vars::upsert_deployment_env_var(
             &state.db_pool,
@@ -772,6 +893,9 @@ pub async fn create_deployment(
                 )
             })?;
 
+            // Apply env overrides from the request
+            apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+
             crate::db::env_vars::upsert_deployment_env_var(
                 &state.db_pool,
                 deployment.id,
@@ -872,6 +996,9 @@ pub async fn create_deployment(
             )
         })?;
 
+        // Apply env overrides from the request
+        apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+
         // Upsert PORT env var with the resolved effective value
         // This overwrites any user-set PORT with the resolved value (which may be the same)
         crate::db::env_vars::upsert_deployment_env_var(
@@ -971,6 +1098,9 @@ pub async fn create_deployment(
                 format!("Failed to copy environment variables: {}", e),
             )
         })?;
+
+        // Apply env overrides from the request
+        apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
 
         // Upsert PORT env var with the resolved effective value
         // This overwrites any user-set PORT with the resolved value (which may be the same)
@@ -1817,4 +1947,95 @@ pub async fn stream_deployment_logs(
     });
 
     Ok(Sse::new(sse_stream).keep_alive(KeepAlive::default()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        normalize_env_override_is_protected, validate_env_override, validate_env_override_key,
+    };
+    use crate::server::deployment::models::EnvOverride;
+    use axum::http::StatusCode;
+
+    #[test]
+    fn env_override_key_validation_rejects_empty_keys() {
+        assert!(!validate_env_override_key(""));
+        assert!(validate_env_override_key("VALID_KEY_123"));
+    }
+
+    #[test]
+    fn env_override_validation_rejects_port_overrides() {
+        let err = validate_env_override(&EnvOverride {
+            key: "PORT".to_string(),
+            value: "3000".to_string(),
+            is_secret: false,
+            is_protected: Some(false),
+        })
+        .unwrap_err();
+
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            err.1,
+            "PORT cannot be set via env overrides. Use http_port/--http-port instead."
+        );
+    }
+
+    #[test]
+    fn env_override_validation_rejects_protected_non_secrets() {
+        let err = validate_env_override(&EnvOverride {
+            key: "API_KEY".to_string(),
+            value: "value".to_string(),
+            is_secret: false,
+            is_protected: Some(true),
+        })
+        .unwrap_err();
+
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            err.1,
+            "Env override 'API_KEY' cannot be protected unless it is also secret."
+        );
+    }
+
+    #[test]
+    fn env_override_validation_rejects_empty_keys() {
+        let err = validate_env_override(&EnvOverride {
+            key: String::new(),
+            value: "value".to_string(),
+            is_secret: false,
+            is_protected: Some(false),
+        })
+        .unwrap_err();
+
+        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(
+            err.1,
+            "Invalid env var key '' (must be alphanumeric with underscores)"
+        );
+    }
+
+    #[test]
+    fn env_override_validation_defaults_secret_overrides_to_protected() {
+        let is_protected = validate_env_override(&EnvOverride {
+            key: "API_KEY".to_string(),
+            value: "secret".to_string(),
+            is_secret: true,
+            is_protected: None,
+        })
+        .unwrap();
+
+        assert!(is_protected);
+    }
+
+    #[test]
+    fn env_override_normalization_preserves_explicit_unprotected_secret() {
+        let is_protected = normalize_env_override_is_protected(&EnvOverride {
+            key: "API_KEY".to_string(),
+            value: "secret".to_string(),
+            is_secret: true,
+            is_protected: Some(false),
+        });
+
+        assert!(!is_protected);
+    }
 }
