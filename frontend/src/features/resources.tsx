@@ -818,7 +818,9 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                             <button
                                                 onClick={async () => {
                                                     try {
-                                                        const response = await api.getEnvVarValue(projectName, env.key);
+                                                        const response = deploymentId
+                                                            ? await api.getDeploymentEnvVarValue(projectName, deploymentId, env.key)
+                                                            : await api.getEnvVarValue(projectName, env.key);
                                                         await copyToClipboard(response.value);
                                                         showToast('Secret copied to clipboard!', 'success');
                                                     } catch (err) {

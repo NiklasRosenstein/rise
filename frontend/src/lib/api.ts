@@ -204,6 +204,12 @@ class RiseAPI {
         return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}/value`);
     }
 
+    async getDeploymentEnvVarValue(projectName, deploymentId, key) {
+        return this.request(
+            `/projects/${projectName}/deployments/${deploymentId}/env/${encodeURIComponent(key)}/value`
+        );
+    }
+
     async deleteEnvVar(projectName, key) {
         return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}`, {
             method: 'DELETE'

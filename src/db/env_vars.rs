@@ -169,6 +169,29 @@ pub async fn list_deployment_env_vars(
     Ok(env_vars)
 }
 
+/// Get a specific deployment environment variable by key
+pub async fn get_deployment_env_var(
+    pool: &PgPool,
+    deployment_id: Uuid,
+    key: &str,
+) -> Result<Option<DeploymentEnvVar>> {
+    let env_var = sqlx::query_as!(
+        DeploymentEnvVar,
+        r#"
+        SELECT id, deployment_id, key, value, is_secret, is_protected, created_at, updated_at
+        FROM deployment_env_vars
+        WHERE deployment_id = $1 AND key = $2
+        "#,
+        deployment_id,
+        key
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to get deployment environment variable")?;
+
+    Ok(env_var)
+}
+
 /// Create or update a deployment environment variable (upsert)
 pub async fn upsert_deployment_env_var(
     pool: &PgPool,
@@ -251,4 +274,63 @@ pub async fn load_deployment_env_vars_decrypted(
     }
 
     Ok(env_vars)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::deployments::{self, CreateDeploymentParams};
+    use crate::db::models::{DeploymentStatus, ProjectStatus};
+    use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
+
+    #[sqlx::test]
+    async fn get_deployment_env_var_returns_matching_variable(pool: PgPool) {
+        let user = crate::db::users::create(&pool, "env-vars-test@example.com")
+            .await
+            .expect("Failed to create test user");
+
+        let project = crate::db::projects::create(
+            &pool,
+            "env-vars-test-project",
+            ProjectStatus::Stopped,
+            "default".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await
+        .expect("Failed to create test project");
+
+        let deployment = deployments::create(
+            &pool,
+            CreateDeploymentParams {
+                deployment_id: "20260316-120000",
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DeploymentStatus::Healthy,
+                image: Some("test:v1"),
+                image_digest: None,
+                rolled_back_from_deployment_id: None,
+                deployment_group: DEFAULT_DEPLOYMENT_GROUP,
+                expires_at: None,
+                http_port: 8080,
+                is_active: false,
+            },
+        )
+        .await
+        .expect("Failed to create test deployment");
+
+        upsert_deployment_env_var(&pool, deployment.id, "BAZ", "secret-value", true, false)
+            .await
+            .expect("Failed to insert deployment env var");
+
+        let env_var = get_deployment_env_var(&pool, deployment.id, "BAZ")
+            .await
+            .expect("Failed to fetch deployment env var")
+            .expect("Expected deployment env var to exist");
+
+        assert_eq!(env_var.key, "BAZ");
+        assert_eq!(env_var.value, "secret-value");
+        assert!(env_var.is_secret);
+        assert!(!env_var.is_protected);
+    }
 }
