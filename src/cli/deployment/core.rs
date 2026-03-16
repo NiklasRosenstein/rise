@@ -421,6 +421,15 @@ struct CreateDeploymentResponse {
     credentials: RegistryCredentials,
 }
 
+/// A runtime environment variable override for a deployment
+#[derive(Debug, Clone)]
+pub struct EnvOverride {
+    pub key: String,
+    pub value: String,
+    pub is_secret: bool,
+    pub is_protected: bool,
+}
+
 /// Options for creating a deployment
 pub struct DeploymentOptions<'a> {
     pub project_name: &'a str,
@@ -436,6 +445,8 @@ pub struct DeploymentOptions<'a> {
     pub use_source_env_vars: bool,
     /// When true with --image, pull the image locally and push to Rise registry.
     pub push_image: bool,
+    /// Runtime environment variable overrides to apply to the deployment.
+    pub env_overrides: Vec<EnvOverride>,
 }
 
 pub async fn create_deployment(
@@ -485,6 +496,7 @@ pub async fn create_deployment(
         deploy_opts.from_deployment,
         deploy_opts.use_source_env_vars,
         deploy_opts.push_image,
+        &deploy_opts.env_overrides,
     )
     .await?;
 
@@ -771,6 +783,7 @@ async fn call_create_deployment_api(
     from_deployment: Option<&str>,
     use_source_env_vars: bool,
     push_image: bool,
+    env_overrides: &[EnvOverride],
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
@@ -807,6 +820,22 @@ async fn call_create_deployment_api(
     // Add push_image field if set
     if push_image {
         payload["push_image"] = serde_json::json!(true);
+    }
+
+    // Add env_overrides if any
+    if !env_overrides.is_empty() {
+        let overrides: Vec<serde_json::Value> = env_overrides
+            .iter()
+            .map(|o| {
+                serde_json::json!({
+                    "key": o.key,
+                    "value": o.value,
+                    "is_secret": o.is_secret,
+                    "is_protected": o.is_protected,
+                })
+            })
+            .collect();
+        payload["env_overrides"] = serde_json::json!(overrides);
     }
 
     let response = http_client

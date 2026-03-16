@@ -89,17 +89,37 @@ Rise automatically injects these variables into every deployment:
 
 `PORT` defaults to 8080. Override it per-deployment with `--http-port` on `rise deploy`, or set it permanently with `rise env set my-app PORT 3000`.
 
+## Deploy-Time Environment Overrides
+
+You can pass runtime environment variables directly when deploying:
+
+```bash
+# Plain text variable
+rise deploy -e DATABASE_URL=postgres://user:pass@db/mydb
+
+# Secret variable (encrypted, retrievable via `rise env get`)
+rise deploy --secret-env API_KEY=sk-xxx
+
+# Protected secret (encrypted, NOT retrievable)
+rise deploy --protected-env MASTER_KEY=xxx
+
+# From a file (same format as `rise env import`)
+rise deploy --env-file .env.production
+```
+
+These overrides are applied after copying project env vars, so they take precedence over existing values. They are stored as deployment-level env vars.
+
 ## Build-Time vs Runtime Variables
 
 | Aspect | Build-Time | Runtime |
 |--------|-----------|---------|
 | **Purpose** | Configure build process (compiler flags, tool versions) | Configure running application |
-| **Set via** | `-e` flag or `[build] env` in `rise.toml` | `rise env set` |
+| **Set via** | `-b` / `--build-arg` flag or `[build] args` in `rise.toml` | `rise env set`, or `-e` / `--env` on deploy |
 | **Available during** | Image build only | Container runtime |
 | **Storage** | Ephemeral (not persisted) | Database (encrypted for secrets) |
 | **Examples** | `NODE_ENV`, `BUILD_VERSION` | `DATABASE_URL`, `API_KEY` |
 
-See [Building Images](builds.md#build-time-environment-variables) for build-time variable details.
+See [Building Images](builds.md#build-time-arguments) for build-time variable details.
 
 ## Variables in rise.toml
 

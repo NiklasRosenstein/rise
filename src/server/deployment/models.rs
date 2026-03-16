@@ -167,6 +167,17 @@ pub fn rise_system_env_vars(
     ]
 }
 
+/// A runtime environment variable override included in a deployment request
+#[derive(Debug, Deserialize, Serialize)]
+pub struct EnvOverride {
+    pub key: String,
+    pub value: String,
+    #[serde(default)]
+    pub is_secret: bool,
+    #[serde(default)]
+    pub is_protected: bool,
+}
+
 // Request to create a deployment
 #[derive(Debug, Deserialize)]
 pub struct CreateDeploymentRequest {
@@ -187,6 +198,9 @@ pub struct CreateDeploymentRequest {
     pub use_source_env_vars: bool, // If true and from_deployment is set, copy env vars from source (default: false = use current project env vars)
     #[serde(default)]
     pub push_image: bool, // If true with image, CLI will pull and push image to Rise registry
+    /// Runtime environment variable overrides applied after copying project/source env vars
+    #[serde(default)]
+    pub env_overrides: Vec<EnvOverride>,
 }
 
 // Response from creating a deployment

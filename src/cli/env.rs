@@ -341,6 +341,69 @@ pub async fn unset_env(
     Ok(())
 }
 
+/// A parsed environment variable from a file or string
+#[derive(Debug, Clone)]
+pub struct ParsedEnvVar {
+    pub key: String,
+    pub value: String,
+    pub is_secret: bool,
+}
+
+/// Parse a single KEY=VALUE or KEY=secret:VALUE string
+pub fn parse_env_string(s: &str) -> anyhow::Result<ParsedEnvVar> {
+    let parts: Vec<&str> = s.splitn(2, '=').collect();
+    if parts.len() != 2 {
+        anyhow::bail!("Invalid format (expected KEY=value): {}", s);
+    }
+
+    let key = parts[0].trim();
+    let value_part = parts[1];
+
+    // Validate key name
+    if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        anyhow::bail!(
+            "Invalid key name '{}' (must be alphanumeric with underscores)",
+            key
+        );
+    }
+
+    let (value, is_secret) = if let Some(stripped) = value_part.strip_prefix("secret:") {
+        (stripped, true)
+    } else {
+        (value_part, false)
+    };
+
+    Ok(ParsedEnvVar {
+        key: key.to_string(),
+        value: value.to_string(),
+        is_secret,
+    })
+}
+
+/// Parse a multi-line env file (same format as `rise env import`)
+///
+/// Lines starting with # are comments, empty lines are ignored.
+/// Format: KEY=value (plain text) or KEY=secret:value (secret)
+pub fn parse_env_file(contents: &str) -> anyhow::Result<Vec<ParsedEnvVar>> {
+    let mut vars = Vec::new();
+
+    for (line_num, line) in contents.lines().enumerate() {
+        let line = line.trim();
+
+        // Skip comments and empty lines
+        if line.is_empty() || line.starts_with('#') {
+            continue;
+        }
+
+        match parse_env_string(line) {
+            Ok(var) => vars.push(var),
+            Err(e) => anyhow::bail!("Line {}: {}", line_num + 1, e),
+        }
+    }
+
+    Ok(vars)
+}
+
 /// Import environment variables from a file
 ///
 /// File format:

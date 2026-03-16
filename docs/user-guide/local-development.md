@@ -50,10 +50,10 @@ For OAuth extension support during local development, see [OAuth — Local Devel
 Set or override environment variables for the local run:
 
 ```bash
-rise run --run-env DATABASE_URL=postgres://localhost/mydb --run-env DEBUG=true
+rise run -e DATABASE_URL=postgres://localhost/mydb -e DEBUG=true
 ```
 
-`--run-env` values take precedence over project environment variables.
+`--env` / `-e` values take precedence over project environment variables.
 
 ## Build Backend Selection
 

@@ -31,7 +31,7 @@ LOG_LEVEL = "info"
 [build]
 backend = "docker"
 dockerfile = "Dockerfile.prod"
-env = ["NODE_ENV=production", "BUILD_VERSION"]
+args = ["NODE_ENV=production", "BUILD_VERSION"]
 ```
 
 | Field | Type | Description |
@@ -42,7 +42,7 @@ env = ["NODE_ENV=production", "BUILD_VERSION"]
 | `build_contexts` | Object | Named build contexts for multi-stage Docker builds (format: `{ "name" = "path" }`) |
 | `builder` | String | Buildpack builder image (pack backend only) |
 | `buildpacks` | Array | Buildpacks to use (pack backend only) |
-| `env` | Array | Build-time environment variables (format: `KEY=VALUE` or `KEY` to read from shell) |
+| `args` | Array | Build-time arguments (format: `KEY=VALUE` or `KEY` to read from shell). Alias: `env` for backward compat. |
 | `container_cli` | String | Container CLI: `docker` or `podman` |
 | `managed_buildkit` | Boolean | Enable/disable managed BuildKit daemon (auto-enables when `SSL_CERT_FILE` is set) |
 | `no_cache` | Boolean | Disable build cache |
@@ -63,7 +63,7 @@ APP_MODE = "production"
 backend = "pack"
 builder = "heroku/builder:24"
 buildpacks = ["heroku/nodejs", "heroku/procfile"]
-env = ["BP_NODE_VERSION=20"]
+args = ["BP_NODE_VERSION=20"]
 ```
 
 ## Project Creation Modes
@@ -106,7 +106,7 @@ Settings are resolved in this order (highest to lowest priority):
 4. **Global config** (`~/.config/rise/config.json`)
 5. **Auto-detection / defaults**
 
-For array fields (`buildpacks`, `env`), CLI values are **appended** to config file values rather than replacing them.
+For array fields (`buildpacks`, `args`), CLI values are **appended** to config file values rather than replacing them.
 
 ## Global CLI Config
 

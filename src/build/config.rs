@@ -56,9 +56,10 @@ pub struct BuildConfig {
     /// Buildpack(s) to use (only for pack backend)
     pub buildpacks: Option<Vec<String>>,
 
-    /// Environment variables to pass to the build
+    /// Build arguments to pass to the build
     /// Format: KEY=VALUE or KEY (to pass from environment)
-    pub env: Option<Vec<String>>,
+    #[serde(alias = "env")]
+    pub args: Option<Vec<String>>,
 
     /// Container CLI to use (docker or podman)
     pub container_cli: Option<String>,

@@ -7,7 +7,7 @@ custom_domains = []
 
 [project.env]
 
-# Build-time environment variables (optional)
+# Build-time arguments (optional)
 # These are passed to the build process and can configure build behavior
 # Uncomment to configure Node.js version and npm version:
 # [build]

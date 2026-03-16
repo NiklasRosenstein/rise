@@ -33,24 +33,24 @@ pub struct BuildArgs {
     pub builder: Option<String>,
 
     /// Buildpack(s) to use (only for pack backend). Can be specified multiple times.
-    #[arg(long = "buildpack", short = 'b')]
+    #[arg(long = "buildpack", short = 'B')]
     pub buildpacks: Vec<String>,
 
-    /// Build-time environment variables (for build configuration only).
+    /// Build-time arguments (for build configuration only).
     /// Format: KEY=VALUE (with explicit value) or KEY (reads from current environment).
     ///
     /// Examples:
-    ///   -e NODE_ENV=production -e API_VERSION=1.2.3
-    ///   -e DATABASE_URL  (reads DATABASE_URL from current environment)
+    ///   -b NODE_ENV=production -b API_VERSION=1.2.3
+    ///   -b DATABASE_URL  (reads DATABASE_URL from current environment)
     ///
-    /// Can also be configured in rise.toml under [build] section.
+    /// Can also be configured in rise.toml under [build] section as `args`.
     /// CLI values are merged with rise.toml values.
     ///
-    /// WARNING: Build-time variables are for build configuration (compiler flags,
+    /// WARNING: Build args are for build configuration (compiler flags,
     /// tool versions, feature toggles), NOT runtime secrets. For runtime secrets,
-    /// use 'rise env set --secret' instead.
-    #[arg(long = "env", short = 'e', value_name = "KEY=VALUE")]
-    pub env: Vec<String>,
+    /// use '-e' / '--env' on deploy, or 'rise env set --secret'.
+    #[arg(long = "build-arg", short = 'b', value_name = "KEY=VALUE")]
+    pub build_env: Vec<String>,
 
     /// Container CLI to use (docker or podman)
     #[arg(long)]
@@ -186,9 +186,9 @@ impl BuildOptions {
             env: {
                 let mut env = project_config
                     .as_ref()
-                    .and_then(|c| c.env.clone())
+                    .and_then(|c| c.args.clone())
                     .unwrap_or_default();
-                env.extend(build_args.env.clone());
+                env.extend(build_args.build_env.clone());
                 env
             },
 

@@ -299,6 +299,87 @@ async fn insert_rise_env_vars(
     Ok(())
 }
 
+/// Apply env var overrides from the deployment request.
+///
+/// Encrypts secret values and upserts each override into the deployment's env vars.
+/// Called after copying project/source env vars and before upserting PORT.
+async fn apply_env_overrides(
+    state: &AppState,
+    deployment_id: uuid::Uuid,
+    overrides: &[models::EnvOverride],
+) -> Result<(), (StatusCode, String)> {
+    if overrides.is_empty() {
+        return Ok(());
+    }
+
+    info!(
+        "Applying {} env override(s) to deployment {}",
+        overrides.len(),
+        deployment_id
+    );
+
+    for env_override in overrides {
+        // Validate key
+        if !env_override
+            .key
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_')
+        {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!(
+                    "Invalid env var key '{}' (must be alphanumeric with underscores)",
+                    env_override.key
+                ),
+            ));
+        }
+
+        // Encrypt if secret
+        let value_to_store = if env_override.is_secret {
+            let provider = state.encryption_provider.as_ref().ok_or_else(|| {
+                (
+                    StatusCode::BAD_REQUEST,
+                    "Cannot store secret variables: no encryption provider configured".to_string(),
+                )
+            })?;
+            provider.encrypt(&env_override.value).await.map_err(|e| {
+                error!(
+                    "Failed to encrypt env override '{}': {:?}",
+                    env_override.key, e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to encrypt secret '{}': {}", env_override.key, e),
+                )
+            })?
+        } else {
+            env_override.value.clone()
+        };
+
+        crate::db::env_vars::upsert_deployment_env_var(
+            &state.db_pool,
+            deployment_id,
+            &env_override.key,
+            &value_to_store,
+            env_override.is_secret,
+            env_override.is_protected,
+        )
+        .await
+        .map_err(|e| {
+            error!(
+                "Failed to upsert env override '{}': {}",
+                env_override.key, e
+            );
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to set env override '{}': {}", env_override.key, e),
+            )
+        })?;
+    }
+
+    Ok(())
+}
+
 /// Convert DB DeploymentStatus to API DeploymentStatus
 fn convert_status_from_db(status: DbDeploymentStatus) -> DeploymentStatus {
     match status {
@@ -651,6 +732,9 @@ pub async fn create_deployment(
             })?;
         }
 
+        // Apply env overrides from the request
+        apply_env_overrides(&state, new_deployment.id, &payload.env_overrides).await?;
+
         // Upsert PORT env var with the final http_port value
         crate::db::env_vars::upsert_deployment_env_var(
             &state.db_pool,
@@ -772,6 +856,9 @@ pub async fn create_deployment(
                 )
             })?;
 
+            // Apply env overrides from the request
+            apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+
             crate::db::env_vars::upsert_deployment_env_var(
                 &state.db_pool,
                 deployment.id,
@@ -872,6 +959,9 @@ pub async fn create_deployment(
             )
         })?;
 
+        // Apply env overrides from the request
+        apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
+
         // Upsert PORT env var with the resolved effective value
         // This overwrites any user-set PORT with the resolved value (which may be the same)
         crate::db::env_vars::upsert_deployment_env_var(
@@ -971,6 +1061,9 @@ pub async fn create_deployment(
                 format!("Failed to copy environment variables: {}", e),
             )
         })?;
+
+        // Apply env overrides from the request
+        apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
 
         // Upsert PORT env var with the resolved effective value
         // This overwrites any user-set PORT with the resolved value (which may be the same)

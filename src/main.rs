@@ -75,6 +75,22 @@ struct DeployArgs {
     /// Pulls the image locally (platform linux/amd64) and pushes to the internal registry.
     #[arg(long)]
     push_image: bool,
+    /// Runtime environment variables (format: KEY=VALUE, can be specified multiple times).
+    /// These are set on the deployment and available to the running container.
+    #[arg(long = "env", short = 'e', value_name = "KEY=VALUE", value_parser = parse_key_val::<String, String>)]
+    env: Vec<(String, String)>,
+    /// Secret runtime environment variables (encrypted at rest, retrievable via `rise env get`).
+    /// Format: KEY=VALUE, can be specified multiple times.
+    #[arg(long, value_name = "KEY=VALUE", value_parser = parse_key_val::<String, String>)]
+    secret_env: Vec<(String, String)>,
+    /// Protected secret runtime environment variables (encrypted at rest, NOT retrievable).
+    /// Format: KEY=VALUE, can be specified multiple times.
+    #[arg(long, value_name = "KEY=VALUE", value_parser = parse_key_val::<String, String>)]
+    protected_env: Vec<(String, String)>,
+    /// File with runtime environment variables (same format as `rise env import`).
+    /// Lines: KEY=value (plain) or KEY=secret:value (protected secret).
+    #[arg(long)]
+    env_file: Option<String>,
     #[command(flatten)]
     build_args: build::BuildArgs,
 }
@@ -157,7 +173,7 @@ enum Commands {
         #[arg(long)]
         expose: Option<u16>,
         /// Runtime environment variables (format: KEY=VALUE, can be specified multiple times)
-        #[arg(long = "run-env", short, value_parser = parse_key_val::<String, String>)]
+        #[arg(long = "env", short = 'e', value_parser = parse_key_val::<String, String>)]
         run_env: Vec<(String, String)>,
         #[command(flatten)]
         build_args: build::BuildArgs,
@@ -1012,6 +1028,55 @@ async fn main() -> Result<()> {
                     }
                 }
 
+                // Collect runtime env overrides
+                let mut env_overrides = Vec::new();
+
+                // --env KEY=VALUE → plain text
+                for (key, value) in &args.env {
+                    env_overrides.push(deployment::EnvOverride {
+                        key: key.clone(),
+                        value: value.clone(),
+                        is_secret: false,
+                        is_protected: false,
+                    });
+                }
+
+                // --secret-env KEY=VALUE → secret, retrievable
+                for (key, value) in &args.secret_env {
+                    env_overrides.push(deployment::EnvOverride {
+                        key: key.clone(),
+                        value: value.clone(),
+                        is_secret: true,
+                        is_protected: false,
+                    });
+                }
+
+                // --protected-env KEY=VALUE → secret, NOT retrievable
+                for (key, value) in &args.protected_env {
+                    env_overrides.push(deployment::EnvOverride {
+                        key: key.clone(),
+                        value: value.clone(),
+                        is_secret: true,
+                        is_protected: true,
+                    });
+                }
+
+                // --env-file → parse file
+                if let Some(ref env_file_path) = args.env_file {
+                    let contents = std::fs::read_to_string(env_file_path)
+                        .with_context(|| format!("Failed to read env file: {}", env_file_path))?;
+                    let parsed = cli::env::parse_env_file(&contents)
+                        .with_context(|| format!("Failed to parse env file: {}", env_file_path))?;
+                    for var in parsed {
+                        env_overrides.push(deployment::EnvOverride {
+                            key: var.key,
+                            value: var.value,
+                            is_secret: var.is_secret,
+                            is_protected: var.is_secret, // secrets from file are protected by default
+                        });
+                    }
+                }
+
                 // Pass through the http_port option - server will resolve from:
                 // 1. Explicit http_port (if provided)
                 // 2. Source deployment's http_port (if --from is used)
@@ -1032,6 +1097,7 @@ async fn main() -> Result<()> {
                         from_deployment: args.from.as_deref(),
                         use_source_env_vars: args.use_source_env_vars,
                         push_image: args.push_image,
+                        env_overrides,
                     },
                 )
                 .await?;

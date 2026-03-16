@@ -149,19 +149,19 @@ If builds fail with the error `requested experimental feature mergeop has been d
 docker buildx create --use
 ```
 
-## Build-Time Environment Variables
+## Build-Time Arguments
 
-Pass variables to the build process with `-e`:
+Pass build arguments with `-b` / `--build-arg`:
 
 ```bash
-rise build myapp:latest -e NODE_ENV=production -e BUILD_VERSION=1.2.3
+rise build myapp:latest -b NODE_ENV=production -b BUILD_VERSION=1.2.3
 ```
 
 Or in `rise.toml`:
 
 ```toml
 [build]
-env = ["NODE_ENV=production", "BUILD_VERSION"]
+args = ["NODE_ENV=production", "BUILD_VERSION"]
 ```
 
 Using `KEY` without `=VALUE` reads the variable from your shell environment (useful for CI metadata like git SHAs).
@@ -172,7 +172,7 @@ Using `KEY` without `=VALUE` reads the variable from your shell environment (use
 - **Pack**: Passed as `--env` to pack CLI
 - **Railpack**: Passed as BuildKit secrets
 
-Build-time variables are for build configuration only (compiler flags, tool versions). For runtime secrets, use `rise env set --secret`. See [Environment Variables](environment-variables.md) for the distinction.
+Build args are for build configuration only (compiler flags, tool versions). For runtime variables, use `-e` / `--env` on `rise deploy`, or `rise env set`. See [Environment Variables](environment-variables.md) for the distinction.
 
 ## Build Cache Control
 
