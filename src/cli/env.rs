@@ -485,38 +485,6 @@ pub async fn import_env(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::{parse_env_file, parse_env_string};
-
-    #[test]
-    fn parse_env_string_rejects_empty_keys() {
-        let err = parse_env_string("=value").unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Invalid key name '' (must be alphanumeric with underscores)"
-        );
-    }
-
-    #[test]
-    fn parse_env_file_reports_original_line_numbers() {
-        let err = parse_env_file("\n# comment\n=value").unwrap_err();
-        assert_eq!(
-            err.to_string(),
-            "Line 3: Invalid key name '' (must be alphanumeric with underscores)"
-        );
-    }
-
-    #[test]
-    fn parse_env_string_supports_secret_values() {
-        let parsed = parse_env_string("API_KEY=secret:value").unwrap();
-
-        assert_eq!(parsed.key, "API_KEY");
-        assert_eq!(parsed.value, "value");
-        assert!(parsed.is_secret);
-    }
-}
-
 /// List environment variables for a deployment (read-only)
 pub async fn list_deployment_env(
     http_client: &Client,
@@ -589,4 +557,36 @@ pub async fn list_deployment_env(
     println!("Note: Deployment environment variables are read-only snapshots");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_env_file, parse_env_string};
+
+    #[test]
+    fn parse_env_string_rejects_empty_keys() {
+        let err = parse_env_string("=value").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Invalid key name '' (must be alphanumeric with underscores)"
+        );
+    }
+
+    #[test]
+    fn parse_env_file_reports_original_line_numbers() {
+        let err = parse_env_file("\n# comment\n=value").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Line 3: Invalid key name '' (must be alphanumeric with underscores)"
+        );
+    }
+
+    #[test]
+    fn parse_env_string_supports_secret_values() {
+        let parsed = parse_env_string("API_KEY=secret:value").unwrap();
+
+        assert_eq!(parsed.key, "API_KEY");
+        assert_eq!(parsed.value, "value");
+        assert!(parsed.is_secret);
+    }
 }
