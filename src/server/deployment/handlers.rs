@@ -319,7 +319,7 @@ async fn apply_env_overrides(
     );
 
     for env_override in overrides {
-        validate_env_override(env_override)?;
+        let is_protected = validate_env_override(env_override)?;
 
         // Encrypt if secret
         let value_to_store = if env_override.is_secret {
@@ -349,7 +349,7 @@ async fn apply_env_overrides(
             &env_override.key,
             &value_to_store,
             env_override.is_secret,
-            env_override.is_protected,
+            is_protected,
         )
         .await
         .map_err(|e| {
@@ -371,7 +371,11 @@ fn validate_env_override_key(key: &str) -> bool {
     !key.is_empty() && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
 
-fn validate_env_override(env_override: &models::EnvOverride) -> Result<(), (StatusCode, String)> {
+fn normalize_env_override_is_protected(env_override: &models::EnvOverride) -> bool {
+    env_override.is_protected.unwrap_or(env_override.is_secret)
+}
+
+fn validate_env_override(env_override: &models::EnvOverride) -> Result<bool, (StatusCode, String)> {
     if !validate_env_override_key(&env_override.key) {
         return Err((
             StatusCode::BAD_REQUEST,
@@ -389,7 +393,8 @@ fn validate_env_override(env_override: &models::EnvOverride) -> Result<(), (Stat
         ));
     }
 
-    if env_override.is_protected && !env_override.is_secret {
+    let is_protected = normalize_env_override_is_protected(env_override);
+    if is_protected && !env_override.is_secret {
         return Err((
             StatusCode::BAD_REQUEST,
             format!(
@@ -399,7 +404,7 @@ fn validate_env_override(env_override: &models::EnvOverride) -> Result<(), (Stat
         ));
     }
 
-    Ok(())
+    Ok(is_protected)
 }
 
 fn validate_env_overrides(overrides: &[models::EnvOverride]) -> Result<(), (StatusCode, String)> {
@@ -1946,7 +1951,9 @@ pub async fn stream_deployment_logs(
 
 #[cfg(test)]
 mod tests {
-    use super::{validate_env_override, validate_env_override_key};
+    use super::{
+        normalize_env_override_is_protected, validate_env_override, validate_env_override_key,
+    };
     use crate::server::deployment::models::EnvOverride;
     use axum::http::StatusCode;
 
@@ -1962,7 +1969,7 @@ mod tests {
             key: "PORT".to_string(),
             value: "3000".to_string(),
             is_secret: false,
-            is_protected: false,
+            is_protected: Some(false),
         })
         .unwrap_err();
 
@@ -1979,7 +1986,7 @@ mod tests {
             key: "API_KEY".to_string(),
             value: "value".to_string(),
             is_secret: false,
-            is_protected: true,
+            is_protected: Some(true),
         })
         .unwrap_err();
 
@@ -1996,7 +2003,7 @@ mod tests {
             key: String::new(),
             value: "value".to_string(),
             is_secret: false,
-            is_protected: false,
+            is_protected: Some(false),
         })
         .unwrap_err();
 
@@ -2005,5 +2012,30 @@ mod tests {
             err.1,
             "Invalid env var key '' (must be alphanumeric with underscores)"
         );
+    }
+
+    #[test]
+    fn env_override_validation_defaults_secret_overrides_to_protected() {
+        let is_protected = validate_env_override(&EnvOverride {
+            key: "API_KEY".to_string(),
+            value: "secret".to_string(),
+            is_secret: true,
+            is_protected: None,
+        })
+        .unwrap();
+
+        assert!(is_protected);
+    }
+
+    #[test]
+    fn env_override_normalization_preserves_explicit_unprotected_secret() {
+        let is_protected = normalize_env_override_is_protected(&EnvOverride {
+            key: "API_KEY".to_string(),
+            value: "secret".to_string(),
+            is_secret: true,
+            is_protected: Some(false),
+        });
+
+        assert!(!is_protected);
     }
 }

@@ -174,8 +174,8 @@ pub struct EnvOverride {
     pub value: String,
     #[serde(default)]
     pub is_secret: bool,
-    #[serde(default)]
-    pub is_protected: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub is_protected: Option<bool>,
 }
 
 // Request to create a deployment
@@ -222,6 +222,7 @@ pub struct UpdateDeploymentStatusRequest {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn test_normalize_deployment_group() {
@@ -289,5 +290,31 @@ mod tests {
         );
         assert_eq!(map["RISE_DEPLOYMENT_GROUP"], "mr/42");
         assert_eq!(map["RISE_DEPLOYMENT_GROUP_NORMALIZED"], "mr--42");
+    }
+
+    #[test]
+    fn test_env_override_deserialization_defaults_is_protected_to_none() {
+        let env_override: EnvOverride = serde_json::from_value(json!({
+            "key": "API_KEY",
+            "value": "secret",
+            "is_secret": true
+        }))
+        .unwrap();
+
+        assert!(env_override.is_secret);
+        assert_eq!(env_override.is_protected, None);
+    }
+
+    #[test]
+    fn test_env_override_deserialization_keeps_explicit_is_protected() {
+        let env_override: EnvOverride = serde_json::from_value(json!({
+            "key": "API_KEY",
+            "value": "secret",
+            "is_secret": true,
+            "is_protected": false
+        }))
+        .unwrap();
+
+        assert_eq!(env_override.is_protected, Some(false));
     }
 }

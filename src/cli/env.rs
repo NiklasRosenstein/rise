@@ -349,6 +349,17 @@ pub struct ParsedEnvVar {
     pub is_secret: bool,
 }
 
+fn iter_env_file_lines(contents: &str) -> impl Iterator<Item = (usize, &str)> {
+    contents.lines().enumerate().filter_map(|(line_num, line)| {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') {
+            None
+        } else {
+            Some((line_num + 1, line))
+        }
+    })
+}
+
 /// Parse a single KEY=VALUE or KEY=secret:VALUE string
 pub fn parse_env_string(s: &str) -> anyhow::Result<ParsedEnvVar> {
     let parts: Vec<&str> = s.splitn(2, '=').collect();
@@ -360,6 +371,10 @@ pub fn parse_env_string(s: &str) -> anyhow::Result<ParsedEnvVar> {
     let value_part = parts[1];
 
     // Validate key name
+    if key.is_empty() {
+        anyhow::bail!("Invalid key name '' (must be alphanumeric with underscores)");
+    }
+
     if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
         anyhow::bail!(
             "Invalid key name '{}' (must be alphanumeric with underscores)",
@@ -387,17 +402,10 @@ pub fn parse_env_string(s: &str) -> anyhow::Result<ParsedEnvVar> {
 pub fn parse_env_file(contents: &str) -> anyhow::Result<Vec<ParsedEnvVar>> {
     let mut vars = Vec::new();
 
-    for (line_num, line) in contents.lines().enumerate() {
-        let line = line.trim();
-
-        // Skip comments and empty lines
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
+    for (line_num, line) in iter_env_file_lines(contents) {
         match parse_env_string(line) {
             Ok(var) => vars.push(var),
-            Err(e) => anyhow::bail!("Line {}: {}", line_num + 1, e),
+            Err(e) => anyhow::bail!("Line {}: {}", line_num, e),
         }
     }
 
@@ -429,58 +437,27 @@ pub async fn import_env(
     let mut success_count = 0;
     let mut error_count = 0;
 
-    for (line_num, line) in contents.lines().enumerate() {
-        let line = line.trim();
-
-        // Skip comments and empty lines
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        // Parse KEY=value
-        let parts: Vec<&str> = line.splitn(2, '=').collect();
-        if parts.len() != 2 {
-            eprintln!(
-                "Warning: Line {} has invalid format (expected KEY=value): {}",
-                line_num + 1,
-                line
-            );
-            error_count += 1;
-            continue;
-        }
-
-        let key = parts[0].trim();
-        let value_part = parts[1];
-
-        // Check if value is secret
-        let (value, is_secret) = if let Some(stripped) = value_part.strip_prefix("secret:") {
-            (stripped, true)
-        } else {
-            (value_part, false)
+    for (line_num, line) in iter_env_file_lines(&contents) {
+        let parsed = match parse_env_string(line) {
+            Ok(parsed) => parsed,
+            Err(e) => {
+                eprintln!("Warning: Line {}: {}", line_num, e);
+                error_count += 1;
+                continue;
+            }
         };
-
-        // Validate key name (alphanumeric and underscore only)
-        if !key.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-            eprintln!(
-                "Warning: Line {} has invalid key name '{}' (must be alphanumeric with underscores)",
-                line_num + 1,
-                key
-            );
-            error_count += 1;
-            continue;
-        }
 
         // Set the variable
         // Protected defaults to true for secrets, false for non-secrets
-        let is_protected = is_secret;
+        let is_protected = parsed.is_secret;
         match set_env(
             http_client,
             backend_url,
             token,
             project,
-            key,
-            value,
-            is_secret,
+            &parsed.key,
+            &parsed.value,
+            parsed.is_secret,
             is_protected,
         )
         .await
@@ -489,9 +466,7 @@ pub async fn import_env(
             Err(e) => {
                 eprintln!(
                     "Warning: Failed to set variable '{}' from line {}: {}",
-                    key,
-                    line_num + 1,
-                    e
+                    parsed.key, line_num, e
                 );
                 error_count += 1;
             }
@@ -508,6 +483,38 @@ pub async fn import_env(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{parse_env_file, parse_env_string};
+
+    #[test]
+    fn parse_env_string_rejects_empty_keys() {
+        let err = parse_env_string("=value").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Invalid key name '' (must be alphanumeric with underscores)"
+        );
+    }
+
+    #[test]
+    fn parse_env_file_reports_original_line_numbers() {
+        let err = parse_env_file("\n# comment\n=value").unwrap_err();
+        assert_eq!(
+            err.to_string(),
+            "Line 3: Invalid key name '' (must be alphanumeric with underscores)"
+        );
+    }
+
+    #[test]
+    fn parse_env_string_supports_secret_values() {
+        let parsed = parse_env_string("API_KEY=secret:value").unwrap();
+
+        assert_eq!(parsed.key, "API_KEY");
+        assert_eq!(parsed.value, "value");
+        assert!(parsed.is_secret);
+    }
 }
 
 /// List environment variables for a deployment (read-only)

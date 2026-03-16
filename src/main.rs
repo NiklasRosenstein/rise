@@ -1063,7 +1063,8 @@ async fn main() -> Result<()> {
 
                 // --env-file → parse file
                 if let Some(ref env_file_path) = args.env_file {
-                    let contents = std::fs::read_to_string(env_file_path)
+                    let contents = tokio::fs::read_to_string(env_file_path)
+                        .await
                         .with_context(|| format!("Failed to read env file: {}", env_file_path))?;
                     let parsed = cli::env::parse_env_file(&contents)
                         .with_context(|| format!("Failed to parse env file: {}", env_file_path))?;
