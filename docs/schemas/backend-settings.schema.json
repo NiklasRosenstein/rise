@@ -785,6 +785,126 @@
             "user"
           ],
           "type": "object"
+        },
+        {
+          "description": "Snowflake authentication configuration",
+          "oneOf": [
+            {
+              "properties": {
+                "auth_type": {
+                  "enum": [
+                    "password"
+                  ],
+                  "type": "string"
+                },
+                "password": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "auth_type",
+                "password"
+              ],
+              "type": "object"
+            },
+            {
+              "anyOf": [
+                {
+                  "properties": {
+                    "private_key_path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "private_key_path"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "properties": {
+                    "private_key": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "private_key"
+                  ],
+                  "type": "object"
+                }
+              ],
+              "description": "Private key source (path or inline PEM)",
+              "properties": {
+                "auth_type": {
+                  "enum": [
+                    "private_key"
+                  ],
+                  "type": "string"
+                },
+                "private_key_password": {
+                  "default": null,
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "auth_type"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "account": {
+              "description": "Snowflake account identifier (e.g. \"myorg.us-east-1\")",
+              "type": "string"
+            },
+            "kubeconfig": {
+              "default": null,
+              "description": "Path to kubeconfig file; uses in-cluster config when omitted",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "namespace": {
+              "default": "rise-system",
+              "description": "Kubernetes namespace where SnowflakePostgres CRDs are managed Default: \"rise-system\"",
+              "type": "string"
+            },
+            "role": {
+              "default": null,
+              "description": "Snowflake role to use (must have CREATE DATABASE privileges)",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "enum": [
+                "snowflake-postgres-provisioner"
+              ],
+              "type": "string"
+            },
+            "user": {
+              "description": "Snowflake user used for provisioning databases",
+              "type": "string"
+            },
+            "warehouse": {
+              "default": null,
+              "description": "Snowflake warehouse to use",
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "account",
+            "type",
+            "user"
+          ],
+          "type": "object"
         }
       ]
     },

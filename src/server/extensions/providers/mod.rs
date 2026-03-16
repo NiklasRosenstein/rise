@@ -7,3 +7,6 @@ pub mod oauth;
 
 #[cfg(feature = "backend")]
 pub mod snowflake_oauth;
+
+#[cfg(feature = "backend")]
+pub mod snowflake_postgres;

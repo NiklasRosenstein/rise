@@ -1281,6 +1281,7 @@ pub enum PrivateKeySource {
 /// Extension provider configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
+#[allow(clippy::enum_variant_names)]
 pub enum ExtensionProviderConfig {
     #[cfg(feature = "backend")]
     AwsRdsProvisioner {
@@ -1353,6 +1354,31 @@ pub enum ExtensionProviderConfig {
         #[serde(default = "default_refresh_token_validity_seconds")]
         refresh_token_validity_seconds: i64,
     },
+
+    #[cfg(feature = "backend")]
+    #[serde(rename = "snowflake-postgres-provisioner")]
+    SnowflakePostgresProvisioner {
+        /// Snowflake account identifier (e.g. "myorg.us-east-1")
+        account: String,
+        /// Snowflake user used for provisioning databases
+        user: String,
+        /// Snowflake role to use (must have CREATE DATABASE privileges)
+        #[serde(default)]
+        role: Option<String>,
+        /// Snowflake warehouse to use
+        #[serde(default)]
+        warehouse: Option<String>,
+        /// Authentication configuration
+        #[serde(flatten)]
+        auth: SnowflakeAuth,
+        /// Kubernetes namespace where SnowflakePostgres CRDs are managed
+        /// Default: "rise-system"
+        #[serde(default = "default_snowflake_postgres_namespace")]
+        namespace: String,
+        /// Path to kubeconfig file; uses in-cluster config when omitted
+        #[serde(default)]
+        kubeconfig: Option<String>,
+    },
 }
 
 #[allow(dead_code)]
@@ -1397,6 +1423,11 @@ fn default_scopes() -> Vec<String> {
 #[allow(dead_code)]
 fn default_refresh_token_validity_seconds() -> i64 {
     7776000 // 90 days
+}
+
+#[allow(dead_code)]
+fn default_snowflake_postgres_namespace() -> String {
+    "rise-system".to_string()
 }
 
 /// Platform access control configuration

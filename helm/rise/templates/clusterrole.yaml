@@ -76,3 +76,12 @@ rules:
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["get", "list", "watch"]
+
+# Rise-owned CRDs: SnowflakePostgres management
+- apiGroups: ["rise.dev"]
+  resources: ["snowflakepostgreses"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+- apiGroups: ["rise.dev"]
+  resources: ["snowflakepostgreses/status"]
+  verbs: ["get", "update", "patch"]

@@ -13,6 +13,9 @@ pub enum BackendCommands {
     /// Print backend settings JSON schema
     #[cfg(feature = "backend")]
     ConfigSchema,
+    /// Print CRD definitions owned by Rise as YAML (for committing to Helm chart)
+    #[cfg(feature = "backend")]
+    Crds,
     /// Run a local OIDC issuer for testing service accounts
     DevOidcIssuer {
         /// Port to listen on
@@ -49,6 +52,12 @@ pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
         BackendCommands::ConfigSchema => {
             let schema = crate::server::settings::Settings::json_schema_value()?;
             println!("{}", serde_json::to_string_pretty(&schema)?);
+            Ok(())
+        }
+        #[cfg(feature = "backend")]
+        BackendCommands::Crds => {
+            let yaml = crate::server::crds::get_all_crds_yaml()?;
+            print!("{}", yaml);
             Ok(())
         }
         BackendCommands::DevOidcIssuer { port, token } => dev_oidc_issuer::run(port, token).await,
