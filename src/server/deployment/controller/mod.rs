@@ -1,5 +1,11 @@
 #[cfg(feature = "backend")]
+mod argocd;
+
+#[cfg(feature = "backend")]
 mod kubernetes;
+
+#[cfg(feature = "backend")]
+pub use argocd::{ArgoCdController, ArgoCdControllerConfig, ArgoCdHelmChartConfig};
 
 #[cfg(feature = "backend")]
 pub use kubernetes::{KubernetesController, KubernetesControllerConfig};
@@ -192,6 +198,73 @@ pub struct DeploymentController {
 }
 
 impl DeploymentController {
+    async fn promote_healthy_deployment(
+        &self,
+        deployment: &Deployment,
+        project: &Project,
+    ) -> anyhow::Result<()> {
+        // Find active deployment IN THIS GROUP before marking the new deployment healthy.
+        // This prevents a race where the query could otherwise return the newly-promoted deployment.
+        let active_in_group = db_deployments::find_active_for_project_and_group(
+            &self.state.db_pool,
+            deployment.project_id,
+            &deployment.deployment_group,
+        )
+        .await?;
+
+        db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
+
+        if let Some(old_active) = active_in_group {
+            if old_active.id != deployment.id && !state_machine::is_terminal(&old_active.status) {
+                info!(
+                    "Deployment {} replacing {} in group '{}', marking old as Terminating",
+                    deployment.deployment_id, old_active.deployment_id, deployment.deployment_group
+                );
+                db_deployments::mark_terminating(
+                    &self.state.db_pool,
+                    old_active.id,
+                    crate::db::models::TerminationReason::Superseded,
+                )
+                .await?;
+            }
+        }
+
+        let other_in_group = db_deployments::find_non_terminal_for_project_and_group(
+            &self.state.db_pool,
+            project.id,
+            &deployment.deployment_group,
+        )
+        .await?;
+
+        for other in other_in_group {
+            if other.id != deployment.id
+                && state_machine::is_active(&other.status)
+                && !state_machine::is_terminal(&other.status)
+            {
+                info!(
+                    "Cleaning up non-active deployment {} in group '{}', marking as Terminating",
+                    other.deployment_id, deployment.deployment_group
+                );
+                db_deployments::mark_terminating(
+                    &self.state.db_pool,
+                    other.id,
+                    crate::db::models::TerminationReason::Superseded,
+                )
+                .await?;
+            }
+        }
+
+        db_deployments::mark_as_active(
+            &self.state.db_pool,
+            deployment.id,
+            project.id,
+            &deployment.deployment_group,
+        )
+        .await?;
+
+        Ok(())
+    }
+
     /// Create a new deployment controller
     ///
     /// # Arguments
@@ -409,81 +482,20 @@ impl DeploymentController {
         )
         .await?;
 
-        if let Some(error) = result.error_message {
-            if new_status == DeploymentStatus::Failed {
-                db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
-            } else if new_status == DeploymentStatus::Unhealthy {
-                db_deployments::mark_unhealthy(&self.state.db_pool, deployment.id, error).await?;
-            }
-        } else if new_status == DeploymentStatus::Healthy {
-            // Find active deployment IN THIS GROUP *before* marking new as Healthy
-            // This prevents a race condition where the query would return the new deployment
-            let active_in_group = db_deployments::find_active_for_project_and_group(
-                &self.state.db_pool,
-                deployment.project_id,
-                &deployment.deployment_group,
-            )
-            .await?;
-
-            // Now mark the new deployment as healthy
-            db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
-
-            // Supersede old active deployment in this group
-            if let Some(old_active) = active_in_group {
-                if old_active.id != deployment.id && !state_machine::is_terminal(&old_active.status)
-                {
-                    info!(
-                        "Deployment {} replacing {} in group '{}', marking old as Terminating",
-                        deployment.deployment_id,
-                        old_active.deployment_id,
-                        deployment.deployment_group
-                    );
-                    db_deployments::mark_terminating(
-                        &self.state.db_pool,
-                        old_active.id,
-                        crate::db::models::TerminationReason::Superseded,
-                    )
-                    .await?;
-                }
-            }
-
-            // Clean up other ACTIVE (Healthy/Unhealthy) deployments in this group
-            // Do NOT clean up deployments that are still being deployed (Pushed, Deploying, etc.)
-            let other_in_group = db_deployments::find_non_terminal_for_project_and_group(
-                &self.state.db_pool,
-                project.id,
-                &deployment.deployment_group,
-            )
-            .await?;
-
-            for other in other_in_group {
-                // Only clean up OTHER deployments that are in ACTIVE running states
-                // Don't clean up deployments that are still being deployed (Pending, Building, Pushing, Pushed, Deploying)
-                if other.id != deployment.id
-                    && state_machine::is_active(&other.status)
-                    && !state_machine::is_terminal(&other.status)
-                {
-                    info!(
-                        "Cleaning up non-active deployment {} in group '{}', marking as Terminating",
-                        other.deployment_id, deployment.deployment_group
-                    );
-                    db_deployments::mark_terminating(
-                        &self.state.db_pool,
-                        other.id,
-                        crate::db::models::TerminationReason::Superseded,
-                    )
-                    .await?;
-                }
-            }
-
-            // Mark deployment as active
-            db_deployments::mark_as_active(
-                &self.state.db_pool,
-                deployment.id,
-                project.id,
-                &deployment.deployment_group,
-            )
-            .await?;
+        if new_status == DeploymentStatus::Failed {
+            let error = result
+                .error_message
+                .unwrap_or_else(|| "Deployment failed".to_string());
+            db_deployments::mark_failed(&self.state.db_pool, deployment.id, &error).await?;
+        } else if new_status == DeploymentStatus::Unhealthy {
+            let error = result
+                .error_message
+                .unwrap_or_else(|| "Deployment became unhealthy".to_string());
+            db_deployments::mark_unhealthy(&self.state.db_pool, deployment.id, error).await?;
+        } else if new_status == DeploymentStatus::Healthy
+            && deployment.status != DeploymentStatus::Healthy
+        {
+            self.promote_healthy_deployment(&deployment, &project).await?;
         }
 
         // Update project status
@@ -631,7 +643,10 @@ impl DeploymentController {
                             "Deployment {} has recovered, marking as Healthy",
                             deployment.deployment_id
                         );
-                        db_deployments::mark_healthy(&self.state.db_pool, deployment.id).await?;
+                        let project = projects::find_by_id(&self.state.db_pool, deployment.project_id)
+                            .await?
+                            .ok_or_else(|| anyhow::anyhow!("Project not found"))?;
+                        self.promote_healthy_deployment(&deployment, &project).await?;
                         projects::update_calculated_status(
                             &self.state.db_pool,
                             deployment.project_id,

@@ -26,7 +26,8 @@ use std::time::Duration;
 
 #[cfg(feature = "backend")]
 use crate::server::deployment::controller::{
-    DeploymentBackend, KubernetesController, KubernetesControllerConfig,
+    ArgoCdController, ArgoCdControllerConfig, ArgoCdHelmChartConfig, DeploymentBackend,
+    KubernetesController, KubernetesControllerConfig,
 };
 
 /// Minimal state for controllers - database access and encryption
@@ -263,6 +264,93 @@ async fn init_kubernetes_backend(
         Ok(Arc::new(k8s_backend) as Arc<dyn DeploymentBackend>)
     } else {
         anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
+    }
+}
+
+/// Initialize ArgoCD deployment backend from settings
+#[cfg(feature = "backend")]
+async fn init_argocd_backend(
+    settings: &Settings,
+    controller_state: Arc<ControllerState>,
+    registry_provider: Arc<dyn RegistryProvider>,
+) -> Result<Arc<dyn DeploymentBackend>> {
+    use crate::server::settings::DeploymentControllerSettings;
+
+    if let Some(DeploymentControllerSettings::ArgoCd {
+        kubeconfig,
+        argocd_namespace,
+        production_ingress_url_template,
+        staging_ingress_url_template,
+        ingress_port,
+        ingress_schema,
+        appproject_format,
+        application_format,
+        destination_namespace_format,
+        destination_server,
+        namespace_labels,
+        namespace_annotations,
+        helm_chart,
+        sync_options,
+        access_classes,
+        ..
+    }) = &settings.deployment_controller
+    {
+        let filtered_access_classes: std::collections::HashMap<_, _> = access_classes
+            .iter()
+            .filter_map(|(key, value)| value.as_ref().map(|access_class| (key.clone(), access_class.clone())))
+            .collect();
+
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+
+        let kube_config = if kubeconfig.is_some() {
+            kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
+                context: None,
+                cluster: None,
+                user: None,
+            })
+            .await?
+        } else {
+            kube::Config::infer().await?
+        };
+        let kube_client = kube::Client::try_from(kube_config)?;
+
+        let argocd_backend = ArgoCdController::new(
+            (*controller_state).clone(),
+            kube_client,
+            ArgoCdControllerConfig {
+                argocd_namespace: argocd_namespace.clone(),
+                production_ingress_url_template: production_ingress_url_template.clone(),
+                staging_ingress_url_template: staging_ingress_url_template.clone(),
+                ingress_port: *ingress_port,
+                ingress_schema: ingress_schema.clone(),
+                appproject_format: appproject_format.clone(),
+                application_format: application_format.clone(),
+                destination_namespace_format: destination_namespace_format.clone(),
+                destination_server: destination_server.clone(),
+                namespace_labels: namespace_labels.clone(),
+                namespace_annotations: namespace_annotations.clone(),
+                helm_chart: ArgoCdHelmChartConfig {
+                    repo_url: helm_chart.repo_url.clone(),
+                    chart: helm_chart.chart.clone(),
+                    target_revision: helm_chart.target_revision.clone(),
+                    values: helm_chart.values.clone(),
+                },
+                sync_options: sync_options.clone(),
+                access_classes: filtered_access_classes,
+                registry_provider,
+            },
+        )?;
+
+        argocd_backend.test_connection().await?;
+        tracing::info!("✓ ArgoCD deployment backend initialized and connection tested");
+
+        Ok(Arc::new(argocd_backend) as Arc<dyn DeploymentBackend>)
+    } else {
+        anyhow::bail!(
+            "Deployment controller not configured. Please add deployment_controller configuration with type: argocd"
+        )
     }
 }
 
@@ -531,7 +619,19 @@ impl AppState {
                 db_pool: db_pool.clone(),
                 encryption_provider: encryption_provider.clone(),
             });
-            init_kubernetes_backend(settings, controller_state, registry_provider.clone()).await?
+            match &settings.deployment_controller {
+                Some(crate::server::settings::DeploymentControllerSettings::Kubernetes { .. }) => {
+                    init_kubernetes_backend(settings, controller_state, registry_provider.clone())
+                        .await?
+                }
+                Some(crate::server::settings::DeploymentControllerSettings::ArgoCd { .. }) => {
+                    init_argocd_backend(settings, controller_state, registry_provider.clone())
+                        .await?
+                }
+                None => anyhow::bail!(
+                    "Deployment controller not configured. Please add deployment_controller configuration"
+                ),
+            }
         };
 
         // Initialize extension registry
@@ -737,24 +837,30 @@ impl AppState {
         // Extract access_classes from deployment controller settings
         // Filter out null values (used to remove inherited access classes)
         let (access_classes, production_ingress_url_template, staging_ingress_url_template) =
-            if let Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
-                access_classes,
-                production_ingress_url_template,
-                staging_ingress_url_template,
-                ..
-            }) = &settings.deployment_controller
-            {
-                let filtered: std::collections::HashMap<_, _> = access_classes
-                    .iter()
-                    .filter_map(|(k, v)| v.as_ref().map(|ac| (k.clone(), ac.clone())))
-                    .collect();
-                (
-                    Arc::new(filtered),
-                    Some(production_ingress_url_template.clone()),
-                    staging_ingress_url_template.clone(),
-                )
-            } else {
-                (Arc::new(std::collections::HashMap::new()), None, None)
+            match &settings.deployment_controller {
+                Some(crate::server::settings::DeploymentControllerSettings::Kubernetes {
+                    access_classes,
+                    production_ingress_url_template,
+                    staging_ingress_url_template,
+                    ..
+                })
+                | Some(crate::server::settings::DeploymentControllerSettings::ArgoCd {
+                    access_classes,
+                    production_ingress_url_template,
+                    staging_ingress_url_template,
+                    ..
+                }) => {
+                    let filtered: std::collections::HashMap<_, _> = access_classes
+                        .iter()
+                        .filter_map(|(k, v)| v.as_ref().map(|ac| (k.clone(), ac.clone())))
+                        .collect();
+                    (
+                        Arc::new(filtered),
+                        Some(production_ingress_url_template.clone()),
+                        staging_ingress_url_template.clone(),
+                    )
+                }
+                None => (Arc::new(std::collections::HashMap::new()), None, None),
             };
 
         Ok(Self {

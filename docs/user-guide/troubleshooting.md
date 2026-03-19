@@ -31,6 +31,38 @@ rise deployment show my-app:latest --follow
 - Review application logs: `rise deployment logs my-app 20241205-1234`
 - Ensure health check endpoint responds
 
+### Temporarily Stop Rise Reconciliation
+
+For debugging, you can tell Rise to stop reconciling specific resources by adding this label:
+
+```yaml
+rise.dev/ignore-reconcile: "true"
+```
+
+When this label is present, Rise skips both reconcile updates and cleanup deletes for that resource.
+
+This is currently supported for ArgoCD deployment-controller resources managed by Rise:
+- `Application`
+- `AppProject`
+- destination `Namespace`
+- deployment-owned `Secret`s created by Rise
+
+Example:
+
+```bash
+kubectl -n argocd label application rise-hello-world-default rise.dev/ignore-reconcile=true
+```
+
+To resume normal Rise management, remove the label:
+
+```bash
+kubectl -n argocd label application rise-hello-world-default rise.dev/ignore-reconcile-
+```
+
+Use this carefully:
+- Rise will not revert or clean up ignored resources while the label is present.
+- If you label deployment-owned secrets or namespaces, Rise will also leave them behind during deployment cleanup.
+
 ## Build Issues
 
 ### Buildpack: CA Certificate Verification Errors

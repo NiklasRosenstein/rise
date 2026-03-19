@@ -19,6 +19,7 @@ static/assets/app.css
 
 # Helm packages
 .helm-packages/
+dist/charts/
 
 # Cargo chef recipe (generated during Docker builds)
 **/recipe.json
