@@ -61,8 +61,6 @@ deployment_controller:
   # /var/run/secrets/rise/tokens/<name>
   # extra_service_token_audiences:
   #   vault: "https://vault.example.com"
-  network_policy_egress_allow_cidrs:
-    - "192.168.49.0/24" # Minikube host network
   access_classes:
     public:
       display_name: "Public"
