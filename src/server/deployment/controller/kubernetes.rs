@@ -2363,17 +2363,10 @@ impl KubernetesController {
         deployment: &Deployment,
         namespace: &str,
     ) -> NetworkPolicy {
-        let ingress_rules: Vec<_> = self
-            .network_policy
-            .ingress
-            .iter()
-            .map(|r| r.to_k8s())
-            .collect();
-
         let (egress_rules, policy_types) = match &self.network_policy.egress {
             None => (None, vec!["Ingress".to_string()]),
             Some(rules) => (
-                Some(rules.iter().map(|r| r.to_k8s()).collect()),
+                Some(rules.clone()),
                 vec!["Ingress".to_string(), "Egress".to_string()],
             ),
         };
@@ -2392,7 +2385,7 @@ impl KubernetesController {
                 },
                 policy_types: Some(policy_types),
                 egress: egress_rules,
-                ingress: Some(ingress_rules),
+                ingress: Some(self.network_policy.ingress.clone()),
             }),
         }
     }
@@ -4974,6 +4967,56 @@ mod tests {
         assert_eq!(error, None);
     }
 
+    /// Construct a test NetworkPolicyConfig with standard ingress rules and unrestricted egress.
+    fn test_network_policy() -> crate::server::settings::NetworkPolicyConfig {
+        use k8s_openapi::api::networking::v1::{NetworkPolicyIngressRule, NetworkPolicyPeer};
+        use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
+
+        crate::server::settings::NetworkPolicyConfig {
+            ingress: vec![
+                NetworkPolicyIngressRule {
+                    from: Some(vec![NetworkPolicyPeer {
+                        namespace_selector: Some(LabelSelector {
+                            match_labels: Some(
+                                [(
+                                    "kubernetes.io/metadata.name".to_string(),
+                                    "ingress-nginx".to_string(),
+                                )]
+                                .into_iter()
+                                .collect(),
+                            ),
+                            ..Default::default()
+                        }),
+                        pod_selector: Some(LabelSelector {
+                            match_labels: Some(
+                                [(
+                                    "app.kubernetes.io/name".to_string(),
+                                    "ingress-nginx".to_string(),
+                                )]
+                                .into_iter()
+                                .collect(),
+                            ),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: None,
+                },
+                NetworkPolicyIngressRule {
+                    from: Some(vec![NetworkPolicyPeer {
+                        pod_selector: Some(LabelSelector {
+                            match_labels: Some(Default::default()),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }]),
+                    ports: None,
+                },
+            ],
+            egress: None,
+        }
+    }
+
     // Helper function to create a mock controller for testing
     fn create_mock_controller() -> KubernetesController {
         use crate::server::state::ControllerState;
@@ -5040,7 +5083,7 @@ mod tests {
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
             extra_service_token_audiences: std::collections::HashMap::new(),
-            network_policy: crate::server::settings::NetworkPolicyConfig::default(),
+            network_policy: test_network_policy(),
             pod_security_enabled: true,
             pod_resources: None,
             health_probes: None,
@@ -5676,7 +5719,7 @@ mod tests {
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
             extra_service_token_audiences: std::collections::HashMap::new(),
-            network_policy: crate::server::settings::NetworkPolicyConfig::default(),
+            network_policy: test_network_policy(),
             pod_security_enabled: true,
             pod_resources: None,
             health_probes: None,
@@ -5748,14 +5791,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_network_policy_default_config() {
+    async fn test_network_policy_standard_config() {
         let controller = create_mock_controller();
         let (project, deployment) = create_test_project_and_deployment();
         let np = controller.create_network_policy(&project, &deployment, "ns");
 
         let spec = np.spec.as_ref().unwrap();
 
-        // Default config: policyTypes is ["Ingress"] only (no egress restriction)
+        // Standard config: policyTypes is ["Ingress"] only (no egress restriction)
         assert_eq!(
             spec.policy_types.as_ref().unwrap(),
             &vec!["Ingress".to_string()]
@@ -5800,21 +5843,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_network_policy_explicit_egress() {
+        use k8s_openapi::api::networking::v1::{
+            IPBlock, NetworkPolicyEgressRule, NetworkPolicyPeer, NetworkPolicyPort,
+        };
+        use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
+
         let mut controller = create_mock_controller();
-        controller.network_policy.egress = Some(vec![
-            crate::server::settings::NetworkPolicyEgressRuleConfig {
-                to: vec![crate::server::settings::NetworkPolicyPeerConfig {
-                    cidr: Some("10.0.0.0/8".to_string()),
-                    cidr_except: None,
-                    namespace_selector: None,
-                    pod_selector: None,
-                }],
-                ports: Some(vec![crate::server::settings::NetworkPolicyPortConfig {
-                    protocol: "TCP".to_string(),
-                    port: 443,
-                }]),
-            },
-        ]);
+        controller.network_policy.egress = Some(vec![NetworkPolicyEgressRule {
+            to: Some(vec![NetworkPolicyPeer {
+                ip_block: Some(IPBlock {
+                    cidr: "10.0.0.0/8".to_string(),
+                    except: None,
+                }),
+                ..Default::default()
+            }]),
+            ports: Some(vec![NetworkPolicyPort {
+                protocol: Some("TCP".to_string()),
+                port: Some(IntOrString::Int(443)),
+                ..Default::default()
+            }]),
+        }]);
 
         let (project, deployment) = create_test_project_and_deployment();
         let np = controller.create_network_policy(&project, &deployment, "ns");
@@ -5852,20 +5900,26 @@ mod tests {
 
     #[tokio::test]
     async fn test_network_policy_custom_ingress() {
+        use k8s_openapi::api::networking::v1::{
+            IPBlock, NetworkPolicyIngressRule, NetworkPolicyPeer, NetworkPolicyPort,
+        };
+        use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
+
         let mut controller = create_mock_controller();
-        controller.network_policy.ingress =
-            vec![crate::server::settings::NetworkPolicyIngressRuleConfig {
-                from: vec![crate::server::settings::NetworkPolicyPeerConfig {
-                    cidr: Some("203.0.113.0/24".to_string()),
-                    cidr_except: None,
-                    namespace_selector: None,
-                    pod_selector: None,
-                }],
-                ports: Some(vec![crate::server::settings::NetworkPolicyPortConfig {
-                    protocol: "TCP".to_string(),
-                    port: 80,
-                }]),
-            }];
+        controller.network_policy.ingress = vec![NetworkPolicyIngressRule {
+            from: Some(vec![NetworkPolicyPeer {
+                ip_block: Some(IPBlock {
+                    cidr: "203.0.113.0/24".to_string(),
+                    except: None,
+                }),
+                ..Default::default()
+            }]),
+            ports: Some(vec![NetworkPolicyPort {
+                protocol: Some("TCP".to_string()),
+                port: Some(IntOrString::Int(80)),
+                ..Default::default()
+            }]),
+        }];
 
         let (project, deployment) = create_test_project_and_deployment();
         let np = controller.create_network_policy(&project, &deployment, "ns");

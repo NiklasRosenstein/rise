@@ -387,204 +387,18 @@ pub struct HealthProbeConfig {
     pub failure_threshold: i32,
 }
 
-/// A peer selector for NetworkPolicy rules
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct NetworkPolicyPeerConfig {
-    /// IP block CIDR (maps to ipBlock.cidr)
-    #[serde(default)]
-    pub cidr: Option<String>,
-    /// IP block exceptions (maps to ipBlock.except)
-    #[serde(default)]
-    pub cidr_except: Option<Vec<String>>,
-    /// Namespace selector matchLabels
-    #[serde(default)]
-    pub namespace_selector: Option<std::collections::HashMap<String, String>>,
-    /// Pod selector matchLabels
-    #[serde(default)]
-    pub pod_selector: Option<std::collections::HashMap<String, String>>,
-}
-
-/// A port for NetworkPolicy rules
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct NetworkPolicyPortConfig {
-    /// Protocol (default: "TCP")
-    #[serde(default = "default_tcp")]
-    pub protocol: String,
-    /// Port number
-    pub port: i32,
-}
-
-/// An ingress rule for NetworkPolicy
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct NetworkPolicyIngressRuleConfig {
-    /// Peers allowed to send traffic
-    pub from: Vec<NetworkPolicyPeerConfig>,
-    /// Ports to allow (None = all ports)
-    #[serde(default)]
-    pub ports: Option<Vec<NetworkPolicyPortConfig>>,
-}
-
-/// An egress rule for NetworkPolicy
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
-#[serde(rename_all = "camelCase")]
-pub struct NetworkPolicyEgressRuleConfig {
-    /// Peers allowed to receive traffic
-    pub to: Vec<NetworkPolicyPeerConfig>,
-    /// Ports to allow (None = all ports)
-    #[serde(default)]
-    pub ports: Option<Vec<NetworkPolicyPortConfig>>,
-}
-
 /// NetworkPolicy configuration for deployed apps
 ///
-/// Defines explicit ingress and egress rules. Egress semantics:
-/// - Omitted/null: policyTypes is ["Ingress"] only, Kubernetes does not restrict egress
+/// Uses Kubernetes NetworkPolicy types directly. Egress semantics:
+/// - null: policyTypes is ["Ingress"] only, Kubernetes does not restrict egress
 /// - Empty list: policyTypes includes "Egress" with no rules = deny all egress
 /// - Non-empty list: explicit egress rules enforced
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct NetworkPolicyConfig {
-    /// Ingress rules (default: allow from ingress-nginx + intra-namespace)
-    #[serde(default = "NetworkPolicyConfig::default_ingress")]
-    pub ingress: Vec<NetworkPolicyIngressRuleConfig>,
-    /// Egress rules (default: None = unrestricted egress)
-    #[serde(default)]
-    pub egress: Option<Vec<NetworkPolicyEgressRuleConfig>>,
-}
-
-fn default_tcp() -> String {
-    "TCP".to_string()
-}
-
-impl Default for NetworkPolicyConfig {
-    fn default() -> Self {
-        Self {
-            ingress: Self::default_ingress(),
-            egress: None,
-        }
-    }
-}
-
-impl NetworkPolicyConfig {
-    fn default_ingress() -> Vec<NetworkPolicyIngressRuleConfig> {
-        vec![
-            // Rule 1: Allow traffic from ingress-nginx namespace+pods
-            NetworkPolicyIngressRuleConfig {
-                from: vec![NetworkPolicyPeerConfig {
-                    cidr: None,
-                    cidr_except: None,
-                    namespace_selector: Some({
-                        let mut m = std::collections::HashMap::new();
-                        m.insert(
-                            "kubernetes.io/metadata.name".to_string(),
-                            "ingress-nginx".to_string(),
-                        );
-                        m
-                    }),
-                    pod_selector: Some({
-                        let mut m = std::collections::HashMap::new();
-                        m.insert(
-                            "app.kubernetes.io/name".to_string(),
-                            "ingress-nginx".to_string(),
-                        );
-                        m
-                    }),
-                }],
-                ports: None,
-            },
-            // Rule 2: Allow intra-namespace traffic (empty pod selector = all pods in namespace)
-            NetworkPolicyIngressRuleConfig {
-                from: vec![NetworkPolicyPeerConfig {
-                    cidr: None,
-                    cidr_except: None,
-                    namespace_selector: None,
-                    pod_selector: Some(std::collections::HashMap::new()),
-                }],
-                ports: None,
-            },
-        ]
-    }
-}
-
-impl NetworkPolicyPeerConfig {
-    /// Convert to k8s NetworkPolicyPeer
-    pub fn to_k8s(&self) -> k8s_openapi::api::networking::v1::NetworkPolicyPeer {
-        use k8s_openapi::api::networking::v1::NetworkPolicyPeer;
-        use k8s_openapi::apimachinery::pkg::apis::meta::v1::LabelSelector;
-        use std::collections::BTreeMap;
-
-        NetworkPolicyPeer {
-            ip_block: self
-                .cidr
-                .as_ref()
-                .map(|cidr| k8s_openapi::api::networking::v1::IPBlock {
-                    cidr: cidr.clone(),
-                    except: self.cidr_except.clone(),
-                }),
-            namespace_selector: self
-                .namespace_selector
-                .as_ref()
-                .map(|labels| LabelSelector {
-                    match_labels: Some(
-                        labels
-                            .iter()
-                            .map(|(k, v)| (k.clone(), v.clone()))
-                            .collect::<BTreeMap<_, _>>(),
-                    ),
-                    ..Default::default()
-                }),
-            pod_selector: self.pod_selector.as_ref().map(|labels| LabelSelector {
-                match_labels: Some(
-                    labels
-                        .iter()
-                        .map(|(k, v)| (k.clone(), v.clone()))
-                        .collect::<BTreeMap<_, _>>(),
-                ),
-                ..Default::default()
-            }),
-        }
-    }
-}
-
-impl NetworkPolicyPortConfig {
-    /// Convert to k8s NetworkPolicyPort
-    pub fn to_k8s(&self) -> k8s_openapi::api::networking::v1::NetworkPolicyPort {
-        use k8s_openapi::apimachinery::pkg::util::intstr::IntOrString;
-
-        k8s_openapi::api::networking::v1::NetworkPolicyPort {
-            protocol: Some(self.protocol.clone()),
-            port: Some(IntOrString::Int(self.port)),
-            ..Default::default()
-        }
-    }
-}
-
-impl NetworkPolicyIngressRuleConfig {
-    /// Convert to k8s NetworkPolicyIngressRule
-    pub fn to_k8s(&self) -> k8s_openapi::api::networking::v1::NetworkPolicyIngressRule {
-        k8s_openapi::api::networking::v1::NetworkPolicyIngressRule {
-            from: Some(self.from.iter().map(|p| p.to_k8s()).collect()),
-            ports: self
-                .ports
-                .as_ref()
-                .map(|ports| ports.iter().map(|p| p.to_k8s()).collect()),
-        }
-    }
-}
-
-impl NetworkPolicyEgressRuleConfig {
-    /// Convert to k8s NetworkPolicyEgressRule
-    pub fn to_k8s(&self) -> k8s_openapi::api::networking::v1::NetworkPolicyEgressRule {
-        k8s_openapi::api::networking::v1::NetworkPolicyEgressRule {
-            to: Some(self.to.iter().map(|p| p.to_k8s()).collect()),
-            ports: self
-                .ports
-                .as_ref()
-                .map(|ports| ports.iter().map(|p| p.to_k8s()).collect()),
-        }
-    }
+    /// Ingress rules
+    pub ingress: Vec<k8s_openapi::api::networking::v1::NetworkPolicyIngressRule>,
+    /// Egress rules (null = unrestricted egress)
+    pub egress: Option<Vec<k8s_openapi::api::networking::v1::NetworkPolicyEgressRule>>,
 }
 
 // Default functions for pod security settings
@@ -768,7 +582,6 @@ pub enum DeploymentControllerSettings {
         extra_service_token_audiences: std::collections::HashMap<String, String>,
 
         /// NetworkPolicy configuration for deployed apps
-        #[serde(default)]
         network_policy: NetworkPolicyConfig,
 
         /// Pod security settings (enabled by default)
@@ -1252,6 +1065,12 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
+  network_policy:
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels: {}
+    egress: null
   access_classes:
     public:
       display_name: "Public"
@@ -1332,6 +1151,12 @@ deployment_controller:
   auth_signin_url: "http://localhost:3000"
   extra_service_token_audiences:
     vault: "https://vault.example.com"
+  network_policy:
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels: {}
+    egress: null
   access_classes:
     public:
       display_name: "Public"
