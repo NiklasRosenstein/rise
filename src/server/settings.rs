@@ -306,19 +306,6 @@ fn default_custom_domain_tls_mode() -> CustomDomainTlsMode {
     CustomDomainTlsMode::PerDomain
 }
 
-fn default_ingress_controller_namespace() -> String {
-    "ingress-nginx".to_string()
-}
-
-fn default_ingress_controller_labels() -> std::collections::HashMap<String, String> {
-    let mut labels = std::collections::HashMap::new();
-    labels.insert(
-        "app.kubernetes.io/name".to_string(),
-        "ingress-nginx".to_string(),
-    );
-    labels
-}
-
 /// Access requirement level for project ingress
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq, JsonSchema)]
 #[serde(rename_all = "PascalCase")]
@@ -349,16 +336,6 @@ pub struct AccessClass {
     /// Optional custom nginx annotations
     #[serde(default)]
     pub custom_annotations: std::collections::HashMap<String, String>,
-
-    /// Optional override for ingress controller namespace (for NetworkPolicy ingress rules)
-    /// If not set, uses the global ingress_controller_namespace from deployment_controller
-    #[serde(default)]
-    pub ingress_controller_namespace: Option<String>,
-
-    /// Optional override for ingress controller pod labels (for NetworkPolicy ingress rules)
-    /// If not set, uses the global ingress_controller_labels from deployment_controller
-    #[serde(default)]
-    pub ingress_controller_labels: Option<std::collections::HashMap<String, String>>,
 }
 
 /// Resource limits for pods
@@ -410,8 +387,18 @@ pub struct HealthProbeConfig {
     pub failure_threshold: i32,
 }
 
-fn default_network_policy_allow_kube_apiserver() -> bool {
-    true
+/// NetworkPolicy configuration for deployed apps
+///
+/// Uses Kubernetes NetworkPolicy types directly. Egress semantics:
+/// - null: policyTypes is ["Ingress"] only, Kubernetes does not restrict egress
+/// - Empty list: policyTypes includes "Egress" with no rules = deny all egress
+/// - Non-empty list: explicit egress rules enforced
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct NetworkPolicyConfig {
+    /// Ingress rules
+    pub ingress: Vec<k8s_openapi::api::networking::v1::NetworkPolicyIngressRule>,
+    /// Egress rules (null = unrestricted egress)
+    pub egress: Option<Vec<k8s_openapi::api::networking::v1::NetworkPolicyEgressRule>>,
 }
 
 // Default functions for pod security settings
@@ -594,30 +581,8 @@ pub enum DeploymentControllerSettings {
         #[serde(default)]
         extra_service_token_audiences: std::collections::HashMap<String, String>,
 
-        /// Ingress controller namespace for NetworkPolicy ingress rules (default: "ingress-nginx")
-        #[serde(default = "default_ingress_controller_namespace")]
-        ingress_controller_namespace: String,
-
-        /// Ingress controller pod selector labels for NetworkPolicy ingress rules
-        /// Default: {"app.kubernetes.io/name": "ingress-nginx"}
-        #[serde(default = "default_ingress_controller_labels")]
-        ingress_controller_labels: std::collections::HashMap<String, String>,
-
-        /// Allow egress to the Kubernetes API server in NetworkPolicy (default: true)
-        /// Looks up the ClusterIP of the `kubernetes` service in the `default` namespace
-        /// and adds an egress rule for TCP/443. We use an IP lookup rather than pod selector
-        /// labels because the labels on kube-apiserver pods are not standardized across
-        /// Kubernetes distributions (e.g. `component: kube-apiserver` vs `component: apiserver`).
-        /// The `kubernetes` service in the `default` namespace is part of the Kubernetes spec
-        /// and always exists. The API server requires authentication, so this is safe.
-        #[serde(default = "default_network_policy_allow_kube_apiserver")]
-        network_policy_allow_kube_apiserver: bool,
-
-        /// Additional CIDR ranges to allow egress to (exempted from default blocks)
-        /// Useful for development environments where pods need to reach host IPs
-        /// Example: ["192.168.49.1/32"] for Minikube host IP
-        #[serde(default)]
-        network_policy_egress_allow_cidrs: Vec<String>,
+        /// NetworkPolicy configuration for deployed apps
+        network_policy: NetworkPolicyConfig,
 
         /// Pod security settings (enabled by default)
         /// Set to false to disable security context enforcement
@@ -1100,6 +1065,12 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
+  network_policy:
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels: {}
+    egress: null
   access_classes:
     public:
       display_name: "Public"
@@ -1180,6 +1151,12 @@ deployment_controller:
   auth_signin_url: "http://localhost:3000"
   extra_service_token_audiences:
     vault: "https://vault.example.com"
+  network_policy:
+    ingress:
+      - from:
+          - podSelector:
+              matchLabels: {}
+    egress: null
   access_classes:
     public:
       display_name: "Public"

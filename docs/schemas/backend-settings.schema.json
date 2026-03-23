@@ -31,25 +31,6 @@
         "ingress_class": {
           "description": "Ingress class to use",
           "type": "string"
-        },
-        "ingress_controller_labels": {
-          "additionalProperties": {
-            "type": "string"
-          },
-          "default": null,
-          "description": "Optional override for ingress controller pod labels (for NetworkPolicy ingress rules) If not set, uses the global ingress_controller_labels from deployment_controller",
-          "type": [
-            "object",
-            "null"
-          ]
-        },
-        "ingress_controller_namespace": {
-          "default": null,
-          "description": "Optional override for ingress controller namespace (for NetworkPolicy ingress rules) If not set, uses the global ingress_controller_namespace from deployment_controller",
-          "type": [
-            "string",
-            "null"
-          ]
         }
       },
       "required": [
@@ -345,21 +326,6 @@
               "description": "Ingress annotations to apply to all deployed application ingresses These apply to both primary ingresses and custom domain ingresses For annotations specific to custom domains only, use custom_domain_ingress_annotations Example: {\"nginx.ingress.kubernetes.io/proxy-body-size\": \"10m\"}",
               "type": "object"
             },
-            "ingress_controller_labels": {
-              "additionalProperties": {
-                "type": "string"
-              },
-              "default": {
-                "app.kubernetes.io/name": "ingress-nginx"
-              },
-              "description": "Ingress controller pod selector labels for NetworkPolicy ingress rules Default: {\"app.kubernetes.io/name\": \"ingress-nginx\"}",
-              "type": "object"
-            },
-            "ingress_controller_namespace": {
-              "default": "ingress-nginx",
-              "description": "Ingress controller namespace for NetworkPolicy ingress rules (default: \"ingress-nginx\")",
-              "type": "string"
-            },
             "ingress_port": {
               "default": null,
               "description": "Optional port number to append to all generated ingress URLs Used for development environments with port-forwarding (e.g., kubectl port-forward) Example: 8080 → \"https://myapp.apps.rise.local:8080\" If not set, URLs use standard ports (80 for HTTP, 443 for HTTPS)",
@@ -412,18 +378,13 @@
               "description": "Labels to apply to all managed namespaces Example: {\"environment\": \"production\", \"team\": \"platform\"}",
               "type": "object"
             },
-            "network_policy_allow_kube_apiserver": {
-              "default": true,
-              "description": "Allow egress to the Kubernetes API server in NetworkPolicy (default: true) Looks up the ClusterIP of the `kubernetes` service in the `default` namespace and adds an egress rule for TCP/443. We use an IP lookup rather than pod selector labels because the labels on kube-apiserver pods are not standardized across Kubernetes distributions (e.g. `component: kube-apiserver` vs `component: apiserver`). The `kubernetes` service in the `default` namespace is part of the Kubernetes spec and always exists. The API server requires authentication, so this is safe.",
-              "type": "boolean"
-            },
-            "network_policy_egress_allow_cidrs": {
-              "default": [],
-              "description": "Additional CIDR ranges to allow egress to (exempted from default blocks) Useful for development environments where pods need to reach host IPs Example: [\"192.168.49.1/32\"] for Minikube host IP",
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
+            "network_policy": {
+              "allOf": [
+                {
+                  "$ref": "#/definitions/NetworkPolicyConfig"
+                }
+              ],
+              "description": "NetworkPolicy configuration for deployed apps"
             },
             "node_selector": {
               "additionalProperties": {
@@ -474,6 +435,7 @@
             "access_classes",
             "auth_backend_url",
             "auth_signin_url",
+            "network_policy",
             "production_ingress_url_template",
             "type"
           ],
@@ -845,6 +807,32 @@
       },
       "type": "object"
     },
+    "NetworkPolicyConfig": {
+      "description": "NetworkPolicy configuration for deployed apps\n\nUses Kubernetes NetworkPolicy types directly. Egress semantics: - null: policyTypes is [\"Ingress\"] only, Kubernetes does not restrict egress - Empty list: policyTypes includes \"Egress\" with no rules = deny all egress - Non-empty list: explicit egress rules enforced",
+      "properties": {
+        "egress": {
+          "description": "Egress rules (null = unrestricted egress)",
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyEgressRule"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "ingress": {
+          "description": "Ingress rules",
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyIngressRule"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "ingress"
+      ],
+      "type": "object"
+    },
     "PlatformAccessConfig": {
       "description": "Platform access control configuration",
       "properties": {
@@ -1137,6 +1125,168 @@
         "public_url"
       ],
       "type": "object"
+    },
+    "io.k8s.api.networking.v1.IPBlock": {
+      "description": "IPBlock describes a particular CIDR (Ex. \"192.168.1.0/24\",\"2001:db8::/64\") that is allowed to the pods matched by a NetworkPolicySpec's podSelector. The except entry describes CIDRs that should not be included within this rule.",
+      "properties": {
+        "cidr": {
+          "description": "cidr is a string representing the IPBlock Valid examples are \"192.168.1.0/24\" or \"2001:db8::/64\"",
+          "type": "string"
+        },
+        "except": {
+          "description": "except is a slice of CIDRs that should not be included within an IPBlock Valid examples are \"192.168.1.0/24\" or \"2001:db8::/64\" Except values will be rejected if they are outside the cidr range",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "cidr"
+      ],
+      "type": "object"
+    },
+    "io.k8s.api.networking.v1.NetworkPolicyEgressRule": {
+      "description": "NetworkPolicyEgressRule describes a particular set of traffic that is allowed out of pods matched by a NetworkPolicySpec's podSelector. The traffic must match both ports and to. This type is beta-level in 1.8",
+      "properties": {
+        "ports": {
+          "description": "ports is a list of destination ports for outgoing traffic. Each item in this list is combined using a logical OR. If this field is empty or missing, this rule matches all ports (traffic not restricted by port). If this field is present and contains at least one item, then this rule allows traffic only if the traffic matches at least one port in the list.",
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyPort"
+          },
+          "type": "array"
+        },
+        "to": {
+          "description": "to is a list of destinations for outgoing traffic of pods selected for this rule. Items in this list are combined using a logical OR operation. If this field is empty or missing, this rule matches all destinations (traffic not restricted by destination). If this field is present and contains at least one item, this rule allows traffic only if the traffic matches at least one item in the to list.",
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyPeer"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "io.k8s.api.networking.v1.NetworkPolicyIngressRule": {
+      "description": "NetworkPolicyIngressRule describes a particular set of traffic that is allowed to the pods matched by a NetworkPolicySpec's podSelector. The traffic must match both ports and from.",
+      "properties": {
+        "from": {
+          "description": "from is a list of sources which should be able to access the pods selected for this rule. Items in this list are combined using a logical OR operation. If this field is empty or missing, this rule matches all sources (traffic not restricted by source). If this field is present and contains at least one item, this rule allows traffic only if the traffic matches at least one item in the from list.",
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyPeer"
+          },
+          "type": "array"
+        },
+        "ports": {
+          "description": "ports is a list of ports which should be made accessible on the pods selected for this rule. Each item in this list is combined using a logical OR. If this field is empty or missing, this rule matches all ports (traffic not restricted by port). If this field is present and contains at least one item, then this rule allows traffic only if the traffic matches at least one port in the list.",
+          "items": {
+            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyPort"
+          },
+          "type": "array"
+        }
+      },
+      "type": "object"
+    },
+    "io.k8s.api.networking.v1.NetworkPolicyPeer": {
+      "description": "NetworkPolicyPeer describes a peer to allow traffic to/from. Only certain combinations of fields are allowed",
+      "properties": {
+        "ipBlock": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/io.k8s.api.networking.v1.IPBlock"
+            }
+          ],
+          "description": "ipBlock defines policy on a particular IPBlock. If this field is set then neither of the other fields can be."
+        },
+        "namespaceSelector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector"
+            }
+          ],
+          "description": "namespaceSelector selects namespaces using cluster-scoped labels. This field follows standard label selector semantics; if present but empty, it selects all namespaces.\n\nIf podSelector is also set, then the NetworkPolicyPeer as a whole selects the pods matching podSelector in the namespaces selected by namespaceSelector. Otherwise it selects all pods in the namespaces selected by namespaceSelector."
+        },
+        "podSelector": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector"
+            }
+          ],
+          "description": "podSelector is a label selector which selects pods. This field follows standard label selector semantics; if present but empty, it selects all pods.\n\nIf namespaceSelector is also set, then the NetworkPolicyPeer as a whole selects the pods matching podSelector in the Namespaces selected by NamespaceSelector. Otherwise it selects the pods matching podSelector in the policy's own namespace."
+        }
+      },
+      "type": "object"
+    },
+    "io.k8s.api.networking.v1.NetworkPolicyPort": {
+      "description": "NetworkPolicyPort describes a port to allow traffic on",
+      "properties": {
+        "endPort": {
+          "description": "endPort indicates that the range of ports from port to endPort if set, inclusive, should be allowed by the policy. This field cannot be defined if the port field is not defined or if the port field is defined as a named (string) port. The endPort must be equal or greater than port.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "port": {
+          "allOf": [
+            {
+              "$ref": "#/definitions/io.k8s.apimachinery.pkg.util.intstr.IntOrString"
+            }
+          ],
+          "description": "port represents the port on the given protocol. This can either be a numerical or named port on a pod. If this field is not provided, this matches all port names and numbers. If present, only traffic on the specified protocol AND port will be matched."
+        },
+        "protocol": {
+          "description": "protocol represents the protocol (TCP, UDP, or SCTP) which traffic must match. If not specified, this field defaults to TCP.",
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector": {
+      "description": "A label selector is a label query over a set of resources. The result of matchLabels and matchExpressions are ANDed. An empty label selector matches all objects. A null label selector matches no objects.",
+      "properties": {
+        "matchExpressions": {
+          "description": "matchExpressions is a list of label selector requirements. The requirements are ANDed.",
+          "items": {
+            "$ref": "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement"
+          },
+          "type": "array"
+        },
+        "matchLabels": {
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "matchLabels is a map of {key,value} pairs. A single {key,value} in the matchLabels map is equivalent to an element of matchExpressions, whose key field is \"key\", the operator is \"In\", and the values array contains only \"value\". The requirements are ANDed.",
+          "type": "object"
+        }
+      },
+      "type": "object"
+    },
+    "io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement": {
+      "description": "A label selector requirement is a selector that contains values, a key, and an operator that relates the key and values.",
+      "properties": {
+        "key": {
+          "description": "key is the label key that the selector applies to.",
+          "type": "string"
+        },
+        "operator": {
+          "description": "operator represents a key's relationship to a set of values. Valid operators are In, NotIn, Exists and DoesNotExist.",
+          "type": "string"
+        },
+        "values": {
+          "description": "values is an array of string values. If the operator is In or NotIn, the values array must be non-empty. If the operator is Exists or DoesNotExist, the values array must be empty. This array is replaced during a strategic merge patch.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "key",
+        "operator"
+      ],
+      "type": "object"
+    },
+    "io.k8s.apimachinery.pkg.util.intstr.IntOrString": {
+      "description": "IntOrString is a type that can hold an int32 or a string.  When used in JSON or YAML marshalling and unmarshalling, it produces or consumes the inner type.  This allows you to have, for example, a JSON field that can accept a name or number.",
+      "x-kubernetes-int-or-string": true
     }
   },
   "properties": {
