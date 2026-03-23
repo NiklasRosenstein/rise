@@ -68,6 +68,7 @@ deployment_controller:
       - from:
           - podSelector:
               matchLabels: {}
+    # null = no egress restrictions (all outbound traffic allowed)
     egress: null
   access_classes:
     public:
