@@ -131,10 +131,7 @@ async fn authenticate_service_account(
 
         // Include validation details in the response so users can self-diagnose
         let details = validation_errors.join("; ");
-        let error_msg = format!(
-            "No service account matches the provided token: {}",
-            details
-        );
+        let error_msg = format!("No service account matches the provided token: {}", details);
 
         return Err((StatusCode::UNAUTHORIZED, error_msg));
     }
