@@ -13,6 +13,7 @@ pub mod oci;
 pub mod project;
 pub mod registry;
 pub mod settings;
+pub mod ssrf;
 pub mod state;
 pub mod team;
 pub mod workload_identity;

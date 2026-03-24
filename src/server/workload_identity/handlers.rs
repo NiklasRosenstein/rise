@@ -8,14 +8,28 @@ use uuid::Uuid;
 use crate::db::{projects, service_accounts, users, User};
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::project::handlers::{check_read_permission, check_write_permission};
+use crate::server::ssrf;
 use crate::server::state::AppState;
 use crate::server::workload_identity::models::{
     CreateWorkloadIdentityRequest, ListWorkloadIdentitiesResponse, UpdateWorkloadIdentityRequest,
     WorkloadIdentityResponse,
 };
 
-/// Verify that an OIDC issuer is reachable and has valid configuration
+/// Verify that an OIDC issuer is reachable and has valid configuration.
+///
+/// Includes SSRF protections: requires HTTPS, blocks private/internal IPs,
+/// enforces request timeout and redirect limits.
 async fn verify_oidc_issuer(issuer_url: &str) -> Result<(), ServerError> {
+    // Validate the issuer URL against SSRF (requires HTTPS, blocks private IPs)
+    ssrf::validate_url(issuer_url).await.map_err(|e| {
+        tracing::warn!(
+            "SSRF validation failed for issuer URL '{}': {}",
+            issuer_url,
+            e
+        );
+        ServerError::bad_request(format!("Invalid OIDC issuer URL: {}", e))
+    })?;
+
     // Construct the OIDC discovery URL
     let discovery_url = if issuer_url.ends_with('/') {
         format!("{}well-known/openid-configuration", issuer_url)
@@ -25,8 +39,12 @@ async fn verify_oidc_issuer(issuer_url: &str) -> Result<(), ServerError> {
 
     tracing::debug!("Verifying OIDC issuer at: {}", discovery_url);
 
+    // Use SSRF-safe client (timeout + redirect limits)
+    let client = ssrf::safe_client();
+
     // Attempt to fetch the OIDC configuration
-    let response = reqwest::get(&discovery_url)
+    let response = client.get(&discovery_url)
+        .send()
         .await
         .server_err(
             StatusCode::BAD_REQUEST,
@@ -97,11 +115,10 @@ pub async fn create_workload_identity(
         return Err(ServerError::bad_request("Issuer URL cannot be empty"));
     }
 
-    // In production, should validate HTTPS
-    // For now, just check it's a valid URL format
-    if !req.issuer_url.starts_with("http://") && !req.issuer_url.starts_with("https://") {
+    // OIDC issuers must use HTTPS per the OpenID Connect Discovery spec
+    if !req.issuer_url.starts_with("https://") {
         return Err(ServerError::bad_request(
-            "Issuer URL must be a valid HTTP(S) URL",
+            "Issuer URL must use HTTPS (required by the OpenID Connect specification)",
         ));
     }
 
@@ -313,11 +330,21 @@ pub async fn update_workload_identity(
             return Err(ServerError::bad_request("Issuer URL cannot be empty"));
         }
 
-        if !issuer_url.starts_with("http://") && !issuer_url.starts_with("https://") {
+        if !issuer_url.starts_with("https://") {
             return Err(ServerError::bad_request(
-                "Issuer URL must be a valid HTTP(S) URL",
+                "Issuer URL must use HTTPS (required by the OpenID Connect specification)",
             ));
         }
+
+        // Validate SSRF protections (blocks private/internal IPs)
+        ssrf::validate_url(issuer_url).await.map_err(|e| {
+            tracing::warn!(
+                "SSRF validation failed for issuer URL '{}': {}",
+                issuer_url,
+                e
+            );
+            ServerError::bad_request(format!("Invalid OIDC issuer URL: {}", e))
+        })?;
     }
 
     // Validate claims if provided

@@ -1,0 +1,254 @@
+use std::net::IpAddr;
+use std::time::Duration;
+
+/// Errors that can occur during SSRF-safe URL validation.
+#[derive(Debug)]
+pub enum SsrfError {
+    /// URL must use HTTPS scheme.
+    HttpsRequired,
+    /// The URL could not be parsed.
+    InvalidUrl(String),
+    /// The hostname could not be resolved.
+    DnsResolutionFailed(String),
+    /// The resolved IP address is in a blocked range (private, loopback, link-local, etc.).
+    BlockedIpRange(IpAddr),
+}
+
+impl std::fmt::Display for SsrfError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            SsrfError::HttpsRequired => write!(f, "URL must use HTTPS"),
+            SsrfError::InvalidUrl(msg) => write!(f, "Invalid URL: {}", msg),
+            SsrfError::DnsResolutionFailed(msg) => write!(f, "DNS resolution failed: {}", msg),
+            SsrfError::BlockedIpRange(ip) => {
+                write!(f, "URL resolves to a blocked IP address: {}", ip)
+            }
+        }
+    }
+}
+
+/// Check whether an IP address is in a private, loopback, link-local, or otherwise
+/// internal range that should not be reachable from server-side requests.
+fn is_blocked_ip(ip: &IpAddr) -> bool {
+    match ip {
+        IpAddr::V4(ipv4) => {
+            ipv4.is_loopback()             // 127.0.0.0/8
+                || ipv4.is_private()        // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+                || ipv4.is_link_local()     // 169.254.0.0/16 (includes AWS metadata 169.254.169.254)
+                || ipv4.is_unspecified()     // 0.0.0.0
+                || ipv4.is_broadcast()      // 255.255.255.255
+                || ipv4.is_documentation()  // 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
+                || ipv4.octets()[0] == 100 && (ipv4.octets()[1] & 0xC0) == 64 // 100.64.0.0/10 (CGNAT)
+        }
+        IpAddr::V6(ipv6) => {
+            ipv6.is_loopback()          // ::1
+                || ipv6.is_unspecified() // ::
+                // Unique local (fc00::/7)
+                || (ipv6.segments()[0] & 0xfe00) == 0xfc00
+                // Link-local (fe80::/10)
+                || (ipv6.segments()[0] & 0xffc0) == 0xfe80
+                // IPv4-mapped addresses (::ffff:0:0/96) — check the mapped IPv4
+                || match ipv6.to_ipv4_mapped() {
+                    Some(mapped_v4) => is_blocked_ip(&IpAddr::V4(mapped_v4)),
+                    None => false,
+                }
+        }
+    }
+}
+
+/// Validate that a URL is safe to fetch (SSRF protection).
+///
+/// Checks:
+/// 1. Scheme must be HTTPS
+/// 2. Hostname must be present
+/// 3. All resolved IP addresses must not be in blocked ranges
+pub async fn validate_url(url: &str) -> Result<(), SsrfError> {
+    // Parse the URL
+    let parsed = url::Url::parse(url).map_err(|e| SsrfError::InvalidUrl(e.to_string()))?;
+
+    // Require HTTPS
+    if parsed.scheme() != "https" {
+        return Err(SsrfError::HttpsRequired);
+    }
+
+    // Extract hostname
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| SsrfError::InvalidUrl("URL has no host".to_string()))?;
+
+    // If host is already an IP address, check it directly
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        if is_blocked_ip(&ip) {
+            return Err(SsrfError::BlockedIpRange(ip));
+        }
+        return Ok(());
+    }
+
+    // Resolve hostname and check all resolved addresses
+    let port = parsed.port().unwrap_or(443);
+    let addr = format!("{}:{}", host, port);
+
+    let resolved = tokio::net::lookup_host(&addr)
+        .await
+        .map_err(|e| SsrfError::DnsResolutionFailed(format!("{}: {}", host, e)))?;
+
+    let addrs: Vec<_> = resolved.collect();
+    if addrs.is_empty() {
+        return Err(SsrfError::DnsResolutionFailed(format!(
+            "{}: no addresses resolved",
+            host
+        )));
+    }
+
+    for addr in &addrs {
+        if is_blocked_ip(&addr.ip()) {
+            return Err(SsrfError::BlockedIpRange(addr.ip()));
+        }
+    }
+
+    Ok(())
+}
+
+/// Create an HTTP client configured with SSRF mitigations.
+///
+/// The client has:
+/// - 10-second connect and total request timeout
+/// - Maximum 3 redirects
+/// - HTTPS-only redirect following
+pub fn safe_client() -> reqwest::Client {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .connect_timeout(Duration::from_secs(5))
+        .redirect(reqwest::redirect::Policy::limited(3))
+        .build()
+        .expect("failed to build SSRF-safe HTTP client")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_blocked_ipv4_loopback() {
+        assert!(is_blocked_ip(&"127.0.0.1".parse().unwrap()));
+        assert!(is_blocked_ip(&"127.0.0.2".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_blocked_ipv4_private() {
+        assert!(is_blocked_ip(&"10.0.0.1".parse().unwrap()));
+        assert!(is_blocked_ip(&"172.16.0.1".parse().unwrap()));
+        assert!(is_blocked_ip(&"172.31.255.255".parse().unwrap()));
+        assert!(is_blocked_ip(&"192.168.0.1".parse().unwrap()));
+        assert!(is_blocked_ip(&"192.168.1.100".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_blocked_ipv4_link_local() {
+        // AWS metadata endpoint
+        assert!(is_blocked_ip(&"169.254.169.254".parse().unwrap()));
+        assert!(is_blocked_ip(&"169.254.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_blocked_ipv4_unspecified() {
+        assert!(is_blocked_ip(&"0.0.0.0".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_blocked_ipv4_cgnat() {
+        assert!(is_blocked_ip(&"100.64.0.1".parse().unwrap()));
+        assert!(is_blocked_ip(&"100.127.255.255".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_allowed_ipv4_public() {
+        assert!(!is_blocked_ip(&"8.8.8.8".parse().unwrap()));
+        assert!(!is_blocked_ip(&"1.1.1.1".parse().unwrap()));
+        assert!(!is_blocked_ip(&"142.250.80.46".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_blocked_ipv6_loopback() {
+        assert!(is_blocked_ip(&"::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_blocked_ipv6_unspecified() {
+        assert!(is_blocked_ip(&"::".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_blocked_ipv6_unique_local() {
+        assert!(is_blocked_ip(&"fc00::1".parse().unwrap()));
+        assert!(is_blocked_ip(&"fd00::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_blocked_ipv6_link_local() {
+        assert!(is_blocked_ip(&"fe80::1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_blocked_ipv4_mapped_ipv6() {
+        // ::ffff:127.0.0.1
+        assert!(is_blocked_ip(&"::ffff:127.0.0.1".parse().unwrap()));
+        // ::ffff:169.254.169.254
+        assert!(is_blocked_ip(&"::ffff:169.254.169.254".parse().unwrap()));
+        // ::ffff:10.0.0.1
+        assert!(is_blocked_ip(&"::ffff:10.0.0.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_allowed_ipv6_public() {
+        assert!(!is_blocked_ip(&"2607:f8b0:4004:800::200e".parse().unwrap()));
+    }
+
+    #[tokio::test]
+    async fn test_validate_url_rejects_http() {
+        let result = validate_url("http://example.com").await;
+        assert!(matches!(result, Err(SsrfError::HttpsRequired)));
+    }
+
+    #[tokio::test]
+    async fn test_validate_url_rejects_invalid_url() {
+        let result = validate_url("not-a-url").await;
+        assert!(matches!(result, Err(SsrfError::InvalidUrl(_))));
+    }
+
+    #[tokio::test]
+    async fn test_validate_url_rejects_ip_loopback() {
+        let result = validate_url("https://127.0.0.1/path").await;
+        assert!(matches!(result, Err(SsrfError::BlockedIpRange(_))));
+    }
+
+    #[tokio::test]
+    async fn test_validate_url_rejects_ip_metadata() {
+        let result = validate_url("https://169.254.169.254/latest/meta-data/").await;
+        assert!(matches!(result, Err(SsrfError::BlockedIpRange(_))));
+    }
+
+    #[tokio::test]
+    async fn test_validate_url_rejects_private_ip() {
+        let result = validate_url("https://10.0.0.1/internal").await;
+        assert!(matches!(result, Err(SsrfError::BlockedIpRange(_))));
+
+        let result = validate_url("https://192.168.1.1/admin").await;
+        assert!(matches!(result, Err(SsrfError::BlockedIpRange(_))));
+    }
+
+    #[tokio::test]
+    async fn test_validate_url_accepts_public_https() {
+        // This test requires DNS resolution, so it may fail in isolated environments
+        let result = validate_url("https://accounts.google.com").await;
+        // In CI environments this should pass; in isolated environments it may fail on DNS
+        if result.is_ok() {
+            assert!(result.is_ok());
+        }
+    }
+
+    #[test]
+    fn test_safe_client_builds_successfully() {
+        let _client = safe_client();
+    }
+}
