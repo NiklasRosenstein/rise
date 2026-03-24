@@ -274,15 +274,12 @@ mod tests {
 
         // Insert a SA with non-string claim values (invalid for HashMap<String, String>)
         let bad_claims = serde_json::json!({"sub": 12345});
-        sqlx::query(
-            "INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence) \
-             VALUES ($1, $2, $3, $4, 1)",
+        service_accounts::create_with_raw_claims(
+            &pool,
+            project.id,
+            "https://gitlab.com",
+            bad_claims,
         )
-        .bind(project.id)
-        .bind(owner.id)
-        .bind("https://gitlab.com")
-        .bind(bad_claims)
-        .execute(&pool)
         .await
         .unwrap();
 

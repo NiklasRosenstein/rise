@@ -1,6 +1,7 @@
 use anyhow::Context;
 use axum::{
     extract::{Path, Query, State},
+    http::StatusCode,
     response::sse::{Event, KeepAlive, Sse},
     Json,
 };
@@ -502,10 +503,18 @@ pub async fn create_deployment(
     }
 
     // Resolve auth for project scope (validates SA claims if external token)
+    // Only mask auth failures (401/403) as 404 to prevent project existence leakage;
+    // preserve 409 (SA collision) and 5xx (misconfiguration) for diagnosability.
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
 
     // Check deployment permissions (SA access already validated above)
     if !is_sa {
@@ -1059,7 +1068,13 @@ pub async fn update_deployment_status_by_project(
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
 
     // Find deployment by deployment_id + project_id
     let deployment =
@@ -1146,7 +1161,13 @@ pub async fn update_deployment_status(
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
 
     perform_status_update(
         &state,
@@ -1191,7 +1212,13 @@ pub async fn list_deployments(
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
 
     // Check if user has permission to view deployments (SA access already validated)
     if !is_sa {
@@ -1298,7 +1325,13 @@ pub async fn stop_deployments_by_group(
     let (_user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
 
     // Check if user has permission to stop deployments (SA access already validated)
     if !is_sa {
@@ -1382,7 +1415,13 @@ pub async fn stop_deployment(
     let (_user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
 
     // Check if user has permission to stop deployments (SA access already validated)
     if !is_sa {
@@ -1477,7 +1516,13 @@ pub async fn get_deployment_by_project(
     let (_user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
 
     // Check if user has permission to view deployments (SA access already validated)
     if !is_sa {
@@ -1555,7 +1600,13 @@ pub async fn list_deployment_groups(
     let (_user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
 
     // Check if user has permission to view deployment groups (SA access already validated)
     if !is_sa {
@@ -1606,7 +1657,13 @@ pub async fn stream_deployment_logs(
     let (_user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
 
     // Check permission (SA access already validated)
     if !is_sa {

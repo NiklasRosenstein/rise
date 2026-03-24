@@ -274,6 +274,102 @@ pub async fn find_by_project_and_issuer(
     Ok(sas)
 }
 
+/// Create a service account with raw JSON claims (for testing malformed claims).
+///
+/// Unlike [`create`], this accepts arbitrary `serde_json::Value` claims,
+/// allowing tests to insert non-`HashMap<String, String>` values.
+#[cfg(test)]
+pub async fn create_with_raw_claims(
+    pool: &PgPool,
+    project_id: Uuid,
+    issuer_url: &str,
+    raw_claims: serde_json::Value,
+) -> Result<ServiceAccount> {
+    let mut tx = pool.begin().await.context("Failed to begin transaction")?;
+
+    let project = sqlx::query_as!(
+        Project,
+        r#"
+        SELECT id, name, status as "status: _", access_class,
+               owner_user_id, owner_team_id, finalizers,
+               created_at, updated_at
+        FROM projects
+        WHERE id = $1
+        "#,
+        project_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .context("Failed to fetch project")?;
+
+    let sequence: Option<i32> = sqlx::query_scalar!(
+        r#"
+        SELECT COALESCE(MAX(sequence), 0) + 1 as "sequence"
+        FROM service_accounts
+        WHERE project_id = $1
+        "#,
+        project_id
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .context("Failed to calculate sequence")?;
+
+    let sequence = sequence.unwrap_or(1);
+    let email = format!("{}+{}@sa.rise.local", project.name, sequence);
+
+    let existing_user = sqlx::query_as!(
+        User,
+        r#"
+        SELECT id, email, created_at, updated_at
+        FROM users
+        WHERE email = $1
+        "#,
+        email
+    )
+    .fetch_optional(&mut *tx)
+    .await
+    .context("Failed to check for existing user")?;
+
+    let user = if let Some(user) = existing_user {
+        user
+    } else {
+        sqlx::query_as!(
+            User,
+            r#"
+            INSERT INTO users (email)
+            VALUES ($1)
+            RETURNING id, email, created_at, updated_at
+            "#,
+            email
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .context("Failed to create user for service account")?
+    };
+
+    let sa = sqlx::query_as!(
+        ServiceAccount,
+        r#"
+        INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING id, project_id, user_id, issuer_url, claims, sequence,
+                  deleted_at, created_at, updated_at
+        "#,
+        project_id,
+        user.id,
+        issuer_url,
+        raw_claims,
+        sequence
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .context("Failed to create service account with raw claims")?;
+
+    tx.commit().await.context("Failed to commit transaction")?;
+
+    Ok(sa)
+}
+
 /// Soft delete a service account
 pub async fn soft_delete(pool: &PgPool, id: Uuid) -> Result<()> {
     sqlx::query!(

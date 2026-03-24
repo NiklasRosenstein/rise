@@ -36,7 +36,13 @@ pub async fn add_custom_domain(
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found("Project not found"))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }
@@ -142,7 +148,13 @@ pub async fn list_custom_domains(
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found("Project not found"))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project)
             .await
@@ -190,7 +202,13 @@ pub async fn get_custom_domain(
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found("Project not found"))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project)
             .await
@@ -234,7 +252,13 @@ pub async fn delete_custom_domain(
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found("Project not found"))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }
@@ -317,7 +341,13 @@ pub async fn set_primary_domain(
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found("Project not found"))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }
@@ -401,7 +431,13 @@ pub async fn unset_primary_domain(
     let (user, is_sa) = auth
         .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found("Project not found"))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }
