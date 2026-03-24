@@ -46,6 +46,10 @@ pub struct ServerError {
     pub source: Option<anyhow::Error>,
     /// Structured context for logging (key-value pairs)
     pub context: Vec<(&'static str, String)>,
+    /// Optional suggestions for the client (e.g. fuzzy-matched names)
+    pub suggestions: Option<Vec<String>>,
+    /// If true, skip error-level logging (for expected transient conditions)
+    pub expected: bool,
 }
 
 impl ServerError {
@@ -56,6 +60,8 @@ impl ServerError {
             message: message.into(),
             source: None,
             context: Vec::new(),
+            suggestions: None,
+            expected: false,
         }
     }
 
@@ -70,12 +76,29 @@ impl ServerError {
             message: message.into(),
             source: Some(source),
             context: Vec::new(),
+            suggestions: None,
+            expected: false,
         }
     }
 
     /// Add a context field for logging (chainable)
     pub fn with_context(mut self, key: &'static str, value: impl Into<String>) -> Self {
         self.context.push((key, value.into()));
+        self
+    }
+
+    /// Add suggestions to the error response (chainable)
+    pub fn with_suggestions(mut self, suggestions: Option<Vec<String>>) -> Self {
+        self.suggestions = suggestions;
+        self
+    }
+
+    /// Mark this error as expected, suppressing ERROR-level logging (chainable)
+    ///
+    /// Use for transient conditions that are normal (e.g. "pod not ready yet")
+    /// rather than actual failures. These are logged at WARN instead of ERROR.
+    pub fn expected(mut self) -> Self {
+        self.expected = true;
         self
     }
 
@@ -104,14 +127,47 @@ impl ServerError {
     pub fn not_found(message: impl Into<String>) -> Self {
         Self::new(StatusCode::NOT_FOUND, message)
     }
+
+    /// Create a 409 Conflict error
+    pub fn conflict(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::CONFLICT, message)
+    }
+
+    /// Create a 410 Gone error
+    pub fn gone(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::GONE, message)
+    }
+
+    /// Create a 503 Service Unavailable error
+    pub fn service_unavailable(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::SERVICE_UNAVAILABLE, message)
+    }
 }
 
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
         // Log server errors (5xx) with full context using structured fields
+        // Errors marked as `expected` are logged at WARN (transient conditions
+        // like "pod not ready yet"), all others at ERROR.
         if self.status.is_server_error() {
-            // Log with structured fields to prevent log injection
-            if let Some(source) = &self.source {
+            if self.expected {
+                if let Some(source) = &self.source {
+                    tracing::warn!(
+                        status = self.status.as_u16(),
+                        message = %self.message,
+                        context = ?self.context,
+                        error = ?source,
+                        "Expected server error"
+                    );
+                } else {
+                    tracing::warn!(
+                        status = self.status.as_u16(),
+                        message = %self.message,
+                        context = ?self.context,
+                        "Expected server error"
+                    );
+                }
+            } else if let Some(source) = &self.source {
                 tracing::error!(
                     status = self.status.as_u16(),
                     message = %self.message,
@@ -130,9 +186,16 @@ impl IntoResponse for ServerError {
         }
 
         // Return clean JSON error response to client
-        let body = Json(json!({
-            "error": self.message,
-        }));
+        let body = if let Some(suggestions) = &self.suggestions {
+            Json(json!({
+                "error": self.message,
+                "suggestions": suggestions,
+            }))
+        } else {
+            Json(json!({
+                "error": self.message,
+            }))
+        };
 
         (self.status, body).into_response()
     }
@@ -148,6 +211,18 @@ impl From<sqlx::Error> for ServerError {
 impl From<anyhow::Error> for ServerError {
     fn from(err: anyhow::Error) -> Self {
         Self::internal_anyhow(err, "Internal server error")
+    }
+}
+
+impl From<(StatusCode, String)> for ServerError {
+    fn from((status, message): (StatusCode, String)) -> Self {
+        Self::new(status, message)
+    }
+}
+
+impl From<ServerError> for (StatusCode, String) {
+    fn from(err: ServerError) -> Self {
+        (err.status, err.message)
     }
 }
 
@@ -258,6 +333,42 @@ mod tests {
 
         let internal = ServerError::internal("Server error");
         assert_eq!(internal.status, StatusCode::INTERNAL_SERVER_ERROR);
+
+        let conflict = ServerError::conflict("Already exists");
+        assert_eq!(conflict.status, StatusCode::CONFLICT);
+
+        let gone = ServerError::gone("No longer available");
+        assert_eq!(gone.status, StatusCode::GONE);
+
+        let unavailable = ServerError::service_unavailable("Try later");
+        assert_eq!(unavailable.status, StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[tokio::test]
+    async fn test_server_error_with_suggestions() {
+        let error = ServerError::not_found("Team 'devopsy' not found")
+            .with_suggestions(Some(vec!["devops".to_string(), "dev-ops".to_string()]));
+
+        let response = error.into_response();
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+
+        let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(body_json["error"], "Team 'devopsy' not found");
+        assert_eq!(body_json["suggestions"][0], "devops");
+        assert_eq!(body_json["suggestions"][1], "dev-ops");
+    }
+
+    #[tokio::test]
+    async fn test_server_error_without_suggestions_has_no_suggestions_key() {
+        let error = ServerError::not_found("Not found");
+        let response = error.into_response();
+
+        let body_bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body_json: serde_json::Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert!(body_json.get("suggestions").is_none());
     }
 
     #[tokio::test]

@@ -1,8 +1,8 @@
 use super::fuzzy::find_similar_projects;
 use super::models::{
     AccessClassInfo, CreateProjectRequest, CreateProjectResponse, GetProjectParams,
-    ListAccessClassesResponse, OwnerInfo, Project as ApiProject, ProjectErrorResponse,
-    ProjectOwner, ProjectStatus, TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
+    ListAccessClassesResponse, OwnerInfo, Project as ApiProject, ProjectOwner, ProjectStatus,
+    TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
 };
 use crate::db::models::User;
 use crate::db::{projects, service_accounts, teams as db_teams, users as db_users};
@@ -331,32 +331,21 @@ pub async fn get_project(
     Extension(user): Extension<User>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetProjectParams>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<ProjectErrorResponse>)> {
+) -> Result<Json<serde_json::Value>, ServerError> {
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
     // Check read permission
     let can_read = check_read_permission(&state, &project, &user)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to check permissions: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .map_err(|e| ServerError::internal(format!("Failed to check permissions: {}", e)))?;
 
     if !can_read {
         // Use 404 to hide project existence from unauthorized users
-        return Err((
-            StatusCode::NOT_FOUND,
-            Json(ProjectErrorResponse {
-                error: format!("Project '{}' not found", id_or_name),
-                suggestions: None,
-            }),
-        ));
+        return Err(ServerError::not_found(format!(
+            "Project '{}' not found",
+            id_or_name
+        )));
     }
 
     // Calculate deployment URLs if there's an active deployment
@@ -381,12 +370,9 @@ pub async fn get_project(
                             urls.custom_domain_urls,
                         ),
                         Err(e) => {
-                            return Err((
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(ProjectErrorResponse {
-                                    error: format!("Failed to calculate URLs: {}", e),
-                                    suggestions: None,
-                                }),
+                            return Err(ServerError::internal_anyhow(
+                                e,
+                                "Failed to calculate URLs",
                             ));
                         }
                     }
@@ -395,26 +381,17 @@ pub async fn get_project(
                 }
             }
             Err(e) => {
-                return Err((
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ProjectErrorResponse {
-                        error: format!("Failed to get active deployments: {}", e),
-                        suggestions: None,
-                    }),
+                return Err(ServerError::internal_anyhow(
+                    e,
+                    "Failed to get active deployments",
                 ));
             }
         };
 
     // Resolve owner info
-    let owner_info = resolve_owner_info(&state, &project).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(ProjectErrorResponse {
-                error: format!("Failed to resolve owner info: {}", e),
-                suggestions: None,
-            }),
-        )
-    })?;
+    let owner_info = resolve_owner_info(&state, &project)
+        .await
+        .map_err(|e| ServerError::internal(format!("Failed to resolve owner info: {}", e)))?;
 
     let mut api_project = convert_project(project.clone(), owner_info);
     api_project.default_url = default_url;
@@ -425,15 +402,7 @@ pub async fn get_project(
     let deployment_groups =
         crate::db::deployments::get_active_deployment_groups(&state.db_pool, project.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ProjectErrorResponse {
-                        error: format!("Failed to get deployment groups: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
+            .internal_err("Failed to get deployment groups")?;
     api_project.deployment_groups = if deployment_groups.is_empty() {
         None
     } else {
@@ -443,15 +412,7 @@ pub async fn get_project(
     // Load app users and teams
     let (app_users, app_teams) = load_app_users_for_project(&state, project.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to load app users: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .map_err(|e| ServerError::internal(format!("Failed to load app users: {}", e)))?;
     api_project.app_users = app_users;
     api_project.app_teams = app_teams;
 
@@ -464,53 +425,29 @@ pub async fn update_project(
     Path(id_or_name): Path<String>,
     Query(params): Query<GetProjectParams>,
     Json(payload): Json<UpdateProjectRequest>,
-) -> Result<Json<UpdateProjectResponse>, (StatusCode, Json<ProjectErrorResponse>)> {
+) -> Result<Json<UpdateProjectResponse>, ServerError> {
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
     // Check write permission
     let can_write = check_write_permission(&state, &project, &user)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to check permissions: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .map_err(|e| ServerError::internal(format!("Failed to check permissions: {}", e)))?;
 
     if !can_write {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ProjectErrorResponse {
-                error: "You do not have permission to update this project".to_string(),
-                suggestions: None,
-            }),
+        return Err(ServerError::forbidden(
+            "You do not have permission to update this project",
         ));
     }
 
     // Service accounts cannot update projects
     let is_sa = service_accounts::is_service_account(&state.db_pool, user.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to check service account status: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to check service account status")?;
 
     if is_sa {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ProjectErrorResponse {
-                error: "Service accounts cannot modify projects".to_string(),
-                suggestions: None,
-            }),
+        return Err(ServerError::forbidden(
+            "Service accounts cannot modify projects",
         ));
     }
 
@@ -526,38 +463,16 @@ pub async fn update_project(
                     // Valid UUID - look up by ID
                     db_users::find_by_id(&state.db_pool, uuid)
                         .await
-                        .map_err(|e| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(ProjectErrorResponse {
-                                    error: format!("Failed to verify user: {}", e),
-                                    suggestions: None,
-                                }),
-                            )
-                        })?
+                        .internal_err("Failed to verify user")?
                 } else {
                     // Not a UUID - treat as email
                     db_users::find_by_email(&state.db_pool, &user_identifier)
                         .await
-                        .map_err(|e| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(ProjectErrorResponse {
-                                    error: format!("Failed to verify user: {}", e),
-                                    suggestions: None,
-                                }),
-                            )
-                        })?
+                        .internal_err("Failed to verify user")?
                 };
 
                 let user = user.ok_or_else(|| {
-                    (
-                        StatusCode::NOT_FOUND,
-                        Json(ProjectErrorResponse {
-                            error: format!("User '{}' not found", user_identifier),
-                            suggestions: None,
-                        }),
-                    )
+                    ServerError::not_found(format!("User '{}' not found", user_identifier))
                 })?;
 
                 (Some(user.id), None)
@@ -568,64 +483,28 @@ pub async fn update_project(
                     // Valid UUID - look up by ID
                     db_teams::find_by_id(&state.db_pool, uuid)
                         .await
-                        .map_err(|e| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(ProjectErrorResponse {
-                                    error: format!("Failed to verify team: {}", e),
-                                    suggestions: None,
-                                }),
-                            )
-                        })?
+                        .internal_err("Failed to verify team")?
                 } else {
                     // Not a UUID - treat as team name
                     db_teams::find_by_name(&state.db_pool, &team_identifier)
                         .await
-                        .map_err(|e| {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                Json(ProjectErrorResponse {
-                                    error: format!("Failed to verify team: {}", e),
-                                    suggestions: None,
-                                }),
-                            )
-                        })?
+                        .internal_err("Failed to verify team")?
                 };
 
                 let team = team.ok_or_else(|| {
-                    (
-                        StatusCode::NOT_FOUND,
-                        Json(ProjectErrorResponse {
-                            error: format!("Team '{}' not found", team_identifier),
-                            suggestions: None,
-                        }),
-                    )
+                    ServerError::not_found(format!("Team '{}' not found", team_identifier))
                 })?;
 
                 // Verify the requesting user is a member of the team they're transferring to
                 let is_member = db_teams::is_member(&state.db_pool, team.id, user.id)
                     .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(ProjectErrorResponse {
-                                error: format!("Failed to check team membership: {}", e),
-                                suggestions: None,
-                            }),
-                        )
-                    })?;
+                    .internal_err("Failed to check team membership")?;
 
                 if !is_member {
-                    return Err((
-                        StatusCode::FORBIDDEN,
-                        Json(ProjectErrorResponse {
-                            error: format!(
-                                "You must be a member of team '{}' to transfer projects to it",
-                                team.name
-                            ),
-                            suggestions: None,
-                        }),
-                    ));
+                    return Err(ServerError::forbidden(format!(
+                        "You must be a member of team '{}' to transfer projects to it",
+                        team.name
+                    )));
                 }
 
                 (None, Some(team.id))
@@ -639,15 +518,7 @@ pub async fn update_project(
             owner_team_id,
         )
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to update project owner: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to update project owner")?;
     }
 
     // Update access_class if provided
@@ -663,184 +534,82 @@ pub async fn update_project(
                 .collect::<Vec<_>>()
                 .join(", ");
 
-            return Err((
-                StatusCode::BAD_REQUEST,
-                Json(ProjectErrorResponse {
-                    error: format!(
-                        "Invalid access class '{}'. Available: {}",
-                        access_class, available
-                    ),
-                    suggestions: None,
-                }),
-            ));
+            return Err(ServerError::bad_request(format!(
+                "Invalid access class '{}'. Available: {}",
+                access_class, available
+            )));
         }
 
         updated_project =
             projects::update_access_class(&state.db_pool, updated_project.id, access_class)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ProjectErrorResponse {
-                            error: format!("Failed to update project access class: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+                .internal_err("Failed to update project access class")?;
     }
 
     // Update app users if provided
     if let Some(app_users) = payload.app_users {
-        let mut tx = state.db_pool.begin().await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to start transaction: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        let mut tx = state
+            .db_pool
+            .begin()
+            .await
+            .internal_err("Failed to start transaction")?;
 
         // Remove all existing app users
         let existing_users = crate::db::project_app_users::list_users(&mut *tx, updated_project.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ProjectErrorResponse {
-                        error: format!("Failed to list existing app users: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
+            .internal_err("Failed to list existing app users")?;
 
         for user_id in existing_users {
             crate::db::project_app_users::remove_user(&mut *tx, updated_project.id, user_id)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ProjectErrorResponse {
-                            error: format!("Failed to remove app user: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+                .internal_err("Failed to remove app user")?;
         }
 
         // Add new app users
         for user_identifier in &app_users {
-            let user_id = resolve_user_identifier(&state.db_pool, user_identifier)
-                .await
-                .map_err(|e| {
-                    (
-                        e.status,
-                        Json(ProjectErrorResponse {
-                            error: e.message,
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+            let user_id = resolve_user_identifier(&state.db_pool, user_identifier).await?;
 
             crate::db::project_app_users::add_user(&mut *tx, updated_project.id, user_id)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ProjectErrorResponse {
-                            error: format!("Failed to add app user: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+                .internal_err("Failed to add app user")?;
         }
 
-        tx.commit().await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to commit transaction: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        tx.commit()
+            .await
+            .internal_err("Failed to commit transaction")?;
     }
 
     // Update app teams if provided
     if let Some(app_teams) = payload.app_teams {
-        let mut tx = state.db_pool.begin().await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to start transaction: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        let mut tx = state
+            .db_pool
+            .begin()
+            .await
+            .internal_err("Failed to start transaction")?;
 
         // Remove all existing app teams
         let existing_teams = crate::db::project_app_users::list_teams(&mut *tx, updated_project.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(ProjectErrorResponse {
-                        error: format!("Failed to list existing app teams: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
+            .internal_err("Failed to list existing app teams")?;
 
         for team_id in existing_teams {
             crate::db::project_app_users::remove_team(&mut *tx, updated_project.id, team_id)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ProjectErrorResponse {
-                            error: format!("Failed to remove app team: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+                .internal_err("Failed to remove app team")?;
         }
 
         // Add new app teams
         for team_identifier in &app_teams {
-            let team_id = resolve_team_identifier(&state.db_pool, team_identifier)
-                .await
-                .map_err(|e| {
-                    (
-                        e.status,
-                        Json(ProjectErrorResponse {
-                            error: e.message,
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+            let team_id = resolve_team_identifier(&state.db_pool, team_identifier).await?;
 
             crate::db::project_app_users::add_team(&mut *tx, updated_project.id, team_id)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(ProjectErrorResponse {
-                            error: format!("Failed to add app team: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+                .internal_err("Failed to add app team")?;
         }
 
-        tx.commit().await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to commit transaction: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        tx.commit()
+            .await
+            .internal_err("Failed to commit transaction")?;
     }
 
     // Update status if provided
@@ -851,28 +620,12 @@ pub async fn update_project(
             crate::db::models::ProjectStatus::from(status),
         )
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to update project status: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to update project status")?;
     }
 
     let owner_info = resolve_owner_info(&state, &updated_project)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to resolve owner info: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .map_err(|e| ServerError::internal(format!("Failed to resolve owner info: {}", e)))?;
 
     Ok(Json(UpdateProjectResponse {
         project: convert_project(updated_project, owner_info),
@@ -884,53 +637,29 @@ pub async fn delete_project(
     Extension(user): Extension<User>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetProjectParams>,
-) -> Result<StatusCode, (StatusCode, Json<ProjectErrorResponse>)> {
+) -> Result<StatusCode, ServerError> {
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
     // Check write permission
     let can_write = check_write_permission(&state, &project, &user)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to check permissions: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .map_err(|e| ServerError::internal(format!("Failed to check permissions: {}", e)))?;
 
     if !can_write {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ProjectErrorResponse {
-                error: "You do not have permission to delete this project".to_string(),
-                suggestions: None,
-            }),
+        return Err(ServerError::forbidden(
+            "You do not have permission to delete this project",
         ));
     }
 
     // Service accounts cannot delete projects
     let is_sa = service_accounts::is_service_account(&state.db_pool, user.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to check service account status: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to check service account status")?;
 
     if is_sa {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(ProjectErrorResponse {
-                error: "Service accounts cannot modify projects".to_string(),
-                suggestions: None,
-            }),
+        return Err(ServerError::forbidden(
+            "Service accounts cannot modify projects",
         ));
     }
 
@@ -942,15 +671,7 @@ pub async fn delete_project(
     // Mark project as deleting
     projects::mark_deleting(&state.db_pool, project.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(ProjectErrorResponse {
-                    error: format!("Failed to mark project for deletion: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to mark project for deletion")?;
 
     tracing::info!("Project {} marked for deletion", project.name);
 
@@ -1019,21 +740,15 @@ async fn resolve_project(
     state: &AppState,
     id_or_name: &str,
     by_id: bool,
-) -> Result<crate::db::models::Project, (StatusCode, Json<ProjectErrorResponse>)> {
+) -> Result<crate::db::models::Project, ServerError> {
     tracing::info!("Resolving project '{}', by_id={}", id_or_name, by_id);
 
     let project = if by_id {
         // Explicit ID lookup
         tracing::info!("Using explicit ID lookup");
-        query_project_by_id(state, id_or_name).await.map_err(|e| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(ProjectErrorResponse {
-                    error: e,
-                    suggestions: None,
-                }),
-            )
-        })?
+        query_project_by_id(state, id_or_name)
+            .await
+            .map_err(ServerError::not_found)?
     } else {
         // Try name first, fallback to ID
         tracing::info!("Trying name lookup first, will fallback to ID");
@@ -1065,13 +780,8 @@ async fn resolve_project(
                         Err(_) => None,
                     };
 
-                    (
-                        StatusCode::NOT_FOUND,
-                        Json(ProjectErrorResponse {
-                            error: format!("Project '{}' not found", id_or_name),
-                            suggestions,
-                        }),
-                    )
+                    ServerError::not_found(format!("Project '{}' not found", id_or_name))
+                        .with_suggestions(suggestions)
                 })?
             }
         }
@@ -1155,6 +865,32 @@ fn convert_project(project: crate::db::models::Project, owner: Option<OwnerInfo>
         app_users: vec![], // Will be populated by caller if needed
         app_teams: vec![], // Will be populated by caller if needed
     }
+}
+
+/// Check if user has access to a project, returning an error if not (admin bypass)
+///
+/// Admins always have access. Non-admins must pass the project ownership/team membership check.
+/// Returns `Ok(())` if access is granted, or `Err(ServerError::forbidden(...))` if not.
+pub async fn ensure_project_access_or_admin(
+    state: &AppState,
+    user: &User,
+    project: &crate::db::models::Project,
+) -> Result<(), ServerError> {
+    if state.is_admin(&user.email) {
+        return Ok(());
+    }
+
+    let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
+        .await
+        .internal_err("Failed to check project access")?;
+
+    if !can_access {
+        return Err(ServerError::forbidden(
+            "You do not have access to this project",
+        ));
+    }
+
+    Ok(())
 }
 
 /// Check if user can read a project (owner, team member, or admin)

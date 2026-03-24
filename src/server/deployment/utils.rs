@@ -1,10 +1,10 @@
-use axum::http::StatusCode;
 use chrono::Utc;
 use tracing::error;
 
 use crate::db::deployments as db_deployments;
 use crate::db::env_vars as db_env_vars;
 use crate::db::models::{Deployment, Project};
+use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::extensions::InjectedEnvVarValue;
 use crate::server::state::AppState;
 
@@ -94,24 +94,19 @@ pub async fn get_deployment_image_tag(
 /// * `project` - The project this deployment belongs to
 ///
 /// # Returns
-/// The created deployment on success, or an error tuple (StatusCode, String)
+/// The created deployment on success, or a ServerError
 pub async fn create_deployment_with_hooks(
     state: &AppState,
     params: db_deployments::CreateDeploymentParams<'_>,
     project: &Project,
-) -> Result<Deployment, (StatusCode, String)> {
+) -> Result<Deployment, ServerError> {
     // Extract deployment_group before moving params (needed for extension hooks)
     let deployment_group = params.deployment_group.to_string();
 
     // Create the deployment record
     let deployment = db_deployments::create(&state.db_pool, params)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create deployment: {}", e),
-            )
-        })?;
+        .internal_err("Failed to create deployment")?;
 
     // Call before_deployment hooks for all registered extensions
     for (_, extension) in state.extension_registry.iter() {
@@ -121,12 +116,6 @@ pub async fn create_deployment_with_hooks(
         {
             Ok(vars) => vars,
             Err(e) => {
-                error!(
-                    "Extension type '{}' before_deployment hook failed: {:?}",
-                    extension.extension_type(),
-                    e
-                );
-
                 let error_msg = format!(
                     "Extension type '{}' failed: {}",
                     extension.extension_type(),
@@ -141,7 +130,13 @@ pub async fn create_deployment_with_hooks(
                     );
                 }
 
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
+                return Err(ServerError::internal_anyhow(
+                    e,
+                    format!(
+                        "Extension type '{}' before_deployment hook failed",
+                        extension.extension_type()
+                    ),
+                ));
             }
         };
 
@@ -163,12 +158,7 @@ pub async fn create_deployment_with_hooks(
             )
             .await
             {
-                error!(
-                    "Failed to write env var '{}' for deployment {}: {:?}",
-                    var.key, deployment.deployment_id, e
-                );
-
-                let error_msg = format!("Failed to write env var '{}': {}", var.key, e);
+                let error_msg = format!("Failed to write env var '{}'", var.key);
                 if let Err(mark_err) =
                     db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
                 {
@@ -178,7 +168,7 @@ pub async fn create_deployment_with_hooks(
                     );
                 }
 
-                return Err((StatusCode::INTERNAL_SERVER_ERROR, error_msg));
+                return Err(ServerError::internal_anyhow(e, error_msg));
             }
         }
     }

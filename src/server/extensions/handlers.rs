@@ -1,6 +1,7 @@
 use super::models::*;
 use crate::db::models::User;
 use crate::db::{extensions as db_extensions, projects};
+use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension as AxumExtension, Path, State},
@@ -12,7 +13,7 @@ use axum::{
 pub async fn list_extension_types(
     State(state): State<AppState>,
     AxumExtension(_user): AxumExtension<User>,
-) -> Result<Json<ListExtensionTypesResponse>, (StatusCode, String)> {
+) -> Result<Json<ListExtensionTypesResponse>, ServerError> {
     // Note: This endpoint doesn't require project access - it lists all available
     // extension types that any authenticated user can see and potentially enable on their projects
 
@@ -37,33 +38,35 @@ pub async fn create_extension(
     AxumExtension(user): AxumExtension<User>,
     Path((project_name, extension_name)): Path<(String, String)>,
     Json(payload): Json<CreateExtensionRequest>,
-) -> Result<Json<CreateExtensionResponse>, (StatusCode, String)> {
+) -> Result<Json<CreateExtensionResponse>, ServerError> {
     // Get project and verify access
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to look up project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check project ownership/access
     let has_access = check_project_access(&state, &user, project.id).await?;
     if !has_access {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     // Get extension handler by type
     let extension = state
         .extension_registry
         .get(&payload.extension_type)
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            format!("Unknown extension type: {}", payload.extension_type),
-        ))?;
+        .ok_or_else(|| {
+            ServerError::bad_request(format!(
+                "Unknown extension type: {}",
+                payload.extension_type
+            ))
+        })?;
 
     // Validate spec
     extension
         .validate_spec(&payload.spec)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid spec: {}", e)))?;
+        .map_err(|e| ServerError::bad_request(format!("Invalid spec: {}", e)))?;
 
     // Create extension (will fail if already exists)
     let _ext_record = db_extensions::create(
@@ -78,12 +81,9 @@ pub async fn create_extension(
         // Check if it's a unique constraint violation
         let error_msg = e.to_string();
         if error_msg.contains("duplicate key") || error_msg.contains("unique constraint") {
-            (
-                StatusCode::CONFLICT,
-                format!("Extension '{}' already exists", extension_name),
-            )
+            ServerError::conflict(format!("Extension '{}' already exists", extension_name))
         } else {
-            (StatusCode::INTERNAL_SERVER_ERROR, error_msg)
+            ServerError::internal_anyhow(e, "Failed to create extension")
         }
     })?;
 
@@ -97,14 +97,14 @@ pub async fn create_extension(
             &state.db_pool,
         )
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .internal_err("Failed to run extension spec update hook")?;
 
     // Fetch updated extension to get the latest status (may have been initialized by on_spec_updated)
     let ext_record =
         db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
+            .internal_err("Failed to fetch extension after creation")?
+            .ok_or_else(|| ServerError::not_found("Extension not found"))?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
@@ -128,40 +128,42 @@ pub async fn update_extension(
     AxumExtension(user): AxumExtension<User>,
     Path((project_name, extension_name)): Path<(String, String)>,
     Json(payload): Json<UpdateExtensionRequest>,
-) -> Result<Json<UpdateExtensionResponse>, (StatusCode, String)> {
+) -> Result<Json<UpdateExtensionResponse>, ServerError> {
     // Get project and verify access
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to look up project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check project ownership/access
     let has_access = check_project_access(&state, &user, project.id).await?;
     if !has_access {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     // Get existing extension to determine its type
     let existing =
         db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
+            .internal_err("Failed to look up extension")?
+            .ok_or_else(|| ServerError::not_found("Extension not found"))?;
 
     // Get extension handler by type
     let extension = state
         .extension_registry
         .get(&existing.extension_type)
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            format!("Unknown extension type: {}", existing.extension_type),
-        ))?;
+        .ok_or_else(|| {
+            ServerError::bad_request(format!(
+                "Unknown extension type: {}",
+                existing.extension_type
+            ))
+        })?;
 
     // Validate new spec
     extension
         .validate_spec(&payload.spec)
         .await
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid spec: {}", e)))?;
+        .map_err(|e| ServerError::bad_request(format!("Invalid spec: {}", e)))?;
 
     // Update extension (upsert will update existing, keeping the extension_type)
     let _ext_record = db_extensions::upsert(
@@ -172,7 +174,7 @@ pub async fn update_extension(
         &payload.spec,
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .internal_err("Failed to update extension")?;
 
     // Call extension's spec update hook
     extension
@@ -184,14 +186,14 @@ pub async fn update_extension(
             &state.db_pool,
         )
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .internal_err("Failed to run extension spec update hook")?;
 
     // Fetch updated extension to get the latest status (may have been modified by on_spec_updated)
     let ext_record =
         db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
+            .internal_err("Failed to fetch extension after update")?
+            .ok_or_else(|| ServerError::not_found("Extension not found"))?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
@@ -215,25 +217,25 @@ pub async fn patch_extension(
     AxumExtension(user): AxumExtension<User>,
     Path((project_name, extension_name)): Path<(String, String)>,
     Json(payload): Json<UpdateExtensionRequest>,
-) -> Result<Json<UpdateExtensionResponse>, (StatusCode, String)> {
+) -> Result<Json<UpdateExtensionResponse>, ServerError> {
     // Get project and verify access
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to look up project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check project ownership/access
     let has_access = check_project_access(&state, &user, project.id).await?;
     if !has_access {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     // Get existing extension
     let existing =
         db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
+            .internal_err("Failed to look up extension")?
+            .ok_or_else(|| ServerError::not_found("Extension not found"))?;
 
     // Merge specs (null values in payload remove fields from existing)
     let merged_spec = merge_json_with_nulls(&existing.spec, &payload.spec);
@@ -242,18 +244,18 @@ pub async fn patch_extension(
     let extension = state
         .extension_registry
         .get(&existing.extension_type)
-        .ok_or((
-            StatusCode::BAD_REQUEST,
-            format!("Unknown extension type: {}", existing.extension_type),
-        ))?;
+        .ok_or_else(|| {
+            ServerError::bad_request(format!(
+                "Unknown extension type: {}",
+                existing.extension_type
+            ))
+        })?;
 
     // Validate merged spec
-    extension.validate_spec(&merged_spec).await.map_err(|e| {
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid spec after merge: {}", e),
-        )
-    })?;
+    extension
+        .validate_spec(&merged_spec)
+        .await
+        .map_err(|e| ServerError::bad_request(format!("Invalid spec after merge: {}", e)))?;
 
     // Update extension with merged spec
     let _ext_record = db_extensions::upsert(
@@ -264,7 +266,7 @@ pub async fn patch_extension(
         &merged_spec,
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .internal_err("Failed to update extension")?;
 
     // Call extension's spec update hook
     extension
@@ -276,14 +278,14 @@ pub async fn patch_extension(
             &state.db_pool,
         )
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .internal_err("Failed to run extension spec update hook")?;
 
     // Fetch updated extension to get the latest status (may have been modified by on_spec_updated)
     let ext_record =
         db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-            .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
+            .internal_err("Failed to fetch extension after patch")?
+            .ok_or_else(|| ServerError::not_found("Extension not found"))?;
 
     // Format status using the extension provider
     let status_summary = extension.format_status(&ext_record.status);
@@ -306,20 +308,20 @@ pub async fn list_extensions(
     State(state): State<AppState>,
     AxumExtension(user): AxumExtension<User>,
     Path(project_name): Path<String>,
-) -> Result<Json<ListExtensionsResponse>, (StatusCode, String)> {
+) -> Result<Json<ListExtensionsResponse>, ServerError> {
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to look up project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     let has_access = check_project_access(&state, &user, project.id).await?;
     if !has_access {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     let extensions = db_extensions::list_by_project(&state.db_pool, project.id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .internal_err("Failed to list extensions")?;
 
     let extensions: Vec<Extension> = extensions
         .into_iter()
@@ -351,21 +353,21 @@ pub async fn get_extension(
     State(state): State<AppState>,
     AxumExtension(user): AxumExtension<User>,
     Path((project_name, extension_name)): Path<(String, String)>,
-) -> Result<Json<Extension>, (StatusCode, String)> {
+) -> Result<Json<Extension>, ServerError> {
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to look up project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     let has_access = check_project_access(&state, &user, project.id).await?;
     if !has_access {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     let ext = db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Extension not found".to_string()))?;
+        .internal_err("Failed to look up extension")?
+        .ok_or_else(|| ServerError::not_found("Extension not found"))?;
 
     // Get extension provider by type to format status
     let status_summary = state
@@ -390,20 +392,20 @@ pub async fn delete_extension(
     State(state): State<AppState>,
     AxumExtension(user): AxumExtension<User>,
     Path((project_name, extension_name)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, ServerError> {
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or((StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to look up project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     let has_access = check_project_access(&state, &user, project.id).await?;
     if !has_access {
-        return Err((StatusCode::FORBIDDEN, "Access denied".to_string()));
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     db_extensions::mark_deleted(&state.db_pool, project.id, &extension_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .internal_err("Failed to delete extension")?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -413,7 +415,7 @@ async fn check_project_access(
     state: &AppState,
     user: &User,
     project_id: uuid::Uuid,
-) -> Result<bool, (StatusCode, String)> {
+) -> Result<bool, ServerError> {
     // Check if user is admin
     if state.is_admin(&user.email) {
         return Ok(true);
@@ -422,7 +424,7 @@ async fn check_project_access(
     // Check if user has access to project (owner or team member)
     let accessible_projects = projects::list_accessible_by_user(&state.db_pool, user.id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .internal_err("Failed to check project access")?;
 
     Ok(accessible_projects.iter().any(|p| p.id == project_id))
 }

@@ -1,10 +1,11 @@
 use super::fuzzy::find_similar_teams;
 use super::models::{
-    CreateTeamRequest, CreateTeamResponse, GetTeamParams, Team as ApiTeam, TeamErrorResponse,
-    UpdateTeamRequest, UpdateTeamResponse, UserInfo,
+    CreateTeamRequest, CreateTeamResponse, GetTeamParams, Team as ApiTeam, UpdateTeamRequest,
+    UpdateTeamResponse, UserInfo,
 };
 use crate::db::models::{TeamRole, User};
 use crate::db::{service_accounts, teams as db_teams};
+use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Path, Query, State},
@@ -17,7 +18,7 @@ pub async fn create_team(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Json(payload): Json<CreateTeamRequest>,
-) -> Result<Json<CreateTeamResponse>, (StatusCode, String)> {
+) -> Result<Json<CreateTeamResponse>, ServerError> {
     // Check if user is allowed to create teams
     let is_admin = state.is_admin(&user.email);
     if !state.auth_settings.allow_team_creation && !is_admin {
@@ -26,9 +27,8 @@ pub async fn create_team(
             user.email,
             payload.name
         );
-        return Err((
-            StatusCode::FORBIDDEN,
-            "Team creation is disabled. Please contact your administrator.".to_string(),
+        return Err(ServerError::forbidden(
+            "Team creation is disabled. Please contact your administrator.",
         ));
     }
 
@@ -36,9 +36,8 @@ pub async fn create_team(
 
     // Validate that at least one owner is specified
     if payload.owners.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "At least one owner must be specified".to_string(),
+        return Err(ServerError::bad_request(
+            "At least one owner must be specified",
         ));
     }
 
@@ -48,13 +47,12 @@ pub async fn create_team(
         .iter()
         .map(|id| Uuid::parse_str(id))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid owner ID: {}", e)))?;
+        .server_err(StatusCode::BAD_REQUEST, "Invalid owner ID")?;
 
     // Verify the authenticated user is in the owners list
     if !owner_ids.contains(&user.id) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "You must be an owner of the team you create".to_string(),
+        return Err(ServerError::bad_request(
+            "You must be an owner of the team you create",
         ));
     }
 
@@ -64,7 +62,7 @@ pub async fn create_team(
         .iter()
         .map(|id| Uuid::parse_str(id))
         .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| (StatusCode::BAD_REQUEST, format!("Invalid member ID: {}", e)))?;
+        .server_err(StatusCode::BAD_REQUEST, "Invalid member ID")?;
 
     // Create the team
     let team = db_teams::create(&state.db_pool, &payload.name)
@@ -73,15 +71,9 @@ pub async fn create_team(
             if e.to_string().contains("duplicate key")
                 || e.to_string().contains("unique constraint")
             {
-                (
-                    StatusCode::CONFLICT,
-                    format!("Team '{}' already exists", payload.name),
-                )
+                ServerError::conflict(format!("Team '{}' already exists", payload.name))
             } else {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to create team: {}", e),
-                )
+                ServerError::internal_anyhow(e, "Failed to create team")
             }
         })?;
 
@@ -89,12 +81,7 @@ pub async fn create_team(
     for owner_id in owner_ids {
         db_teams::add_member(&state.db_pool, team.id, owner_id, TeamRole::Owner)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to add owner: {}", e),
-                )
-            })?;
+            .internal_err("Failed to add owner")?;
     }
 
     // Add members.
@@ -102,31 +89,16 @@ pub async fn create_team(
     for member_id in member_ids {
         db_teams::add_member(&state.db_pool, team.id, member_id, TeamRole::Member)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to add member: {}", e),
-                )
-            })?;
+            .internal_err("Failed to add member")?;
     }
 
     // Fetch members/owners with email info for response
     let members = db_teams::get_members(&state.db_pool, team.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get team members: {}", e),
-            )
-        })?;
+        .internal_err("Failed to get team members")?;
     let owners = db_teams::get_owners(&state.db_pool, team.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get team owners: {}", e),
-            )
-        })?;
+        .internal_err("Failed to get team owners")?;
 
     let member_infos = users_to_infos(&members);
     let owner_infos = users_to_infos(&owners);
@@ -141,34 +113,18 @@ pub async fn get_team(
     Extension(_user): Extension<User>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetTeamParams>,
-) -> Result<Json<serde_json::Value>, (StatusCode, Json<TeamErrorResponse>)> {
+) -> Result<Json<serde_json::Value>, ServerError> {
     // Resolve team by ID or name
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
     // Always resolve member/owner emails
     let members = db_teams::get_members(&state.db_pool, team.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TeamErrorResponse {
-                    error: format!("Failed to get team members: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to get team members")?;
 
     let owners = db_teams::get_owners(&state.db_pool, team.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TeamErrorResponse {
-                    error: format!("Failed to get team owners: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to get team owners")?;
 
     let member_infos = users_to_infos(&members);
     let owner_infos = users_to_infos(&owners);
@@ -184,7 +140,7 @@ pub async fn update_team(
     Path(id_or_name): Path<String>,
     Query(params): Query<GetTeamParams>,
     Json(payload): Json<UpdateTeamRequest>,
-) -> Result<Json<UpdateTeamResponse>, (StatusCode, Json<TeamErrorResponse>)> {
+) -> Result<Json<UpdateTeamResponse>, ServerError> {
     // Resolve team by ID or name
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
@@ -193,37 +149,21 @@ pub async fn update_team(
     let is_owner = if !is_admin {
         db_teams::is_owner(&state.db_pool, team.id, user.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(TeamErrorResponse {
-                        error: format!("Failed to check team ownership: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?
+            .internal_err("Failed to check team ownership")?
     } else {
         true // Admins bypass ownership check
     };
 
     if !is_owner {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(TeamErrorResponse {
-                error: "You must be an owner of the team to update it".to_string(),
-                suggestions: None,
-            }),
+        return Err(ServerError::forbidden(
+            "You must be an owner of the team to update it",
         ));
     }
 
     // Check if team is IdP-managed (only admins can modify)
     if team.idp_managed && !is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(TeamErrorResponse {
-                error: "This team is managed by your Identity Provider. Only administrators can modify IdP-managed teams.".to_string(),
-                suggestions: None,
-            }),
+        return Err(ServerError::forbidden(
+            "This team is managed by your Identity Provider. Only administrators can modify IdP-managed teams.",
         ));
     }
 
@@ -242,28 +182,12 @@ pub async fn update_team(
             .iter()
             .map(|id| Uuid::parse_str(id))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(TeamErrorResponse {
-                        error: format!("Invalid member ID: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
+            .server_err(StatusCode::BAD_REQUEST, "Invalid member ID")?;
 
         // Get current members
         let current_members = db_teams::get_members(&state.db_pool, team.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(TeamErrorResponse {
-                        error: format!("Failed to get current members: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
+            .internal_err("Failed to get current members")?;
 
         let current_member_ids: Vec<Uuid> = current_members.iter().map(|m| m.id).collect();
 
@@ -277,15 +201,7 @@ pub async fn update_team(
                     TeamRole::Member,
                 )
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(TeamErrorResponse {
-                            error: format!("Failed to remove member: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+                .internal_err("Failed to remove member")?;
             }
         }
 
@@ -293,23 +209,11 @@ pub async fn update_team(
         for member_id in &member_ids {
             let is_sa = service_accounts::is_service_account(&state.db_pool, *member_id)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(TeamErrorResponse {
-                            error: format!("Failed to check service account status: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+                .internal_err("Failed to check service account status")?;
 
             if is_sa {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(TeamErrorResponse {
-                        error: "Service accounts cannot be team members".to_string(),
-                        suggestions: None,
-                    }),
+                return Err(ServerError::bad_request(
+                    "Service accounts cannot be team members",
                 ));
             }
         }
@@ -319,15 +223,7 @@ pub async fn update_team(
             if !current_member_ids.contains(&member_id) {
                 db_teams::add_member(&state.db_pool, team.id, member_id, TeamRole::Member)
                     .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(TeamErrorResponse {
-                                error: format!("Failed to add member: {}", e),
-                                suggestions: None,
-                            }),
-                        )
-                    })?;
+                    .internal_err("Failed to add member")?;
             }
         }
     }
@@ -338,28 +234,12 @@ pub async fn update_team(
             .iter()
             .map(|id| Uuid::parse_str(id))
             .collect::<Result<Vec<_>, _>>()
-            .map_err(|e| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    Json(TeamErrorResponse {
-                        error: format!("Invalid owner ID: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
+            .server_err(StatusCode::BAD_REQUEST, "Invalid owner ID")?;
 
         // Get current owners
         let current_owners = db_teams::get_owners(&state.db_pool, team.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(TeamErrorResponse {
-                        error: format!("Failed to get current owners: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?;
+            .internal_err("Failed to get current owners")?;
 
         let current_owner_ids: Vec<Uuid> = current_owners.iter().map(|o| o.id).collect();
 
@@ -373,15 +253,7 @@ pub async fn update_team(
                     TeamRole::Owner,
                 )
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(TeamErrorResponse {
-                            error: format!("Failed to remove owner: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+                .internal_err("Failed to remove owner")?;
             }
         }
 
@@ -389,23 +261,11 @@ pub async fn update_team(
         for owner_id in &owner_ids {
             let is_sa = service_accounts::is_service_account(&state.db_pool, *owner_id)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        Json(TeamErrorResponse {
-                            error: format!("Failed to check service account status: {}", e),
-                            suggestions: None,
-                        }),
-                    )
-                })?;
+                .internal_err("Failed to check service account status")?;
 
             if is_sa {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    Json(TeamErrorResponse {
-                        error: "Service accounts cannot be team members".to_string(),
-                        suggestions: None,
-                    }),
+                return Err(ServerError::bad_request(
+                    "Service accounts cannot be team members",
                 ));
             }
         }
@@ -415,28 +275,12 @@ pub async fn update_team(
             if !current_owner_ids.contains(&owner_id) {
                 db_teams::add_member(&state.db_pool, team.id, owner_id, TeamRole::Owner)
                     .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(TeamErrorResponse {
-                                error: format!("Failed to add owner: {}", e),
-                                suggestions: None,
-                            }),
-                        )
-                    })?;
+                    .internal_err("Failed to add owner")?;
             } else {
                 // Update role if already a member but not an owner
                 db_teams::update_member_role(&state.db_pool, team.id, owner_id, TeamRole::Owner)
                     .await
-                    .map_err(|e| {
-                        (
-                            StatusCode::INTERNAL_SERVER_ERROR,
-                            Json(TeamErrorResponse {
-                                error: format!("Failed to update member role: {}", e),
-                                suggestions: None,
-                            }),
-                        )
-                    })?;
+                    .internal_err("Failed to update member role")?;
             }
         }
     }
@@ -444,27 +288,11 @@ pub async fn update_team(
     // Fetch updated members and owners
     let members = db_teams::get_members(&state.db_pool, updated_team.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TeamErrorResponse {
-                    error: format!("Failed to get team members: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to get team members")?;
 
     let owners = db_teams::get_owners(&state.db_pool, updated_team.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TeamErrorResponse {
-                    error: format!("Failed to get team owners: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to get team owners")?;
 
     let member_infos = users_to_infos(&members);
     let owner_infos = users_to_infos(&owners);
@@ -479,7 +307,7 @@ pub async fn delete_team(
     Extension(user): Extension<User>,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetTeamParams>,
-) -> Result<StatusCode, (StatusCode, Json<TeamErrorResponse>)> {
+) -> Result<StatusCode, ServerError> {
     // Resolve team by ID or name
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
@@ -488,51 +316,27 @@ pub async fn delete_team(
     let is_owner = if !is_admin {
         db_teams::is_owner(&state.db_pool, team.id, user.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(TeamErrorResponse {
-                        error: format!("Failed to check team ownership: {}", e),
-                        suggestions: None,
-                    }),
-                )
-            })?
+            .internal_err("Failed to check team ownership")?
     } else {
         true // Admins bypass ownership check
     };
 
     if !is_owner {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(TeamErrorResponse {
-                error: "You must be an owner of the team to delete it".to_string(),
-                suggestions: None,
-            }),
+        return Err(ServerError::forbidden(
+            "You must be an owner of the team to delete it",
         ));
     }
 
     // Check if team is IdP-managed (only admins can delete)
     if team.idp_managed && !is_admin {
-        return Err((
-            StatusCode::FORBIDDEN,
-            Json(TeamErrorResponse {
-                error: "This team is managed by your Identity Provider. Only administrators can delete IdP-managed teams.".to_string(),
-                suggestions: None,
-            }),
+        return Err(ServerError::forbidden(
+            "This team is managed by your Identity Provider. Only administrators can delete IdP-managed teams.",
         ));
     }
 
     db_teams::delete(&state.db_pool, team.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(TeamErrorResponse {
-                    error: format!("Failed to delete team: {}", e),
-                    suggestions: None,
-                }),
-            )
-        })?;
+        .internal_err("Failed to delete team")?;
 
     Ok(StatusCode::NO_CONTENT)
 }
@@ -540,24 +344,16 @@ pub async fn delete_team(
 pub async fn list_teams(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
-) -> Result<Json<Vec<ApiTeam>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ApiTeam>>, ServerError> {
     // Admins can see all teams; other users see all teams if allow_list_all_teams is enabled
     let teams = if state.is_admin(&user.email) || state.auth_settings.allow_list_all_teams {
-        db_teams::list(&state.db_pool).await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list teams: {}", e),
-            )
-        })?
+        db_teams::list(&state.db_pool)
+            .await
+            .internal_err("Failed to list teams")?
     } else {
         db_teams::list_for_user(&state.db_pool, user.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to list teams: {}", e),
-                )
-            })?
+            .internal_err("Failed to list teams")?
     };
 
     let mut api_teams = Vec::new();
@@ -565,21 +361,11 @@ pub async fn list_teams(
     for team in teams {
         let members = db_teams::get_members(&state.db_pool, team.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get team members: {}", e),
-                )
-            })?;
+            .internal_err("Failed to get team members")?;
 
         let owners = db_teams::get_owners(&state.db_pool, team.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get team owners: {}", e),
-                )
-            })?;
+            .internal_err("Failed to get team owners")?;
 
         let member_infos = users_to_infos(&members);
         let owner_infos = users_to_infos(&owners);
@@ -621,21 +407,15 @@ async fn resolve_team(
     state: &AppState,
     id_or_name: &str,
     by_id: bool,
-) -> Result<crate::db::models::Team, (StatusCode, Json<TeamErrorResponse>)> {
+) -> Result<crate::db::models::Team, ServerError> {
     tracing::info!("Resolving team '{}', by_id={}", id_or_name, by_id);
 
     let team = if by_id {
         // Explicit ID lookup
         tracing::info!("Using explicit ID lookup");
-        query_team_by_id(state, id_or_name).await.map_err(|e| {
-            (
-                StatusCode::NOT_FOUND,
-                Json(TeamErrorResponse {
-                    error: e,
-                    suggestions: None,
-                }),
-            )
-        })?
+        query_team_by_id(state, id_or_name)
+            .await
+            .map_err(ServerError::not_found)?
     } else {
         // Try name first, fallback to ID
         tracing::info!("Trying name lookup first, will fallback to ID");
@@ -666,13 +446,8 @@ async fn resolve_team(
                         Err(_) => None,
                     };
 
-                    (
-                        StatusCode::NOT_FOUND,
-                        Json(TeamErrorResponse {
-                            error: format!("Team '{}' not found", id_or_name),
-                            suggestions,
-                        }),
-                    )
+                    ServerError::not_found(format!("Team '{}' not found", id_or_name))
+                        .with_suggestions(suggestions)
                 })?
             }
         }
