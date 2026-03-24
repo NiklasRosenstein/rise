@@ -24,7 +24,7 @@ pub async fn get_registry_credentials(
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", params.project)))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
 
     // Check if user has permission to deploy to this project (SA access already validated)
     if !is_sa {

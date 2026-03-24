@@ -503,7 +503,7 @@ pub async fn create_deployment(
 
     // Resolve auth for project scope (validates SA claims if external token)
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
@@ -1057,7 +1057,7 @@ pub async fn update_deployment_status_by_project(
 
     // Resolve auth for project scope
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
@@ -1144,7 +1144,7 @@ pub async fn update_deployment_status(
 
     // Resolve auth for project scope
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
@@ -1189,7 +1189,7 @@ pub async fn list_deployments(
 
     // Resolve auth for project scope
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
@@ -1296,7 +1296,7 @@ pub async fn stop_deployments_by_group(
 
     // Resolve auth for project scope
     let (_user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
@@ -1380,7 +1380,7 @@ pub async fn stop_deployment(
 
     // Resolve auth for project scope
     let (_user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
@@ -1475,7 +1475,7 @@ pub async fn get_deployment_by_project(
 
     // Resolve auth for project scope
     let (_user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
@@ -1553,7 +1553,7 @@ pub async fn list_deployment_groups(
 
     // Resolve auth for project scope
     let (_user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
@@ -1604,7 +1604,7 @@ pub async fn stream_deployment_logs(
 
     // Resolve auth for project scope
     let (_user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 

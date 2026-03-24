@@ -33,7 +33,7 @@ pub async fn set_project_env_var(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check permission (SA access already validated, admin bypass for regular users)
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -125,7 +125,7 @@ pub async fn list_project_env_vars(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check permission (SA access already validated, admin bypass for regular users)
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -200,7 +200,7 @@ pub async fn delete_project_env_var(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check permission (SA access already validated, admin bypass for regular users)
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -251,7 +251,7 @@ pub async fn list_deployment_env_vars(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check permission (SA access already validated, admin bypass for regular users)
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -333,7 +333,7 @@ pub async fn get_project_env_var_value(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check permission (SA access already validated, admin bypass for regular users)
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -400,7 +400,7 @@ pub async fn get_deployment_env_var_value(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check permission (SA access already validated, admin bypass for regular users)
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -482,7 +482,7 @@ pub async fn preview_deployment_env_vars(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check permission (SA access already validated, admin bypass for regular users)
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;

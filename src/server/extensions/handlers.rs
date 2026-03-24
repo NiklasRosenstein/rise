@@ -47,7 +47,7 @@ pub async fn create_extension(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check project ownership/access (SA access already validated)
     if !is_sa {
         let has_access = check_project_access(&state, &user, project.id).await?;
@@ -141,7 +141,7 @@ pub async fn update_extension(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check project ownership/access (SA access already validated)
     if !is_sa {
         let has_access = check_project_access(&state, &user, project.id).await?;
@@ -234,7 +234,7 @@ pub async fn patch_extension(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     // Check project ownership/access (SA access already validated)
     if !is_sa {
         let has_access = check_project_access(&state, &user, project.id).await?;
@@ -328,7 +328,7 @@ pub async fn list_extensions(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     if !is_sa {
         let has_access = check_project_access(&state, &user, project.id).await?;
         if !has_access {
@@ -377,7 +377,7 @@ pub async fn get_extension(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     if !is_sa {
         let has_access = check_project_access(&state, &user, project.id).await?;
         if !has_access {
@@ -420,7 +420,7 @@ pub async fn delete_extension(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
     if !is_sa {
         let has_access = check_project_access(&state, &user, project.id).await?;
         if !has_access {

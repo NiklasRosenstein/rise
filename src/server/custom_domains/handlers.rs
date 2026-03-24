@@ -34,7 +34,7 @@ pub async fn add_custom_domain(
 
     // Resolve auth for project scope
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
@@ -140,7 +140,7 @@ pub async fn list_custom_domains(
 
     // Resolve auth for project scope
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
@@ -188,7 +188,7 @@ pub async fn get_custom_domain(
 
     // Resolve auth for project scope
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
@@ -232,7 +232,7 @@ pub async fn delete_custom_domain(
 
     // Resolve auth for project scope
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
@@ -315,7 +315,7 @@ pub async fn set_primary_domain(
 
     // Resolve auth for project scope
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
@@ -399,7 +399,7 @@ pub async fn unset_primary_domain(
 
     // Resolve auth for project scope
     let (user, is_sa) = auth
-        .resolve_for_project(&state, &project)
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {

@@ -4,6 +4,7 @@ use crate::server::auth::jwt::JwtValidator;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::state::AppState;
 use axum::{extract::FromRequestParts, http::request::Parts};
+use sqlx::PgPool;
 use std::collections::HashMap;
 
 /// A JWKS-validated external token (phase 1 of two-phase SA auth).
@@ -54,20 +55,17 @@ impl AuthContext {
     ///   since they are scoped to the same project (no cross-project leakage).
     pub async fn resolve_for_project(
         &self,
-        state: &AppState,
+        pool: &PgPool,
         project: &crate::db::models::Project,
     ) -> Result<(User, bool), ServerError> {
         match self {
             AuthContext::User(user) => Ok((user.clone(), false)),
             AuthContext::ExternalToken(token) => {
                 // Find service accounts for this project + issuer
-                let service_accounts = service_accounts::find_by_project_and_issuer(
-                    &state.db_pool,
-                    project.id,
-                    &token.issuer,
-                )
-                .await
-                .internal_err("Failed to look up service accounts")?;
+                let service_accounts =
+                    service_accounts::find_by_project_and_issuer(pool, project.id, &token.issuer)
+                        .await
+                        .internal_err("Failed to look up service accounts")?;
 
                 if service_accounts.is_empty() {
                     return Err(ServerError::unauthorized(format!(
@@ -133,7 +131,7 @@ impl AuthContext {
 
                 // Exactly one match — look up the SA's synthetic user
                 let sa = matching_sas[0];
-                let user = crate::db::users::find_by_id(&state.db_pool, sa.user_id)
+                let user = crate::db::users::find_by_id(pool, sa.user_id)
                     .await
                     .internal_err("Failed to look up service account user")?
                     .ok_or_else(|| {
@@ -179,5 +177,142 @@ impl FromRequestParts<AppState> for AuthContext {
 
         // Neither was set — middleware should have rejected the request
         Err(ServerError::unauthorized("Not authenticated"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db::{models::ProjectStatus, projects, service_accounts, users};
+    use axum::http::StatusCode;
+
+    /// Helper: create a project and an external token auth context.
+    async fn setup(
+        pool: &PgPool,
+        issuer: &str,
+        sa_claims: &HashMap<String, String>,
+        token_claims: serde_json::Value,
+    ) -> (crate::db::models::Project, AuthContext) {
+        let owner = users::create(pool, "owner@example.com").await.unwrap();
+        let project = projects::create(
+            pool,
+            "test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(owner.id),
+            None,
+        )
+        .await
+        .unwrap();
+        service_accounts::create(pool, project.id, issuer, sa_claims)
+            .await
+            .unwrap();
+        let auth = AuthContext::ExternalToken(VerifiedExternalToken {
+            issuer: issuer.to_string(),
+            claims: token_claims,
+        });
+        (project, auth)
+    }
+
+    #[sqlx::test]
+    async fn test_resolve_single_match(pool: PgPool) {
+        let mut expected = HashMap::new();
+        expected.insert("sub".to_string(), "deploy-bot".to_string());
+
+        let token_claims = serde_json::json!({"sub": "deploy-bot", "iss": "https://gitlab.com"});
+
+        let (project, auth) = setup(&pool, "https://gitlab.com", &expected, token_claims).await;
+
+        let (user, is_sa) = auth.resolve_for_project(&pool, &project).await.unwrap();
+        assert!(is_sa);
+        assert!(user.email.contains("test-project"));
+    }
+
+    #[sqlx::test]
+    async fn test_resolve_no_match(pool: PgPool) {
+        let mut expected = HashMap::new();
+        expected.insert("sub".to_string(), "deploy-bot".to_string());
+
+        let token_claims = serde_json::json!({"sub": "wrong-subject", "iss": "https://gitlab.com"});
+
+        let (project, auth) = setup(&pool, "https://gitlab.com", &expected, token_claims).await;
+
+        let err = auth.resolve_for_project(&pool, &project).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::UNAUTHORIZED);
+        assert!(err.message.contains("do not match"));
+    }
+
+    #[sqlx::test]
+    async fn test_resolve_collision_returns_conflict(pool: PgPool) {
+        let claims = HashMap::new(); // empty claims match everything
+        let token_claims = serde_json::json!({"iss": "https://gitlab.com"});
+
+        let (project, auth) = setup(&pool, "https://gitlab.com", &claims, token_claims).await;
+
+        // Create a second SA with the same empty claims → both will match
+        service_accounts::create(&pool, project.id, "https://gitlab.com", &claims)
+            .await
+            .unwrap();
+
+        let err = auth.resolve_for_project(&pool, &project).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::CONFLICT);
+    }
+
+    #[sqlx::test]
+    async fn test_resolve_malformed_claims_fails_closed(pool: PgPool) {
+        let owner = users::create(&pool, "owner@example.com").await.unwrap();
+        let project = projects::create(
+            &pool,
+            "test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(owner.id),
+            None,
+        )
+        .await
+        .unwrap();
+
+        // Insert a SA with non-string claim values (invalid for HashMap<String, String>)
+        let bad_claims = serde_json::json!({"sub": 12345});
+        sqlx::query(
+            "INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence) \
+             VALUES ($1, $2, $3, $4, 1)",
+        )
+        .bind(project.id)
+        .bind(owner.id)
+        .bind("https://gitlab.com")
+        .bind(bad_claims)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        let auth = AuthContext::ExternalToken(VerifiedExternalToken {
+            issuer: "https://gitlab.com".to_string(),
+            claims: serde_json::json!({"sub": "12345"}),
+        });
+
+        let err = auth.resolve_for_project(&pool, &project).await.unwrap_err();
+        assert_eq!(err.status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert!(err.message.contains("Invalid service account claims"));
+    }
+
+    #[sqlx::test]
+    async fn test_resolve_rise_jwt_returns_user(pool: PgPool) {
+        let user = users::create(&pool, "regular@example.com").await.unwrap();
+        let project = projects::create(
+            &pool,
+            "test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let auth = AuthContext::User(user.clone());
+        let (resolved_user, is_sa) = auth.resolve_for_project(&pool, &project).await.unwrap();
+        assert!(!is_sa);
+        assert_eq!(resolved_user.id, user.id);
     }
 }
