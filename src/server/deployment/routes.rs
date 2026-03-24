@@ -28,6 +28,10 @@ pub fn deployment_routes() -> Router<AppState> {
             get(super::handlers::get_deployment_by_project),
         )
         .route(
+            "/projects/{project_name}/deployments/{deployment_id}/status",
+            patch(super::handlers::update_deployment_status_by_project),
+        )
+        .route(
             "/projects/{project_name}/deployments/{deployment_id}/stop",
             post(super::handlers::stop_deployment),
         )

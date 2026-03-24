@@ -164,6 +164,14 @@ cargo test
 
 Use conventional commits: `feat:`, `fix:`, `docs:`, `refactor:`
 
+## Deprecated API Endpoints
+
+Endpoints listed here are kept for backward compatibility with older CLI versions. They should be removed in a future major release once all clients have migrated.
+
+| Endpoint | Replacement | Deprecated in | Reason |
+|----------|-------------|---------------|--------|
+| `PATCH /api/v1/deployments/{deployment_id}/status` | `PATCH /api/v1/projects/{project_name}/deployments/{deployment_id}/status` | v0.18.0 | `deployment_id` is not globally unique — two projects can share the same timestamp-based ID, causing status updates to hit the wrong deployment |
+
 ## Troubleshooting
 
 See [Troubleshooting](user-guide/troubleshooting.md) for common issues.

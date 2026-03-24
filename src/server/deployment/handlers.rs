@@ -8,7 +8,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use futures::StreamExt;
 use regex::Regex;
-use tracing::{debug, error, info};
+use tracing::{debug, error, info, warn};
 
 use super::models::{self, *};
 use super::state_machine;
@@ -1133,57 +1133,20 @@ pub async fn create_deployment(
     }
 }
 
-/// PATCH /deployments/{deployment_id}/status - Update deployment status
-pub async fn update_deployment_status(
-    State(state): State<AppState>,
-    Extension(user): Extension<User>,
-    Path(deployment_id): Path<String>,
-    Json(payload): Json<UpdateDeploymentStatusRequest>,
+/// Shared logic for updating a deployment's status.
+///
+/// Given a resolved deployment and project, validates permissions and applies the status update.
+async fn perform_status_update(
+    state: &AppState,
+    user: &User,
+    deployment: crate::db::models::Deployment,
+    project: &crate::db::models::Project,
+    deployment_id: &str,
+    payload: UpdateDeploymentStatusRequest,
 ) -> Result<Json<Deployment>, (StatusCode, String)> {
-    info!(
-        "Updating deployment {} status to {:?}",
-        deployment_id, payload.status
-    );
-
-    // Find all deployments with this deployment_id (there should only be one)
-    // We need to find the project first to check the deployment_id
-    // For now, let's query by deployment_id across all projects
-    // We'll need to add a function to find by deployment_id only
-
-    // Query all projects to find the one with this deployment
-    let all_projects = projects::list(&state.db_pool, None).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to list projects: {}", e),
-        )
-    })?;
-
-    let mut found_deployment: Option<crate::db::models::Deployment> = None;
-    let mut found_project: Option<crate::db::models::Project> = None;
-
-    for project in all_projects {
-        if let Ok(Some(deployment)) =
-            db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id).await
-        {
-            found_deployment = Some(deployment);
-            found_project = Some(project);
-            break;
-        }
-    }
-
-    let deployment = found_deployment.ok_or((
-        StatusCode::NOT_FOUND,
-        format!("Deployment '{}' not found", deployment_id),
-    ))?;
-
-    let project = found_project.ok_or((
-        StatusCode::NOT_FOUND,
-        format!("Project for deployment '{}' not found", deployment_id),
-    ))?;
-
     // Check if user has permission (owns the project)
     // Return 404 instead of 403 to avoid revealing project existence
-    check_deploy_permission(&state, &project, &user)
+    check_deploy_permission(state, project, user)
         .await
         .map_err(|_| {
             (
@@ -1260,13 +1223,11 @@ pub async fn update_deployment_status(
     // Only calculate URLs for non-terminal deployments that could receive traffic
     let (primary_url, custom_domain_urls) =
         if state_machine::is_terminal(&updated_deployment.status) {
-            // Terminal deployments (Failed, Stopped, Cancelled, Superseded, Expired) cannot receive traffic
             (None, vec![])
         } else {
-            // Calculate deployment URLs dynamically for active deployments
             match state
                 .deployment_backend
-                .get_deployment_urls(&updated_deployment, &project)
+                .get_deployment_urls(&updated_deployment, project)
                 .await
             {
                 Ok(urls) => (Some(urls.primary_url), urls.custom_domain_urls),
@@ -1284,15 +1245,122 @@ pub async fn update_deployment_status(
         get_creator_email(&state.db_pool, updated_deployment.created_by_id).await;
     Ok(Json(
         convert_deployment(
-            &state,
+            state,
             updated_deployment,
-            &project,
+            project,
             created_by_email,
             primary_url,
             custom_domain_urls,
         )
         .await,
     ))
+}
+
+/// PATCH /projects/{project_name}/deployments/{deployment_id}/status - Update deployment status (project-scoped)
+pub async fn update_deployment_status_by_project(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path((project_name, deployment_id)): Path<(String, String)>,
+    Json(payload): Json<UpdateDeploymentStatusRequest>,
+) -> Result<Json<Deployment>, (StatusCode, String)> {
+    info!(
+        "Updating deployment {} status to {:?} for project {}",
+        deployment_id, payload.status, project_name
+    );
+
+    // Find project by name
+    let project = projects::find_by_name(&state.db_pool, &project_name)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project '{}' not found", project_name),
+            )
+        })?;
+
+    // Find deployment by deployment_id + project_id
+    let deployment =
+        db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id)
+            .await
+            .map_err(|e| {
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to find deployment: {}", e),
+                )
+            })?
+            .ok_or_else(|| {
+                (
+                    StatusCode::NOT_FOUND,
+                    format!(
+                        "Deployment '{}' not found for project '{}'",
+                        deployment_id, project_name
+                    ),
+                )
+            })?;
+
+    perform_status_update(&state, &user, deployment, &project, &deployment_id, payload).await
+}
+
+/// PATCH /deployments/{deployment_id}/status - Update deployment status (deprecated, unscoped)
+///
+/// This endpoint is deprecated. Use `PATCH /projects/{project_name}/deployments/{deployment_id}/status` instead.
+/// Kept for backward compatibility with older CLI versions.
+pub async fn update_deployment_status(
+    State(state): State<AppState>,
+    Extension(user): Extension<User>,
+    Path(deployment_id): Path<String>,
+    Json(payload): Json<UpdateDeploymentStatusRequest>,
+) -> Result<Json<Deployment>, (StatusCode, String)> {
+    warn!(
+        "Deprecated endpoint called: PATCH /deployments/{}/status — use PATCH /projects/{{project_name}}/deployments/{}/status instead",
+        deployment_id, deployment_id
+    );
+
+    // Scan all projects to find the deployment (the original, buggy approach)
+    let all_projects = projects::list(&state.db_pool, None).await.map_err(|e| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("Failed to list projects: {}", e),
+        )
+    })?;
+
+    let mut matching_projects: Vec<(crate::db::models::Project, crate::db::models::Deployment)> =
+        Vec::new();
+
+    for project in all_projects {
+        if let Ok(Some(deployment)) =
+            db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id).await
+        {
+            matching_projects.push((project, deployment));
+        }
+    }
+
+    if matching_projects.len() > 1 {
+        let project_names: Vec<&str> = matching_projects
+            .iter()
+            .map(|(p, _)| p.name.as_str())
+            .collect();
+        warn!(
+            "Deployment ID collision on deprecated endpoint: deployment_id={} matches {} projects: {:?}. Using first match. \
+             Clients should migrate to the project-scoped endpoint.",
+            deployment_id,
+            matching_projects.len(),
+            project_names,
+        );
+    }
+
+    let (project, deployment) = matching_projects.into_iter().next().ok_or((
+        StatusCode::NOT_FOUND,
+        format!("Deployment '{}' not found", deployment_id),
+    ))?;
+
+    perform_status_update(&state, &user, deployment, &project, &deployment_id, payload).await
 }
 
 /// Query parameters for listing deployments

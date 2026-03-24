@@ -508,6 +508,7 @@ pub async fn create_deployment(
     let backend_url_clone = backend_url.to_string();
     let http_client_clone = http_client.clone();
     let token_clone = token.to_string();
+    let project_name_clone = deploy_opts.project_name.to_string();
 
     tokio::spawn(async move {
         if let Ok(()) = tokio::signal::ctrl_c().await {
@@ -518,6 +519,7 @@ pub async fn create_deployment(
                 &http_client_clone,
                 &backend_url_clone,
                 &token_clone,
+                &project_name_clone,
                 &deployment_id_clone,
             )
             .await
@@ -551,6 +553,7 @@ pub async fn create_deployment(
             &token,
             &container_cli,
             &deployment_info.credentials,
+            deploy_opts.project_name,
             &deployment_info.deployment_id,
         )
         .await?;
@@ -561,6 +564,7 @@ pub async fn create_deployment(
                 http_client,
                 backend_url,
                 &token,
+                deploy_opts.project_name,
                 &deployment_info.deployment_id,
                 "Failed",
                 Some(&e.to_string()),
@@ -576,6 +580,7 @@ pub async fn create_deployment(
                 http_client,
                 backend_url,
                 &token,
+                deploy_opts.project_name,
                 &deployment_info.deployment_id,
                 "Failed",
                 Some(&e.to_string()),
@@ -589,6 +594,7 @@ pub async fn create_deployment(
             http_client,
             backend_url,
             &token,
+            deploy_opts.project_name,
             &deployment_info.deployment_id,
             "Building",
             None,
@@ -601,6 +607,7 @@ pub async fn create_deployment(
                 http_client,
                 backend_url,
                 &token,
+                deploy_opts.project_name,
                 &deployment_info.deployment_id,
                 "Failed",
                 Some(&e.to_string()),
@@ -614,6 +621,7 @@ pub async fn create_deployment(
             http_client,
             backend_url,
             &token,
+            deploy_opts.project_name,
             &deployment_info.deployment_id,
             "Pushed",
             None,
@@ -655,6 +663,7 @@ pub async fn create_deployment(
             &token,
             options.container_cli.command(),
             &deployment_info.credentials,
+            deploy_opts.project_name,
             &deployment_info.deployment_id,
         )
         .await?;
@@ -664,6 +673,7 @@ pub async fn create_deployment(
             http_client,
             backend_url,
             &token,
+            deploy_opts.project_name,
             &deployment_info.deployment_id,
             "Building",
             None,
@@ -678,6 +688,7 @@ pub async fn create_deployment(
                 http_client,
                 backend_url,
                 &token,
+                deploy_opts.project_name,
                 &deployment_info.deployment_id,
                 "Failed",
                 Some(&e.to_string()),
@@ -691,6 +702,7 @@ pub async fn create_deployment(
             http_client,
             backend_url,
             &token,
+            deploy_opts.project_name,
             &deployment_info.deployment_id,
             "Pushed",
             None,
@@ -726,6 +738,7 @@ async fn login_to_registry(
     token: &str,
     container_cli: &str,
     credentials: &RegistryCredentials,
+    project_name: &str,
     deployment_id: &str,
 ) -> Result<()> {
     let result = match credentials.auth_method {
@@ -760,6 +773,7 @@ async fn login_to_registry(
             http_client,
             backend_url,
             token,
+            project_name,
             deployment_id,
             "Failed",
             Some(&e.to_string()),
@@ -868,11 +882,12 @@ async fn cancel_deployment(
     http_client: &Client,
     backend_url: &str,
     token: &str,
+    project_name: &str,
     deployment_id: &str,
 ) -> Result<()> {
     let url = format!(
-        "{}/api/v1/deployments/{}/status",
-        backend_url, deployment_id
+        "{}/api/v1/projects/{}/deployments/{}/status",
+        backend_url, project_name, deployment_id
     );
 
     let payload = serde_json::json!({
@@ -903,13 +918,14 @@ async fn update_deployment_status(
     http_client: &Client,
     backend_url: &str,
     token: &str,
+    project_name: &str,
     deployment_id: &str,
     status: &str,
     error_message: Option<&str>,
 ) -> Result<()> {
     let url = format!(
-        "{}/api/v1/deployments/{}/status",
-        backend_url, deployment_id
+        "{}/api/v1/projects/{}/deployments/{}/status",
+        backend_url, project_name, deployment_id
     );
     let mut payload = serde_json::json!({
         "status": status,
