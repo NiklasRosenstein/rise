@@ -151,6 +151,45 @@ pub async fn find_by_deployment_id(
     Ok(deployment)
 }
 
+/// Find deployments by deployment_id across all projects (unscoped).
+///
+/// Returns up to `limit` matching deployments. Used by the deprecated unscoped
+/// status update endpoint to detect collisions.
+pub async fn find_by_deployment_id_unscoped(
+    pool: &PgPool,
+    deployment_id: &str,
+    limit: i64,
+) -> Result<Vec<Deployment>> {
+    let deployments = sqlx::query_as!(
+        Deployment,
+        r#"
+        SELECT
+            id, deployment_id, project_id, created_by_id,
+            status as "status: DeploymentStatus",
+            deployment_group, expires_at,
+            completed_at, error_message, build_logs,
+            controller_metadata as "controller_metadata: serde_json::Value",
+            image, image_digest, rolled_back_from_deployment_id,
+            http_port, needs_reconcile, is_active,
+            deploying_started_at,
+            first_healthy_at,
+            termination_reason as "termination_reason: _",
+            created_at, updated_at
+        FROM deployments
+        WHERE deployment_id = $1
+        ORDER BY created_at ASC
+        LIMIT $2
+        "#,
+        deployment_id,
+        limit
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to find deployments by deployment_id (unscoped)")?;
+
+    Ok(deployments)
+}
+
 /// Create a new deployment
 pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result<Deployment> {
     let status_str = params.status.to_string();

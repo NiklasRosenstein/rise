@@ -1311,6 +1311,9 @@ pub async fn update_deployment_status_by_project(
 ///
 /// This endpoint is deprecated. Use `PATCH /projects/{project_name}/deployments/{deployment_id}/status` instead.
 /// Kept for backward compatibility with older CLI versions.
+///
+/// Returns 409 Conflict when multiple projects have deployments with the same deployment_id,
+/// since we cannot determine which one the caller intended.
 pub async fn update_deployment_status(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
@@ -1322,43 +1325,62 @@ pub async fn update_deployment_status(
         deployment_id, deployment_id
     );
 
-    // Scan all projects to find the deployment (the original, buggy approach)
-    let all_projects = projects::list(&state.db_pool, None).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to list projects: {}", e),
-        )
-    })?;
+    // Single query to find matching deployments across all projects (LIMIT 2 to detect collisions)
+    let matching_deployments =
+        db_deployments::find_by_deployment_id_unscoped(&state.db_pool, &deployment_id, 2)
+            .await
+            .map_err(|e| {
+                error!(
+                    "Failed to query deployment '{}' (unscoped): {:?}",
+                    deployment_id, e
+                );
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    format!("Failed to query deployment '{}': {}", deployment_id, e),
+                )
+            })?;
 
-    let mut matching_projects: Vec<(crate::db::models::Project, crate::db::models::Deployment)> =
-        Vec::new();
-
-    for project in all_projects {
-        if let Ok(Some(deployment)) =
-            db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id).await
-        {
-            matching_projects.push((project, deployment));
-        }
-    }
-
-    if matching_projects.len() > 1 {
-        let project_names: Vec<&str> = matching_projects
+    if matching_deployments.len() > 1 {
+        let project_ids: Vec<String> = matching_deployments
             .iter()
-            .map(|(p, _)| p.name.as_str())
+            .map(|d| d.project_id.to_string())
             .collect();
         warn!(
-            "Deployment ID collision on deprecated endpoint: deployment_id={} matches {} projects: {:?}. Using first match. \
-             Clients should migrate to the project-scoped endpoint.",
+            "Deployment ID collision on deprecated endpoint: deployment_id={} matches {} projects: {:?}. \
+             Refusing to proceed. Clients should migrate to the project-scoped endpoint.",
             deployment_id,
-            matching_projects.len(),
-            project_names,
+            matching_deployments.len(),
+            project_ids,
         );
+        return Err((
+            StatusCode::CONFLICT,
+            format!(
+                "Ambiguous deployment_id '{}': matches multiple projects. \
+                 Use PATCH /api/v1/projects/{{project_name}}/deployments/{}/status instead.",
+                deployment_id, deployment_id
+            ),
+        ));
     }
 
-    let (project, deployment) = matching_projects.into_iter().next().ok_or((
+    let deployment = matching_deployments.into_iter().next().ok_or((
         StatusCode::NOT_FOUND,
         format!("Deployment '{}' not found", deployment_id),
     ))?;
+
+    let project = projects::find_by_id(&state.db_pool, deployment.project_id)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to find project: {}", e),
+            )
+        })?
+        .ok_or_else(|| {
+            (
+                StatusCode::NOT_FOUND,
+                format!("Project for deployment '{}' not found", deployment_id),
+            )
+        })?;
 
     perform_status_update(&state, &user, deployment, &project, &deployment_id, payload).await
 }
