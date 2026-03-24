@@ -106,7 +106,12 @@ async fn authenticate_service_account(
                 matching_accounts.push(sa);
             }
             Err(e) => {
-                // Collect validation errors for better error reporting
+                tracing::debug!(
+                    "Service account {} (project {}) validation failed: {:#}",
+                    sa.id,
+                    sa.project_id,
+                    e
+                );
                 validation_errors.push(e.to_string());
             }
         }
@@ -114,20 +119,23 @@ async fn authenticate_service_account(
 
     // Check for collisions
     if matching_accounts.is_empty() {
-        // Provide specific error messages based on validation failures
-        let error_msg = if validation_errors.iter().any(|e| e.contains("'aud'")) {
-            "The provided JWT is missing the \"aud\" claim".to_string()
-        } else if validation_errors.iter().any(|e| {
-            e.contains("validate JWT token")
-                || e.contains("signature")
-                || e.contains("InvalidSignature")
-        }) {
-            "The provided JWT signature could not be validated".to_string()
-        } else {
-            "No service account matches the provided claims".to_string()
-        };
+        // Log all validation errors for debugging
+        for (i, err) in validation_errors.iter().enumerate() {
+            tracing::warn!(
+                "Service account validation error [{}/{}]: {}",
+                i + 1,
+                validation_errors.len(),
+                err
+            );
+        }
 
-        tracing::warn!("Service account validation failed: {}", error_msg);
+        // Include validation details in the response so users can self-diagnose
+        let details = validation_errors.join("; ");
+        let error_msg = format!(
+            "No service account matches the provided token: {}",
+            details
+        );
+
         return Err((StatusCode::UNAUTHORIZED, error_msg));
     }
 
