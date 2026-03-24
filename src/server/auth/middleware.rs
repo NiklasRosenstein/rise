@@ -7,7 +7,7 @@ use axum::{
 use base64::{engine::general_purpose, Engine as _};
 use jsonwebtoken::decode_header;
 use serde::Deserialize;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use crate::db::{service_accounts, users, User};
 use crate::server::auth::cookie_helpers;
@@ -58,6 +58,32 @@ fn extract_rise_jwt_from_cookie(headers: &HeaderMap) -> Option<String> {
 #[derive(Debug, Deserialize)]
 struct MinimalClaims {
     iss: String,
+}
+
+/// Sanitize a validation error message for inclusion in HTTP responses.
+///
+/// Removes expected claim values from error messages to prevent leaking
+/// cross-project service account configuration. The caller's actual token
+/// values are safe to include (they already know those), but the expected
+/// values configured on other projects' service accounts must not be revealed.
+fn sanitize_validation_error(error: &str) -> String {
+    if let Some(rest) = error.strip_prefix("Claim mismatch: '") {
+        // Formats:
+        //   "Claim mismatch: 'key' expected 'expected', got 'actual'"
+        //   "Claim mismatch: 'key' pattern 'pattern' does not match 'actual'"
+        // Redact to: "Claim 'key' does not match"
+        if let Some(key) = rest.split('\'').next() {
+            return format!("Claim '{}' does not match", key);
+        }
+        "Claim does not match".to_string()
+    } else if error.contains("not found or not a string") {
+        // "Claim 'key' not found or not a string" - the claim key reveals which
+        // claims other projects' service accounts expect
+        "Required claim not found in token".to_string()
+    } else {
+        // Other errors (signature validation, expiry, JWKS issues) are safe
+        error.to_string()
+    }
 }
 
 /// Authenticate as a service account using external OIDC provider
@@ -119,7 +145,7 @@ async fn authenticate_service_account(
 
     // Check for collisions
     if matching_accounts.is_empty() {
-        // Log all validation errors for debugging
+        // Log all validation errors for debugging (full details, server-side only)
         for (i, err) in validation_errors.iter().enumerate() {
             tracing::warn!(
                 "Service account validation error [{}/{}]: {}",
@@ -129,8 +155,15 @@ async fn authenticate_service_account(
             );
         }
 
-        // Include validation details in the response so users can self-diagnose
-        let details = validation_errors.join("; ");
+        // Sanitize and deduplicate errors for the response to avoid leaking
+        // cross-project service account configuration details
+        let sanitized: Vec<String> = validation_errors
+            .iter()
+            .map(|e| sanitize_validation_error(e))
+            .collect::<HashSet<_>>()
+            .into_iter()
+            .collect();
+        let details = sanitized.join("; ");
         let error_msg = format!("No service account matches the provided token: {}", details);
 
         return Err((StatusCode::UNAUTHORIZED, error_msg));
@@ -439,5 +472,44 @@ mod tests {
 
         let result = extract_bearer_token(&headers);
         assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_sanitize_validation_error_exact_claim_mismatch() {
+        let error = "Claim mismatch: 'sub' expected 'secret-value', got 'my-token-sub'";
+        assert_eq!(
+            sanitize_validation_error(error),
+            "Claim 'sub' does not match"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_validation_error_wildcard_claim_mismatch() {
+        let error = "Claim mismatch: 'project_path' pattern 'org/*' does not match 'other/repo'";
+        assert_eq!(
+            sanitize_validation_error(error),
+            "Claim 'project_path' does not match"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_validation_error_claim_not_found() {
+        let error = "Claim 'department' not found or not a string";
+        assert_eq!(
+            sanitize_validation_error(error),
+            "Required claim not found in token"
+        );
+    }
+
+    #[test]
+    fn test_sanitize_validation_error_safe_errors_pass_through() {
+        let error = "Token has expired";
+        assert_eq!(sanitize_validation_error(error), "Token has expired");
+
+        let error = "Failed to validate JWT token: InvalidSignature";
+        assert_eq!(
+            sanitize_validation_error(error),
+            "Failed to validate JWT token: InvalidSignature"
+        );
     }
 }
