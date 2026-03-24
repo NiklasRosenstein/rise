@@ -134,23 +134,47 @@ impl ServerError {
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
         // Log server errors (5xx) with full context using structured fields
+        // 503 Service Unavailable is logged at WARN since it typically represents
+        // expected transient conditions (e.g. pod not ready yet), not actual failures.
         if self.status.is_server_error() {
-            // Log with structured fields to prevent log injection
-            if let Some(source) = &self.source {
-                tracing::error!(
-                    status = self.status.as_u16(),
-                    message = %self.message,
-                    context = ?self.context,
-                    error = ?source,
-                    "Server error"
-                );
+            let log_level = if self.status == StatusCode::SERVICE_UNAVAILABLE {
+                tracing::Level::WARN
             } else {
-                tracing::error!(
-                    status = self.status.as_u16(),
-                    message = %self.message,
-                    context = ?self.context,
-                    "Server error"
-                );
+                tracing::Level::ERROR
+            };
+
+            if let Some(source) = &self.source {
+                match log_level {
+                    tracing::Level::WARN => tracing::warn!(
+                        status = self.status.as_u16(),
+                        message = %self.message,
+                        context = ?self.context,
+                        error = ?source,
+                        "Server error"
+                    ),
+                    _ => tracing::error!(
+                        status = self.status.as_u16(),
+                        message = %self.message,
+                        context = ?self.context,
+                        error = ?source,
+                        "Server error"
+                    ),
+                }
+            } else {
+                match log_level {
+                    tracing::Level::WARN => tracing::warn!(
+                        status = self.status.as_u16(),
+                        message = %self.message,
+                        context = ?self.context,
+                        "Server error"
+                    ),
+                    _ => tracing::error!(
+                        status = self.status.as_u16(),
+                        message = %self.message,
+                        context = ?self.context,
+                        "Server error"
+                    ),
+                }
             }
         }
 
