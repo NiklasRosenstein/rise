@@ -61,7 +61,12 @@ async fn check_deploy_permission(
         let team = db_teams::find_by_id(&state.db_pool, team_id)
             .await
             .internal_err("Failed to fetch team")?
-            .ok_or_else(|| ServerError::not_found("Team not found"))?;
+            .ok_or_else(|| {
+                ServerError::internal(format!(
+                    "Data integrity error: project {} references non-existent team {}",
+                    project.id, team_id
+                ))
+            })?;
 
         return Err(ServerError::forbidden(format!(
             "You must be a member of team '{}' to deploy to this project",

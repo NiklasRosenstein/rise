@@ -116,12 +116,6 @@ pub async fn create_deployment_with_hooks(
         {
             Ok(vars) => vars,
             Err(e) => {
-                error!(
-                    "Extension type '{}' before_deployment hook failed: {:?}",
-                    extension.extension_type(),
-                    e
-                );
-
                 let error_msg = format!(
                     "Extension type '{}' failed: {}",
                     extension.extension_type(),
@@ -136,7 +130,13 @@ pub async fn create_deployment_with_hooks(
                     );
                 }
 
-                return Err(ServerError::internal(error_msg));
+                return Err(ServerError::internal_anyhow(
+                    e,
+                    format!(
+                        "Extension type '{}' before_deployment hook failed",
+                        extension.extension_type()
+                    ),
+                ));
             }
         };
 
@@ -158,12 +158,7 @@ pub async fn create_deployment_with_hooks(
             )
             .await
             {
-                error!(
-                    "Failed to write env var '{}' for deployment {}: {:?}",
-                    var.key, deployment.deployment_id, e
-                );
-
-                let error_msg = format!("Failed to write env var '{}': {}", var.key, e);
+                let error_msg = format!("Failed to write env var '{}'", var.key);
                 if let Err(mark_err) =
                     db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await
                 {
@@ -173,7 +168,7 @@ pub async fn create_deployment_with_hooks(
                     );
                 }
 
-                return Err(ServerError::internal(error_msg));
+                return Err(ServerError::internal_anyhow(e, error_msg));
             }
         }
     }

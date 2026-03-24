@@ -83,7 +83,7 @@ pub async fn create_extension(
         if error_msg.contains("duplicate key") || error_msg.contains("unique constraint") {
             ServerError::conflict(format!("Extension '{}' already exists", extension_name))
         } else {
-            ServerError::internal(error_msg)
+            ServerError::internal_anyhow(e, "Failed to create extension")
         }
     })?;
 
