@@ -1,7 +1,6 @@
 use anyhow::Context;
 use axum::{
     extract::{Extension, Path, Query, State},
-    http::StatusCode,
     response::sse::{Event, KeepAlive, Sse},
     Json,
 };
@@ -17,6 +16,7 @@ use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
 use crate::db::{
     deployments as db_deployments, projects, service_accounts, teams as db_teams, users,
 };
+use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::registry::ImageTagType;
 use crate::server::state::AppState;
 
@@ -25,7 +25,7 @@ async fn check_deploy_permission(
     state: &AppState,
     project: &crate::db::models::Project,
     user: &User,
-) -> Result<(), String> {
+) -> Result<(), ServerError> {
     // Admins have full access
     if state.is_admin(&user.email) {
         return Ok(());
@@ -34,7 +34,7 @@ async fn check_deploy_permission(
     // Check if user is a service account for this project
     let is_sa = service_accounts::find_by_user_and_project(&state.db_pool, user.id, project.id)
         .await
-        .map_err(|e| format!("Failed to check service account status: {}", e))?
+        .internal_err("Failed to check service account status")?
         .is_some();
 
     if is_sa {
@@ -52,7 +52,7 @@ async fn check_deploy_permission(
     if let Some(team_id) = project.owner_team_id {
         let is_member = db_teams::is_member(&state.db_pool, team_id, user.id)
             .await
-            .map_err(|e| format!("Failed to check team membership: {}", e))?;
+            .internal_err("Failed to check team membership")?;
 
         if is_member {
             return Ok(());
@@ -60,16 +60,18 @@ async fn check_deploy_permission(
 
         let team = db_teams::find_by_id(&state.db_pool, team_id)
             .await
-            .map_err(|e| format!("Failed to fetch team: {}", e))?
-            .ok_or_else(|| "Team not found".to_string())?;
+            .internal_err("Failed to fetch team")?
+            .ok_or_else(|| ServerError::not_found("Team not found"))?;
 
-        return Err(format!(
+        return Err(ServerError::forbidden(format!(
             "You must be a member of team '{}' to deploy to this project",
             team.name
-        ));
+        )));
     }
 
-    Err("You do not have permission to deploy to this project".to_string())
+    Err(ServerError::forbidden(
+        "You do not have permission to deploy to this project",
+    ))
 }
 
 /// Validate group name format: must be 'default' or match [a-z0-9][a-z0-9/-]*[a-z0-9]
@@ -254,18 +256,12 @@ async fn insert_rise_env_vars(
     state: &AppState,
     deployment: &crate::db::models::Deployment,
     project: &crate::db::models::Project,
-) -> Result<(), (StatusCode, String)> {
+) -> Result<(), ServerError> {
     let deployment_urls = state
         .deployment_backend
         .get_deployment_urls(deployment, project)
         .await
-        .map_err(|e| {
-            error!("Failed to get deployment URLs: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get deployment URLs: {}", e),
-            )
-        })?;
+        .internal_err("Failed to get deployment URLs")?;
 
     let vars = models::rise_system_env_vars(
         &state.public_url,
@@ -283,13 +279,7 @@ async fn insert_rise_env_vars(
             false, // is_protected
         )
         .await
-        .map_err(|e| {
-            error!("Failed to insert {} env var: {}", key, e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to insert {}: {}", key, e),
-            )
-        })?;
+        .internal_err(format!("Failed to insert {}", key))?;
     }
 
     info!(
@@ -307,7 +297,7 @@ async fn apply_env_overrides(
     state: &AppState,
     deployment_id: uuid::Uuid,
     overrides: &[models::EnvOverride],
-) -> Result<(), (StatusCode, String)> {
+) -> Result<(), ServerError> {
     if overrides.is_empty() {
         return Ok(());
     }
@@ -324,21 +314,14 @@ async fn apply_env_overrides(
         // Encrypt if secret
         let value_to_store = if env_override.is_secret {
             let provider = state.encryption_provider.as_ref().ok_or_else(|| {
-                (
-                    StatusCode::BAD_REQUEST,
-                    "Cannot store secret variables: no encryption provider configured".to_string(),
+                ServerError::bad_request(
+                    "Cannot store secret variables: no encryption provider configured",
                 )
             })?;
-            provider.encrypt(&env_override.value).await.map_err(|e| {
-                error!(
-                    "Failed to encrypt env override '{}': {:?}",
-                    env_override.key, e
-                );
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to encrypt secret '{}': {}", env_override.key, e),
-                )
-            })?
+            provider
+                .encrypt(&env_override.value)
+                .await
+                .internal_err(format!("Failed to encrypt secret '{}'", env_override.key))?
         } else {
             env_override.value.clone()
         };
@@ -352,16 +335,7 @@ async fn apply_env_overrides(
             is_protected,
         )
         .await
-        .map_err(|e| {
-            error!(
-                "Failed to upsert env override '{}': {}",
-                env_override.key, e
-            );
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to set env override '{}': {}", env_override.key, e),
-            )
-        })?;
+        .internal_err(format!("Failed to set env override '{}'", env_override.key))?;
     }
 
     Ok(())
@@ -375,39 +349,32 @@ fn normalize_env_override_is_protected(env_override: &models::EnvOverride) -> bo
     env_override.is_protected.unwrap_or(env_override.is_secret)
 }
 
-fn validate_env_override(env_override: &models::EnvOverride) -> Result<bool, (StatusCode, String)> {
+fn validate_env_override(env_override: &models::EnvOverride) -> Result<bool, ServerError> {
     if !validate_env_override_key(&env_override.key) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Invalid env var key '{}' (must be alphanumeric with underscores)",
-                env_override.key
-            ),
-        ));
+        return Err(ServerError::bad_request(format!(
+            "Invalid env var key '{}' (must be alphanumeric with underscores)",
+            env_override.key
+        )));
     }
 
     if env_override.key == "PORT" {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "PORT cannot be set via env overrides. Use http_port/--http-port instead.".to_string(),
+        return Err(ServerError::bad_request(
+            "PORT cannot be set via env overrides. Use http_port/--http-port instead.",
         ));
     }
 
     let is_protected = normalize_env_override_is_protected(env_override);
     if is_protected && !env_override.is_secret {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Env override '{}' cannot be protected unless it is also secret.",
-                env_override.key
-            ),
-        ));
+        return Err(ServerError::bad_request(format!(
+            "Env override '{}' cannot be protected unless it is also secret.",
+            env_override.key
+        )));
     }
 
     Ok(is_protected)
 }
 
-fn validate_env_overrides(overrides: &[models::EnvOverride]) -> Result<(), (StatusCode, String)> {
+fn validate_env_overrides(overrides: &[models::EnvOverride]) -> Result<(), ServerError> {
     for env_override in overrides {
         validate_env_override(env_override)?;
     }
@@ -500,7 +467,7 @@ async fn resolve_effective_http_port(
     state: &AppState,
     project_id: uuid::Uuid,
     explicit_port: Option<u16>,
-) -> Result<u16, (StatusCode, String)> {
+) -> Result<u16, ServerError> {
     // 1. Explicit port takes precedence
     if let Some(port) = explicit_port {
         return Ok(port);
@@ -509,13 +476,7 @@ async fn resolve_effective_http_port(
     // 2. Check project's PORT env var
     let project_env_vars = crate::db::env_vars::list_project_env_vars(&state.db_pool, project_id)
         .await
-        .map_err(|e| {
-            error!("Failed to list project env vars: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list project environment variables: {}", e),
-            )
-        })?;
+        .internal_err("Failed to list project environment variables")?;
 
     if let Some(port_var) = project_env_vars.iter().find(|v| v.key == "PORT") {
         if let Ok(port) = port_var.value.parse::<u16>() {
@@ -541,26 +502,22 @@ pub async fn create_deployment(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Json(payload): Json<CreateDeploymentRequest>,
-) -> Result<Json<CreateDeploymentResponse>, (StatusCode, String)> {
+) -> Result<Json<CreateDeploymentResponse>, ServerError> {
     info!("Creating deployment for project '{}'", payload.project);
 
     // Validate deployment group name
     if !is_valid_group_name(&payload.group) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (no consecutive hyphens, normalized length max 63 chars)",
-                payload.group
-            ),
-        ));
+        return Err(ServerError::bad_request(format!(
+            "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (no consecutive hyphens, normalized length max 63 chars)",
+            payload.group
+        )));
     }
 
     // Validate http_port if provided (should be 1-65535)
     if let Some(port) = payload.http_port {
         if port == 0 {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "HTTP port must be between 1 and 65535".to_string(),
+            return Err(ServerError::bad_request(
+                "HTTP port must be between 1 and 65535",
             ));
         }
     }
@@ -570,10 +527,10 @@ pub async fn create_deployment(
     // Parse expiration duration if provided
     let expires_at = if let Some(ref expires_in) = payload.expires_in {
         Some(parse_expiration(expires_in).map_err(|e| {
-            (
-                StatusCode::BAD_REQUEST,
-                format!("Invalid expiration duration '{}': {}", expires_in, e),
-            )
+            ServerError::bad_request(format!(
+                "Invalid expiration duration '{}': {}",
+                expires_in, e
+            ))
         })?)
     } else {
         None
@@ -582,17 +539,9 @@ pub async fn create_deployment(
     // Query project by name
     let project = projects::find_by_name(&state.db_pool, &payload.project)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to query project: {}", e),
-            )
-        })?
+        .internal_err("Failed to query project")?
         .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", payload.project),
-            )
+            ServerError::not_found(format!("Project '{}' not found", payload.project))
         })?;
 
     // Prevent deployments on projects in deletion lifecycle
@@ -601,25 +550,17 @@ pub async fn create_deployment(
         project.status,
         crate::db::models::ProjectStatus::Deleting | crate::db::models::ProjectStatus::Terminated
     ) {
-        return Err((
-            StatusCode::CONFLICT,
-            format!(
-                "Cannot create deployment for project in {:?} state",
-                project.status
-            ),
-        ));
+        return Err(ServerError::conflict(format!(
+            "Cannot create deployment for project in {:?} state",
+            project.status
+        )));
     }
 
     // Check deployment permissions
     // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", payload.project),
-            )
-        })?;
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", payload.project)))?;
 
     // Generate deployment ID
     let deployment_id = generate_deployment_id();
@@ -651,31 +592,20 @@ pub async fn create_deployment(
             from_deployment_id,
         )
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to find source deployment: {}", e),
-            )
-        })?
+        .internal_err("Failed to find source deployment")?
         .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!(
-                    "Source deployment '{}' not found for project '{}'",
-                    from_deployment_id, payload.project
-                ),
-            )
+            ServerError::not_found(format!(
+                "Source deployment '{}' not found for project '{}'",
+                from_deployment_id, payload.project
+            ))
         })?;
 
         // Verify the source deployment already has a reusable image.
         if !state_machine::can_create_from(&source_deployment) {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                format!(
-                    "Cannot create deployment from '{}' because its image is not available yet (status '{}').",
-                    from_deployment_id, source_deployment.status
-                ),
-            ));
+            return Err(ServerError::bad_request(format!(
+                "Cannot create deployment from '{}' because its image is not available yet (status '{}').",
+                from_deployment_id, source_deployment.status
+            )));
         }
 
         // For chained redeployments, follow the chain to find the original source
@@ -738,16 +668,7 @@ pub async fn create_deployment(
                 new_deployment.id,
             )
             .await
-            .map_err(|e| {
-                error!(
-                    "Failed to copy environment variables from deployment {}: {}",
-                    from_deployment_id, e
-                );
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to copy environment variables: {}", e),
-                )
-            })?;
+            .internal_err("Failed to copy environment variables")?;
         } else {
             // Copy current project environment variables to deployment
             info!("Using current project environment variables");
@@ -757,16 +678,7 @@ pub async fn create_deployment(
                 new_deployment.id,
             )
             .await
-            .map_err(|e| {
-                error!(
-                    "Failed to copy environment variables for deployment {}: {}",
-                    deployment_id, e
-                );
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to copy environment variables: {}", e),
-                )
-            })?;
+            .internal_err("Failed to copy environment variables")?;
         }
 
         // Apply env overrides from the request
@@ -782,13 +694,7 @@ pub async fn create_deployment(
             false, // is_protected
         )
         .await
-        .map_err(|e| {
-            error!("Failed to insert PORT env var: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to insert PORT env var: {}", e),
-            )
-        })?;
+        .internal_err("Failed to insert PORT env var")?;
 
         // Insert Rise-provided environment variables
         insert_rise_env_vars(&state, &new_deployment, &project).await?;
@@ -839,12 +745,7 @@ pub async fn create_deployment(
                 .registry_provider
                 .get_credentials(&payload.project)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to get credentials: {}", e),
-                    )
-                })?;
+                .internal_err("Failed to get credentials")?;
             let image_tag = state.registry_provider.get_image_tag(
                 &payload.project,
                 &deployment_id,
@@ -882,16 +783,7 @@ pub async fn create_deployment(
                 deployment.id,
             )
             .await
-            .map_err(|e| {
-                error!(
-                    "Failed to copy environment variables for deployment {}: {}",
-                    deployment_id, e
-                );
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to copy environment variables: {}", e),
-                )
-            })?;
+            .internal_err("Failed to copy environment variables")?;
 
             // Apply env overrides from the request
             apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
@@ -905,13 +797,7 @@ pub async fn create_deployment(
                 false,
             )
             .await
-            .map_err(|e| {
-                error!("Failed to insert PORT env var: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to insert PORT env var: {}", e),
-                )
-            })?;
+            .internal_err("Failed to insert PORT env var")?;
 
             insert_rise_env_vars(&state, &deployment, &project).await?;
 
@@ -941,14 +827,7 @@ pub async fn create_deployment(
         )
         .await
         .map_err(|e| {
-            error!(
-                "Failed to resolve image '{}' (normalized from '{}'): {}",
-                normalized_image, user_image, e
-            );
-            (
-                StatusCode::BAD_REQUEST,
-                format!("Failed to resolve image '{}': {}", user_image, e),
-            )
+            ServerError::bad_request(format!("Failed to resolve image '{}': {}", user_image, e))
         })?;
 
         info!("Successfully resolved image to digest: {}", image_digest);
@@ -985,16 +864,7 @@ pub async fn create_deployment(
             deployment.id,
         )
         .await
-        .map_err(|e| {
-            error!(
-                "Failed to copy environment variables for deployment {}: {}",
-                deployment_id, e
-            );
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to copy environment variables: {}", e),
-            )
-        })?;
+        .internal_err("Failed to copy environment variables")?;
 
         // Apply env overrides from the request
         apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
@@ -1010,13 +880,7 @@ pub async fn create_deployment(
             false, // is_protected
         )
         .await
-        .map_err(|e| {
-            error!("Failed to insert PORT env var: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to insert PORT env var: {}", e),
-            )
-        })?;
+        .internal_err("Failed to insert PORT env var")?;
 
         // Insert Rise-provided environment variables
         insert_rise_env_vars(&state, &deployment, &project).await?;
@@ -1040,12 +904,7 @@ pub async fn create_deployment(
             .registry_provider
             .get_credentials(&payload.project)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get credentials: {}", e),
-                )
-            })?;
+            .internal_err("Failed to get credentials")?;
 
         // Get full image tag from provider for CLI client (uses client_registry_url if configured)
         let image_tag = state.registry_provider.get_image_tag(
@@ -1088,16 +947,7 @@ pub async fn create_deployment(
             deployment.id,
         )
         .await
-        .map_err(|e| {
-            error!(
-                "Failed to copy environment variables for deployment {}: {}",
-                deployment_id, e
-            );
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to copy environment variables: {}", e),
-            )
-        })?;
+        .internal_err("Failed to copy environment variables")?;
 
         // Apply env overrides from the request
         apply_env_overrides(&state, deployment.id, &payload.env_overrides).await?;
@@ -1113,13 +963,7 @@ pub async fn create_deployment(
             false, // is_protected
         )
         .await
-        .map_err(|e| {
-            error!("Failed to insert PORT env var: {}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to insert PORT env var: {}", e),
-            )
-        })?;
+        .internal_err("Failed to insert PORT env var")?;
 
         // Insert Rise-provided environment variables
         insert_rise_env_vars(&state, &deployment, &project).await?;
@@ -1143,17 +987,12 @@ async fn perform_status_update(
     project: &crate::db::models::Project,
     deployment_id: &str,
     payload: UpdateDeploymentStatusRequest,
-) -> Result<Json<Deployment>, (StatusCode, String)> {
+) -> Result<Json<Deployment>, ServerError> {
     // Check if user has permission (owns the project)
     // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(state, project, user)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Deployment '{}' not found", deployment_id),
-            )
-        })?;
+        .map_err(|_| ServerError::not_found(format!("Deployment '{}' not found", deployment_id)))?;
 
     // Update status in database
     let status_copy = payload.status.clone();
@@ -1162,22 +1001,12 @@ async fn perform_status_update(
             let error_msg = payload.error_message.as_deref().unwrap_or("Unknown error");
             let deployment = db_deployments::mark_failed(&state.db_pool, deployment.id, error_msg)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to update deployment: {}", e),
-                    )
-                })?;
+                .internal_err("Failed to update deployment")?;
 
             // Update project status to Failed
             projects::update_calculated_status(&state.db_pool, project.id)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to update project status: {}", e),
-                    )
-                })?;
+                .internal_err("Failed to update project status")?;
 
             deployment
         }
@@ -1192,24 +1021,16 @@ async fn perform_status_update(
                         // Return BAD_REQUEST for validation errors, INTERNAL_SERVER_ERROR otherwise
                         let error_msg = e.to_string();
                         if error_msg.contains("Invalid deployment state transition") {
-                            (StatusCode::BAD_REQUEST, error_msg)
+                            ServerError::bad_request(error_msg)
                         } else {
-                            (
-                                StatusCode::INTERNAL_SERVER_ERROR,
-                                format!("Failed to update deployment: {}", e),
-                            )
+                            ServerError::internal_anyhow(e, "Failed to update deployment")
                         }
                     })?;
 
             // Update project status (e.g., to Deploying)
             projects::update_calculated_status(&state.db_pool, project.id)
                 .await
-                .map_err(|e| {
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to update project status: {}", e),
-                    )
-                })?;
+                .internal_err("Failed to update project status")?;
 
             deployment
         }
@@ -1262,7 +1083,7 @@ pub async fn update_deployment_status_by_project(
     Extension(user): Extension<User>,
     Path((project_name, deployment_id)): Path<(String, String)>,
     Json(payload): Json<UpdateDeploymentStatusRequest>,
-) -> Result<Json<Deployment>, (StatusCode, String)> {
+) -> Result<Json<Deployment>, ServerError> {
     info!(
         "Updating deployment {} status to {:?} for project {}",
         deployment_id, payload.status, project_name
@@ -1271,37 +1092,19 @@ pub async fn update_deployment_status_by_project(
     // Find project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to find project: {}", e),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Find deployment by deployment_id + project_id
     let deployment =
         db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to find deployment: {}", e),
-                )
-            })?
+            .internal_err("Failed to find deployment")?
             .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    format!(
-                        "Deployment '{}' not found for project '{}'",
-                        deployment_id, project_name
-                    ),
-                )
+                ServerError::not_found(format!(
+                    "Deployment '{}' not found for project '{}'",
+                    deployment_id, project_name
+                ))
             })?;
 
     perform_status_update(&state, &user, deployment, &project, &deployment_id, payload).await
@@ -1319,7 +1122,7 @@ pub async fn update_deployment_status(
     Extension(user): Extension<User>,
     Path(deployment_id): Path<String>,
     Json(payload): Json<UpdateDeploymentStatusRequest>,
-) -> Result<Json<Deployment>, (StatusCode, String)> {
+) -> Result<Json<Deployment>, ServerError> {
     warn!(
         "Deprecated endpoint called: PATCH /deployments/{}/status — use PATCH /projects/{{project_name}}/deployments/{}/status instead",
         deployment_id, deployment_id
@@ -1329,16 +1132,7 @@ pub async fn update_deployment_status(
     let matching_deployments =
         db_deployments::find_by_deployment_id_unscoped(&state.db_pool, &deployment_id, 2)
             .await
-            .map_err(|e| {
-                error!(
-                    "Failed to query deployment '{}' (unscoped): {:?}",
-                    deployment_id, e
-                );
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to query deployment '{}': {}", deployment_id, e),
-                )
-            })?;
+            .internal_err(format!("Failed to query deployment '{}'", deployment_id))?;
 
     if matching_deployments.len() > 1 {
         let project_ids: Vec<String> = matching_deployments
@@ -1352,34 +1146,25 @@ pub async fn update_deployment_status(
             matching_deployments.len(),
             project_ids,
         );
-        return Err((
-            StatusCode::CONFLICT,
-            format!(
-                "Ambiguous deployment_id '{}': matches multiple projects. \
-                 Use PATCH /api/v1/projects/{{project_name}}/deployments/{}/status instead.",
-                deployment_id, deployment_id
-            ),
-        ));
+        return Err(ServerError::conflict(format!(
+            "Ambiguous deployment_id '{}': matches multiple projects. \
+             Use PATCH /api/v1/projects/{{project_name}}/deployments/{}/status instead.",
+            deployment_id, deployment_id
+        )));
     }
 
-    let deployment = matching_deployments.into_iter().next().ok_or((
-        StatusCode::NOT_FOUND,
-        format!("Deployment '{}' not found", deployment_id),
-    ))?;
+    let deployment = matching_deployments.into_iter().next().ok_or_else(|| {
+        ServerError::not_found(format!("Deployment '{}' not found", deployment_id))
+    })?;
 
     let project = projects::find_by_id(&state.db_pool, deployment.project_id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to find project: {}", e),
-            )
-        })?
+        .internal_err("Failed to find project")?
         .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project for deployment '{}' not found", deployment_id),
-            )
+            ServerError::not_found(format!(
+                "Project for deployment '{}' not found",
+                deployment_id
+            ))
         })?;
 
     perform_status_update(&state, &user, deployment, &project, &deployment_id, payload).await
@@ -1400,7 +1185,7 @@ pub async fn list_deployments(
     Extension(user): Extension<User>,
     Path(project_name): Path<String>,
     Query(query): Query<ListDeploymentsQuery>,
-) -> Result<Json<Vec<Deployment>>, (StatusCode, String)> {
+) -> Result<Json<Vec<Deployment>>, ServerError> {
     debug!(
         "Listing deployments for project: {} (group: {:?})",
         project_name, query.deployment_group
@@ -1409,29 +1194,14 @@ pub async fn list_deployments(
     // Find the project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to find project: {}", e),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Check if user has permission to view deployments
     // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Get deployments from database (optionally filtered by group, with pagination)
     let db_deployments = db_deployments::list_for_project_and_group(
@@ -1442,12 +1212,7 @@ pub async fn list_deployments(
         query.offset,
     )
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to list deployments: {}", e),
-        )
-    })?;
+    .internal_err("Failed to list deployments")?;
 
     // Convert to API models (fetch creator emails and calculate URLs)
     let mut deployments = Vec::with_capacity(db_deployments.len());
@@ -1512,7 +1277,7 @@ pub async fn stop_deployments_by_group(
     Extension(user): Extension<User>,
     Path(project_name): Path<String>,
     Query(query): Query<StopDeploymentsQuery>,
-) -> Result<Json<StopDeploymentsResponse>, (StatusCode, String)> {
+) -> Result<Json<StopDeploymentsResponse>, ServerError> {
     info!(
         "Stopping all deployments in group '{}' for project '{}'",
         query.group, project_name
@@ -1520,41 +1285,23 @@ pub async fn stop_deployments_by_group(
 
     // Validate group name
     if !is_valid_group_name(&query.group) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (no consecutive hyphens, normalized length max 63 chars)",
-                query.group
-            ),
-        ));
+        return Err(ServerError::bad_request(format!(
+            "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (no consecutive hyphens, normalized length max 63 chars)",
+            query.group
+        )));
     }
 
     // Find the project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to find project: {}", e),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Check if user has permission to stop deployments (owns the project)
     // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Find all non-terminal deployments in this group
     let deployments = db_deployments::find_non_terminal_for_project_and_group(
@@ -1563,12 +1310,7 @@ pub async fn stop_deployments_by_group(
         &query.group,
     )
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to find deployments: {}", e),
-        )
-    })?;
+    .internal_err("Failed to find deployments")?;
 
     let mut stopped_ids = Vec::new();
 
@@ -1600,12 +1342,7 @@ pub async fn stop_deployments_by_group(
     // Update project status
     projects::update_calculated_status(&state.db_pool, project.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to update project status: {}", e),
-            )
-        })?;
+        .internal_err("Failed to update project status")?;
 
     info!(
         "Stopped {} deployments in group '{}' for project '{}'",
@@ -1625,7 +1362,7 @@ pub async fn stop_deployment(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_name, deployment_id)): Path<(String, String)>,
-) -> Result<Json<Deployment>, (StatusCode, String)> {
+) -> Result<Json<Deployment>, ServerError> {
     info!(
         "Stopping deployment '{}' for project '{}'",
         deployment_id, project_name
@@ -1634,56 +1371,30 @@ pub async fn stop_deployment(
     // Find the project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to find project: {}", e),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Check if user has permission to stop deployments
     // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Find the specific deployment
     let deployment =
         db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to find deployment: {}", e),
-                )
-            })?
+            .internal_err("Failed to find deployment")?
             .ok_or_else(|| {
-                (
-                    StatusCode::NOT_FOUND,
-                    format!("Deployment '{}' not found", deployment_id),
-                )
+                ServerError::not_found(format!("Deployment '{}' not found", deployment_id))
             })?;
 
     // Check if deployment is already in a terminal state
     if state_machine::is_terminal(&deployment.status) {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Deployment '{}' is already in terminal state: {}",
-                deployment_id, deployment.status
-            ),
-        ));
+        return Err(ServerError::bad_request(format!(
+            "Deployment '{}' is already in terminal state: {}",
+            deployment_id, deployment.status
+        )));
     }
 
     // Mark deployment as Terminating with UserStopped reason
@@ -1693,24 +1404,14 @@ pub async fn stop_deployment(
         crate::db::models::TerminationReason::UserStopped,
     )
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to stop deployment: {}", e),
-        )
-    })?;
+    .internal_err("Failed to stop deployment")?;
 
     info!("Marked deployment {} as Terminating", deployment_id);
 
     // Update project status
     projects::update_calculated_status(&state.db_pool, project.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to update project status: {}", e),
-            )
-        })?;
+        .internal_err("Failed to update project status")?;
 
     // Calculate deployment URLs dynamically
     let (primary_url, custom_domain_urls) = match state
@@ -1749,7 +1450,7 @@ pub async fn get_deployment_by_project(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_name, deployment_id)): Path<(String, String)>,
-) -> Result<Json<Deployment>, (StatusCode, String)> {
+) -> Result<Json<Deployment>, ServerError> {
     debug!(
         "Getting deployment {} for project {}",
         deployment_id, project_name
@@ -1758,29 +1459,14 @@ pub async fn get_deployment_by_project(
     // Find the project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to find project: {}", e),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Check if user has permission to view deployments
     // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Find deployment by project_id and deployment_id
     let deployment = db_deployments::find_by_project_and_deployment_id(
@@ -1789,20 +1475,12 @@ pub async fn get_deployment_by_project(
         &deployment_id,
     )
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to find deployment: {}", e),
-        )
-    })?
+    .internal_err("Failed to find deployment")?
     .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            format!(
-                "Deployment '{}' not found for project '{}'",
-                deployment_id, project_name
-            ),
-        )
+        ServerError::not_found(format!(
+            "Deployment '{}' not found for project '{}'",
+            deployment_id, project_name
+        ))
     })?;
 
     // Only calculate URLs for non-terminal deployments that could receive traffic
@@ -1846,45 +1524,25 @@ pub async fn list_deployment_groups(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(project_name): Path<String>,
-) -> Result<Json<Vec<String>>, (StatusCode, String)> {
+) -> Result<Json<Vec<String>>, ServerError> {
     debug!("Listing deployment groups for project: {}", project_name);
 
     // Find the project by name
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to find project: {}", e),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Check if user has permission to view deployment groups
     // Return 404 instead of 403 to avoid revealing project existence
     check_deploy_permission(&state, &project, &user)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Get deployment groups from database
     let groups = db_deployments::get_all_deployment_groups(&state.db_pool, project.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list deployment groups: {}", e),
-            )
-        })?;
+        .internal_err("Failed to list deployment groups")?;
 
     Ok(Json(groups))
 }
@@ -1912,27 +1570,15 @@ pub async fn stream_deployment_logs(
     Extension(user): Extension<User>,
     Path((project_name, deployment_id)): Path<(String, String)>,
     Query(params): Query<LogStreamParams>,
-) -> Result<Sse<impl futures::Stream<Item = Result<Event, anyhow::Error>>>, (StatusCode, String)> {
+) -> Result<Sse<impl futures::Stream<Item = Result<Event, anyhow::Error>>>, ServerError> {
     // Fetch project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to fetch project: {}", e),
-            )
-        })?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Project '{}' not found", project_name),
-            )
-        })?;
+        .internal_err("Failed to fetch project")?
+        .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Check permission
-    check_deploy_permission(&state, &project, &user)
-        .await
-        .map_err(|e| (StatusCode::FORBIDDEN, e))?;
+    check_deploy_permission(&state, &project, &user).await?;
 
     // Fetch deployment
     let deployment = db_deployments::find_by_project_and_deployment_id(
@@ -1941,27 +1587,18 @@ pub async fn stream_deployment_logs(
         &deployment_id,
     )
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to fetch deployment: {}", e),
-        )
-    })?
+    .internal_err("Failed to fetch deployment")?
     .ok_or_else(|| {
-        (
-            StatusCode::NOT_FOUND,
-            format!(
-                "Deployment '{}' not found for project '{}'",
-                deployment_id, project_name
-            ),
-        )
+        ServerError::not_found(format!(
+            "Deployment '{}' not found for project '{}'",
+            deployment_id, project_name
+        ))
     })?;
 
     // Check if deployment is in a state where logs make sense
     if state_machine::is_terminal(&deployment.status) {
-        return Err((
-            StatusCode::GONE,
-            "Deployment is no longer running - logs may not be available".to_string(),
+        return Err(ServerError::gone(
+            "Deployment is no longer running - logs may not be available",
         ));
     }
 
@@ -1973,10 +1610,8 @@ pub async fn stream_deployment_logs(
             | DbDeploymentStatus::Pushing
             | DbDeploymentStatus::Pushed
     ) {
-        return Err((
-            StatusCode::SERVICE_UNAVAILABLE,
-            "Deployment not ready yet - no logs available. Try again when deployment is running."
-                .to_string(),
+        return Err(ServerError::service_unavailable(
+            "Deployment not ready yet - no logs available. Try again when deployment is running.",
         ));
     }
 
@@ -2002,15 +1637,11 @@ pub async fn stream_deployment_logs(
                 || error_msg.contains("ContainerCreating")
                 || error_msg.contains("PodInitializing")
             {
-                (
-                    StatusCode::SERVICE_UNAVAILABLE,
-                    "Deployment pod not ready yet. Please try again in a moment.".to_string(),
+                ServerError::service_unavailable(
+                    "Deployment pod not ready yet. Please try again in a moment.",
                 )
             } else {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to stream logs: {}", e),
-                )
+                ServerError::internal_anyhow(e, "Failed to stream logs")
             }
         })?;
 
@@ -2063,9 +1694,9 @@ mod tests {
         })
         .unwrap_err();
 
-        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
         assert_eq!(
-            err.1,
+            err.message,
             "PORT cannot be set via env overrides. Use http_port/--http-port instead."
         );
     }
@@ -2080,9 +1711,9 @@ mod tests {
         })
         .unwrap_err();
 
-        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
         assert_eq!(
-            err.1,
+            err.message,
             "Env override 'API_KEY' cannot be protected unless it is also secret."
         );
     }
@@ -2097,9 +1728,9 @@ mod tests {
         })
         .unwrap_err();
 
-        assert_eq!(err.0, StatusCode::BAD_REQUEST);
+        assert_eq!(err.status, StatusCode::BAD_REQUEST);
         assert_eq!(
-            err.1,
+            err.message,
             "Invalid env var key '' (must be alphanumeric with underscores)"
         );
     }

@@ -2,6 +2,7 @@ use super::models::{EnvVarResponse, EnvVarValueResponse, EnvVarsResponse, SetEnv
 use crate::db::models::User;
 use crate::db::{env_vars as db_env_vars, projects};
 use crate::server::deployment::models as deployment_models;
+use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::extensions::InjectedEnvVarValue;
 use crate::server::state::AppState;
 use axum::{
@@ -11,54 +12,7 @@ use axum::{
 };
 use std::collections::HashMap;
 
-/// Format an error and its full chain of causes for logging/display
-fn format_error_chain(error: &anyhow::Error) -> String {
-    let mut chain = vec![error.to_string()];
-
-    // Collect all causes
-    let mut current_error = error.source();
-    while let Some(cause) = current_error {
-        chain.push(cause.to_string());
-        current_error = cause.source();
-    }
-
-    // Join them with " -> " to show the causal chain
-    chain.join(" -> ")
-}
-
-/// Check if user has access to a project (admin bypass)
-///
-/// Admins always have access. Non-admins must pass the project ownership/team membership check.
-async fn ensure_project_access_or_admin(
-    state: &AppState,
-    user: &User,
-    project: &crate::db::models::Project,
-) -> Result<(), (StatusCode, String)> {
-    // Admins bypass all access checks
-    if state.is_admin(&user.email) {
-        return Ok(());
-    }
-
-    // Check if user has access via ownership or team membership
-    let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to check project access: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            )
-        })?;
-
-    if !can_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
-    }
-
-    Ok(())
-}
+use crate::server::project::handlers::ensure_project_access_or_admin;
 
 /// Set or update a project environment variable
 pub async fn set_project_env_var(
@@ -66,28 +20,18 @@ pub async fn set_project_env_var(
     Extension(user): Extension<User>,
     Path((project_id_or_name, key)): Path<(String, String)>,
     Json(payload): Json<SetEnvVarRequest>,
-) -> Result<Json<EnvVarResponse>, (StatusCode, String)> {
+) -> Result<Json<EnvVarResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -98,18 +42,15 @@ pub async fn set_project_env_var(
 
     // Validate: is_protected requires is_secret (non-secrets cannot be "protected")
     if is_protected && !payload.is_secret {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Non-secret variables cannot be protected. Protection only applies to secrets."
-                .to_string(),
+        return Err(ServerError::bad_request(
+            "Non-secret variables cannot be protected. Protection only applies to secrets.",
         ));
     }
 
     // IMPORTANT: If this is a secret, we must have an encryption provider
     if payload.is_secret && state.encryption_provider.is_none() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Cannot store secret variables: no encryption provider configured".to_string(),
+        return Err(ServerError::bad_request(
+            "Cannot store secret variables: no encryption provider configured",
         ));
     }
 
@@ -120,17 +61,10 @@ pub async fn set_project_env_var(
             .as_ref()
             .expect("Encryption provider checked above");
 
-        provider.encrypt(&payload.value).await.map_err(|e| {
-            // Log the full error chain for debugging
-            tracing::error!("Encryption failed: {:?}", e);
-
-            // Format error chain for the response
-            let error_chain = format_error_chain(&e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to encrypt secret: {}", error_chain),
-            )
-        })?
+        provider
+            .encrypt(&payload.value)
+            .await
+            .internal_err("Failed to encrypt secret")?
     } else {
         payload.value.clone()
     };
@@ -145,12 +79,7 @@ pub async fn set_project_env_var(
         is_protected,
     )
     .await
-    .map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to store environment variable: {}", e),
-        )
-    })?;
+    .internal_err("Failed to store environment variable")?;
 
     tracing::info!(
         "Set environment variable '{}' for project '{}' (secret: {}, protected: {}). This will apply to new deployments only.",
@@ -179,28 +108,18 @@ pub async fn list_project_env_vars(
     Extension(user): Extension<User>,
     Path(project_id_or_name): Path<String>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<EnvVarsResponse>, (StatusCode, String)> {
+) -> Result<Json<EnvVarsResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -214,12 +133,7 @@ pub async fn list_project_env_vars(
     // Get all environment variables
     let db_env_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list environment variables: {}", e),
-            )
-        })?;
+        .internal_err("Failed to list environment variables")?;
 
     // Convert to API response
     let mut env_vars = Vec::new();
@@ -227,21 +141,13 @@ pub async fn list_project_env_vars(
         let value = if include_unprotected && var.is_secret && !var.is_protected {
             // Decrypt unprotected secret
             match &state.encryption_provider {
-                Some(provider) => provider.decrypt(&var.value).await.map_err(|e| {
-                    tracing::error!(
-                        "Failed to decrypt unprotected secret '{}': {:?}",
-                        var.key,
-                        e
-                    );
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to decrypt secret '{}': {}", var.key, e),
-                    )
-                })?,
+                Some(provider) => provider
+                    .decrypt(&var.value)
+                    .await
+                    .internal_err("Failed to decrypt secret")?,
                 None => {
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Cannot decrypt secrets: no encryption provider configured".to_string(),
+                    return Err(ServerError::internal(
+                        "Cannot decrypt secrets: no encryption provider configured",
                     ))
                 }
             }
@@ -273,28 +179,18 @@ pub async fn delete_project_env_var(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_id_or_name, key)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -302,18 +198,13 @@ pub async fn delete_project_env_var(
     // Delete environment variable
     let deleted = db_env_vars::delete_project_env_var(&state.db_pool, project.id, &key)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to delete environment variable: {}", e),
-            )
-        })?;
+        .internal_err("Failed to delete environment variable")?;
 
     if !deleted {
-        return Err((
-            StatusCode::NOT_FOUND,
-            format!("Environment variable '{}' not found", key),
-        ));
+        return Err(ServerError::not_found(format!(
+            "Environment variable '{}' not found",
+            key
+        )));
     }
 
     tracing::info!(
@@ -335,28 +226,18 @@ pub async fn list_deployment_env_vars(
     Extension(user): Extension<User>,
     Path((project_id_or_name, deployment_id)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<EnvVarsResponse>, (StatusCode, String)> {
+) -> Result<Json<EnvVarsResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -365,13 +246,8 @@ pub async fn list_deployment_env_vars(
     let deployment =
         crate::db::deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get deployment: {}", e),
-                )
-            })?
-            .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+            .internal_err("Failed to get deployment")?
+            .ok_or_else(|| ServerError::not_found("Deployment not found"))?;
 
     // Check if we should include unprotected values
     let include_unprotected = params
@@ -382,12 +258,7 @@ pub async fn list_deployment_env_vars(
     // Get all deployment environment variables
     let db_env_vars = db_env_vars::list_deployment_env_vars(&state.db_pool, deployment.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list deployment environment variables: {}", e),
-            )
-        })?;
+        .internal_err("Failed to list deployment environment variables")?;
 
     // Convert to API response
     let mut env_vars = Vec::new();
@@ -395,21 +266,13 @@ pub async fn list_deployment_env_vars(
         let value = if include_unprotected && var.is_secret && !var.is_protected {
             // Decrypt unprotected secret
             match &state.encryption_provider {
-                Some(provider) => provider.decrypt(&var.value).await.map_err(|e| {
-                    tracing::error!(
-                        "Failed to decrypt unprotected secret '{}': {:?}",
-                        var.key,
-                        e
-                    );
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to decrypt secret '{}': {}", var.key, e),
-                    )
-                })?,
+                Some(provider) => provider
+                    .decrypt(&var.value)
+                    .await
+                    .internal_err("Failed to decrypt secret")?,
                 None => {
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Cannot decrypt secrets: no encryption provider configured".to_string(),
+                    return Err(ServerError::internal(
+                        "Cannot decrypt secrets: no encryption provider configured",
                     ))
                 }
             }
@@ -441,28 +304,18 @@ pub async fn get_project_env_var_value(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_id_or_name, key)): Path<(String, String)>,
-) -> Result<Json<EnvVarValueResponse>, (StatusCode, String)> {
+) -> Result<Json<EnvVarValueResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -470,44 +323,29 @@ pub async fn get_project_env_var_value(
     // Get the specific environment variable
     let env_var = db_env_vars::get_project_env_var(&state.db_pool, project.id, &key)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get environment variable: {}", e),
-            )
-        })?
+        .internal_err("Failed to get environment variable")?
         .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Environment variable '{}' not found", key),
-            )
+            ServerError::not_found(format!("Environment variable '{}' not found", key))
         })?;
 
     // Validate: must be an unprotected secret
     if !env_var.is_secret || env_var.is_protected {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Environment variable '{}' is a protected secret and cannot be retrieved. \
-                 Update it with --protected=false to allow retrieval.",
-                key
-            ),
-        ));
+        return Err(ServerError::bad_request(format!(
+            "Environment variable '{}' is a protected secret and cannot be retrieved. \
+             Update it with --protected=false to allow retrieval.",
+            key
+        )));
     }
 
     // Decrypt the value
     let decrypted_value = match &state.encryption_provider {
-        Some(provider) => provider.decrypt(&env_var.value).await.map_err(|e| {
-            tracing::error!("Failed to decrypt unprotected secret '{}': {:?}", key, e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to decrypt secret '{}': {}", key, e),
-            )
-        })?,
+        Some(provider) => provider
+            .decrypt(&env_var.value)
+            .await
+            .internal_err("Failed to decrypt secret")?,
         None => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Cannot decrypt secrets: no encryption provider configured".to_string(),
+            return Err(ServerError::internal(
+                "Cannot decrypt secrets: no encryption provider configured",
             ))
         }
     };
@@ -529,28 +367,18 @@ pub async fn get_deployment_env_var_value(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_id_or_name, deployment_id, key)): Path<(String, String, String)>,
-) -> Result<Json<EnvVarValueResponse>, (StatusCode, String)> {
+) -> Result<Json<EnvVarValueResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -559,59 +387,35 @@ pub async fn get_deployment_env_var_value(
     let deployment =
         crate::db::deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get deployment: {}", e),
-                )
-            })?
-            .ok_or_else(|| (StatusCode::NOT_FOUND, "Deployment not found".to_string()))?;
+            .internal_err("Failed to get deployment")?
+            .ok_or_else(|| ServerError::not_found("Deployment not found"))?;
 
     // Get the specific environment variable
     let env_var = db_env_vars::get_deployment_env_var(&state.db_pool, deployment.id, &key)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get environment variable: {}", e),
-            )
-        })?
+        .internal_err("Failed to get environment variable")?
         .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                format!("Environment variable '{}' not found", key),
-            )
+            ServerError::not_found(format!("Environment variable '{}' not found", key))
         })?;
 
     // Validate: must be an unprotected secret
     if !env_var.is_secret || env_var.is_protected {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "Environment variable '{}' is a protected secret and cannot be retrieved. \
-                 Update it with --protected=false to allow retrieval.",
-                key
-            ),
-        ));
+        return Err(ServerError::bad_request(format!(
+            "Environment variable '{}' is a protected secret and cannot be retrieved. \
+             Update it with --protected=false to allow retrieval.",
+            key
+        )));
     }
 
     // Decrypt the value
     let decrypted_value = match &state.encryption_provider {
-        Some(provider) => provider.decrypt(&env_var.value).await.map_err(|e| {
-            tracing::error!(
-                "Failed to decrypt unprotected deployment secret '{}': {:?}",
-                key,
-                e
-            );
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to decrypt secret '{}': {}", key, e),
-            )
-        })?,
+        Some(provider) => provider
+            .decrypt(&env_var.value)
+            .await
+            .internal_err("Failed to decrypt secret")?,
         None => {
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Cannot decrypt secrets: no encryption provider configured".to_string(),
+            return Err(ServerError::internal(
+                "Cannot decrypt secrets: no encryption provider configured",
             ))
         }
     };
@@ -641,28 +445,18 @@ pub async fn preview_deployment_env_vars(
     Extension(user): Extension<User>,
     Path(project_id_or_name): Path<String>,
     Query(params): Query<HashMap<String, String>>,
-) -> Result<Json<EnvVarsResponse>, (StatusCode, String)> {
+) -> Result<Json<EnvVarsResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -678,32 +472,19 @@ pub async fn preview_deployment_env_vars(
     // 1. Load user-set project vars
     let db_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list environment variables: {}", e),
-            )
-        })?;
+        .internal_err("Failed to list environment variables")?;
 
     for var in db_vars {
         if var.is_secret && !var.is_protected {
             // Unprotected secret — decrypt for preview
             let decrypted = match &state.encryption_provider {
-                Some(provider) => provider.decrypt(&var.value).await.map_err(|e| {
-                    tracing::error!(
-                        "Failed to decrypt unprotected secret '{}': {:?}",
-                        var.key,
-                        e
-                    );
-                    (
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        format!("Failed to decrypt secret '{}': {}", var.key, e),
-                    )
-                })?,
+                Some(provider) => provider
+                    .decrypt(&var.value)
+                    .await
+                    .internal_err("Failed to decrypt secret")?,
                 None => {
-                    return Err((
-                        StatusCode::INTERNAL_SERVER_ERROR,
-                        "Cannot decrypt secrets: no encryption provider configured".to_string(),
+                    return Err(ServerError::internal(
+                        "Cannot decrypt secrets: no encryption provider configured",
                     ))
                 }
             };

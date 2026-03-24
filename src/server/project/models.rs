@@ -146,14 +146,6 @@ pub enum OwnerInfo {
     Team(TeamInfo),
 }
 
-// Error response with optional fuzzy match suggestions
-#[derive(Debug, Serialize, Clone)]
-pub struct ProjectErrorResponse {
-    pub error: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub suggestions: Option<Vec<String>>,
-}
-
 // Query parameters for project lookup
 #[derive(Debug, Deserialize, Clone)]
 pub struct GetProjectParams {

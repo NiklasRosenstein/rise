@@ -6,6 +6,7 @@ use axum::{
 use uuid::Uuid;
 
 use crate::db::{projects, service_accounts, users, User};
+use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::project::handlers::{check_read_permission, check_write_permission};
 use crate::server::state::AppState;
 use crate::server::workload_identity::models::{
@@ -13,10 +14,8 @@ use crate::server::workload_identity::models::{
     WorkloadIdentityResponse,
 };
 
-type Result<T> = std::result::Result<T, (StatusCode, String)>;
-
 /// Verify that an OIDC issuer is reachable and has valid configuration
-async fn verify_oidc_issuer(issuer_url: &str) -> Result<()> {
+async fn verify_oidc_issuer(issuer_url: &str) -> Result<(), ServerError> {
     // Construct the OIDC discovery URL
     let discovery_url = if issuer_url.ends_with('/') {
         format!("{}well-known/openid-configuration", issuer_url)
@@ -29,13 +28,10 @@ async fn verify_oidc_issuer(issuer_url: &str) -> Result<()> {
     // Attempt to fetch the OIDC configuration
     let response = reqwest::get(&discovery_url)
         .await
-        .map_err(|e| {
-            tracing::warn!("Failed to reach OIDC issuer {}: {:#}", issuer_url, e);
-            (
-                StatusCode::BAD_REQUEST,
-                format!("Failed to reach OIDC issuer: {}. Please verify the issuer URL is correct and accessible.", e),
-            )
-        })?;
+        .server_err(
+            StatusCode::BAD_REQUEST,
+            format!("Failed to reach OIDC issuer: please verify the issuer URL '{}' is correct and accessible", issuer_url),
+        )?;
 
     if !response.status().is_success() {
         tracing::warn!(
@@ -43,37 +39,29 @@ async fn verify_oidc_issuer(issuer_url: &str) -> Result<()> {
             issuer_url,
             response.status()
         );
-        return Err((
-            StatusCode::BAD_REQUEST,
-            format!(
-                "OIDC issuer returned status {}: {}. Please verify the issuer URL points to a valid OIDC provider.",
-                response.status(),
-                response.status().canonical_reason().unwrap_or("Unknown")
-            ),
-        ));
+        return Err(ServerError::bad_request(format!(
+            "OIDC issuer returned status {}: {}. Please verify the issuer URL points to a valid OIDC provider.",
+            response.status(),
+            response.status().canonical_reason().unwrap_or("Unknown")
+        )));
     }
 
     // Try to parse the response as JSON to verify it's valid OIDC configuration
-    let config: serde_json::Value = response.json().await.map_err(|e| {
-        tracing::warn!("Failed to parse OIDC configuration from {}: {:#}", issuer_url, e);
-        (
-            StatusCode::BAD_REQUEST,
-            format!("Invalid OIDC configuration: {}. The issuer URL does not return valid OIDC discovery metadata.", e),
-        )
-    })?;
+    let config: serde_json::Value = response.json().await.server_err(
+        StatusCode::BAD_REQUEST,
+        format!("Invalid OIDC configuration: the issuer URL '{}' does not return valid OIDC discovery metadata", issuer_url),
+    )?;
 
     // Verify required OIDC fields are present
     if config.get("issuer").is_none() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "OIDC configuration missing required 'issuer' field".to_string(),
+        return Err(ServerError::bad_request(
+            "OIDC configuration missing required 'issuer' field",
         ));
     }
 
     if config.get("jwks_uri").is_none() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "OIDC configuration missing required 'jwks_uri' field".to_string(),
+        return Err(ServerError::bad_request(
+            "OIDC configuration missing required 'jwks_uri' field",
         ));
     }
 
@@ -87,62 +75,52 @@ pub async fn create_workload_identity(
     Extension(user): Extension<User>,
     Path(project_name): Path<String>,
     Json(req): Json<CreateWorkloadIdentityRequest>,
-) -> Result<Json<WorkloadIdentityResponse>> {
+) -> Result<Json<WorkloadIdentityResponse>, ServerError> {
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission: user must be able to write to project
     if !check_write_permission(&state, &project, &user)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(ServerError::internal)?
     {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "Cannot manage service accounts for this project".to_string(),
+        return Err(ServerError::forbidden(
+            "Cannot manage service accounts for this project",
         ));
     }
 
     // Validate issuer URL
     if req.issuer_url.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Issuer URL cannot be empty".to_string(),
-        ));
+        return Err(ServerError::bad_request("Issuer URL cannot be empty"));
     }
 
     // In production, should validate HTTPS
     // For now, just check it's a valid URL format
     if !req.issuer_url.starts_with("http://") && !req.issuer_url.starts_with("https://") {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "Issuer URL must be a valid HTTP(S) URL".to_string(),
+        return Err(ServerError::bad_request(
+            "Issuer URL must be a valid HTTP(S) URL",
         ));
     }
 
     // Validate claims requirements
     if req.claims.is_empty() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "At least one claim is required".to_string(),
-        ));
+        return Err(ServerError::bad_request("At least one claim is required"));
     }
 
     // Require 'aud' claim
     if !req.claims.contains_key("aud") {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "The 'aud' (audience) claim is required for service accounts".to_string(),
+        return Err(ServerError::bad_request(
+            "The 'aud' (audience) claim is required for service accounts",
         ));
     }
 
     // Require at least one additional claim besides 'aud'
     if req.claims.len() < 2 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "At least one claim in addition to 'aud' is required (e.g., project_path, ref_protected)".to_string(),
+        return Err(ServerError::bad_request(
+            "At least one claim in addition to 'aud' is required (e.g., project_path, ref_protected)",
         ));
     }
 
@@ -152,34 +130,17 @@ pub async fn create_workload_identity(
     // Create service account
     let sa = service_accounts::create(&state.db_pool, project.id, &req.issuer_url, &req.claims)
         .await
-        .map_err(|e| {
-            tracing::error!("Failed to create service account: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to create service account: {}", e),
-            )
-        })?;
+        .internal_err("Failed to create service account")?;
 
     // Get user for response
     let sa_user = users::find_by_id(&state.db_pool, sa.user_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Service account user not found".to_string(),
-            )
-        })?;
+        .internal_err("Failed to find service account user")?
+        .ok_or_else(|| ServerError::internal("Service account user not found"))?;
 
     // Convert JSONB claims to HashMap for response
-    let claims: std::collections::HashMap<String, String> = serde_json::from_value(sa.claims)
-        .map_err(|e| {
-            tracing::error!("Failed to deserialize claims: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to deserialize claims".to_string(),
-            )
-        })?;
+    let claims: std::collections::HashMap<String, String> =
+        serde_json::from_value(sa.claims).internal_err("Failed to deserialize claims")?;
 
     Ok(Json(WorkloadIdentityResponse {
         id: sa.id.to_string(),
@@ -196,48 +157,38 @@ pub async fn list_workload_identities(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(project_name): Path<String>,
-) -> Result<Json<ListWorkloadIdentitiesResponse>> {
+) -> Result<Json<ListWorkloadIdentitiesResponse>, ServerError> {
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check read permission
     if !check_read_permission(&state, &project, &user)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(ServerError::internal)?
     {
-        return Err((StatusCode::NOT_FOUND, "Project not found".to_string()));
+        return Err(ServerError::not_found("Project not found"));
     }
 
     // Get active service accounts
     let sas = service_accounts::list_by_project(&state.db_pool, project.id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .internal_err("Failed to list service accounts")?;
 
     // Convert to response
     let mut workload_identities = Vec::new();
     for sa in sas {
         let sa_user = users::find_by_id(&state.db_pool, sa.user_id)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-            .ok_or_else(|| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Service account user not found".to_string(),
-                )
-            })?;
+            .internal_err("Failed to find service account user")?
+            .ok_or_else(|| ServerError::internal("Service account user not found"))?;
 
         // Convert JSONB claims to HashMap
         let claims: std::collections::HashMap<String, String> =
-            serde_json::from_value(sa.claims.clone()).map_err(|e| {
-                tracing::error!("Failed to deserialize claims: {:#}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to deserialize claims".to_string(),
-                )
-            })?;
+            serde_json::from_value(sa.claims.clone())
+                .internal_err("Failed to deserialize claims")?;
 
         workload_identities.push(WorkloadIdentityResponse {
             id: sa.id.to_string(),
@@ -259,68 +210,46 @@ pub async fn get_workload_identity(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_name, sa_id)): Path<(String, Uuid)>,
-) -> Result<Json<WorkloadIdentityResponse>> {
+) -> Result<Json<WorkloadIdentityResponse>, ServerError> {
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check read permission
     if !check_read_permission(&state, &project, &user)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(ServerError::internal)?
     {
-        return Err((StatusCode::NOT_FOUND, "Project not found".to_string()));
+        return Err(ServerError::not_found("Project not found"));
     }
 
     // Get service account
     let sa = service_accounts::get_by_id(&state.db_pool, sa_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                "Service account not found".to_string(),
-            )
-        })?;
+        .internal_err("Failed to find service account")?
+        .ok_or_else(|| ServerError::not_found("Service account not found"))?;
 
     // Verify SA belongs to this project
     if sa.project_id != project.id {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "Service account not found".to_string(),
-        ));
+        return Err(ServerError::not_found("Service account not found"));
     }
 
     // Check if deleted
     if sa.deleted_at.is_some() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "Service account not found".to_string(),
-        ));
+        return Err(ServerError::not_found("Service account not found"));
     }
 
     // Get user
     let sa_user = users::find_by_id(&state.db_pool, sa.user_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Service account user not found".to_string(),
-            )
-        })?;
+        .internal_err("Failed to find service account user")?
+        .ok_or_else(|| ServerError::internal("Service account user not found"))?;
 
     // Convert JSONB claims to HashMap
-    let claims: std::collections::HashMap<String, String> = serde_json::from_value(sa.claims)
-        .map_err(|e| {
-            tracing::error!("Failed to deserialize claims: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to deserialize claims".to_string(),
-            )
-        })?;
+    let claims: std::collections::HashMap<String, String> =
+        serde_json::from_value(sa.claims).internal_err("Failed to deserialize claims")?;
 
     Ok(Json(WorkloadIdentityResponse {
         id: sa.id.to_string(),
@@ -338,72 +267,55 @@ pub async fn update_workload_identity(
     Extension(user): Extension<User>,
     Path((project_name, sa_id)): Path<(String, Uuid)>,
     Json(req): Json<UpdateWorkloadIdentityRequest>,
-) -> Result<Json<WorkloadIdentityResponse>> {
+) -> Result<Json<WorkloadIdentityResponse>, ServerError> {
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check write permission
     if !check_write_permission(&state, &project, &user)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(ServerError::internal)?
     {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "Cannot manage service accounts for this project".to_string(),
+        return Err(ServerError::forbidden(
+            "Cannot manage service accounts for this project",
         ));
     }
 
     // Get service account
     let sa = service_accounts::get_by_id(&state.db_pool, sa_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                "Service account not found".to_string(),
-            )
-        })?;
+        .internal_err("Failed to find service account")?
+        .ok_or_else(|| ServerError::not_found("Service account not found"))?;
 
     // Verify SA belongs to this project
     if sa.project_id != project.id {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "Service account not found".to_string(),
-        ));
+        return Err(ServerError::not_found("Service account not found"));
     }
 
     // Check if deleted
     if sa.deleted_at.is_some() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "Service account not found".to_string(),
-        ));
+        return Err(ServerError::not_found("Service account not found"));
     }
 
     // Validate that at least one field is provided
     if req.issuer_url.is_none() && req.claims.is_none() {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "At least one field (issuer_url or claims) must be provided for update".to_string(),
+        return Err(ServerError::bad_request(
+            "At least one field (issuer_url or claims) must be provided for update",
         ));
     }
 
     // Validate issuer URL if provided
     if let Some(ref issuer_url) = req.issuer_url {
         if issuer_url.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "Issuer URL cannot be empty".to_string(),
-            ));
+            return Err(ServerError::bad_request("Issuer URL cannot be empty"));
         }
 
         if !issuer_url.starts_with("http://") && !issuer_url.starts_with("https://") {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "Issuer URL must be a valid HTTP(S) URL".to_string(),
+            return Err(ServerError::bad_request(
+                "Issuer URL must be a valid HTTP(S) URL",
             ));
         }
     }
@@ -411,25 +323,20 @@ pub async fn update_workload_identity(
     // Validate claims if provided
     if let Some(ref claims) = req.claims {
         if claims.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "Claims cannot be empty".to_string(),
-            ));
+            return Err(ServerError::bad_request("Claims cannot be empty"));
         }
 
         // Require 'aud' claim
         if !claims.contains_key("aud") {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "The 'aud' (audience) claim is required for service accounts".to_string(),
+            return Err(ServerError::bad_request(
+                "The 'aud' (audience) claim is required for service accounts",
             ));
         }
 
         // Require at least one additional claim besides 'aud'
         if claims.len() < 2 {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "At least one claim in addition to 'aud' is required (e.g., project_path, ref_protected)".to_string(),
+            return Err(ServerError::bad_request(
+                "At least one claim in addition to 'aud' is required (e.g., project_path, ref_protected)",
             ));
         }
     }
@@ -442,28 +349,17 @@ pub async fn update_workload_identity(
         req.claims.as_ref(),
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    .internal_err("Failed to update service account")?;
 
     // Get user for response
     let sa_user = users::find_by_id(&state.db_pool, updated_sa.user_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Service account user not found".to_string(),
-            )
-        })?;
+        .internal_err("Failed to find service account user")?
+        .ok_or_else(|| ServerError::internal("Service account user not found"))?;
 
     // Convert JSONB claims to HashMap for response
     let claims: std::collections::HashMap<String, String> =
-        serde_json::from_value(updated_sa.claims).map_err(|e| {
-            tracing::error!("Failed to deserialize claims: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to deserialize claims".to_string(),
-            )
-        })?;
+        serde_json::from_value(updated_sa.claims).internal_err("Failed to deserialize claims")?;
 
     Ok(Json(WorkloadIdentityResponse {
         id: updated_sa.id.to_string(),
@@ -480,55 +376,43 @@ pub async fn delete_workload_identity(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_name, sa_id)): Path<(String, Uuid)>,
-) -> Result<StatusCode> {
+) -> Result<StatusCode, ServerError> {
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+        .internal_err("Failed to find project")?
+        .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check write permission
     if !check_write_permission(&state, &project, &user)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .map_err(ServerError::internal)?
     {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "Cannot manage service accounts for this project".to_string(),
+        return Err(ServerError::forbidden(
+            "Cannot manage service accounts for this project",
         ));
     }
 
     // Get service account
     let sa = service_accounts::get_by_id(&state.db_pool, sa_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
-        .ok_or_else(|| {
-            (
-                StatusCode::NOT_FOUND,
-                "Service account not found".to_string(),
-            )
-        })?;
+        .internal_err("Failed to find service account")?
+        .ok_or_else(|| ServerError::not_found("Service account not found"))?;
 
     // Verify SA belongs to this project
     if sa.project_id != project.id {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "Service account not found".to_string(),
-        ));
+        return Err(ServerError::not_found("Service account not found"));
     }
 
     // Check if already deleted
     if sa.deleted_at.is_some() {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "Service account not found".to_string(),
-        ));
+        return Err(ServerError::not_found("Service account not found"));
     }
 
     // Soft delete
     service_accounts::soft_delete(&state.db_pool, sa_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .internal_err("Failed to delete service account")?;
 
     Ok(StatusCode::NO_CONTENT)
 }

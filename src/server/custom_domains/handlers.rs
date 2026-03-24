@@ -3,6 +3,7 @@ use super::validation;
 use crate::db::models::User;
 use crate::db::{custom_domains as db_custom_domains, deployments as db_deployments, projects};
 use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
+use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::state::AppState;
 use axum::{
     extract::{Extension, Path, State},
@@ -11,39 +12,7 @@ use axum::{
 };
 use tracing::info;
 
-/// Check if user has access to a project (admin bypass)
-///
-/// Admins always have access. Non-admins must pass the project ownership/team membership check.
-async fn ensure_project_access_or_admin(
-    state: &AppState,
-    user: &User,
-    project: &crate::db::models::Project,
-) -> Result<(), (StatusCode, String)> {
-    // Admins bypass all access checks
-    if state.is_admin(&user.email) {
-        return Ok(());
-    }
-
-    // Check if user has access via ownership or team membership
-    let can_access = projects::user_can_access(&state.db_pool, project.id, user.id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to check project access: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            )
-        })?;
-
-    if !can_access {
-        return Err((
-            StatusCode::FORBIDDEN,
-            "You do not have access to this project".to_string(),
-        ));
-    }
-
-    Ok(())
-}
+use crate::server::project::handlers::ensure_project_access_or_admin;
 
 /// Add a custom domain to a project
 pub async fn add_custom_domain(
@@ -51,28 +20,18 @@ pub async fn add_custom_domain(
     Extension(user): Extension<User>,
     Path(project_id_or_name): Path<String>,
     Json(payload): Json<AddCustomDomainRequest>,
-) -> Result<(StatusCode, Json<CustomDomainResponse>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<CustomDomainResponse>), ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -85,7 +44,7 @@ pub async fn add_custom_domain(
             state.staging_ingress_url_template.as_deref(),
             Some(&state.public_url),
         ) {
-            return Err((StatusCode::BAD_REQUEST, reason));
+            return Err(ServerError::bad_request(reason));
         }
     }
 
@@ -98,20 +57,11 @@ pub async fn add_custom_domain(
             if error_message.contains("duplicate key")
                 || error_message.contains("unique constraint")
             {
-                (
-                    StatusCode::CONFLICT,
-                    format!("Domain '{}' is already in use", payload.domain),
-                )
+                ServerError::conflict(format!("Domain '{}' is already in use", payload.domain))
             } else if error_message.contains("check constraint") {
-                (
-                    StatusCode::BAD_REQUEST,
-                    format!("Invalid domain format: {}", payload.domain),
-                )
+                ServerError::bad_request(format!("Invalid domain format: {}", payload.domain))
             } else {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to add custom domain: {}", e),
-                )
+                ServerError::internal_anyhow(e, "Failed to add custom domain")
             }
         })?;
 
@@ -170,50 +120,34 @@ pub async fn list_custom_domains(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path(project_id_or_name): Path<String>,
-) -> Result<Json<CustomDomainsResponse>, (StatusCode, String)> {
+) -> Result<Json<CustomDomainsResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project)
         .await
-        .map_err(|(status, msg)| {
-            // Map FORBIDDEN to NOT_FOUND for consistency with original behavior
-            if status == StatusCode::FORBIDDEN {
-                (StatusCode::NOT_FOUND, "Project not found".to_string())
+        .map_err(|e| {
+            if e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
             } else {
-                (status, msg)
+                e
             }
         })?;
 
     // Get all custom domains for the project
     let domains = db_custom_domains::list_project_custom_domains(&state.db_pool, project.id)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to list custom domains: {}", e),
-            )
-        })?;
+        .internal_err("Failed to list custom domains")?;
 
     Ok(Json(CustomDomainsResponse {
         domains: domains
@@ -228,51 +162,35 @@ pub async fn get_custom_domain(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_id_or_name, domain)): Path<(String, String)>,
-) -> Result<Json<CustomDomainResponse>, (StatusCode, String)> {
+) -> Result<Json<CustomDomainResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project)
         .await
-        .map_err(|(status, msg)| {
-            // Map FORBIDDEN to NOT_FOUND for consistency with original behavior
-            if status == StatusCode::FORBIDDEN {
-                (StatusCode::NOT_FOUND, "Project not found".to_string())
+        .map_err(|e| {
+            if e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
             } else {
-                (status, msg)
+                e
             }
         })?;
 
     // Get the custom domain
     let domain = db_custom_domains::get_custom_domain(&state.db_pool, project.id, &domain)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to get custom domain: {}", e),
-            )
-        })?
-        .ok_or_else(|| (StatusCode::NOT_FOUND, "Custom domain not found".to_string()))?;
+        .internal_err("Failed to get custom domain")?
+        .ok_or_else(|| ServerError::not_found("Custom domain not found"))?;
 
     Ok(Json(CustomDomainResponse::from_db_model(&domain)))
 }
@@ -282,28 +200,18 @@ pub async fn delete_custom_domain(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_id_or_name, domain)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -311,15 +219,10 @@ pub async fn delete_custom_domain(
     // Delete the custom domain
     let deleted = db_custom_domains::delete_custom_domain(&state.db_pool, project.id, &domain)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to delete custom domain: {}", e),
-            )
-        })?;
+        .internal_err("Failed to delete custom domain")?;
 
     if !deleted {
-        return Err((StatusCode::NOT_FOUND, "Custom domain not found".to_string()));
+        return Err(ServerError::not_found("Custom domain not found"));
     }
 
     // Trigger reconciliation of the active deployment in the default group
@@ -374,28 +277,18 @@ pub async fn set_primary_domain(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_id_or_name, domain)): Path<(String, String)>,
-) -> Result<Json<CustomDomainResponse>, (StatusCode, String)> {
+) -> Result<Json<CustomDomainResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -406,12 +299,9 @@ pub async fn set_primary_domain(
         .map_err(|e| {
             let error_message = e.to_string();
             if error_message.contains("no rows") {
-                (StatusCode::NOT_FOUND, "Custom domain not found".to_string())
+                ServerError::not_found("Custom domain not found")
             } else {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to set primary domain: {}", e),
-                )
+                ServerError::internal_anyhow(e, "Failed to set primary domain")
             }
         })?;
 
@@ -465,28 +355,18 @@ pub async fn unset_primary_domain(
     State(state): State<AppState>,
     Extension(user): Extension<User>,
     Path((project_id_or_name, domain)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
         projects::find_by_id(&state.db_pool, uuid)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     } else {
         projects::find_by_name(&state.db_pool, &project_id_or_name)
             .await
-            .map_err(|e| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to get project: {}", e),
-                )
-            })?
+            .internal_err("Failed to get project")?
     }
-    .ok_or_else(|| (StatusCode::NOT_FOUND, "Project not found".to_string()))?;
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission (admin bypass)
     ensure_project_access_or_admin(&state, &user, &project).await?;
@@ -494,17 +374,11 @@ pub async fn unset_primary_domain(
     // Unset the primary status
     let unset = db_custom_domains::unset_primary_domain(&state.db_pool, project.id, &domain)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("Failed to unset primary domain: {}", e),
-            )
-        })?;
+        .internal_err("Failed to unset primary domain")?;
 
     if !unset {
-        return Err((
-            StatusCode::NOT_FOUND,
-            "Custom domain not found or is not primary".to_string(),
+        return Err(ServerError::not_found(
+            "Custom domain not found or is not primary",
         ));
     }
 
