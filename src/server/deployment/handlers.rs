@@ -1612,7 +1612,8 @@ pub async fn stream_deployment_logs(
     ) {
         return Err(ServerError::service_unavailable(
             "Deployment not ready yet - no logs available. Try again when deployment is running.",
-        ));
+        )
+        .expected());
     }
 
     // Get log stream from deployment backend
@@ -1640,6 +1641,7 @@ pub async fn stream_deployment_logs(
                 ServerError::service_unavailable(
                     "Deployment pod not ready yet. Please try again in a moment.",
                 )
+                .expected()
             } else {
                 ServerError::internal_anyhow(e, "Failed to stream logs")
             }

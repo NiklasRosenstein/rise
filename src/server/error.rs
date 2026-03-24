@@ -48,6 +48,8 @@ pub struct ServerError {
     pub context: Vec<(&'static str, String)>,
     /// Optional suggestions for the client (e.g. fuzzy-matched names)
     pub suggestions: Option<Vec<String>>,
+    /// If true, skip error-level logging (for expected transient conditions)
+    pub expected: bool,
 }
 
 impl ServerError {
@@ -59,6 +61,7 @@ impl ServerError {
             source: None,
             context: Vec::new(),
             suggestions: None,
+            expected: false,
         }
     }
 
@@ -74,6 +77,7 @@ impl ServerError {
             source: Some(source),
             context: Vec::new(),
             suggestions: None,
+            expected: false,
         }
     }
 
@@ -86,6 +90,15 @@ impl ServerError {
     /// Add suggestions to the error response (chainable)
     pub fn with_suggestions(mut self, suggestions: Option<Vec<String>>) -> Self {
         self.suggestions = suggestions;
+        self
+    }
+
+    /// Mark this error as expected, suppressing ERROR-level logging (chainable)
+    ///
+    /// Use for transient conditions that are normal (e.g. "pod not ready yet")
+    /// rather than actual failures. These are logged at WARN instead of ERROR.
+    pub fn expected(mut self) -> Self {
+        self.expected = true;
         self
     }
 
@@ -134,47 +147,41 @@ impl ServerError {
 impl IntoResponse for ServerError {
     fn into_response(self) -> Response {
         // Log server errors (5xx) with full context using structured fields
-        // 503 Service Unavailable is logged at WARN since it typically represents
-        // expected transient conditions (e.g. pod not ready yet), not actual failures.
+        // Errors marked as `expected` are logged at WARN (transient conditions
+        // like "pod not ready yet"), all others at ERROR.
         if self.status.is_server_error() {
-            let log_level = if self.status == StatusCode::SERVICE_UNAVAILABLE {
-                tracing::Level::WARN
-            } else {
-                tracing::Level::ERROR
-            };
-
-            if let Some(source) = &self.source {
-                match log_level {
-                    tracing::Level::WARN => tracing::warn!(
+            if self.expected {
+                if let Some(source) = &self.source {
+                    tracing::warn!(
                         status = self.status.as_u16(),
                         message = %self.message,
                         context = ?self.context,
                         error = ?source,
-                        "Server error"
-                    ),
-                    _ => tracing::error!(
+                        "Expected server error"
+                    );
+                } else {
+                    tracing::warn!(
                         status = self.status.as_u16(),
                         message = %self.message,
                         context = ?self.context,
-                        error = ?source,
-                        "Server error"
-                    ),
+                        "Expected server error"
+                    );
                 }
+            } else if let Some(source) = &self.source {
+                tracing::error!(
+                    status = self.status.as_u16(),
+                    message = %self.message,
+                    context = ?self.context,
+                    error = ?source,
+                    "Server error"
+                );
             } else {
-                match log_level {
-                    tracing::Level::WARN => tracing::warn!(
-                        status = self.status.as_u16(),
-                        message = %self.message,
-                        context = ?self.context,
-                        "Server error"
-                    ),
-                    _ => tracing::error!(
-                        status = self.status.as_u16(),
-                        message = %self.message,
-                        context = ?self.context,
-                        "Server error"
-                    ),
-                }
+                tracing::error!(
+                    status = self.status.as_u16(),
+                    message = %self.message,
+                    context = ?self.context,
+                    "Server error"
+                );
             }
         }
 
