@@ -85,7 +85,7 @@ impl JwtValidator {
     pub fn new() -> Self {
         Self {
             jwks_cache: Arc::new(RwLock::new(HashMap::new())),
-            http_client: reqwest::Client::new(),
+            http_client: crate::server::ssrf::safe_client(),
         }
     }
 
