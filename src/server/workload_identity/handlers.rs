@@ -1,11 +1,12 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    Extension, Json,
+    Json,
 };
 use uuid::Uuid;
 
-use crate::db::{projects, service_accounts, users, User};
+use crate::db::{projects, service_accounts, users};
+use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::project::handlers::{check_read_permission, check_write_permission};
 use crate::server::ssrf;
@@ -90,10 +91,12 @@ async fn verify_oidc_issuer(issuer_url: &str) -> Result<(), ServerError> {
 /// Create a new service account for a project
 pub async fn create_workload_identity(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(project_name): Path<String>,
     Json(req): Json<CreateWorkloadIdentityRequest>,
 ) -> Result<Json<WorkloadIdentityResponse>, ServerError> {
+    let user = auth.user()?;
+
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
@@ -101,7 +104,7 @@ pub async fn create_workload_identity(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check permission: user must be able to write to project
-    if !check_write_permission(&state, &project, &user)
+    if !check_write_permission(&state, &project, user)
         .await
         .map_err(ServerError::internal)?
     {
@@ -172,9 +175,11 @@ pub async fn create_workload_identity(
 /// List all service accounts for a project
 pub async fn list_workload_identities(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(project_name): Path<String>,
 ) -> Result<Json<ListWorkloadIdentitiesResponse>, ServerError> {
+    let user = auth.user()?;
+
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
@@ -182,7 +187,7 @@ pub async fn list_workload_identities(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check read permission
-    if !check_read_permission(&state, &project, &user)
+    if !check_read_permission(&state, &project, user)
         .await
         .map_err(ServerError::internal)?
     {
@@ -225,9 +230,11 @@ pub async fn list_workload_identities(
 /// Get a specific service account
 pub async fn get_workload_identity(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_name, sa_id)): Path<(String, Uuid)>,
 ) -> Result<Json<WorkloadIdentityResponse>, ServerError> {
+    let user = auth.user()?;
+
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
@@ -235,7 +242,7 @@ pub async fn get_workload_identity(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check read permission
-    if !check_read_permission(&state, &project, &user)
+    if !check_read_permission(&state, &project, user)
         .await
         .map_err(ServerError::internal)?
     {
@@ -281,10 +288,12 @@ pub async fn get_workload_identity(
 /// Update a service account's issuer_url and/or claims
 pub async fn update_workload_identity(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_name, sa_id)): Path<(String, Uuid)>,
     Json(req): Json<UpdateWorkloadIdentityRequest>,
 ) -> Result<Json<WorkloadIdentityResponse>, ServerError> {
+    let user = auth.user()?;
+
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
@@ -292,7 +301,7 @@ pub async fn update_workload_identity(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check write permission
-    if !check_write_permission(&state, &project, &user)
+    if !check_write_permission(&state, &project, user)
         .await
         .map_err(ServerError::internal)?
     {
@@ -401,9 +410,11 @@ pub async fn update_workload_identity(
 /// Delete a service account (soft delete)
 pub async fn delete_workload_identity(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_name, sa_id)): Path<(String, Uuid)>,
 ) -> Result<StatusCode, ServerError> {
+    let user = auth.user()?;
+
     // Get project
     let project = projects::find_by_name(&state.db_pool, &project_name)
         .await
@@ -411,7 +422,7 @@ pub async fn delete_workload_identity(
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Check write permission
-    if !check_write_permission(&state, &project, &user)
+    if !check_write_permission(&state, &project, user)
         .await
         .map_err(ServerError::internal)?
     {

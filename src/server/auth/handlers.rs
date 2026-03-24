@@ -1,4 +1,4 @@
-use crate::db::{models::User, projects, users};
+use crate::db::{projects, users};
 use crate::server::auth::{
     cookie_helpers::{self, CookieSettings},
     token_storage::{
@@ -9,7 +9,7 @@ use crate::server::auth::{
 use crate::server::frontend::load_static_file;
 use crate::server::state::AppState;
 use axum::{
-    extract::{Extension, Query, State},
+    extract::{Query, State},
     http::{uri::Uri, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Redirect, Response},
     Json,
@@ -649,18 +649,19 @@ pub struct MeResponse {
 }
 
 /// Get current user info from auth middleware
-#[instrument(skip(state))]
+#[instrument(skip(state, auth))]
 pub async fn me(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: crate::server::auth::context::AuthContext,
 ) -> Result<Json<MeResponse>, (StatusCode, String)> {
+    let user = auth.user().map_err(|e| (e.status, e.message))?;
     // User is injected by auth middleware
     tracing::debug!("GET /me: user_id={}, email={}", user.id, user.email);
     let is_admin = state.is_admin(&user.email);
     let can_create_teams = is_admin || state.auth_settings.allow_team_creation;
     Ok(Json(MeResponse {
         id: user.id.to_string(),
-        email: user.email,
+        email: user.email.clone(),
         is_admin,
         can_create_teams,
     }))
@@ -683,12 +684,13 @@ pub struct UserInfo {
 }
 
 /// Lookup users by email addresses
-#[instrument(skip(state))]
+#[instrument(skip(state, auth))]
 pub async fn users_lookup(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    auth: crate::server::auth::context::AuthContext,
     Json(payload): Json<UsersLookupRequest>,
 ) -> Result<Json<UsersLookupResponse>, (StatusCode, String)> {
+    let _user = auth.user().map_err(|e| (e.status, e.message))?;
     let mut user_infos = Vec::new();
 
     for email in payload.emails {

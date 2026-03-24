@@ -1,10 +1,10 @@
 use super::models::*;
-use crate::db::models::User;
 use crate::db::{extensions as db_extensions, projects};
+use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::state::AppState;
 use axum::{
-    extract::{Extension as AxumExtension, Path, State},
+    extract::{Path, State},
     http::StatusCode,
     Json,
 };
@@ -12,8 +12,9 @@ use axum::{
 /// List all available extension types (registered providers)
 pub async fn list_extension_types(
     State(state): State<AppState>,
-    AxumExtension(_user): AxumExtension<User>,
+    auth: AuthContext,
 ) -> Result<Json<ListExtensionTypesResponse>, ServerError> {
+    let _user = auth.user()?;
     // Note: This endpoint doesn't require project access - it lists all available
     // extension types that any authenticated user can see and potentially enable on their projects
 
@@ -35,7 +36,7 @@ pub async fn list_extension_types(
 /// Create or upsert extension for project
 pub async fn create_extension(
     State(state): State<AppState>,
-    AxumExtension(user): AxumExtension<User>,
+    auth: AuthContext,
     Path((project_name, extension_name)): Path<(String, String)>,
     Json(payload): Json<CreateExtensionRequest>,
 ) -> Result<Json<CreateExtensionResponse>, ServerError> {
@@ -45,10 +46,14 @@ pub async fn create_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check project ownership/access
-    let has_access = check_project_access(&state, &user, project.id).await?;
-    if !has_access {
-        return Err(ServerError::forbidden("Access denied"));
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    // Check project ownership/access (SA access already validated)
+    if !is_sa {
+        let has_access = check_project_access(&state, &user, project.id).await?;
+        if !has_access {
+            return Err(ServerError::forbidden("Access denied"));
+        }
     }
 
     // Get extension handler by type
@@ -125,7 +130,7 @@ pub async fn create_extension(
 /// Update extension (PUT for full replace, PATCH for partial update)
 pub async fn update_extension(
     State(state): State<AppState>,
-    AxumExtension(user): AxumExtension<User>,
+    auth: AuthContext,
     Path((project_name, extension_name)): Path<(String, String)>,
     Json(payload): Json<UpdateExtensionRequest>,
 ) -> Result<Json<UpdateExtensionResponse>, ServerError> {
@@ -135,10 +140,14 @@ pub async fn update_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check project ownership/access
-    let has_access = check_project_access(&state, &user, project.id).await?;
-    if !has_access {
-        return Err(ServerError::forbidden("Access denied"));
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    // Check project ownership/access (SA access already validated)
+    if !is_sa {
+        let has_access = check_project_access(&state, &user, project.id).await?;
+        if !has_access {
+            return Err(ServerError::forbidden("Access denied"));
+        }
     }
 
     // Get existing extension to determine its type
@@ -214,7 +223,7 @@ pub async fn update_extension(
 /// Patch extension (merge with nulls removing fields)
 pub async fn patch_extension(
     State(state): State<AppState>,
-    AxumExtension(user): AxumExtension<User>,
+    auth: AuthContext,
     Path((project_name, extension_name)): Path<(String, String)>,
     Json(payload): Json<UpdateExtensionRequest>,
 ) -> Result<Json<UpdateExtensionResponse>, ServerError> {
@@ -224,10 +233,14 @@ pub async fn patch_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check project ownership/access
-    let has_access = check_project_access(&state, &user, project.id).await?;
-    if !has_access {
-        return Err(ServerError::forbidden("Access denied"));
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    // Check project ownership/access (SA access already validated)
+    if !is_sa {
+        let has_access = check_project_access(&state, &user, project.id).await?;
+        if !has_access {
+            return Err(ServerError::forbidden("Access denied"));
+        }
     }
 
     // Get existing extension
@@ -306,7 +319,7 @@ pub async fn patch_extension(
 /// List extensions for project
 pub async fn list_extensions(
     State(state): State<AppState>,
-    AxumExtension(user): AxumExtension<User>,
+    auth: AuthContext,
     Path(project_name): Path<String>,
 ) -> Result<Json<ListExtensionsResponse>, ServerError> {
     let project = projects::find_by_name(&state.db_pool, &project_name)
@@ -314,9 +327,13 @@ pub async fn list_extensions(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    let has_access = check_project_access(&state, &user, project.id).await?;
-    if !has_access {
-        return Err(ServerError::forbidden("Access denied"));
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    if !is_sa {
+        let has_access = check_project_access(&state, &user, project.id).await?;
+        if !has_access {
+            return Err(ServerError::forbidden("Access denied"));
+        }
     }
 
     let extensions = db_extensions::list_by_project(&state.db_pool, project.id)
@@ -351,7 +368,7 @@ pub async fn list_extensions(
 /// Get extension by name
 pub async fn get_extension(
     State(state): State<AppState>,
-    AxumExtension(user): AxumExtension<User>,
+    auth: AuthContext,
     Path((project_name, extension_name)): Path<(String, String)>,
 ) -> Result<Json<Extension>, ServerError> {
     let project = projects::find_by_name(&state.db_pool, &project_name)
@@ -359,9 +376,13 @@ pub async fn get_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    let has_access = check_project_access(&state, &user, project.id).await?;
-    if !has_access {
-        return Err(ServerError::forbidden("Access denied"));
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    if !is_sa {
+        let has_access = check_project_access(&state, &user, project.id).await?;
+        if !has_access {
+            return Err(ServerError::forbidden("Access denied"));
+        }
     }
 
     let ext = db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
@@ -390,7 +411,7 @@ pub async fn get_extension(
 /// Delete extension (mark for deletion)
 pub async fn delete_extension(
     State(state): State<AppState>,
-    AxumExtension(user): AxumExtension<User>,
+    auth: AuthContext,
     Path((project_name, extension_name)): Path<(String, String)>,
 ) -> Result<StatusCode, ServerError> {
     let project = projects::find_by_name(&state.db_pool, &project_name)
@@ -398,9 +419,13 @@ pub async fn delete_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    let has_access = check_project_access(&state, &user, project.id).await?;
-    if !has_access {
-        return Err(ServerError::forbidden("Access denied"));
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    if !is_sa {
+        let has_access = check_project_access(&state, &user, project.id).await?;
+        if !has_access {
+            return Err(ServerError::forbidden("Access denied"));
+        }
     }
 
     db_extensions::mark_deleted(&state.db_pool, project.id, &extension_name)
@@ -413,7 +438,7 @@ pub async fn delete_extension(
 /// Helper to check if user has access to project
 async fn check_project_access(
     state: &AppState,
-    user: &User,
+    user: &crate::db::models::User,
     project_id: uuid::Uuid,
 ) -> Result<bool, ServerError> {
     // Check if user is admin

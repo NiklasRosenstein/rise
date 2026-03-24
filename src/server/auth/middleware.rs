@@ -7,16 +7,11 @@ use axum::{
 use base64::{engine::general_purpose, Engine as _};
 use jsonwebtoken::decode_header;
 use serde::Deserialize;
-use std::collections::{HashMap, HashSet};
 
 use crate::db::{service_accounts, users, User};
+use crate::server::auth::context::VerifiedExternalToken;
 use crate::server::auth::cookie_helpers;
 use crate::server::state::AppState;
-
-/// Marker type to indicate service account authentication
-/// Used to exempt service accounts from platform access checks
-#[derive(Debug, Clone, Copy)]
-struct IsServiceAccount;
 
 /// Check if a JWT issuer is a Rise-issued JWT
 ///
@@ -60,164 +55,13 @@ struct MinimalClaims {
     iss: String,
 }
 
-/// Sanitize a validation error message for inclusion in HTTP responses.
+/// Authentication middleware that validates JWT and injects User or VerifiedExternalToken
+/// into request extensions.
 ///
-/// Removes expected claim values from error messages to prevent leaking
-/// cross-project service account configuration. The caller's actual token
-/// values are safe to include (they already know those), but the expected
-/// values configured on other projects' service accounts must not be revealed.
-fn sanitize_validation_error(error: &str) -> String {
-    if let Some(rest) = error.strip_prefix("Claim mismatch: '") {
-        // Formats:
-        //   "Claim mismatch: 'key' expected 'expected', got 'actual'"
-        //   "Claim mismatch: 'key' pattern 'pattern' does not match 'actual'"
-        // Redact to: "Claim 'key' does not match"
-        if let Some(key) = rest.split('\'').next() {
-            return format!("Claim '{}' does not match", key);
-        }
-        "Claim does not match".to_string()
-    } else if error.contains("not found or not a string") {
-        // "Claim 'key' not found or not a string" - the claim key reveals which
-        // claims other projects' service accounts expect
-        "Required claim not found in token".to_string()
-    } else {
-        // Other errors (signature validation, expiry, JWKS issues) are safe
-        error.to_string()
-    }
-}
-
-/// Authenticate as a service account using external OIDC provider
-async fn authenticate_service_account(
-    state: &AppState,
-    token: &str,
-    issuer: &str,
-) -> Result<User, (StatusCode, String)> {
-    // Find all service accounts with this issuer
-    let service_accounts = service_accounts::find_by_issuer(&state.db_pool, issuer)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to find service accounts by issuer: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            )
-        })?;
-
-    if service_accounts.is_empty() {
-        tracing::warn!("No service accounts found for issuer: {}", issuer);
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            "No service accounts configured for this issuer".to_string(),
-        ));
-    }
-
-    // Validate all service accounts and collect matches
-    let mut matching_accounts = Vec::new();
-    let mut validation_errors = Vec::new();
-
-    for sa in &service_accounts {
-        // Convert JSONB claims to HashMap
-        let claims: HashMap<String, String> =
-            serde_json::from_value(sa.claims.clone()).map_err(|e| {
-                tracing::error!("Failed to deserialize service account claims: {:#}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Invalid service account configuration".to_string(),
-                )
-            })?;
-
-        // Try to validate with this service account's claims
-        match state.jwt_validator.validate(token, issuer, &claims).await {
-            Ok(_) => {
-                matching_accounts.push(sa);
-            }
-            Err(e) => {
-                tracing::debug!(
-                    "Service account {} (project {}) validation failed: {:#}",
-                    sa.id,
-                    sa.project_id,
-                    e
-                );
-                validation_errors.push(e.to_string());
-            }
-        }
-    }
-
-    // Check for collisions
-    if matching_accounts.is_empty() {
-        // Log all validation errors for debugging (full details, server-side only)
-        for (i, err) in validation_errors.iter().enumerate() {
-            tracing::warn!(
-                "Service account validation error [{}/{}]: {}",
-                i + 1,
-                validation_errors.len(),
-                err
-            );
-        }
-
-        // Sanitize and deduplicate errors for the response to avoid leaking
-        // cross-project service account configuration details
-        let sanitized: Vec<String> = validation_errors
-            .iter()
-            .map(|e| sanitize_validation_error(e))
-            .collect::<HashSet<_>>()
-            .into_iter()
-            .collect();
-        let details = sanitized.join("; ");
-        let error_msg = format!("No service account matches the provided token: {}", details);
-
-        return Err((StatusCode::UNAUTHORIZED, error_msg));
-    }
-
-    if matching_accounts.len() > 1 {
-        let sa_ids: Vec<String> = matching_accounts
-            .iter()
-            .map(|sa| sa.id.to_string())
-            .collect();
-        tracing::error!(
-            "Multiple service accounts matched JWT: {:?}. This indicates ambiguous claim configuration.",
-            sa_ids
-        );
-        return Err((
-            StatusCode::CONFLICT,
-            "Multiple service accounts match the provided claims".to_string(),
-        ));
-    }
-
-    // Exactly one match - authenticate
-    let sa = matching_accounts[0];
-    tracing::info!(
-        "Service account authenticated: {} for project {}",
-        sa.id,
-        sa.project_id
-    );
-
-    let user = users::find_by_id(&state.db_pool, sa.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("Failed to find user for service account: {:#}", e);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Database error".to_string(),
-            )
-        })?
-        .ok_or_else(|| {
-            tracing::error!("Service account user not found: {}", sa.user_id);
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Service account user not found".to_string(),
-            )
-        })?;
-
-    Ok(user)
-}
-
-/// Authentication middleware that validates JWT and injects User into request extensions
-/// Supports both user authentication (via configured OIDC provider) and service account authentication (via external OIDC providers)
-///
-/// Authentication methods (in order of precedence):
-/// 1. Rise JWT from `rise_jwt` cookie (HS256 for UI, RS256 for ingress)
-/// 2. IdP token from Authorization Bearer header (for backward compatibility)
+/// For Rise-issued JWTs: validates with JwtSigner and injects `User`.
+/// For external JWTs: validates signature + expiry via JWKS (phase 1) and injects
+/// `VerifiedExternalToken`. Claim validation against project-scoped service accounts
+/// happens in phase 2 (inside handlers via `AuthContext::resolve_for_project`).
 pub async fn auth_middleware(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -293,12 +137,10 @@ pub async fn auth_middleware(
         state.public_url
     );
 
-    let user = if is_rise_issued_jwt(&issuer, &state.public_url) {
+    if is_rise_issued_jwt(&issuer, &state.public_url) {
         // Rise-issued JWT (HS256 or RS256) - validate with JwtSigner
-        // This is the primary authentication path for both CLI and UI users
         tracing::debug!("Auth middleware: authenticating with Rise-issued JWT");
 
-        // Verify Rise JWT (skips audience validation for now - we trust our own JWTs)
         let claims = state.jwt_signer.verify_jwt_skip_aud(&token).map_err(|e| {
             tracing::warn!("Auth middleware: Rise JWT validation failed: {:#}", e);
             (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
@@ -306,16 +148,14 @@ pub async fn auth_middleware(
 
         tracing::debug!("Auth middleware: Rise JWT validation successful");
 
-        // Extract email from Rise JWT claims
         let email = &claims.email;
-
         tracing::debug!("Rise JWT validated for user: {}", email);
 
         // Extract groups from Rise JWT for platform access checks
         let groups = claims.groups.clone();
         req.extensions_mut().insert(groups);
 
-        users::find_or_create(&state.db_pool, email)
+        let user = users::find_or_create(&state.db_pool, email)
             .await
             .map_err(|e| {
                 tracing::error!("Failed to find/create user: {:#}", e);
@@ -323,22 +163,61 @@ pub async fn auth_middleware(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Database error".to_string(),
                 )
-            })?
+            })?;
+
+        tracing::debug!("User authenticated: {} ({})", user.email, user.id);
+        req.extensions_mut().insert(user);
     } else {
-        // External issuer - service account authentication
-        tracing::debug!("Authenticating as service account from issuer: {}", issuer);
-        let user = authenticate_service_account(&state, &token, &issuer).await?;
+        // External issuer — phase 1: JWKS validation only
+        tracing::debug!(
+            "Auth middleware: external JWT from issuer '{}', performing JWKS validation",
+            issuer
+        );
 
-        // Mark this as a service account authentication
-        req.extensions_mut().insert(IsServiceAccount);
+        // Lightweight guard: skip JWKS fetch if no SA uses this issuer
+        let exists = service_accounts::issuer_exists(&state.db_pool, &issuer)
+            .await
+            .map_err(|e| {
+                tracing::error!("Failed to check issuer existence: {:#}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Database error".to_string(),
+                )
+            })?;
 
-        user
-    };
+        if !exists {
+            tracing::warn!("No service accounts configured for issuer: {}", issuer);
+            return Err((
+                StatusCode::UNAUTHORIZED,
+                "No service accounts configured for this issuer".to_string(),
+            ));
+        }
 
-    tracing::debug!("User authenticated: {} ({})", user.email, user.id);
+        // Validate signature + expiry via JWKS (no custom claim validation)
+        let claims = state
+            .jwt_validator
+            .validate_token(&token, &issuer)
+            .await
+            .map_err(|e| {
+                tracing::warn!(
+                    "Auth middleware: external JWT JWKS validation failed for issuer '{}': {:#}",
+                    issuer,
+                    e
+                );
+                (StatusCode::UNAUTHORIZED, format!("Invalid token: {}", e))
+            })?;
 
-    // Insert user into request extensions for handlers to access
-    req.extensions_mut().insert(user);
+        tracing::debug!(
+            "Auth middleware: external JWT JWKS-validated for issuer '{}'",
+            issuer
+        );
+
+        // Store the verified token for phase 2 (handler-level claim validation)
+        req.extensions_mut().insert(VerifiedExternalToken {
+            issuer: issuer.clone(),
+            claims,
+        });
+    }
 
     Ok(next.run(req).await)
 }
@@ -385,7 +264,7 @@ pub async fn optional_auth_middleware(
 
 /// Platform access middleware - blocks non-platform users from API endpoints
 ///
-/// Applied AFTER auth_middleware (which validates JWT and injects User).
+/// Applied AFTER auth_middleware (which validates JWT and injects User or VerifiedExternalToken).
 /// Only applies to protected API routes - does NOT apply to ingress auth endpoint.
 pub async fn platform_access_middleware(
     State(state): State<AppState>,
@@ -394,7 +273,14 @@ pub async fn platform_access_middleware(
 ) -> Result<Response, (StatusCode, String)> {
     use crate::server::auth::platform_access::{ConfigBasedAccessChecker, PlatformAccessChecker};
 
-    // Extract user from extensions (injected by auth_middleware)
+    // Service accounts (external tokens) bypass platform access checks.
+    // Their access is validated per-project in phase 2.
+    if req.extensions().get::<VerifiedExternalToken>().is_some() {
+        tracing::debug!("Skipping platform access check for external token (service account)");
+        return Ok(next.run(req).await);
+    }
+
+    // Extract user from extensions (injected by auth_middleware for Rise JWTs)
     let user = req.extensions().get::<User>().ok_or_else(|| {
         tracing::error!("platform_access_middleware called without user in extensions");
         (
@@ -402,12 +288,6 @@ pub async fn platform_access_middleware(
             "Authentication error".to_string(),
         )
     })?;
-
-    // Check if this is a service account - service accounts bypass platform access checks
-    if req.extensions().get::<IsServiceAccount>().is_some() {
-        tracing::debug!("Skipping platform access check for service account");
-        return Ok(next.run(req).await);
-    }
 
     // Extract groups from request extensions (stored by auth_middleware)
     let groups = req.extensions().get::<Option<Vec<String>>>();
@@ -472,44 +352,5 @@ mod tests {
 
         let result = extract_bearer_token(&headers);
         assert_eq!(result, None);
-    }
-
-    #[test]
-    fn test_sanitize_validation_error_exact_claim_mismatch() {
-        let error = "Claim mismatch: 'sub' expected 'secret-value', got 'my-token-sub'";
-        assert_eq!(
-            sanitize_validation_error(error),
-            "Claim 'sub' does not match"
-        );
-    }
-
-    #[test]
-    fn test_sanitize_validation_error_wildcard_claim_mismatch() {
-        let error = "Claim mismatch: 'project_path' pattern 'org/*' does not match 'other/repo'";
-        assert_eq!(
-            sanitize_validation_error(error),
-            "Claim 'project_path' does not match"
-        );
-    }
-
-    #[test]
-    fn test_sanitize_validation_error_claim_not_found() {
-        let error = "Claim 'department' not found or not a string";
-        assert_eq!(
-            sanitize_validation_error(error),
-            "Required claim not found in token"
-        );
-    }
-
-    #[test]
-    fn test_sanitize_validation_error_safe_errors_pass_through() {
-        let error = "Token has expired";
-        assert_eq!(sanitize_validation_error(error), "Token has expired");
-
-        let error = "Failed to validate JWT token: InvalidSignature";
-        assert_eq!(
-            sanitize_validation_error(error),
-            "Failed to validate JWT token: InvalidSignature"
-        );
     }
 }

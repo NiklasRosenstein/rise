@@ -1,58 +1,19 @@
 use axum::{
-    extract::{Extension, Query, State},
+    extract::{Query, State},
     Json,
 };
 
 use super::models::{GetRegistryCredsRequest, GetRegistryCredsResponse};
-use crate::db::models::User;
-use crate::db::{projects, teams as db_teams};
+use crate::db::projects;
+use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
+use crate::server::project::handlers::ensure_project_access_or_admin;
 use crate::server::state::AppState;
-use uuid::Uuid;
-
-/// Check if user has permission to deploy to the project
-async fn check_deploy_permission(
-    state: &AppState,
-    project: &crate::db::models::Project,
-    user_id: Uuid,
-) -> Result<(), ServerError> {
-    // If project is owned by the user directly, allow
-    if let Some(owner_user_id) = project.owner_user_id {
-        if owner_user_id == user_id {
-            return Ok(());
-        }
-    }
-
-    // If project is owned by a team, check if user is an owner of that team
-    if let Some(team_id) = project.owner_team_id {
-        let is_owner = db_teams::is_owner(&state.db_pool, team_id, user_id)
-            .await
-            .internal_err("Failed to check team ownership")?;
-
-        if is_owner {
-            return Ok(());
-        }
-
-        let team = db_teams::find_by_id(&state.db_pool, team_id)
-            .await
-            .internal_err("Failed to fetch team")?
-            .ok_or_else(|| ServerError::not_found("Team not found"))?;
-
-        return Err(ServerError::forbidden(format!(
-            "You must be an owner of team '{}' to deploy to this project",
-            team.name
-        )));
-    }
-
-    Err(ServerError::forbidden(
-        "You do not have permission to deploy to this project",
-    ))
-}
 
 /// Get registry credentials for a project
 pub async fn get_registry_credentials(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Query(params): Query<GetRegistryCredsRequest>,
 ) -> Result<Json<GetRegistryCredsResponse>, ServerError> {
     // Query project by name
@@ -62,8 +23,13 @@ pub async fn get_registry_credentials(
         .map_err(|e| e.with_context("project_name", &params.project))?
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", params.project)))?;
 
-    // Check if user has permission to deploy to this project
-    check_deploy_permission(&state, &project, user.id).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+
+    // Check if user has permission to deploy to this project (SA access already validated)
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Get credentials from the registry provider
     // The repository name is typically the project name

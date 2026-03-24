@@ -195,7 +195,7 @@ impl JwtValidator {
     /// - `app-*-prod` matches `app-staging-prod`, `app-test-prod`, etc.
     ///
     /// If no wildcard is present, exact matching is performed (backward compatible).
-    fn validate_custom_claims(
+    pub fn validate_custom_claims(
         jwt_claims: &serde_json::Value,
         expected_claims: &HashMap<String, String>,
     ) -> Result<()> {
@@ -286,21 +286,24 @@ impl JwtValidator {
         true
     }
 
-    /// Validate a JWT token against an issuer with expected claims
+    /// Validate a JWT token's signature and expiry against an issuer (JWKS only).
+    ///
+    /// This performs steps 1-4 of token validation:
+    /// 1. Decode the JWT header to get the key ID
+    /// 2. Fetch JWKS for the issuer (with caching)
+    /// 3. Verify the signature using the matching key
+    /// 4. Check token expiry
+    ///
+    /// Custom claim validation is NOT performed. Use `validate_custom_claims`
+    /// separately when additional claim matching is needed.
     ///
     /// # Arguments
     /// * `token` - The JWT token string
     /// * `issuer_url` - The OIDC issuer URL (used for JWKS discovery and iss validation)
-    /// * `expected_claims` - Claims that must match exactly (including "aud" if required)
     ///
     /// # Returns
     /// The full JWT claims as a `serde_json::Value` on success
-    pub async fn validate(
-        &self,
-        token: &str,
-        issuer_url: &str,
-        expected_claims: &HashMap<String, String>,
-    ) -> Result<serde_json::Value> {
+    pub async fn validate_token(&self, token: &str, issuer_url: &str) -> Result<serde_json::Value> {
         // Decode header to get key ID
         let header = decode_header(token).context("Failed to decode JWT header")?;
         let kid = header
@@ -336,10 +339,30 @@ impl JwtValidator {
             }
         }
 
-        // Validate expected claims (exact matching)
-        Self::validate_custom_claims(&token_data.claims, expected_claims)?;
-
         Ok(token_data.claims)
+    }
+
+    /// Validate a JWT token against an issuer with expected claims
+    ///
+    /// This calls `validate_token` for signature/expiry validation, then
+    /// `validate_custom_claims` for claim matching.
+    ///
+    /// # Arguments
+    /// * `token` - The JWT token string
+    /// * `issuer_url` - The OIDC issuer URL (used for JWKS discovery and iss validation)
+    /// * `expected_claims` - Claims that must match exactly (including "aud" if required)
+    ///
+    /// # Returns
+    /// The full JWT claims as a `serde_json::Value` on success
+    pub async fn validate(
+        &self,
+        token: &str,
+        issuer_url: &str,
+        expected_claims: &HashMap<String, String>,
+    ) -> Result<serde_json::Value> {
+        let claims = self.validate_token(token, issuer_url).await?;
+        Self::validate_custom_claims(&claims, expected_claims)?;
+        Ok(claims)
     }
 }
 

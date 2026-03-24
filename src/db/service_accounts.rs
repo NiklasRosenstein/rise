@@ -174,49 +174,6 @@ pub async fn get_claims(
     Ok(claims)
 }
 
-/// Find all active service accounts with a specific issuer URL (for authentication)
-pub async fn find_by_issuer(pool: &PgPool, issuer_url: &str) -> Result<Vec<ServiceAccount>> {
-    let sas = sqlx::query_as!(
-        ServiceAccount,
-        r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
-               deleted_at, created_at, updated_at
-        FROM service_accounts
-        WHERE issuer_url = $1 AND deleted_at IS NULL
-        "#,
-        issuer_url
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to find service accounts by issuer")?;
-
-    Ok(sas)
-}
-
-/// Find a service account by user ID and project ID (for authorization)
-pub async fn find_by_user_and_project(
-    pool: &PgPool,
-    user_id: Uuid,
-    project_id: Uuid,
-) -> Result<Option<ServiceAccount>> {
-    let sa = sqlx::query_as!(
-        ServiceAccount,
-        r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
-               deleted_at, created_at, updated_at
-        FROM service_accounts
-        WHERE user_id = $1 AND project_id = $2 AND deleted_at IS NULL
-        "#,
-        user_id,
-        project_id
-    )
-    .fetch_optional(pool)
-    .await
-    .context("Failed to find service account by user and project")?;
-
-    Ok(sa)
-}
-
 /// Check if a user is a service account
 pub async fn is_service_account(pool: &PgPool, user_id: Uuid) -> Result<bool> {
     let exists = sqlx::query_scalar!(
@@ -271,6 +228,49 @@ pub async fn update(
     .context("Failed to update service account")?;
 
     Ok(sa)
+}
+
+/// Check if any active service account exists with this issuer URL
+pub async fn issuer_exists(pool: &PgPool, issuer_url: &str) -> Result<bool> {
+    let exists = sqlx::query_scalar!(
+        r#"
+        SELECT EXISTS(
+            SELECT 1
+            FROM service_accounts
+            WHERE issuer_url = $1 AND deleted_at IS NULL
+        ) as "exists!"
+        "#,
+        issuer_url
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to check if issuer exists")?;
+
+    Ok(exists)
+}
+
+/// Find all active service accounts for a specific project and issuer URL
+pub async fn find_by_project_and_issuer(
+    pool: &PgPool,
+    project_id: Uuid,
+    issuer_url: &str,
+) -> Result<Vec<ServiceAccount>> {
+    let sas = sqlx::query_as!(
+        ServiceAccount,
+        r#"
+        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+               deleted_at, created_at, updated_at
+        FROM service_accounts
+        WHERE project_id = $1 AND issuer_url = $2 AND deleted_at IS NULL
+        "#,
+        project_id,
+        issuer_url
+    )
+    .fetch_all(pool)
+    .await
+    .context("Failed to find service accounts by project and issuer")?;
+
+    Ok(sas)
 }
 
 /// Soft delete a service account
@@ -382,42 +382,6 @@ mod tests {
     }
 
     #[sqlx::test]
-    async fn test_find_by_issuer(pool: PgPool) -> Result<()> {
-        let user = users::create(&pool, "owner@example.com").await?;
-        let project1 = projects::create(
-            &pool,
-            "project1",
-            ProjectStatus::Stopped,
-            "public".to_string(),
-            Some(user.id),
-            None,
-        )
-        .await?;
-        let project2 = projects::create(
-            &pool,
-            "project2",
-            ProjectStatus::Stopped,
-            "public".to_string(),
-            Some(user.id),
-            None,
-        )
-        .await?;
-
-        let claims = HashMap::new();
-
-        // Create service accounts with same issuer
-        create(&pool, project1.id, "https://gitlab.com", &claims).await?;
-        create(&pool, project2.id, "https://gitlab.com", &claims).await?;
-        create(&pool, project1.id, "https://github.com", &claims).await?;
-
-        // Find by issuer
-        let sas = find_by_issuer(&pool, "https://gitlab.com").await?;
-        assert_eq!(sas.len(), 2);
-
-        Ok(())
-    }
-
-    #[sqlx::test]
     async fn test_soft_delete(pool: PgPool) -> Result<()> {
         let user = users::create(&pool, "owner@example.com").await?;
         let project = projects::create(
@@ -444,6 +408,77 @@ mod tests {
         let sa_deleted = get_by_id(&pool, sa.id).await?;
         assert!(sa_deleted.is_some());
         assert!(sa_deleted.unwrap().deleted_at.is_some());
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_issuer_exists(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project = projects::create(
+            &pool,
+            "test-project",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        // No service accounts yet
+        assert!(!issuer_exists(&pool, "https://gitlab.com").await?);
+
+        // Create a service account
+        let claims = HashMap::new();
+        create(&pool, project.id, "https://gitlab.com", &claims).await?;
+
+        // Now it should exist
+        assert!(issuer_exists(&pool, "https://gitlab.com").await?);
+        assert!(!issuer_exists(&pool, "https://github.com").await?);
+
+        Ok(())
+    }
+
+    #[sqlx::test]
+    async fn test_find_by_project_and_issuer(pool: PgPool) -> Result<()> {
+        let user = users::create(&pool, "owner@example.com").await?;
+        let project1 = projects::create(
+            &pool,
+            "project1",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+        let project2 = projects::create(
+            &pool,
+            "project2",
+            ProjectStatus::Stopped,
+            "public".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await?;
+
+        let claims = HashMap::new();
+
+        // Create SAs: project1 has 2 gitlab SAs, project2 has 1 gitlab SA
+        create(&pool, project1.id, "https://gitlab.com", &claims).await?;
+        create(&pool, project1.id, "https://gitlab.com", &claims).await?;
+        create(&pool, project2.id, "https://gitlab.com", &claims).await?;
+
+        // Should only return project1's SAs
+        let sas = find_by_project_and_issuer(&pool, project1.id, "https://gitlab.com").await?;
+        assert_eq!(sas.len(), 2);
+
+        // Should only return project2's SA
+        let sas = find_by_project_and_issuer(&pool, project2.id, "https://gitlab.com").await?;
+        assert_eq!(sas.len(), 1);
+
+        // No SAs for github
+        let sas = find_by_project_and_issuer(&pool, project1.id, "https://github.com").await?;
+        assert_eq!(sas.len(), 0);
 
         Ok(())
     }
