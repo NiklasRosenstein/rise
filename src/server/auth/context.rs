@@ -77,30 +77,27 @@ impl AuthContext {
                 }
 
                 // Try each SA's expected claims against the token
+                let mut matching_sas = Vec::new();
                 let mut last_error = None;
                 for sa in &service_accounts {
                     let expected_claims: HashMap<String, String> =
-                        serde_json::from_value(sa.claims.clone()).unwrap_or_default();
+                        match serde_json::from_value(sa.claims.clone()) {
+                            Ok(claims) => claims,
+                            Err(e) => {
+                                tracing::error!(
+                                    "Failed to deserialize claims for service account {}: {}",
+                                    sa.id,
+                                    e
+                                );
+                                return Err(ServerError::internal(
+                                    "Invalid service account claims configuration",
+                                ));
+                            }
+                        };
 
                     match JwtValidator::validate_custom_claims(&token.claims, &expected_claims) {
                         Ok(()) => {
-                            // Claims match — look up the SA's synthetic user
-                            let user = crate::db::users::find_by_id(&state.db_pool, sa.user_id)
-                                .await
-                                .internal_err("Failed to look up service account user")?
-                                .ok_or_else(|| {
-                                    ServerError::internal(
-                                        "Service account user not found in database",
-                                    )
-                                })?;
-
-                            tracing::info!(
-                                "Service account {} authenticated for project '{}'",
-                                user.email,
-                                project.name
-                            );
-
-                            return Ok((user, true));
+                            matching_sas.push(sa);
                         }
                         Err(e) => {
                             tracing::debug!("SA {} claim mismatch: {}", sa.id, e);
@@ -109,14 +106,47 @@ impl AuthContext {
                     }
                 }
 
-                // No SA matched — include validation details (safe: same project)
-                Err(ServerError::unauthorized(format!(
-                    "Token claims do not match any service account for project '{}': {}",
-                    project.name,
-                    last_error
-                        .map(|e| e.to_string())
-                        .unwrap_or_else(|| "unknown error".to_string()),
-                )))
+                if matching_sas.is_empty() {
+                    // No SA matched — include validation details (safe: same project)
+                    return Err(ServerError::unauthorized(format!(
+                        "Token claims do not match any service account for project '{}': {}",
+                        project.name,
+                        last_error
+                            .map(|e| e.to_string())
+                            .unwrap_or_else(|| "unknown error".to_string()),
+                    )));
+                }
+
+                if matching_sas.len() > 1 {
+                    let sa_ids: Vec<String> =
+                        matching_sas.iter().map(|sa| sa.id.to_string()).collect();
+                    tracing::error!(
+                        "Multiple service accounts matched JWT on project '{}': {:?}. \
+                         This indicates ambiguous claim configuration.",
+                        project.name,
+                        sa_ids
+                    );
+                    return Err(ServerError::conflict(
+                        "Multiple service accounts match the provided claims",
+                    ));
+                }
+
+                // Exactly one match — look up the SA's synthetic user
+                let sa = matching_sas[0];
+                let user = crate::db::users::find_by_id(&state.db_pool, sa.user_id)
+                    .await
+                    .internal_err("Failed to look up service account user")?
+                    .ok_or_else(|| {
+                        ServerError::internal("Service account user not found in database")
+                    })?;
+
+                tracing::info!(
+                    "Service account {} authenticated for project '{}'",
+                    user.email,
+                    project.name
+                );
+
+                Ok((user, true))
             }
         }
     }

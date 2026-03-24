@@ -502,7 +502,10 @@ pub async fn create_deployment(
     }
 
     // Resolve auth for project scope (validates SA claims if external token)
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
     // Check deployment permissions (SA access already validated above)
     if !is_sa {
@@ -1053,7 +1056,10 @@ pub async fn update_deployment_status_by_project(
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
     // Find deployment by deployment_id + project_id
     let deployment =
@@ -1137,7 +1143,10 @@ pub async fn update_deployment_status(
         })?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
     perform_status_update(
         &state,
@@ -1179,7 +1188,10 @@ pub async fn list_deployments(
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
     // Check if user has permission to view deployments (SA access already validated)
     if !is_sa {
@@ -1283,7 +1295,10 @@ pub async fn stop_deployments_by_group(
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Resolve auth for project scope
-    let (_user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
     // Check if user has permission to stop deployments (SA access already validated)
     if !is_sa {
@@ -1364,7 +1379,10 @@ pub async fn stop_deployment(
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Resolve auth for project scope
-    let (_user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
     // Check if user has permission to stop deployments (SA access already validated)
     if !is_sa {
@@ -1456,7 +1474,10 @@ pub async fn get_deployment_by_project(
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Resolve auth for project scope
-    let (_user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
     // Check if user has permission to view deployments (SA access already validated)
     if !is_sa {
@@ -1531,7 +1552,10 @@ pub async fn list_deployment_groups(
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Resolve auth for project scope
-    let (_user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
     // Check if user has permission to view deployment groups (SA access already validated)
     if !is_sa {
@@ -1579,7 +1603,10 @@ pub async fn stream_deployment_logs(
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
     // Resolve auth for project scope
-    let (_user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project.name)))?;
 
     // Check permission (SA access already validated)
     if !is_sa {

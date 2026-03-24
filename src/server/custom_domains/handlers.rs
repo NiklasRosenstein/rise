@@ -33,7 +33,10 @@ pub async fn add_custom_domain(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }
@@ -136,7 +139,10 @@ pub async fn list_custom_domains(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project)
             .await
@@ -181,7 +187,10 @@ pub async fn get_custom_domain(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project)
             .await
@@ -222,7 +231,10 @@ pub async fn delete_custom_domain(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }
@@ -302,7 +314,10 @@ pub async fn set_primary_domain(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }
@@ -383,7 +398,10 @@ pub async fn unset_primary_domain(
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
     // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state, &project).await?;
+    let (user, is_sa) = auth
+        .resolve_for_project(&state, &project)
+        .await
+        .map_err(|_| ServerError::not_found("Project not found"))?;
     if !is_sa {
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }

@@ -21,6 +21,9 @@ pub enum EncryptError {
     #[error("Rate limit exceeded. Retry after {retry_after} seconds")]
     RateLimitExceeded { retry_after: u64 },
 
+    #[error("{0}")]
+    Unauthorized(String),
+
     #[error("Encryption provider not configured")]
     ProviderNotConfigured,
 
@@ -39,6 +42,9 @@ impl IntoResponse for EncryptError {
                     axum::http::HeaderValue::from_str(&retry_after.to_string()).unwrap(),
                 );
                 response
+            }
+            EncryptError::Unauthorized(_) => {
+                (StatusCode::UNAUTHORIZED, self.to_string()).into_response()
             }
             EncryptError::ProviderNotConfigured => {
                 (StatusCode::SERVICE_UNAVAILABLE, self.to_string()).into_response()
@@ -60,7 +66,7 @@ pub async fn encrypt_handler(
 ) -> Result<Json<EncryptResponse>, EncryptError> {
     let user = auth
         .user()
-        .map_err(|_| EncryptError::ProviderNotConfigured)?;
+        .map_err(|e| EncryptError::Unauthorized(e.message))?;
     // Check rate limit (100 req/hour per user)
     let key = format!("encrypt:{}", user.id);
     let count = state.encrypt_rate_limiter.get(&key).await.unwrap_or(0);

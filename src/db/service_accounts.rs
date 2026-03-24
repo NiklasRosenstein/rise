@@ -262,6 +262,7 @@ pub async fn find_by_project_and_issuer(
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE project_id = $1 AND issuer_url = $2 AND deleted_at IS NULL
+        ORDER BY sequence ASC
         "#,
         project_id,
         issuer_url
