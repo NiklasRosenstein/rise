@@ -113,13 +113,28 @@ pub async fn validate_url(url: &str) -> Result<(), SsrfError> {
 ///
 /// The client has:
 /// - 10-second connect and total request timeout
-/// - Maximum 3 redirects
-/// - HTTPS-only redirect following
+/// - Custom redirect policy (max 3 hops, HTTPS-only, blocks private/internal IPs)
 pub fn safe_client() -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .connect_timeout(Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::limited(3))
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 3 {
+                attempt.error("too many redirects")
+            } else if attempt.url().scheme() != "https" {
+                attempt.error("redirect target must use HTTPS")
+            } else if let Some(host) = attempt.url().host_str() {
+                if let Ok(ip) = host.parse::<IpAddr>() {
+                    if is_blocked_ip(&ip) {
+                        return attempt
+                            .error(format!("redirect target resolves to blocked IP: {}", ip));
+                    }
+                }
+                attempt.follow()
+            } else {
+                attempt.error("redirect target has no host")
+            }
+        }))
         .build()
         .expect("failed to build SSRF-safe HTTP client")
 }
@@ -239,12 +254,13 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_url_accepts_public_https() {
-        // This test requires DNS resolution, so it may fail in isolated environments
-        let result = validate_url("https://accounts.google.com").await;
-        // In CI environments this should pass; in isolated environments it may fail on DNS
-        if result.is_ok() {
-            assert!(result.is_ok());
-        }
+        // Use a known public IP to avoid DNS dependency and make the test deterministic.
+        let result = validate_url("https://8.8.8.8/").await;
+        assert!(
+            result.is_ok(),
+            "expected public HTTPS URL to be accepted, got: {:?}",
+            result
+        );
     }
 
     #[test]
