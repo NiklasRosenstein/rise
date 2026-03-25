@@ -750,6 +750,7 @@ async fn main() -> Result<()> {
 
     // Backend commands don't need CLI config (they use Settings from TOML/env vars)
     // Only client commands (login, project, team, deployment, service-account) need it
+    #[allow(unreachable_code)]
     if let Commands::Backend(backend_cmd) = &cli_command {
         return backend::handle_backend_command(backend_cmd.clone()).await;
     }

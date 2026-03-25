@@ -1,7 +1,5 @@
 use anyhow::Result;
 
-use crate::dev_oidc_issuer;
-
 #[derive(Debug, Clone, clap::Subcommand)]
 pub enum BackendCommands {
     /// Start the HTTP server with all controllers
@@ -13,15 +11,6 @@ pub enum BackendCommands {
     /// Print backend settings JSON schema
     #[cfg(feature = "backend")]
     ConfigSchema,
-    /// Run a local OIDC issuer for testing service accounts
-    DevOidcIssuer {
-        /// Port to listen on
-        #[arg(long, short, default_value = "5678")]
-        port: u16,
-        /// Generate and print a token at startup (format: 'key=value,key=value')
-        #[arg(long)]
-        token: Option<String>,
-    },
 }
 
 pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
@@ -51,6 +40,5 @@ pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
             println!("{}", serde_json::to_string_pretty(&schema)?);
             Ok(())
         }
-        BackendCommands::DevOidcIssuer { port, token } => dev_oidc_issuer::run(port, token).await,
     }
 }
