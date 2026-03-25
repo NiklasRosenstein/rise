@@ -761,8 +761,8 @@ async fn main() -> Result<()> {
     let mut config = config::Config::load()?;
     let backend_url = config.get_backend_url();
 
-    // Check version compatibility for all commands except Backend and Login
-    // (Backend commands don't use the HTTP API, Login might use a custom URL)
+    // Check version compatibility for all commands except Login
+    // (Backend commands are handled above and don't use the HTTP API; Login might use a custom URL)
     if !matches!(&cli_command, Commands::Login { .. }) {
         // Non-fatal version check - just warns user
         let _ = version::check_version_compatibility(&http_client, &backend_url).await;
