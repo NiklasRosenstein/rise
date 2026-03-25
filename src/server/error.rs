@@ -113,6 +113,11 @@ impl ServerError {
         Self::from_anyhow(source, StatusCode::INTERNAL_SERVER_ERROR, message)
     }
 
+    /// Create a 401 Unauthorized error
+    pub fn unauthorized(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::UNAUTHORIZED, message)
+    }
+
     /// Create a 400 Bad Request error
     pub fn bad_request(message: impl Into<String>) -> Self {
         Self::new(StatusCode::BAD_REQUEST, message)

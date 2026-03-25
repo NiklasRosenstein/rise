@@ -3,12 +3,13 @@ use super::models::{
     CreateTeamRequest, CreateTeamResponse, GetTeamParams, Team as ApiTeam, UpdateTeamRequest,
     UpdateTeamResponse, UserInfo,
 };
-use crate::db::models::{TeamRole, User};
+use crate::db::models::TeamRole;
 use crate::db::{service_accounts, teams as db_teams};
+use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::state::AppState;
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -16,9 +17,10 @@ use uuid::Uuid;
 
 pub async fn create_team(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Json(payload): Json<CreateTeamRequest>,
 ) -> Result<Json<CreateTeamResponse>, ServerError> {
+    let user = auth.user()?;
     // Check if user is allowed to create teams
     let is_admin = state.is_admin(&user.email);
     if !state.auth_settings.allow_team_creation && !is_admin {
@@ -110,10 +112,11 @@ pub async fn create_team(
 
 pub async fn get_team(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    auth: AuthContext,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetTeamParams>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
+    let _user = auth.user()?;
     // Resolve team by ID or name
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
@@ -136,11 +139,12 @@ pub async fn get_team(
 
 pub async fn update_team(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetTeamParams>,
     Json(payload): Json<UpdateTeamRequest>,
 ) -> Result<Json<UpdateTeamResponse>, ServerError> {
+    let user = auth.user()?;
     // Resolve team by ID or name
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
@@ -304,10 +308,11 @@ pub async fn update_team(
 
 pub async fn delete_team(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetTeamParams>,
 ) -> Result<StatusCode, ServerError> {
+    let user = auth.user()?;
     // Resolve team by ID or name
     let team = resolve_team(&state, &id_or_name, params.by_id).await?;
 
@@ -343,8 +348,9 @@ pub async fn delete_team(
 
 pub async fn list_teams(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
 ) -> Result<Json<Vec<ApiTeam>>, ServerError> {
+    let user = auth.user()?;
     // Admins can see all teams; other users see all teams if allow_list_all_teams is enabled
     let teams = if state.is_admin(&user.email) || state.auth_settings.allow_list_all_teams {
         db_teams::list(&state.db_pool)

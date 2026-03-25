@@ -5,11 +5,12 @@ use super::models::{
     TeamInfo, UpdateProjectRequest, UpdateProjectResponse, UserInfo,
 };
 use crate::db::models::User;
-use crate::db::{projects, service_accounts, teams as db_teams, users as db_users};
+use crate::db::{projects, teams as db_teams, users as db_users};
+use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::state::AppState;
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -18,8 +19,9 @@ use uuid::Uuid;
 /// List available access classes for the deployment controller
 pub async fn list_access_classes(
     State(state): State<AppState>,
-    Extension(_user): Extension<User>,
+    auth: AuthContext,
 ) -> Result<Json<ListAccessClassesResponse>, ServerError> {
+    let _user = auth.user()?;
     let access_classes = state
         .access_classes
         .iter()
@@ -83,9 +85,10 @@ async fn resolve_team_identifier(
 
 pub async fn create_project(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Json(payload): Json<CreateProjectRequest>,
 ) -> Result<Json<CreateProjectResponse>, ServerError> {
+    let user = auth.user()?;
     // Validate access_class against configured access classes
     let is_valid_access_class = state.access_classes.contains_key(&payload.access_class);
 
@@ -199,8 +202,9 @@ pub async fn create_project(
 
 pub async fn list_projects(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
 ) -> Result<Json<Vec<ApiProject>>, ServerError> {
+    let user = auth.user()?;
     // Admins can see all projects, others only see projects they have access to
     let projects = if state.is_admin(&user.email) {
         projects::list(&state.db_pool, None)
@@ -328,15 +332,16 @@ pub async fn list_projects(
 
 pub async fn get_project(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetProjectParams>,
 ) -> Result<Json<serde_json::Value>, ServerError> {
+    let user = auth.user()?;
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
     // Check read permission
-    let can_read = check_read_permission(&state, &project, &user)
+    let can_read = check_read_permission(&state, &project, user)
         .await
         .map_err(|e| ServerError::internal(format!("Failed to check permissions: {}", e)))?;
 
@@ -421,16 +426,17 @@ pub async fn get_project(
 
 pub async fn update_project(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetProjectParams>,
     Json(payload): Json<UpdateProjectRequest>,
 ) -> Result<Json<UpdateProjectResponse>, ServerError> {
+    let user = auth.user()?;
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
     // Check write permission
-    let can_write = check_write_permission(&state, &project, &user)
+    let can_write = check_write_permission(&state, &project, user)
         .await
         .map_err(|e| ServerError::internal(format!("Failed to check permissions: {}", e)))?;
 
@@ -441,11 +447,7 @@ pub async fn update_project(
     }
 
     // Service accounts cannot update projects
-    let is_sa = service_accounts::is_service_account(&state.db_pool, user.id)
-        .await
-        .internal_err("Failed to check service account status")?;
-
-    if is_sa {
+    if auth.is_service_account() {
         return Err(ServerError::forbidden(
             "Service accounts cannot modify projects",
         ));
@@ -634,15 +636,16 @@ pub async fn update_project(
 
 pub async fn delete_project(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(id_or_name): Path<String>,
     Query(params): Query<GetProjectParams>,
 ) -> Result<StatusCode, ServerError> {
+    let user = auth.user()?;
     // Resolve project by ID or name
     let project = resolve_project(&state, &id_or_name, params.by_id).await?;
 
     // Check write permission
-    let can_write = check_write_permission(&state, &project, &user)
+    let can_write = check_write_permission(&state, &project, user)
         .await
         .map_err(|e| ServerError::internal(format!("Failed to check permissions: {}", e)))?;
 
@@ -653,11 +656,7 @@ pub async fn delete_project(
     }
 
     // Service accounts cannot delete projects
-    let is_sa = service_accounts::is_service_account(&state.db_pool, user.id)
-        .await
-        .internal_err("Failed to check service account status")?;
-
-    if is_sa {
+    if auth.is_service_account() {
         return Err(ServerError::forbidden(
             "Service accounts cannot modify projects",
         ));

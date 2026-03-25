@@ -1,6 +1,6 @@
-use crate::db::models::User;
+use crate::server::auth::context::AuthContext;
 use crate::server::state::AppState;
-use axum::{extract::State, http::StatusCode, response::IntoResponse, Extension, Json};
+use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use serde::{Deserialize, Serialize};
 
 /// Request to encrypt a plaintext value
@@ -21,6 +21,9 @@ pub enum EncryptError {
     #[error("Rate limit exceeded. Retry after {retry_after} seconds")]
     RateLimitExceeded { retry_after: u64 },
 
+    #[error("{0}")]
+    Unauthorized(String),
+
     #[error("Encryption provider not configured")]
     ProviderNotConfigured,
 
@@ -40,6 +43,9 @@ impl IntoResponse for EncryptError {
                 );
                 response
             }
+            EncryptError::Unauthorized(_) => {
+                (StatusCode::UNAUTHORIZED, self.to_string()).into_response()
+            }
             EncryptError::ProviderNotConfigured => {
                 (StatusCode::SERVICE_UNAVAILABLE, self.to_string()).into_response()
             }
@@ -55,9 +61,12 @@ impl IntoResponse for EncryptError {
 /// Rate limited to 100 requests per hour per user.
 pub async fn encrypt_handler(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Json(req): Json<EncryptRequest>,
 ) -> Result<Json<EncryptResponse>, EncryptError> {
+    let user = auth
+        .user()
+        .map_err(|e| EncryptError::Unauthorized(e.message))?;
     // Check rate limit (100 req/hour per user)
     let key = format!("encrypt:{}", user.id);
     let count = state.encrypt_rate_limiter.get(&key).await.unwrap_or(0);

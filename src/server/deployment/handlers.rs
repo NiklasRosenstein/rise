@@ -1,6 +1,7 @@
 use anyhow::Context;
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Path, Query, State},
+    http::StatusCode,
     response::sse::{Event, KeepAlive, Sse},
     Json,
 };
@@ -12,72 +13,12 @@ use tracing::{debug, error, info, warn};
 use super::models::{self, *};
 use super::state_machine;
 use super::utils::{create_deployment_with_hooks, generate_deployment_id};
-use crate::db::models::{DeploymentStatus as DbDeploymentStatus, User};
-use crate::db::{
-    deployments as db_deployments, projects, service_accounts, teams as db_teams, users,
-};
+use crate::db::models::DeploymentStatus as DbDeploymentStatus;
+use crate::db::{deployments as db_deployments, projects, users};
+use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::registry::ImageTagType;
 use crate::server::state::AppState;
-
-/// Check if user has permission to deploy to the project
-async fn check_deploy_permission(
-    state: &AppState,
-    project: &crate::db::models::Project,
-    user: &User,
-) -> Result<(), ServerError> {
-    // Admins have full access
-    if state.is_admin(&user.email) {
-        return Ok(());
-    }
-
-    // Check if user is a service account for this project
-    let is_sa = service_accounts::find_by_user_and_project(&state.db_pool, user.id, project.id)
-        .await
-        .internal_err("Failed to check service account status")?
-        .is_some();
-
-    if is_sa {
-        return Ok(());
-    }
-
-    // If project is owned by the user directly, allow
-    if let Some(owner_user_id) = project.owner_user_id {
-        if owner_user_id == user.id {
-            return Ok(());
-        }
-    }
-
-    // If project is owned by a team, check if user is a member of that team
-    if let Some(team_id) = project.owner_team_id {
-        let is_member = db_teams::is_member(&state.db_pool, team_id, user.id)
-            .await
-            .internal_err("Failed to check team membership")?;
-
-        if is_member {
-            return Ok(());
-        }
-
-        let team = db_teams::find_by_id(&state.db_pool, team_id)
-            .await
-            .internal_err("Failed to fetch team")?
-            .ok_or_else(|| {
-                ServerError::internal(format!(
-                    "Data integrity error: project {} references non-existent team {}",
-                    project.id, team_id
-                ))
-            })?;
-
-        return Err(ServerError::forbidden(format!(
-            "You must be a member of team '{}' to deploy to this project",
-            team.name
-        )));
-    }
-
-    Err(ServerError::forbidden(
-        "You do not have permission to deploy to this project",
-    ))
-}
 
 /// Validate group name format: must be 'default' or match [a-z0-9][a-z0-9/-]*[a-z0-9]
 /// with additional constraints:
@@ -505,7 +446,7 @@ async fn resolve_effective_http_port(
 /// POST /deployments - Create a new deployment
 pub async fn create_deployment(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Json(payload): Json<CreateDeploymentRequest>,
 ) -> Result<Json<CreateDeploymentResponse>, ServerError> {
     info!("Creating deployment for project '{}'", payload.project);
@@ -561,11 +502,28 @@ pub async fn create_deployment(
         )));
     }
 
-    // Check deployment permissions
-    // Return 404 instead of 403 to avoid revealing project existence
-    check_deploy_permission(&state, &project, &user)
+    // Resolve auth for project scope (validates SA claims if external token)
+    // Only mask auth failures (401/403) as 404 to prevent project existence leakage;
+    // preserve 409 (SA collision) and 5xx (misconfiguration) for diagnosability.
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", payload.project)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
+
+    // Check deployment permissions (SA access already validated above)
+    if !is_sa {
+        crate::server::project::handlers::ensure_project_access_or_admin(&state, &user, &project)
+            .await
+            .map_err(|_| {
+                ServerError::not_found(format!("Project '{}' not found", payload.project))
+            })?;
+    }
 
     // Generate deployment ID
     let deployment_id = generate_deployment_id();
@@ -985,19 +943,25 @@ pub async fn create_deployment(
 /// Shared logic for updating a deployment's status.
 ///
 /// Given a resolved deployment and project, validates permissions and applies the status update.
+/// When `is_sa` is true, permission checks are skipped (already validated by `resolve_for_project`).
 async fn perform_status_update(
     state: &AppState,
-    user: &User,
+    user: &crate::db::models::User,
+    is_sa: bool,
     deployment: crate::db::models::Deployment,
     project: &crate::db::models::Project,
     deployment_id: &str,
     payload: UpdateDeploymentStatusRequest,
 ) -> Result<Json<Deployment>, ServerError> {
     // Check if user has permission (owns the project)
-    // Return 404 instead of 403 to avoid revealing project existence
-    check_deploy_permission(state, project, user)
-        .await
-        .map_err(|_| ServerError::not_found(format!("Deployment '{}' not found", deployment_id)))?;
+    // SA access was already validated by resolve_for_project
+    if !is_sa {
+        crate::server::project::handlers::ensure_project_access_or_admin(state, user, project)
+            .await
+            .map_err(|_| {
+                ServerError::not_found(format!("Deployment '{}' not found", deployment_id))
+            })?;
+    }
 
     // Update status in database
     let status_copy = payload.status.clone();
@@ -1085,7 +1049,7 @@ async fn perform_status_update(
 /// PATCH /projects/{project_name}/deployments/{deployment_id}/status - Update deployment status (project-scoped)
 pub async fn update_deployment_status_by_project(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_name, deployment_id)): Path<(String, String)>,
     Json(payload): Json<UpdateDeploymentStatusRequest>,
 ) -> Result<Json<Deployment>, ServerError> {
@@ -1100,6 +1064,18 @@ pub async fn update_deployment_status_by_project(
         .internal_err("Failed to find project")?
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
+    // Resolve auth for project scope
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
+        .await
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
+
     // Find deployment by deployment_id + project_id
     let deployment =
         db_deployments::find_by_deployment_id(&state.db_pool, &deployment_id, project.id)
@@ -1112,7 +1088,16 @@ pub async fn update_deployment_status_by_project(
                 ))
             })?;
 
-    perform_status_update(&state, &user, deployment, &project, &deployment_id, payload).await
+    perform_status_update(
+        &state,
+        &user,
+        is_sa,
+        deployment,
+        &project,
+        &deployment_id,
+        payload,
+    )
+    .await
 }
 
 /// PATCH /deployments/{deployment_id}/status - Update deployment status (deprecated, unscoped)
@@ -1124,7 +1109,7 @@ pub async fn update_deployment_status_by_project(
 /// since we cannot determine which one the caller intended.
 pub async fn update_deployment_status(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(deployment_id): Path<String>,
     Json(payload): Json<UpdateDeploymentStatusRequest>,
 ) -> Result<Json<Deployment>, ServerError> {
@@ -1172,7 +1157,28 @@ pub async fn update_deployment_status(
             ))
         })?;
 
-    perform_status_update(&state, &user, deployment, &project, &deployment_id, payload).await
+    // Resolve auth for project scope
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
+        .await
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
+
+    perform_status_update(
+        &state,
+        &user,
+        is_sa,
+        deployment,
+        &project,
+        &deployment_id,
+        payload,
+    )
+    .await
 }
 
 /// Query parameters for listing deployments
@@ -1187,7 +1193,7 @@ pub struct ListDeploymentsQuery {
 /// List deployments for a project
 pub async fn list_deployments(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(project_name): Path<String>,
     Query(query): Query<ListDeploymentsQuery>,
 ) -> Result<Json<Vec<Deployment>>, ServerError> {
@@ -1202,11 +1208,24 @@ pub async fn list_deployments(
         .internal_err("Failed to find project")?
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
-    // Check if user has permission to view deployments
-    // Return 404 instead of 403 to avoid revealing project existence
-    check_deploy_permission(&state, &project, &user)
+    // Resolve auth for project scope
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
+
+    // Check if user has permission to view deployments (SA access already validated)
+    if !is_sa {
+        crate::server::project::handlers::ensure_project_access_or_admin(&state, &user, &project)
+            .await
+            .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+    }
 
     // Get deployments from database (optionally filtered by group, with pagination)
     let db_deployments = db_deployments::list_for_project_and_group(
@@ -1279,7 +1298,7 @@ pub struct StopDeploymentsResponse {
 /// POST /projects/{project_name}/deployments/stop - Stop all deployments in a group
 pub async fn stop_deployments_by_group(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(project_name): Path<String>,
     Query(query): Query<StopDeploymentsQuery>,
 ) -> Result<Json<StopDeploymentsResponse>, ServerError> {
@@ -1302,11 +1321,24 @@ pub async fn stop_deployments_by_group(
         .internal_err("Failed to find project")?
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
-    // Check if user has permission to stop deployments (owns the project)
-    // Return 404 instead of 403 to avoid revealing project existence
-    check_deploy_permission(&state, &project, &user)
+    // Resolve auth for project scope
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
+
+    // Check if user has permission to stop deployments (SA access already validated)
+    if !is_sa {
+        crate::server::project::handlers::ensure_project_access_or_admin(&state, &_user, &project)
+            .await
+            .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+    }
 
     // Find all non-terminal deployments in this group
     let deployments = db_deployments::find_non_terminal_for_project_and_group(
@@ -1365,7 +1397,7 @@ pub async fn stop_deployments_by_group(
 /// POST /projects/{project_name}/deployments/{deployment_id}/stop - Stop a specific deployment
 pub async fn stop_deployment(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_name, deployment_id)): Path<(String, String)>,
 ) -> Result<Json<Deployment>, ServerError> {
     info!(
@@ -1379,11 +1411,24 @@ pub async fn stop_deployment(
         .internal_err("Failed to find project")?
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
-    // Check if user has permission to stop deployments
-    // Return 404 instead of 403 to avoid revealing project existence
-    check_deploy_permission(&state, &project, &user)
+    // Resolve auth for project scope
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
+
+    // Check if user has permission to stop deployments (SA access already validated)
+    if !is_sa {
+        crate::server::project::handlers::ensure_project_access_or_admin(&state, &_user, &project)
+            .await
+            .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+    }
 
     // Find the specific deployment
     let deployment =
@@ -1453,7 +1498,7 @@ pub async fn stop_deployment(
 /// GET /projects/{project_name}/deployments/{deployment_id} - Get a specific deployment
 pub async fn get_deployment_by_project(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_name, deployment_id)): Path<(String, String)>,
 ) -> Result<Json<Deployment>, ServerError> {
     debug!(
@@ -1467,11 +1512,24 @@ pub async fn get_deployment_by_project(
         .internal_err("Failed to find project")?
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
-    // Check if user has permission to view deployments
-    // Return 404 instead of 403 to avoid revealing project existence
-    check_deploy_permission(&state, &project, &user)
+    // Resolve auth for project scope
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
+
+    // Check if user has permission to view deployments (SA access already validated)
+    if !is_sa {
+        crate::server::project::handlers::ensure_project_access_or_admin(&state, &_user, &project)
+            .await
+            .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+    }
 
     // Find deployment by project_id and deployment_id
     let deployment = db_deployments::find_by_project_and_deployment_id(
@@ -1527,7 +1585,7 @@ pub async fn get_deployment_by_project(
 /// GET /projects/{project_name}/deployment-groups - List all deployment groups for a project
 pub async fn list_deployment_groups(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(project_name): Path<String>,
 ) -> Result<Json<Vec<String>>, ServerError> {
     debug!("Listing deployment groups for project: {}", project_name);
@@ -1538,11 +1596,24 @@ pub async fn list_deployment_groups(
         .internal_err("Failed to find project")?
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
-    // Check if user has permission to view deployment groups
-    // Return 404 instead of 403 to avoid revealing project existence
-    check_deploy_permission(&state, &project, &user)
+    // Resolve auth for project scope
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
         .await
-        .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
+
+    // Check if user has permission to view deployment groups (SA access already validated)
+    if !is_sa {
+        crate::server::project::handlers::ensure_project_access_or_admin(&state, &_user, &project)
+            .await
+            .map_err(|_| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
+    }
 
     // Get deployment groups from database
     let groups = db_deployments::get_all_deployment_groups(&state.db_pool, project.id)
@@ -1572,7 +1643,7 @@ pub struct LogStreamParams {
 /// GET /projects/{project_name}/deployments/{deployment_id}/logs
 pub async fn stream_deployment_logs(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_name, deployment_id)): Path<(String, String)>,
     Query(params): Query<LogStreamParams>,
 ) -> Result<Sse<impl futures::Stream<Item = Result<Event, anyhow::Error>>>, ServerError> {
@@ -1582,8 +1653,23 @@ pub async fn stream_deployment_logs(
         .internal_err("Failed to fetch project")?
         .ok_or_else(|| ServerError::not_found(format!("Project '{}' not found", project_name)))?;
 
-    // Check permission
-    check_deploy_permission(&state, &project, &user).await?;
+    // Resolve auth for project scope
+    let (_user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
+        .await
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found(format!("Project '{}' not found", project.name))
+            } else {
+                e
+            }
+        })?;
+
+    // Check permission (SA access already validated)
+    if !is_sa {
+        crate::server::project::handlers::ensure_project_access_or_admin(&state, &_user, &project)
+            .await?;
+    }
 
     // Fetch deployment
     let deployment = db_deployments::find_by_project_and_deployment_id(

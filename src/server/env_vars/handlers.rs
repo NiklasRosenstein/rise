@@ -1,23 +1,22 @@
 use super::models::{EnvVarResponse, EnvVarValueResponse, EnvVarsResponse, SetEnvVarRequest};
-use crate::db::models::User;
 use crate::db::{env_vars as db_env_vars, projects};
+use crate::server::auth::context::AuthContext;
 use crate::server::deployment::models as deployment_models;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::extensions::InjectedEnvVarValue;
+use crate::server::project::handlers::ensure_project_access_or_admin;
 use crate::server::state::AppState;
 use axum::{
-    extract::{Extension, Path, Query, State},
+    extract::{Path, Query, State},
     http::StatusCode,
     Json,
 };
 use std::collections::HashMap;
 
-use crate::server::project::handlers::ensure_project_access_or_admin;
-
 /// Set or update a project environment variable
 pub async fn set_project_env_var(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_id_or_name, key)): Path<(String, String)>,
     Json(payload): Json<SetEnvVarRequest>,
 ) -> Result<Json<EnvVarResponse>, ServerError> {
@@ -33,8 +32,12 @@ pub async fn set_project_env_var(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
+    // Check permission (SA access already validated, admin bypass for regular users)
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Normalize: when is_protected is omitted, infer from is_secret
     // This preserves backward compatibility: secrets default to protected, plain vars default to unprotected
@@ -105,7 +108,7 @@ pub async fn set_project_env_var(
 /// List all environment variables for a project
 pub async fn list_project_env_vars(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(project_id_or_name): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<EnvVarsResponse>, ServerError> {
@@ -121,8 +124,12 @@ pub async fn list_project_env_vars(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
+    // Check permission (SA access already validated, admin bypass for regular users)
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Check if we should include unprotected values
     let include_unprotected = params
@@ -177,7 +184,7 @@ pub async fn list_project_env_vars(
 /// Delete a project environment variable
 pub async fn delete_project_env_var(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_id_or_name, key)): Path<(String, String)>,
 ) -> Result<StatusCode, ServerError> {
     // Find project by ID or name
@@ -192,8 +199,12 @@ pub async fn delete_project_env_var(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
+    // Check permission (SA access already validated, admin bypass for regular users)
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Delete environment variable
     let deleted = db_env_vars::delete_project_env_var(&state.db_pool, project.id, &key)
@@ -223,7 +234,7 @@ pub async fn delete_project_env_var(
 /// List all environment variables for a deployment (read-only)
 pub async fn list_deployment_env_vars(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_id_or_name, deployment_id)): Path<(String, String)>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<EnvVarsResponse>, ServerError> {
@@ -239,8 +250,12 @@ pub async fn list_deployment_env_vars(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
+    // Check permission (SA access already validated, admin bypass for regular users)
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Get deployment by deployment_id within the project
     let deployment =
@@ -302,7 +317,7 @@ pub async fn list_deployment_env_vars(
 /// Get the decrypted value of a specific retrievable secret
 pub async fn get_project_env_var_value(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_id_or_name, key)): Path<(String, String)>,
 ) -> Result<Json<EnvVarValueResponse>, ServerError> {
     // Find project by ID or name
@@ -317,8 +332,12 @@ pub async fn get_project_env_var_value(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
+    // Check permission (SA access already validated, admin bypass for regular users)
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Get the specific environment variable
     let env_var = db_env_vars::get_project_env_var(&state.db_pool, project.id, &key)
@@ -365,7 +384,7 @@ pub async fn get_project_env_var_value(
 /// Get the decrypted value of a specific retrievable deployment secret
 pub async fn get_deployment_env_var_value(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_id_or_name, deployment_id, key)): Path<(String, String, String)>,
 ) -> Result<Json<EnvVarValueResponse>, ServerError> {
     // Find project by ID or name
@@ -380,8 +399,12 @@ pub async fn get_deployment_env_var_value(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
+    // Check permission (SA access already validated, admin bypass for regular users)
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Get deployment by deployment_id within the project
     let deployment =
@@ -442,7 +465,7 @@ pub async fn get_deployment_env_var_value(
 /// Protected vars are masked. This enables `rise run` to inject the same env vars as a real deployment.
 pub async fn preview_deployment_env_vars(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(project_id_or_name): Path<String>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<EnvVarsResponse>, ServerError> {
@@ -458,8 +481,12 @@ pub async fn preview_deployment_env_vars(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
+    // Check permission (SA access already validated, admin bypass for regular users)
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     let deployment_group = params
         .get("deployment_group")

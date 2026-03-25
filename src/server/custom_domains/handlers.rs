@@ -1,23 +1,22 @@
 use super::models::{AddCustomDomainRequest, CustomDomainResponse, CustomDomainsResponse};
 use super::validation;
-use crate::db::models::User;
 use crate::db::{custom_domains as db_custom_domains, deployments as db_deployments, projects};
+use crate::server::auth::context::AuthContext;
 use crate::server::deployment::models::DEFAULT_DEPLOYMENT_GROUP;
 use crate::server::error::{ServerError, ServerErrorExt};
+use crate::server::project::handlers::ensure_project_access_or_admin;
 use crate::server::state::AppState;
 use axum::{
-    extract::{Extension, Path, State},
+    extract::{Path, State},
     http::StatusCode,
     Json,
 };
 use tracing::info;
 
-use crate::server::project::handlers::ensure_project_access_or_admin;
-
 /// Add a custom domain to a project
 pub async fn add_custom_domain(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(project_id_or_name): Path<String>,
     Json(payload): Json<AddCustomDomainRequest>,
 ) -> Result<(StatusCode, Json<CustomDomainResponse>), ServerError> {
@@ -33,8 +32,20 @@ pub async fn add_custom_domain(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
+        .await
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Validate that the custom domain doesn't overlap with project default domain patterns
     if let Some(ref production_template) = state.production_ingress_url_template {
@@ -118,7 +129,7 @@ pub async fn add_custom_domain(
 /// List all custom domains for a project
 pub async fn list_custom_domains(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path(project_id_or_name): Path<String>,
 ) -> Result<Json<CustomDomainsResponse>, ServerError> {
     // Find project by ID or name
@@ -133,16 +144,28 @@ pub async fn list_custom_domains(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project)
+    // Resolve auth for project scope
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|e| {
-            if e.status == StatusCode::FORBIDDEN {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
                 ServerError::not_found("Project not found")
             } else {
                 e
             }
         })?;
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project)
+            .await
+            .map_err(|e| {
+                if e.status == StatusCode::FORBIDDEN {
+                    ServerError::not_found("Project not found")
+                } else {
+                    e
+                }
+            })?;
+    }
 
     // Get all custom domains for the project
     let domains = db_custom_domains::list_project_custom_domains(&state.db_pool, project.id)
@@ -160,7 +183,7 @@ pub async fn list_custom_domains(
 /// Get a specific custom domain
 pub async fn get_custom_domain(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_id_or_name, domain)): Path<(String, String)>,
 ) -> Result<Json<CustomDomainResponse>, ServerError> {
     // Find project by ID or name
@@ -175,16 +198,28 @@ pub async fn get_custom_domain(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project)
+    // Resolve auth for project scope
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
         .await
         .map_err(|e| {
-            if e.status == StatusCode::FORBIDDEN {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
                 ServerError::not_found("Project not found")
             } else {
                 e
             }
         })?;
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project)
+            .await
+            .map_err(|e| {
+                if e.status == StatusCode::FORBIDDEN {
+                    ServerError::not_found("Project not found")
+                } else {
+                    e
+                }
+            })?;
+    }
 
     // Get the custom domain
     let domain = db_custom_domains::get_custom_domain(&state.db_pool, project.id, &domain)
@@ -198,7 +233,7 @@ pub async fn get_custom_domain(
 /// Delete a custom domain
 pub async fn delete_custom_domain(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_id_or_name, domain)): Path<(String, String)>,
 ) -> Result<StatusCode, ServerError> {
     // Find project by ID or name
@@ -213,8 +248,20 @@ pub async fn delete_custom_domain(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
+        .await
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Delete the custom domain
     let deleted = db_custom_domains::delete_custom_domain(&state.db_pool, project.id, &domain)
@@ -275,7 +322,7 @@ pub async fn delete_custom_domain(
 /// Set a custom domain as primary for a project
 pub async fn set_primary_domain(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_id_or_name, domain)): Path<(String, String)>,
 ) -> Result<Json<CustomDomainResponse>, ServerError> {
     // Find project by ID or name
@@ -290,8 +337,20 @@ pub async fn set_primary_domain(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
+        .await
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Set the domain as primary
     let updated_domain = db_custom_domains::set_primary_domain(&state.db_pool, project.id, &domain)
@@ -353,7 +412,7 @@ pub async fn set_primary_domain(
 /// Unset the primary status of a custom domain
 pub async fn unset_primary_domain(
     State(state): State<AppState>,
-    Extension(user): Extension<User>,
+    auth: AuthContext,
     Path((project_id_or_name, domain)): Path<(String, String)>,
 ) -> Result<StatusCode, ServerError> {
     // Find project by ID or name
@@ -368,8 +427,20 @@ pub async fn unset_primary_domain(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Check permission (admin bypass)
-    ensure_project_access_or_admin(&state, &user, &project).await?;
+    // Resolve auth for project scope
+    let (user, is_sa) = auth
+        .resolve_for_project(&state.db_pool, &project)
+        .await
+        .map_err(|e| {
+            if e.status == StatusCode::UNAUTHORIZED || e.status == StatusCode::FORBIDDEN {
+                ServerError::not_found("Project not found")
+            } else {
+                e
+            }
+        })?;
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
 
     // Unset the primary status
     let unset = db_custom_domains::unset_primary_domain(&state.db_pool, project.id, &domain)
