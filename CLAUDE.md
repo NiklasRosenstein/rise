@@ -73,7 +73,6 @@ The codebase is organized into functional modules:
    - **API Layer**: RESTful endpoints via Axum
 - **`src/cli/`**: CLI command handlers (feature: `cli`)
    - Authentication, project, team, deployment, environment variable commands
-   - Local dev OIDC issuer for testing
 - **`src/build/`**: Container image build orchestration (feature: `cli`)
    - Support for Docker, Pack (buildpacks), and Railpack backends
    - BuildKit daemon management, SSL certificate handling
@@ -140,7 +139,6 @@ cargo build --all-features     # Full build with CLI + backend
    - [x] Deployment commands: `create`, `list`, `show`, `rollback`, `stop`
    - [x] Environment variable management
    - [x] Service account (workload identity) management
-   - [x] Local dev OIDC issuer for testing
 
 4. **Build System** (`--features cli`) ✅
    - [x] Docker backend: Standard Dockerfile builds

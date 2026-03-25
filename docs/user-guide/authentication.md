@@ -175,6 +175,35 @@ rise sa delete <project> <service-account-id>
 
 Service accounts can create, view, list, stop, and rollback deployments. They cannot manage projects, teams, or other service accounts.
 
+### Local Testing
+
+To test service accounts locally, use [`@oidc.pub/cli`](https://oidc.pub) to run a dev OIDC issuer:
+
+```bash
+npx @oidc.pub/cli login
+npx @oidc.pub/cli dev issuer --service <id>
+```
+
+The dev issuer runs locally but publishes its JWKS to a public URL (e.g. `https://<id>.oidc.pub`),
+so the Rise backend can verify tokens without needing to reach your machine.
+
+Create a service account using the public issuer URL:
+
+```bash
+rise sa create my-project \
+  --issuer https://<id>.oidc.pub \
+  --claim aud=test \
+  --claim sub=dev
+```
+
+Mint a token and use it:
+
+```bash
+export RISE_TOKEN=$(curl -s http://localhost:9229/token \
+  -d '{"aud": "test", "sub": "dev"}' | jq -r .access_token)
+rise deploy --image my-image:latest
+```
+
 ## App Users
 
 App users grant view-only access to deployed applications. This controls who can access private projects through the ingress.

@@ -1,7 +1,7 @@
+#[cfg(feature = "backend")]
 pub mod backend;
 pub mod config;
 pub mod deployment;
-pub mod dev_oidc_issuer;
 pub mod domain;
 pub mod encrypt;
 pub mod env;
