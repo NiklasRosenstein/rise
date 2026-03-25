@@ -13,6 +13,7 @@ pub enum BackendCommands {
     ConfigSchema,
 }
 
+#[cfg(feature = "backend")]
 pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
     match cmd {
         #[cfg(feature = "backend")]

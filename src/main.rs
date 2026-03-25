@@ -98,6 +98,7 @@ struct DeployArgs {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Backend server and controller commands
+    #[cfg(feature = "backend")]
     #[command(subcommand)]
     Backend(backend::BackendCommands),
     /// Build a container image locally without deploying
@@ -750,7 +751,7 @@ async fn main() -> Result<()> {
 
     // Backend commands don't need CLI config (they use Settings from TOML/env vars)
     // Only client commands (login, project, team, deployment, service-account) need it
-    #[allow(unreachable_code)]
+    #[cfg(feature = "backend")]
     if let Commands::Backend(backend_cmd) = &cli_command {
         return backend::handle_backend_command(backend_cmd.clone()).await;
     }
@@ -762,7 +763,7 @@ async fn main() -> Result<()> {
 
     // Check version compatibility for all commands except Backend and Login
     // (Backend commands don't use the HTTP API, Login might use a custom URL)
-    if !matches!(&cli_command, Commands::Backend(_) | Commands::Login { .. }) {
+    if !matches!(&cli_command, Commands::Login { .. }) {
         // Non-fatal version check - just warns user
         let _ = version::check_version_compatibility(&http_client, &backend_url).await;
     }
@@ -794,6 +795,7 @@ async fn main() -> Result<()> {
                 .await?;
             }
         }
+        #[cfg(feature = "backend")]
         Commands::Backend(_) => {
             // Already handled above before config loading
             unreachable!("Backend commands should have been handled earlier")
