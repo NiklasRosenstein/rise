@@ -98,7 +98,7 @@ impl AuthContext {
                             matching_sas.push(sa);
                         }
                         Err(e) => {
-                            tracing::debug!("SA {} claim mismatch: {}", sa.id, e);
+                            tracing::info!("SA {} claim mismatch: {}", sa.id, e);
                             last_error = Some(e);
                         }
                     }
