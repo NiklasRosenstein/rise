@@ -1,0 +1,120 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "rise-app.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rise-app.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.app.replicas }}
+  selector:
+    matchLabels:
+      {{- include "rise-app.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "rise-app.selectorLabels" . | nindent 8 }}
+        {{- include "rise-app.riseLabels" . | nindent 8 }}
+        {{- with .Values.app.podLabels }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+      {{- with .Values.app.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+    spec:
+      serviceAccountName: {{ include "rise-app.serviceAccountName" . }}
+      {{- if .Values.rise.image.pullSecretName }}
+      imagePullSecrets:
+        - name: {{ .Values.rise.image.pullSecretName }}
+      {{- end }}
+      {{- if .Values.app.podSecurity.enabled }}
+      securityContext:
+        seccompProfile:
+          type: RuntimeDefault
+      {{- end }}
+      {{- with .Values.app.hostAliases }}
+      hostAliases:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: app
+          image: {{ .Values.rise.image.ref | quote }}
+          imagePullPolicy: {{ .Values.app.imagePullPolicy }}
+          {{- with .Values.app.command }}
+          command:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.app.args }}
+          args:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.rise.deployment.httpPort }}
+              protocol: TCP
+          envFrom:
+            - secretRef:
+                name: {{ .Values.rise.env.secretName }}
+          {{- with .Values.app.extraEnv }}
+          env:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- if .Values.app.podSecurity.enabled }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+            readOnlyRootFilesystem: false
+            runAsNonRoot: true
+          {{- end }}
+          resources:
+            {{- toYaml .Values.app.resources | nindent 12 }}
+          {{- if .Values.app.healthProbes.enabled }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.app.healthProbes.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.app.healthProbes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.app.healthProbes.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.healthProbes.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.healthProbes.failureThreshold }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.app.healthProbes.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.app.healthProbes.initialDelaySeconds }}
+            periodSeconds: {{ .Values.app.healthProbes.periodSeconds }}
+            timeoutSeconds: {{ .Values.app.healthProbes.timeoutSeconds }}
+            failureThreshold: {{ .Values.app.healthProbes.failureThreshold }}
+          {{- end }}
+          {{- if .Values.app.extraServiceTokenAudiences }}
+          volumeMounts:
+            - name: rise-extra-service-tokens
+              mountPath: /var/run/secrets/rise/tokens
+              readOnly: true
+          {{- end }}
+      {{- if .Values.app.extraServiceTokenAudiences }}
+      volumes:
+        - name: rise-extra-service-tokens
+          projected:
+            sources:
+              {{- range $name, $audience := .Values.app.extraServiceTokenAudiences }}
+              - serviceAccountToken:
+                  path: {{ $name | quote }}
+                  audience: {{ $audience | quote }}
+              {{- end }}
+      {{- end }}
+      {{- with .Values.app.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.app.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

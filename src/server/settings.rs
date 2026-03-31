@@ -246,6 +246,33 @@ fn default_namespace_format() -> String {
     "rise-{project_name}".to_string()
 }
 
+fn default_argocd_namespace() -> String {
+    "argocd".to_string()
+}
+
+fn default_argocd_appproject_format() -> String {
+    "rise-{project_name}".to_string()
+}
+
+fn default_argocd_application_format() -> String {
+    "rise-{project_name}-{deployment_group}".to_string()
+}
+
+fn default_argocd_destination_namespace_format() -> String {
+    "rise-{project_name}-{deployment_group}".to_string()
+}
+
+fn default_argocd_destination_server() -> String {
+    "https://kubernetes.default.svc".to_string()
+}
+
+fn default_argocd_sync_options() -> Vec<String> {
+    vec![
+        "ServerSideApply=true".to_string(),
+        "ApplyOutOfSyncOnly=true".to_string(),
+    ]
+}
+
 fn default_node_selector() -> std::collections::HashMap<String, String> {
     let mut selector = std::collections::HashMap::new();
     selector.insert("kubernetes.io/arch".to_string(), "amd64".to_string());
@@ -442,6 +469,23 @@ fn default_failure_threshold() -> i32 {
     3
 }
 
+#[derive(Debug, Clone, Deserialize, JsonSchema)]
+pub struct ArgoCdHelmChartSettings {
+    /// Helm repository URL used by ArgoCD for the managed application
+    pub repo_url: String,
+    /// Chart name within the repository
+    pub chart: String,
+    /// Chart version or revision to deploy
+    pub target_revision: String,
+    /// Static values merged with the Rise-generated values contract
+    #[serde(default = "default_chart_values")]
+    pub values: serde_json::Value,
+}
+
+fn default_chart_values() -> serde_json::Value {
+    serde_json::Value::Object(serde_json::Map::new())
+}
+
 /// Deployment controller configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all = "kebab-case")]
@@ -598,6 +642,73 @@ pub enum DeploymentControllerSettings {
         /// If not set, uses defaults (HTTP probes on app port at "/" path)
         #[serde(default)]
         health_probes: Option<HealthProbeConfig>,
+    },
+    /// ArgoCD deployment controller
+    #[cfg(feature = "backend")]
+    #[serde(alias = "argocd")]
+    ArgoCd {
+        /// Optional kubeconfig path (defaults to in-cluster or ~/.kube/config)
+        #[serde(default)]
+        kubeconfig: Option<String>,
+
+        /// Namespace where ArgoCD stores Application and AppProject objects
+        #[serde(default = "default_argocd_namespace")]
+        argocd_namespace: String,
+
+        /// Ingress URL template for production (default) deployment group
+        /// Must contain {project_name}
+        production_ingress_url_template: String,
+
+        /// Ingress URL template for non-default deployment groups
+        /// Must contain {project_name} and {deployment_group} when set
+        #[serde(default)]
+        staging_ingress_url_template: Option<String>,
+
+        /// Optional port number to append to generated application URLs
+        #[serde(default)]
+        ingress_port: Option<u16>,
+
+        /// URL scheme for generated application URLs
+        #[serde(default = "default_ingress_schema")]
+        ingress_schema: String,
+
+        /// Naming format for per-project ArgoCD AppProjects
+        /// Required placeholders: {project_name}
+        #[serde(default = "default_argocd_appproject_format")]
+        appproject_format: String,
+
+        /// Naming format for per-group ArgoCD Applications
+        /// Required placeholders: {project_name}, {deployment_group}
+        #[serde(default = "default_argocd_application_format")]
+        application_format: String,
+
+        /// Destination namespace format for deployed workloads
+        /// Required placeholders: {project_name}, {deployment_group}
+        #[serde(default = "default_argocd_destination_namespace_format")]
+        destination_namespace_format: String,
+
+        /// Kubernetes API destination server for ArgoCD Applications
+        #[serde(default = "default_argocd_destination_server")]
+        destination_server: String,
+
+        /// Labels to apply to destination namespaces created by Rise
+        #[serde(default)]
+        namespace_labels: std::collections::HashMap<String, String>,
+
+        /// Annotations to apply to destination namespaces created by Rise
+        #[serde(default)]
+        namespace_annotations: std::collections::HashMap<String, String>,
+
+        /// Helm chart configuration used by ArgoCD Applications
+        helm_chart: ArgoCdHelmChartSettings,
+
+        /// syncOptions applied to every managed Application
+        #[serde(default = "default_argocd_sync_options")]
+        sync_options: Vec<String>,
+
+        /// Access classes exposed by the backend
+        /// Use `null` in YAML to remove an inherited access class from parent configs
+        access_classes: std::collections::HashMap<String, Option<AccessClass>>,
     },
 }
 
@@ -891,69 +1002,116 @@ impl Settings {
         }
 
         // Validate deployment controller settings if configured
-        if let Some(DeploymentControllerSettings::Kubernetes {
-            ref namespace_format,
-            ref production_ingress_url_template,
-            ref staging_ingress_url_template,
-            ref access_classes,
-            ref extra_service_token_audiences,
-            ..
-        }) = settings.deployment_controller
-        {
-            Self::validate_format_string(namespace_format, "namespace_format", "{project_name}")?;
-            Self::validate_format_string(
-                production_ingress_url_template,
-                "production_ingress_url_template",
-                "{project_name}",
-            )?;
+        if let Some(ref deployment_controller) = settings.deployment_controller {
+            match deployment_controller {
+                DeploymentControllerSettings::Kubernetes {
+                    namespace_format,
+                    production_ingress_url_template,
+                    staging_ingress_url_template,
+                    access_classes,
+                    extra_service_token_audiences,
+                    ..
+                } => {
+                    Self::validate_format_string(
+                        namespace_format,
+                        "namespace_format",
+                        "{project_name}",
+                    )?;
+                    Self::validate_format_string(
+                        production_ingress_url_template,
+                        "production_ingress_url_template",
+                        "{project_name}",
+                    )?;
 
-            if let Some(ref staging_template) = staging_ingress_url_template {
-                Self::validate_format_string(
-                    staging_template,
-                    "staging_ingress_url_template",
-                    "{project_name}",
-                )?;
-                Self::validate_format_string(
-                    staging_template,
-                    "staging_ingress_url_template",
-                    "{deployment_group}",
-                )?;
-            }
+                    if let Some(staging_template) = staging_ingress_url_template {
+                        Self::validate_format_string(
+                            staging_template,
+                            "staging_ingress_url_template",
+                            "{project_name}",
+                        )?;
+                        Self::validate_format_string(
+                            staging_template,
+                            "staging_ingress_url_template",
+                            "{deployment_group}",
+                        )?;
+                    }
 
-            Self::validate_extra_service_token_audiences(extra_service_token_audiences)?;
-
-            // Filter out null access classes (used to remove inherited entries)
-            // and validate the remaining ones
-            let active_classes: Vec<_> = access_classes
-                .iter()
-                .filter_map(|(id, class)| class.as_ref().map(|c| (id, c)))
-                .collect();
-
-            if active_classes.is_empty() {
-                return Err(ConfigError::Message(
-                    "Kubernetes deployment_controller requires at least one access class to be configured. \
-                     Add access_classes to your configuration file.".to_string()
-                ));
-            }
-
-            for (id, class) in active_classes {
-                if class.display_name.is_empty() {
-                    return Err(ConfigError::Message(format!(
-                        "Access class '{}' has empty display_name",
-                        id
-                    )));
+                    Self::validate_extra_service_token_audiences(extra_service_token_audiences)?;
+                    Self::validate_access_classes(access_classes, "Kubernetes")?;
                 }
-                if class.description.is_empty() {
-                    return Err(ConfigError::Message(format!(
-                        "Access class '{}' has empty description",
-                        id
-                    )));
-                }
-                if class.ingress_class.is_empty() {
-                    return Err(ConfigError::Message(format!(
-                        "Access class '{}' has empty ingress_class",
-                        id
-                    )));
+                DeploymentControllerSettings::ArgoCd {
+                    production_ingress_url_template,
+                    staging_ingress_url_template,
+                    appproject_format,
+                    application_format,
+                    destination_namespace_format,
+                    helm_chart,
+                    sync_options,
+                    access_classes,
+                    ..
+                } => {
+                    Self::validate_format_string(
+                        production_ingress_url_template,
+                        "production_ingress_url_template",
+                        "{project_name}",
+                    )?;
+
+                    if let Some(staging_template) = staging_ingress_url_template {
+                        Self::validate_format_string(
+                            staging_template,
+                            "staging_ingress_url_template",
+                            "{project_name}",
+                        )?;
+                        Self::validate_format_string(
+                            staging_template,
+                            "staging_ingress_url_template",
+                            "{deployment_group}",
+                        )?;
+                    }
+
+                    Self::validate_format_string(
+                        appproject_format,
+                        "appproject_format",
+                        "{project_name}",
+                    )?;
+                    Self::validate_format_string(
+                        application_format,
+                        "application_format",
+                        "{project_name}",
+                    )?;
+                    Self::validate_format_string(
+                        application_format,
+                        "application_format",
+                        "{deployment_group}",
+                    )?;
+                    Self::validate_format_string(
+                        destination_namespace_format,
+                        "destination_namespace_format",
+                        "{project_name}",
+                    )?;
+                    Self::validate_format_string(
+                        destination_namespace_format,
+                        "destination_namespace_format",
+                        "{deployment_group}",
+                    )?;
+
+                    if helm_chart.repo_url.is_empty()
+                        || helm_chart.chart.is_empty()
+                        || helm_chart.target_revision.is_empty()
+                    {
+                        return Err(ConfigError::Message(
+                            "ArgoCD deployment_controller requires helm_chart.repo_url, helm_chart.chart, and helm_chart.target_revision".to_string(),
+                        ));
+                    }
+
+                    if !sync_options.iter().all(|item| item.contains('=')) {
+                        return Err(ConfigError::Message(
+                            "ArgoCD deployment_controller sync_options must use KEY=VALUE format"
+                                .to_string(),
+                        ));
+                    }
+
+                    Self::validate_access_classes(access_classes, "ArgoCD")?;
                 }
             }
         }
@@ -973,6 +1131,46 @@ impl Settings {
                 field_name, required_placeholder, format_str
             )));
         }
+        Ok(())
+    }
+
+    fn validate_access_classes(
+        access_classes: &std::collections::HashMap<String, Option<AccessClass>>,
+        controller_name: &str,
+    ) -> Result<(), ConfigError> {
+        let active_classes: Vec<_> = access_classes
+            .iter()
+            .filter_map(|(id, class)| class.as_ref().map(|c| (id, c)))
+            .collect();
+
+        if active_classes.is_empty() {
+            return Err(ConfigError::Message(format!(
+                "{} deployment_controller requires at least one access class to be configured. Add access_classes to your configuration file.",
+                controller_name
+            )));
+        }
+
+        for (id, class) in active_classes {
+            if class.display_name.is_empty() {
+                return Err(ConfigError::Message(format!(
+                    "Access class '{}' has empty display_name",
+                    id
+                )));
+            }
+            if class.description.is_empty() {
+                return Err(ConfigError::Message(format!(
+                    "Access class '{}' has empty description",
+                    id
+                )));
+            }
+            if class.ingress_class.is_empty() {
+                return Err(ConfigError::Message(format!(
+                    "Access class '{}' has empty ingress_class",
+                    id
+                )));
+            }
+        }
+
         Ok(())
     }
 }
@@ -1182,6 +1380,67 @@ deployment_controller:
         assert_eq!(
             extra_service_token_audiences.get("vault"),
             Some(&"https://vault.example.com".to_string())
+        );
+    }
+
+    #[test]
+    fn test_argocd_sync_options_default() {
+        use std::fs;
+        use tempfile::TempDir;
+
+        let temp_dir = TempDir::new().unwrap();
+        let config_path = temp_dir.path().join("development.yaml");
+
+        fs::write(
+            &config_path,
+            r#"
+server:
+  host: "0.0.0.0"
+  port: 3000
+  public_url: "http://localhost:3000"
+  jwt_signing_secret: "test-secret-key-for-testing-123456"
+
+database:
+  url: "postgres://test@localhost/test"
+
+auth:
+  issuer: "http://localhost:5556"
+  client_id: "test"
+  client_secret: "test"
+
+deployment_controller:
+  type: "argo-cd"
+  production_ingress_url_template: "{project_name}.test.local"
+  helm_chart:
+    repo_url: "https://charts.example.com"
+    chart: "test"
+    target_revision: "1.0.0"
+  access_classes:
+    public:
+      display_name: "Public"
+      description: "Test public access"
+      ingress_class: "nginx"
+      access_requirement: None
+"#,
+        )
+        .unwrap();
+
+        let settings =
+            Settings::new_with_env(temp_dir.path().to_str().unwrap(), "development", &|_| None)
+                .expect("argocd config should load");
+
+        let Some(DeploymentControllerSettings::ArgoCd { sync_options, .. }) =
+            settings.deployment_controller
+        else {
+            panic!("expected argocd deployment_controller");
+        };
+
+        assert_eq!(
+            sync_options,
+            vec![
+                "ServerSideApply=true".to_string(),
+                "ApplyOutOfSyncOnly=true".to_string()
+            ]
         );
     }
 

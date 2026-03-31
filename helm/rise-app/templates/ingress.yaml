@@ -1,0 +1,52 @@
+{{- if .Values.ingress.enabled }}
+{{- $accessClass := (index .Values.rise.accessClasses .Values.rise.project.accessClass) | default dict }}
+{{- $annotations := merge (dict) (.Values.ingress.annotations | default dict) (($accessClass.customAnnotations) | default dict) }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "rise-app.name" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "rise-app.labels" . | nindent 4 }}
+  {{- if $annotations }}
+  annotations:
+    {{- toYaml $annotations | nindent 4 }}
+  {{- end }}
+spec:
+  {{- $ingressClass := default .Values.ingress.className ($accessClass.ingressClass | default "") }}
+  {{- if $ingressClass }}
+  ingressClassName: {{ $ingressClass }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.rise.ingress.host | quote }}
+      http:
+        paths:
+          - path: {{ .Values.rise.ingress.path | quote }}
+            pathType: {{ .Values.ingress.pathType }}
+            backend:
+              service:
+                name: {{ include "rise-app.name" . }}
+                port:
+                  name: http
+    {{- range .Values.rise.ingress.customDomainHosts }}
+    - host: {{ . | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ include "rise-app.name" $ }}
+                port:
+                  name: http
+    {{- end }}
+  {{- if and .Values.ingress.tls.enabled .Values.ingress.tls.secretName }}
+  tls:
+    - secretName: {{ .Values.ingress.tls.secretName }}
+      hosts:
+        - {{ .Values.rise.ingress.host | quote }}
+        {{- range .Values.rise.ingress.customDomainHosts }}
+        - {{ . | quote }}
+        {{- end }}
+  {{- end }}
+{{- end }}

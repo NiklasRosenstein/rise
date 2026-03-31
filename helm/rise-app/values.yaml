@@ -1,0 +1,80 @@
+rise:
+  project:
+    id: ""
+    name: ""
+    accessClass: ""
+  deployment:
+    id: ""
+    group: ""
+    normalizedGroup: ""
+    namespace: ""
+    httpPort: 8080
+  ingress:
+    host: ""
+    path: "/"
+    customDomainHosts: []
+  image:
+    ref: ""
+    pullSecretName: ""
+  env:
+    secretName: ""
+  accessClasses: {}
+  argocd:
+    applicationName: ""
+    appProjectName: ""
+
+app:
+  replicas: 1
+  imagePullPolicy: IfNotPresent
+  command: []
+  args: []
+  extraEnv: []
+  podLabels: {}
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  affinity: {}
+  hostAliases: []
+  extraServiceTokenAudiences: {}
+  resources:
+    requests:
+      cpu: "10m"
+      memory: "64Mi"
+    limits:
+      memory: "512Mi"
+  podSecurity:
+    enabled: true
+  healthProbes:
+    enabled: true
+    path: /
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+
+service:
+  annotations: {}
+  type: ClusterIP
+
+ingress:
+  enabled: true
+  className: ""
+  annotations: {}
+  pathType: Prefix
+  tls:
+    enabled: false
+    secretName: ""
+
+networkPolicy:
+  enabled: true
+  ingressControllerNamespace: ingress-nginx
+  ingressControllerLabels:
+    app.kubernetes.io/name: ingress-nginx
+  allowKubeApiServer: false
+  kubeApiServerCidrs: []
+  egressAllowCidrs: []

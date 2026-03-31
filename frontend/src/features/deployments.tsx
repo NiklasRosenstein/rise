@@ -1189,11 +1189,14 @@ function PodInfoRow({ pod }: { pod: PodInfo }) {
     );
 }
 
-function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
-    const replicasMismatch = podStatus.ready_replicas < podStatus.desired_replicas;
+function PodStatusSection({ podStatus, deploymentId }: { podStatus: PodStatus, deploymentId?: string }) {
+    const pods = Array.isArray(podStatus?.pods) ? podStatus.pods : [];
+    const desiredReplicas = typeof podStatus?.desired_replicas === 'number' ? podStatus.desired_replicas : 0;
+    const readyReplicas = typeof podStatus?.ready_replicas === 'number' ? podStatus.ready_replicas : 0;
+    const currentReplicas = typeof podStatus?.current_replicas === 'number' ? podStatus.current_replicas : pods.length;
+    const replicasMismatch = readyReplicas < desiredReplicas;
     const hasPodIssues =
-        podStatus.pods &&
-        podStatus.pods.some(
+        pods.some(
             (p) =>
                 (p.containers && p.containers.some(c => c.restart_count > 0)) ||
                 (p.events && p.events.length > 0)
@@ -1203,7 +1206,7 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
 
     // Determine tone based on replica counts and pod-level issues
     let tone = 'ok';
-    if (podStatus.ready_replicas === 0) {
+    if (readyReplicas === 0) {
         tone = 'bad';
     } else if (replicasMismatch || hasPodIssues) {
         tone = 'warn';
@@ -1236,23 +1239,23 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
             {/* Replica summary */}
             <div className="mono-inline-status mb-3" style={toneColors[tone]}>
                 <div className="flex items-center justify-between">
-                    <span>Pods: {podStatus.ready_replicas}/{podStatus.desired_replicas} ready</span>
+                    <span>Pods: {readyReplicas}/{desiredReplicas} ready</span>
                     <span className="text-xs" style={{ color: 'var(--mono-muted)' }}>
-                        {podStatus.current_replicas} total
+                        {currentReplicas} total
                     </span>
                 </div>
             </div>
 
             {/* Per-pod details */}
-            {podStatus.pods && podStatus.pods.length > 0 && (
+            {pods.length > 0 && (
                 <div className="border border-solid" style={{ borderColor: borderColors[tone], background: tone === 'ok' ? '#0a1210' : '#1a1212' }}>
                     <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
                         <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
-                            Pods ({podStatus.pods.length})
+                            Pods ({pods.length})
                         </h5>
                     </div>
                     <div>
-                        {podStatus.pods.map((pod, idx) => (
+                        {pods.map((pod, idx) => (
                             <PodInfoRow key={pod.name || `pod-${idx}`} pod={pod} />
                         ))}
                     </div>
@@ -1260,8 +1263,250 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
             )}
 
             <p className="text-xs mt-2" style={{ color: 'var(--mono-muted)' }}>
-                Last checked: {formatRelativeTimeRounded(podStatus.last_checked)}
+                Last checked: {podStatus.last_checked ? formatRelativeTimeRounded(podStatus.last_checked) : '-'}
             </p>
+        </div>
+    );
+}
+
+function formatCompactObject(value) {
+    if (value === null || value === undefined) return '-';
+    if (typeof value === 'string') return value;
+    if (Array.isArray(value)) return value.map((item) => formatCompactObject(item)).join(', ');
+    if (typeof value === 'object') {
+        return Object.entries(value)
+            .filter(([_, entryValue]) => entryValue !== null && entryValue !== undefined && entryValue !== '')
+            .map(([key, entryValue]) => `${key}=${formatCompactObject(entryValue)}`)
+            .join(' • ');
+    }
+    return String(value);
+}
+
+function getArgoCdStatusTone(applicationStatus) {
+    const health = applicationStatus.health?.status;
+    const sync = applicationStatus.sync?.status;
+    const operation = applicationStatus.operationState?.phase;
+
+    if (health === 'Healthy' && sync === 'Synced') {
+        return 'ok';
+    }
+    if (['Degraded', 'Missing', 'Suspended'].includes(health) || ['Error', 'Failed'].includes(operation)) {
+        return 'bad';
+    }
+    return 'warn';
+}
+
+function ArgoCdApplicationStatusSection({ applicationStatus, deploymentId }) {
+    const tone = getArgoCdStatusTone(applicationStatus);
+    const configuredDeploymentId = applicationStatus.configuredDeploymentId || '-';
+    const expectedDeploymentId = applicationStatus.expectedDeploymentId || deploymentId || '-';
+    const deploymentMismatch = applicationStatus.deploymentMismatch ?? (
+        Boolean(applicationStatus.configuredDeploymentId) &&
+        Boolean(deploymentId) &&
+        applicationStatus.configuredDeploymentId !== deploymentId
+    );
+    const toneColors = {
+        ok: { color: '#b7ffce', borderColor: '#2e6c44', background: 'rgba(44, 105, 66, 0.2)' },
+        warn: { color: '#ffe3a8', borderColor: '#7b6333', background: 'rgba(139, 112, 57, 0.22)' },
+        bad: { color: '#ffc0c0', borderColor: '#7d4b4b', background: 'rgba(125, 75, 75, 0.24)' },
+    };
+
+    const borderColors = {
+        ok: '#2e6c44',
+        warn: '#7b6333',
+        bad: '#7d4b4b',
+    };
+
+    const headerColors = {
+        ok: '#b7ffce',
+        warn: '#ffe3a8',
+        bad: '#ffc0c0',
+    };
+
+    return (
+        <div className="mb-6">
+            <h4 className="text-sm font-semibold mb-2" style={{ color: 'var(--mono-muted)' }}>
+                ArgoCD Application Status
+            </h4>
+
+            <div className="mono-inline-status mb-3" style={toneColors[tone]}>
+                <div className="flex flex-col gap-1">
+                    <div className="flex items-center justify-between gap-4">
+                        <span>Application: {applicationStatus.application || '-'}</span>
+                        <span className="text-xs" style={{ color: 'var(--mono-muted)' }}>
+                            Namespace: {applicationStatus.namespace || '-'}
+                        </span>
+                    </div>
+                    <div className="text-xs" style={{ color: '#e8e8e8' }}>
+                        Health: {applicationStatus.health?.status || '-'} • Sync: {applicationStatus.sync?.status || '-'} • Operation: {applicationStatus.operationState?.phase || 'Idle'}
+                    </div>
+                </div>
+            </div>
+
+            {deploymentMismatch && (
+                <div className="mono-inline-status mb-3" style={toneColors.warn}>
+                    Application is configured for deployment {configuredDeploymentId}, not {expectedDeploymentId}.
+                </div>
+            )}
+
+            <div className="border border-solid mb-3" style={{ borderColor: borderColors[tone], background: tone === 'ok' ? '#0a1210' : '#1a1212' }}>
+                <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
+                    <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
+                        Summary
+                    </h5>
+                </div>
+                <div className="p-3 grid gap-2 text-xs">
+                    <div><span style={{ color: 'var(--mono-muted)' }}>revision</span><div className="font-mono" style={{ color: '#e8e8e8' }}>{applicationStatus.sync?.revision || '-'}</div></div>
+                    <div><span style={{ color: 'var(--mono-muted)' }}>health message</span><div className="font-mono" style={{ color: '#e8e8e8' }}>{applicationStatus.health?.message || '-'}</div></div>
+                    <div><span style={{ color: 'var(--mono-muted)' }}>operation message</span><div className="font-mono" style={{ color: '#e8e8e8' }}>{applicationStatus.operationState?.message || '-'}</div></div>
+                    <div><span style={{ color: 'var(--mono-muted)' }}>configured deployment</span><div className="font-mono" style={{ color: '#e8e8e8' }}>{configuredDeploymentId}</div></div>
+                    <div><span style={{ color: 'var(--mono-muted)' }}>expected deployment</span><div className="font-mono" style={{ color: '#e8e8e8' }}>{expectedDeploymentId}</div></div>
+                    <div><span style={{ color: 'var(--mono-muted)' }}>last health transition</span><div style={{ color: '#e8e8e8' }}>{applicationStatus.health?.lastTransitionTime ? formatRelativeTimeRounded(applicationStatus.health.lastTransitionTime) : '-'}</div></div>
+                    <div><span style={{ color: 'var(--mono-muted)' }}>reconciled</span><div style={{ color: '#e8e8e8' }}>{applicationStatus.reconciledAt ? formatRelativeTimeRounded(applicationStatus.reconciledAt) : '-'}</div></div>
+                    <div><span style={{ color: 'var(--mono-muted)' }}>observed</span><div style={{ color: '#e8e8e8' }}>{applicationStatus.observedAt ? formatRelativeTimeRounded(applicationStatus.observedAt) : '-'}</div></div>
+                </div>
+            </div>
+
+            {applicationStatus.conditions && applicationStatus.conditions.length > 0 && (
+                <div className="border border-solid mb-3" style={{ borderColor: borderColors[tone], background: '#0a0a0a' }}>
+                    <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
+                        <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
+                            Conditions
+                        </h5>
+                    </div>
+                    <div className="p-3 space-y-2">
+                        {applicationStatus.conditions.map((condition, idx) => (
+                            <div key={`condition-${idx}`} className="text-xs p-2" style={{ background: '#0f0f0f', border: '1px solid var(--mono-line)' }}>
+                                <div className="flex items-center justify-between gap-4 mb-1">
+                                    <span className="font-semibold" style={{ color: '#e8e8e8' }}>
+                                        {condition.type || '-'}
+                                    </span>
+                                    <span style={{ color: 'var(--mono-muted)' }}>
+                                        {condition.lastTransitionTime ? formatRelativeTimeRounded(condition.lastTransitionTime) : '-'}
+                                    </span>
+                                </div>
+                                <div className="font-mono" style={{ color: '#e8e8e8' }}>
+                                    {condition.message || '-'}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {((applicationStatus.summary?.externalURLs && applicationStatus.summary.externalURLs.length > 0) ||
+                (applicationStatus.summary?.images && applicationStatus.summary.images.length > 0)) && (
+                <div className="border border-solid mb-3" style={{ borderColor: borderColors[tone], background: '#0a0a0a' }}>
+                    <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
+                        <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
+                            Application Summary
+                        </h5>
+                    </div>
+                    <div className="p-3 space-y-3 text-xs">
+                        {applicationStatus.summary?.externalURLs?.length > 0 && (
+                            <div>
+                                <div className="mb-1" style={{ color: 'var(--mono-muted)' }}>External URLs</div>
+                                <div className="space-y-1">
+                                    {applicationStatus.summary.externalURLs.map((url, idx) => (
+                                        <div key={`external-url-${idx}`} className="font-mono" style={{ color: '#e8e8e8' }}>
+                                            <a href={url} target="_blank" rel="noopener noreferrer" className="underline">
+                                                {url}
+                                            </a>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                        {applicationStatus.summary?.images?.length > 0 && (
+                            <div>
+                                <div className="mb-1" style={{ color: 'var(--mono-muted)' }}>Images</div>
+                                <div className="space-y-1">
+                                    {applicationStatus.summary.images.map((image, idx) => (
+                                        <div key={`image-${idx}`} className="font-mono" style={{ color: '#e8e8e8' }}>
+                                            {image}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            )}
+
+            {applicationStatus.resources && applicationStatus.resources.length > 0 && (
+                <div className="border border-solid mb-3" style={{ borderColor: borderColors[tone], background: '#0a0a0a' }}>
+                    <div className="p-3 flex items-center justify-between" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
+                        <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
+                            Managed Resources
+                        </h5>
+                        <span className="text-xs" style={{ color: 'var(--mono-muted)' }}>
+                            {applicationStatus.resourceCount || applicationStatus.resources.length} total
+                        </span>
+                    </div>
+                    <div>
+                        {applicationStatus.resources.map((resource, idx) => (
+                            <div key={`${resource.kind}-${resource.name}-${idx}`} className="p-3 border-b last:border-b-0" style={{ borderColor: 'var(--mono-line)' }}>
+                                <div className="flex items-center justify-between gap-4 text-xs mb-1">
+                                    <div className="font-mono" style={{ color: '#e8e8e8' }}>
+                                        {resource.kind}/{resource.name}
+                                    </div>
+                                    <div style={{ color: 'var(--mono-muted)' }}>
+                                        {resource.namespace || '-'}
+                                    </div>
+                                </div>
+                                <div className="text-xs mb-1" style={{ color: 'var(--mono-muted)' }}>
+                                    Sync: {resource.status || '-'} • Health: {resource.health?.status || '-'}
+                                    {resource.requiresPruning ? ' • prune pending' : ''}
+                                </div>
+                                {(resource.message || resource.health?.message) && (
+                                    <div className="font-mono text-xs" style={{ color: '#e8e8e8' }}>
+                                        {resource.message || resource.health?.message}
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {applicationStatus.history && applicationStatus.history.length > 0 && (
+                <div className="border border-solid mb-3" style={{ borderColor: borderColors[tone], background: '#0a0a0a' }}>
+                    <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
+                        <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
+                            Sync History
+                        </h5>
+                    </div>
+                    <div className="p-3 space-y-2">
+                        {applicationStatus.history.map((entry, idx) => (
+                            <div key={`history-${idx}`} className="text-xs p-2" style={{ background: '#0f0f0f', border: '1px solid var(--mono-line)' }}>
+                                <div className="font-mono mb-1" style={{ color: '#e8e8e8' }}>
+                                    {entry.revision || (entry.revisions && entry.revisions.join(', ')) || '-'}
+                                </div>
+                                <div style={{ color: 'var(--mono-muted)' }}>
+                                    Started: {entry.deployStartedAt ? formatRelativeTimeRounded(entry.deployStartedAt) : '-'} • Deployed: {entry.deployedAt ? formatRelativeTimeRounded(entry.deployedAt) : '-'}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {applicationStatus.transitions && applicationStatus.transitions.length > 0 && (
+                <div className="border border-solid" style={{ borderColor: borderColors[tone], background: '#0a0a0a' }}>
+                    <div className="p-3" style={{ borderBottom: `1px solid ${borderColors[tone]}` }}>
+                        <h5 className="text-xs font-semibold" style={{ color: headerColors[tone] }}>
+                            Status Transitions
+                        </h5>
+                    </div>
+                    <div className="p-3 space-y-2">
+                        {applicationStatus.transitions.map((transition, idx) => (
+                            <div key={`transition-${idx}`} className="text-xs p-2 font-mono" style={{ background: '#0f0f0f', border: '1px solid var(--mono-line)', color: '#e8e8e8' }}>
+                                {formatCompactObject(transition)}
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
@@ -1479,7 +1724,10 @@ export function DeploymentDetail({ projectName, deploymentId }) {
             )}
 
             {deployment.controller_metadata?.pod_status && (
-                <PodStatusSection podStatus={deployment.controller_metadata.pod_status} />
+                <PodStatusSection
+                    podStatus={deployment.controller_metadata.pod_status}
+                    deploymentId={deployment.deployment_id}
+                />
             )}
 
             {deployment.build_logs && (

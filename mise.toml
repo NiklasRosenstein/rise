@@ -10,7 +10,7 @@ buildkit = "0.28.0"
 "cargo:sqlx-cli" = "latest"
 "cargo:cargo-all-features" = "latest"
 mdbook = "latest"
-helm = "latest"
+helm = "3"
 rust = { version = "1.91.1", profile = "default" }
 kubectl = "latest"
 k9s = "latest"
@@ -31,8 +31,24 @@ cargo all-features clippy --all-targets -- -D warnings
 cargo fmt --all -- --check
 mise sqlx:check
 helm lint helm/rise
+helm lint helm/rise-app
 """
 env.SQLX_OFFLINE = true
+
+[tasks."chart:app:package"]
+description = "Package the Rise app Helm chart into dist/charts."
+run = """
+mkdir -p dist/charts
+helm package helm/rise-app --destination dist/charts
+"""
+
+[tasks."chart:app:push-local"]
+description = "Package and push the Rise app Helm chart to the local development OCI registry."
+depends = ["backend:deps", "chart:app:package"]
+run = """
+CHART_PACKAGE=$(ls -t dist/charts/rise-app-*.tgz | head -n 1)
+helm push "$CHART_PACKAGE" oci://rise-registry:5000/helm-charts --plain-http
+"""
 
 [tasks."config:schema:generate"]
 description = "Generate the backend settings JSON schema."
@@ -203,4 +219,75 @@ run = "bash tests/e2e-build/run.sh"
 [tasks."k3s:down"]
 run = """
 sudo /usr/local/bin/k3s-uninstall.sh
+"""
+
+[tasks."argocd:install"]
+description = "Install ArgoCD into the current cluster and set the admin password to 'password'."
+run = """
+set -eu
+
+helm repo add argo https://argoproj.github.io/argo-helm >/dev/null 2>&1 || true
+helm repo update argo
+
+helm upgrade --install argocd argo/argo-cd \
+  --namespace argocd \
+  --create-namespace \
+  --wait \
+  --set configs.params."server\\.insecure"=true
+
+PASSWORD_HASH=$(docker run --rm --entrypoint htpasswd httpd:2.4-alpine -nbBC 10 "" password | tr -d ':\n' | sed 's/^\\$2y/\\$2a/')
+PASSWORD_MTIME=$(date -u +%FT%TZ)
+PATCH_FILE=$(mktemp)
+trap 'rm -f "$PATCH_FILE"' EXIT
+
+cat > "$PATCH_FILE" <<EOF
+stringData:
+  admin.password: "$PASSWORD_HASH"
+  admin.passwordMtime: "$PASSWORD_MTIME"
+EOF
+
+kubectl -n argocd patch secret argocd-secret \
+  --type merge \
+  --patch-file "$PATCH_FILE"
+
+kubectl apply -f - <<EOF
+apiVersion: v1
+kind: Secret
+metadata:
+  name: rise-local-oci-repo
+  namespace: argocd
+  labels:
+    argocd.argoproj.io/secret-type: repository
+stringData:
+  name: rise-local-registry
+  url: oci://rise-registry:5000/helm-charts/rise-app
+  type: oci
+  insecureOCIForceHttp: "true"
+EOF
+
+kubectl -n argocd delete secret argocd-initial-admin-secret --ignore-not-found=true
+kubectl -n argocd rollout restart deployment argocd-server
+kubectl -n argocd rollout restart deployment argocd-repo-server
+kubectl -n argocd rollout status deployment argocd-server --timeout=180s
+kubectl -n argocd rollout status deployment argocd-repo-server --timeout=180s
+
+echo
+echo "ArgoCD installed."
+echo "Username: admin"
+echo "Password: password"
+echo "Local OCI Helm repo: rise-registry:5000 (insecure OCI enabled)"
+echo
+echo "Port-forward with:"
+echo "  kubectl -n argocd port-forward svc/argocd-server 8081:80"
+echo
+echo "Then open:"
+echo "  http://localhost:8081"
+"""
+
+[tasks."argocd:password"]
+description = "Print the current ArgoCD initial admin password if the secret exists."
+run = """
+set -eu
+kubectl -n argocd get secret argocd-initial-admin-secret -o jsonpath="{.data.password}" | base64 -d
+echo
 """

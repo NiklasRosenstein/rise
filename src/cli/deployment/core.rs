@@ -5,7 +5,7 @@ use comfy_table::{
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::Duration;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::build::{self, BuildOptions};
 use crate::config::Config;
@@ -287,11 +287,7 @@ pub async fn show_deployment(
 
         // Exit with error if deployment failed
         if deployment.status == DeploymentStatus::Failed {
-            if let Some(error) = deployment.error_message {
-                bail!("Deployment failed: {}", error);
-            } else {
-                bail!("Deployment failed");
-            }
+            return deployment_failed(deployment_id, deployment.error_message.as_deref());
         }
 
         Ok(())
@@ -310,14 +306,23 @@ pub async fn show_deployment(
 
         // Exit with error if deployment failed
         if deployment.status == DeploymentStatus::Failed {
-            if let Some(error) = deployment.error_message {
-                bail!("Deployment failed: {}", error);
-            } else {
-                bail!("Deployment failed");
-            }
+            return deployment_failed(deployment_id, deployment.error_message.as_deref());
         }
 
         Ok(())
+    }
+}
+
+fn deployment_failed(deployment_id: &str, error_message: Option<&str>) -> Result<()> {
+    match error_message {
+        Some(message) => {
+            error!(deployment_id, error = message, "Deployment failed");
+            bail!("Deployment failed: {}", message);
+        }
+        None => {
+            error!(deployment_id, "Deployment failed");
+            bail!("Deployment failed");
+        }
     }
 }
 

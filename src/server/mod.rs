@@ -41,8 +41,8 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     // Spawn enabled controllers as background tasks
     let mut controller_handles = vec![];
 
-    // Start Kubernetes deployment controller
-    info!("Starting Kubernetes deployment controller");
+    // Start deployment controller
+    info!("Starting deployment controller");
 
     let settings_clone = settings.clone();
     let controller_state_clone = controller_state.clone();
@@ -50,20 +50,36 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     let handle = tokio::spawn(async move {
         #[cfg(feature = "backend")]
         {
-            if let Err(e) = run_kubernetes_controller_loop(
-                controller_state_clone,
-                registry_provider,
-                settings_clone,
-            )
-            .await
-            {
+            let result = match &settings_clone.deployment_controller {
+                Some(settings::DeploymentControllerSettings::Kubernetes { .. }) => {
+                    run_kubernetes_controller_loop(
+                        controller_state_clone,
+                        registry_provider,
+                        settings_clone,
+                    )
+                    .await
+                }
+                Some(settings::DeploymentControllerSettings::ArgoCd { .. }) => {
+                    run_argocd_controller_loop(
+                        controller_state_clone,
+                        registry_provider,
+                        settings_clone,
+                    )
+                    .await
+                }
+                None => Err(anyhow::anyhow!(
+                    "Deployment controller not configured. Please add deployment_controller configuration"
+                )),
+            };
+
+            if let Err(e) = result {
                 tracing::error!("Deployment controller error: {:#}", e);
             }
         }
         #[cfg(not(feature = "backend"))]
         {
             tracing::error!(
-                "Kubernetes deployment controller is required but the 'backend' feature is not enabled. \
+                "A deployment controller is configured but the 'backend' feature is not enabled. \
                  Please rebuild with --features backend"
             );
         }
@@ -402,6 +418,11 @@ async fn run_kubernetes_controller_loop(
             pod_resources,
             health_probes,
         ),
+        Some(settings::DeploymentControllerSettings::ArgoCd { .. }) => {
+            anyhow::bail!(
+                "Deployment controller configuration mismatch: expected type kubernetes but found argocd"
+            )
+        }
         None => {
             anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
         }
@@ -489,6 +510,137 @@ async fn run_kubernetes_controller_loop(
     // Wait for shutdown signal
     shutdown_signal().await;
     info!("Kubernetes deployment controller shutdown complete");
+    Ok(())
+}
+
+/// Run the ArgoCD deployment controller loop (for embedding in server process)
+#[cfg(feature = "backend")]
+async fn run_argocd_controller_loop(
+    controller_state: ControllerState,
+    registry_provider: Arc<dyn crate::server::registry::RegistryProvider>,
+    settings: settings::Settings,
+) -> Result<()> {
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .ok();
+
+    let (
+        kubeconfig,
+        argocd_namespace,
+        production_ingress_url_template,
+        staging_ingress_url_template,
+        ingress_port,
+        ingress_schema,
+        appproject_format,
+        application_format,
+        destination_namespace_format,
+        destination_server,
+        namespace_labels,
+        namespace_annotations,
+        helm_chart,
+        sync_options,
+        access_classes,
+    ) = match settings.deployment_controller.clone() {
+        Some(settings::DeploymentControllerSettings::ArgoCd {
+            kubeconfig,
+            argocd_namespace,
+            production_ingress_url_template,
+            staging_ingress_url_template,
+            ingress_port,
+            ingress_schema,
+            appproject_format,
+            application_format,
+            destination_namespace_format,
+            destination_server,
+            namespace_labels,
+            namespace_annotations,
+            helm_chart,
+            sync_options,
+            access_classes,
+            ..
+        }) => (
+            kubeconfig,
+            argocd_namespace,
+            production_ingress_url_template,
+            staging_ingress_url_template,
+            ingress_port,
+            ingress_schema,
+            appproject_format,
+            application_format,
+            destination_namespace_format,
+            destination_server,
+            namespace_labels,
+            namespace_annotations,
+            helm_chart,
+            sync_options,
+            access_classes,
+        ),
+        _ => anyhow::bail!(
+            "Deployment controller not configured. Please add deployment_controller configuration with type: argocd"
+        ),
+    };
+
+    let kube_config = if kubeconfig.is_some() {
+        kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
+            context: None,
+            cluster: None,
+            user: None,
+        })
+        .await?
+    } else {
+        kube::Config::infer().await?
+    };
+    let kube_client = kube::Client::try_from(kube_config)?;
+
+    let backend = Arc::new(deployment::controller::ArgoCdController::new(
+        controller_state.clone(),
+        kube_client,
+        deployment::controller::ArgoCdControllerConfig {
+            argocd_namespace,
+            production_ingress_url_template,
+            staging_ingress_url_template,
+            ingress_port,
+            ingress_schema,
+            appproject_format,
+            application_format,
+            destination_namespace_format,
+            destination_server,
+            namespace_labels,
+            namespace_annotations,
+            helm_chart: deployment::controller::ArgoCdHelmChartConfig {
+                repo_url: helm_chart.repo_url,
+                chart: helm_chart.chart,
+                target_revision: helm_chart.target_revision,
+                values: helm_chart.values,
+            },
+            sync_options,
+            access_classes: access_classes
+                .into_iter()
+                .filter_map(|(key, value)| value.map(|access_class| (key, access_class)))
+                .collect(),
+            registry_provider,
+        },
+    )?);
+
+    backend.test_connection().await?;
+
+    let controller = Arc::new(deployment::controller::DeploymentController::new(
+        Arc::new(controller_state),
+        backend.clone(),
+        Duration::from_secs(settings.controller.reconcile_interval_secs),
+        Duration::from_secs(settings.controller.health_check_interval_secs),
+        Duration::from_secs(settings.controller.termination_interval_secs),
+        Duration::from_secs(settings.controller.cancellation_interval_secs),
+        Duration::from_secs(settings.controller.expiration_interval_secs),
+    )?);
+    controller.start();
+    info!("ArgoCD deployment controller started");
+
+    Arc::clone(&backend).start();
+    info!("ArgoCD project cleanup loop started");
+
+    shutdown_signal().await;
+    info!("ArgoCD deployment controller shutdown complete");
     Ok(())
 }
 

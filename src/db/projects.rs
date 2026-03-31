@@ -397,8 +397,10 @@ pub async fn update_calculated_status(pool: &PgPool, project_id: Uuid) -> Result
                 | DeploymentStatus::Superseded
                 | DeploymentStatus::Expired => ProjectStatus::Stopped,
 
-                // Running states without being active (shouldn't happen, but treat as stopped)
-                DeploymentStatus::Healthy | DeploymentStatus::Unhealthy => ProjectStatus::Stopped,
+                // If the latest default deployment is already healthy/unhealthy but active
+                // promotion has not happened yet, reflect that state instead of showing Stopped.
+                DeploymentStatus::Healthy => ProjectStatus::Running,
+                DeploymentStatus::Unhealthy => ProjectStatus::Failed,
             }
         } else {
             // No deployments in default group at all
@@ -777,6 +779,53 @@ mod tests {
             project.status,
             ProjectStatus::Stopped,
             "Project should be Stopped when only failed deployment exists and no active deployment"
+        );
+    }
+
+    #[sqlx::test]
+    async fn test_project_status_with_healthy_default_deployment_without_active_flag(pool: PgPool) {
+        let user = crate::db::users::create(&pool, "test3@example.com")
+            .await
+            .expect("Failed to create test user");
+
+        let project = create(
+            &pool,
+            "test-project-3",
+            ProjectStatus::Stopped,
+            "default".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await
+        .expect("Failed to create test project");
+
+        deployments::create(
+            &pool,
+            CreateDeploymentParams {
+                deployment_id: "20251220-130000",
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DeploymentStatus::Healthy,
+                image: Some("test:v1"),
+                image_digest: None,
+                rolled_back_from_deployment_id: None,
+                deployment_group: DEFAULT_DEPLOYMENT_GROUP,
+                expires_at: None,
+                http_port: 8080,
+                is_active: false,
+            },
+        )
+        .await
+        .expect("Failed to create healthy deployment");
+
+        let project = update_calculated_status(&pool, project.id)
+            .await
+            .expect("Failed to update project status");
+
+        assert_eq!(
+            project.status,
+            ProjectStatus::Running,
+            "Project should be Running when the latest default deployment is healthy even if is_active is not set yet"
         );
     }
 }
