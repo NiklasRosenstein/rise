@@ -2463,19 +2463,21 @@ impl KubernetesController {
         use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 
         // Use configured values or defaults
-        let (cpu_request, memory_request, memory_limit) =
+        let (cpu_request, memory_request, cpu_limit, memory_limit) =
             if let Some(ref config) = self.pod_resources {
                 (
                     config.cpu_request.clone(),
                     config.memory_request.clone(),
+                    config.cpu_limit.clone(),
                     config.memory_limit.clone(),
                 )
             } else {
                 // Use default values
                 (
-                    String::from("10m"),
-                    String::from("64Mi"),
-                    String::from("512Mi"),
+                    String::from("500m"),
+                    String::from("256Mi"),
+                    String::from("2"),
+                    String::from("2Gi"),
                 )
             };
 
@@ -2488,8 +2490,8 @@ impl KubernetesController {
             }),
             limits: Some({
                 let mut map = BTreeMap::new();
+                map.insert("cpu".to_string(), Quantity(cpu_limit));
                 map.insert("memory".to_string(), Quantity(memory_limit));
-                // No CPU limit - avoid throttling
                 map
             }),
             ..Default::default()

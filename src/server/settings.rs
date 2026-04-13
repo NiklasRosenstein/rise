@@ -341,16 +341,19 @@ pub struct AccessClass {
 /// Resource limits for pods
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct PodResourceLimits {
-    /// CPU request (e.g., "10m", "100m", "1")
+    /// CPU request (e.g., "100m", "500m", "1")
     #[serde(default = "default_cpu_request")]
     pub cpu_request: String,
 
-    /// Memory request (e.g., "64Mi", "128Mi", "1Gi")
+    /// Memory request (e.g., "128Mi", "256Mi", "1Gi")
     #[serde(default = "default_memory_request")]
     pub memory_request: String,
 
+    /// CPU limit (e.g., "1", "2", "4")
+    #[serde(default = "default_cpu_limit")]
+    pub cpu_limit: String,
+
     /// Memory limit (e.g., "512Mi", "1Gi", "2Gi")
-    /// CPU limit intentionally omitted to avoid throttling
     #[serde(default = "default_memory_limit")]
     pub memory_limit: String,
 }
@@ -411,15 +414,19 @@ fn default_true() -> bool {
 }
 
 fn default_cpu_request() -> String {
-    "10m".to_string()
+    "500m".to_string()
 }
 
 fn default_memory_request() -> String {
-    "64Mi".to_string()
+    "256Mi".to_string()
+}
+
+fn default_cpu_limit() -> String {
+    "2".to_string()
 }
 
 fn default_memory_limit() -> String {
-    "512Mi".to_string()
+    "2Gi".to_string()
 }
 
 fn default_probe_path() -> String {
