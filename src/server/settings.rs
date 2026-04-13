@@ -358,6 +358,17 @@ pub struct PodResourceLimits {
     pub memory_limit: String,
 }
 
+impl Default for PodResourceLimits {
+    fn default() -> Self {
+        Self {
+            cpu_request: default_cpu_request(),
+            memory_request: default_memory_request(),
+            cpu_limit: default_cpu_limit(),
+            memory_limit: default_memory_limit(),
+        }
+    }
+}
+
 /// Health probe configuration
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct HealthProbeConfig {
@@ -597,7 +608,7 @@ pub enum DeploymentControllerSettings {
         pod_security_enabled: bool,
 
         /// Resource limits for deployed containers
-        /// If not set, uses default conservative limits (10m CPU request, 64Mi memory request, 512Mi memory limit)
+        /// If not set, uses defaults: 500m CPU request, 256Mi memory request, 2 CPU limit, 2Gi memory limit
         #[serde(default)]
         pod_resources: Option<PodResourceLimits>,
 

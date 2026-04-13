@@ -405,7 +405,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Resource limits for deployed containers If not set, uses default conservative limits (10m CPU request, 64Mi memory request, 512Mi memory limit)"
+              "description": "Resource limits for deployed containers If not set, uses defaults: 500m CPU request, 256Mi memory request, 2 CPU limit, 2Gi memory limit"
             },
             "pod_security_enabled": {
               "default": true,

@@ -2462,24 +2462,12 @@ impl KubernetesController {
     fn create_resource_requirements(&self) -> Option<ResourceRequirements> {
         use k8s_openapi::apimachinery::pkg::api::resource::Quantity;
 
-        // Use configured values or defaults
-        let (cpu_request, memory_request, cpu_limit, memory_limit) =
-            if let Some(ref config) = self.pod_resources {
-                (
-                    config.cpu_request.clone(),
-                    config.memory_request.clone(),
-                    config.cpu_limit.clone(),
-                    config.memory_limit.clone(),
-                )
-            } else {
-                // Use default values
-                (
-                    String::from("500m"),
-                    String::from("256Mi"),
-                    String::from("2"),
-                    String::from("2Gi"),
-                )
-            };
+        // Use configured values or defaults from PodResourceLimits::default()
+        let config = self.pod_resources.clone().unwrap_or_default();
+        let cpu_request = config.cpu_request;
+        let memory_request = config.memory_request;
+        let cpu_limit = config.cpu_limit;
+        let memory_limit = config.memory_limit;
 
         Some(ResourceRequirements {
             requests: Some({
@@ -5239,6 +5227,45 @@ mod tests {
         assert_eq!(volume_mounts[0].name, EXTRA_SERVICE_TOKENS_VOLUME_NAME);
         assert_eq!(volume_mounts[0].mount_path, EXTRA_SERVICE_TOKENS_MOUNT_PATH);
         assert_eq!(volume_mounts[0].read_only, Some(true));
+    }
+
+    #[tokio::test]
+    async fn test_resource_requirements_defaults() {
+        let controller = create_mock_controller();
+        let resources = controller
+            .create_resource_requirements()
+            .expect("should return resource requirements");
+
+        let requests = resources.requests.expect("should have requests");
+        assert_eq!(requests["cpu"].0, "500m");
+        assert_eq!(requests["memory"].0, "256Mi");
+
+        let limits = resources.limits.expect("should have limits");
+        assert_eq!(limits["cpu"].0, "2");
+        assert_eq!(limits["memory"].0, "2Gi");
+    }
+
+    #[tokio::test]
+    async fn test_resource_requirements_custom_values() {
+        let mut controller = create_mock_controller();
+        controller.pod_resources = Some(crate::server::settings::PodResourceLimits {
+            cpu_request: "100m".to_string(),
+            memory_request: "128Mi".to_string(),
+            cpu_limit: "4".to_string(),
+            memory_limit: "1Gi".to_string(),
+        });
+
+        let resources = controller
+            .create_resource_requirements()
+            .expect("should return resource requirements");
+
+        let requests = resources.requests.expect("should have requests");
+        assert_eq!(requests["cpu"].0, "100m");
+        assert_eq!(requests["memory"].0, "128Mi");
+
+        let limits = resources.limits.expect("should have limits");
+        assert_eq!(limits["cpu"].0, "4");
+        assert_eq!(limits["memory"].0, "1Gi");
     }
 
     #[test]
