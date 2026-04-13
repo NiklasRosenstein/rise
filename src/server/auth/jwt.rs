@@ -46,6 +46,7 @@ struct Jwk {
 /// OIDC Discovery document
 #[derive(Debug, Deserialize)]
 struct OidcDiscovery {
+    issuer: String,
     jwks_uri: String,
 }
 
@@ -106,6 +107,19 @@ impl JwtValidator {
             .json()
             .await
             .context("Failed to parse OIDC discovery document")?;
+
+        // RFC 8414 Section 3.1: The issuer field in the discovery document
+        // must match the requested issuer URL to prevent a malicious provider
+        // from claiming to be a different issuer.
+        let expected = issuer_url.trim_end_matches('/');
+        let actual = discovery.issuer.trim_end_matches('/');
+        if expected != actual {
+            return Err(anyhow!(
+                "OIDC issuer mismatch: expected '{}', discovery returned '{}'",
+                issuer_url,
+                discovery.issuer
+            ));
+        }
 
         Ok(discovery.jwks_uri)
     }
@@ -683,5 +697,46 @@ mod tests {
 
         let result_wrong = JwtValidator::validate_custom_claims(&jwt_claims, &expected_wrong);
         assert!(result_wrong.is_err());
+    }
+
+    #[test]
+    fn test_oidc_discovery_issuer_field_required() {
+        // Discovery document without issuer field should fail to deserialize
+        let json = r#"{"jwks_uri": "https://example.com/jwks"}"#;
+        let result: Result<OidcDiscovery, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "Expected deserialization to fail without issuer field"
+        );
+    }
+
+    #[test]
+    fn test_oidc_discovery_deserialization() {
+        let json = r#"{"issuer": "https://example.com", "jwks_uri": "https://example.com/jwks"}"#;
+        let discovery: OidcDiscovery = serde_json::from_str(json).unwrap();
+        assert_eq!(discovery.issuer, "https://example.com");
+        assert_eq!(discovery.jwks_uri, "https://example.com/jwks");
+    }
+
+    /// Test the issuer validation logic used in discover_jwks_uri
+    #[test]
+    fn test_oidc_issuer_mismatch_detection() {
+        let issuer_url = "https://accounts.example.com";
+
+        // Mismatched issuer
+        let discovery_issuer = "https://evil.example.com";
+        let expected = issuer_url.trim_end_matches('/');
+        let actual = discovery_issuer.trim_end_matches('/');
+        assert_ne!(expected, actual, "Mismatched issuers should not be equal");
+
+        // Matching issuer
+        let discovery_issuer = "https://accounts.example.com";
+        let actual = discovery_issuer.trim_end_matches('/');
+        assert_eq!(expected, actual, "Matching issuers should be equal");
+
+        // Trailing slash normalization
+        let discovery_issuer = "https://accounts.example.com/";
+        let actual = discovery_issuer.trim_end_matches('/');
+        assert_eq!(expected, actual, "Trailing slash should be normalized");
     }
 }
