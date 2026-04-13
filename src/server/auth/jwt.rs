@@ -107,6 +107,13 @@ impl JwtValidator {
             .await
             .context("Failed to parse OIDC discovery document")?;
 
+        // SSRF-validate the JWKS URI before returning it.
+        // An attacker-controlled OIDC provider could return a jwks_uri pointing
+        // to an internal IP (e.g., metadata endpoint, internal service).
+        crate::server::ssrf::validate_url(&discovery.jwks_uri)
+            .await
+            .map_err(|e| anyhow!("JWKS URI failed SSRF validation: {}", e))?;
+
         Ok(discovery.jwks_uri)
     }
 

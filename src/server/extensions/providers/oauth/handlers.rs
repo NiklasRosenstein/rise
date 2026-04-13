@@ -38,7 +38,7 @@ async fn fetch_oidc_discovery(issuer_url: &str) -> Result<OidcDiscoveryDocument,
         issuer_url.trim_end_matches('/')
     );
 
-    let http_client = reqwest::Client::new();
+    let http_client = crate::server::ssrf::safe_client();
     let response = http_client.get(&discovery_url).send().await.map_err(|e| {
         error!(
             "Failed to fetch OIDC discovery from {}: {:?}",
@@ -618,7 +618,7 @@ pub async fn callback(
     let oauth_provider = OAuthProvider::new(OAuthProviderConfig {
         db_pool: state.db_pool.clone(),
         encryption_provider: encryption_provider.clone(),
-        http_client: reqwest::Client::new(),
+        http_client: crate::server::ssrf::safe_client(),
         api_domain: state.public_url.clone(),
     });
 
@@ -674,7 +674,7 @@ pub async fn callback(
     })?;
 
     // Exchange authorization code for tokens (with PKCE code verifier)
-    let http_client = reqwest::Client::new();
+    let http_client = crate::server::ssrf::safe_client();
     let response = http_client
         .post(&endpoints.token_endpoint)
         .header("Accept", "application/json")
@@ -1433,7 +1433,7 @@ async fn handle_refresh_token_grant(
             error!("Encryption provider not configured");
             oauth2_error("server_error", Some("Internal server error".to_string()))
         })?,
-        http_client: reqwest::Client::new(),
+        http_client: crate::server::ssrf::safe_client(),
         api_domain: state.public_url.clone(),
     });
 
@@ -1798,7 +1798,18 @@ pub async fn oidc_jwks(
                 "No jwks_uri in OIDC discovery".to_string(),
             ))?;
 
-            let http_client = reqwest::Client::new();
+            // SSRF-validate the JWKS URI before fetching
+            crate::server::ssrf::validate_url(&jwks_uri)
+                .await
+                .map_err(|e| {
+                    error!("JWKS URI failed SSRF validation: {}", e);
+                    (
+                        StatusCode::BAD_REQUEST,
+                        format!("JWKS URI failed SSRF validation: {}", e),
+                    )
+                })?;
+
+            let http_client = crate::server::ssrf::safe_client();
 
             // Fetch JWKS
             let jwks_response = http_client.get(&jwks_uri).send().await.map_err(|e| {
