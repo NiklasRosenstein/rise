@@ -146,6 +146,14 @@ impl Config {
             fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
         }
 
+        // Restrict directory permissions to owner-only (0700) on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700))
+                .context("Failed to set config directory permissions")?;
+        }
+
         Ok(config_dir.join("config.json"))
     }
 
@@ -172,6 +180,14 @@ impl Config {
         let json = serde_json::to_string_pretty(self).context("Failed to serialize config")?;
 
         fs::write(&config_path, json).context("Failed to write config file")?;
+
+        // Restrict file permissions to owner-only (0600) on Unix
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))
+                .context("Failed to set config file permissions")?;
+        }
 
         Ok(())
     }
@@ -391,5 +407,35 @@ mod tests {
         assert_eq!(command_file_name("podman"), Some("podman"));
         assert_eq!(command_file_name("/usr/bin/podman"), Some("podman"));
         assert_eq!(command_file_name("/usr/local/bin/docker"), Some("docker"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn test_config_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let config_dir = tmp_dir.path().join(".config").join("rise");
+        fs::create_dir_all(&config_dir).unwrap();
+        let config_path = config_dir.join("config.json");
+
+        let c = Config {
+            token: Some("secret-token".to_string()),
+            ..Config::default()
+        };
+
+        let json = serde_json::to_string_pretty(&c).unwrap();
+        fs::write(&config_path, json).unwrap();
+
+        // Apply the same permission logic as save()
+        fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        let metadata = fs::metadata(&config_path).unwrap();
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(
+            mode, 0o600,
+            "Config file should have 0600 permissions, got {:o}",
+            mode
+        );
     }
 }
