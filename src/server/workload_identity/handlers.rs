@@ -76,7 +76,9 @@ async fn verify_oidc_issuer(issuer_url: &str) -> Result<(), ServerError> {
         .get("issuer")
         .and_then(|v| v.as_str())
         .ok_or_else(|| {
-            ServerError::bad_request("OIDC configuration missing required 'issuer' field")
+            ServerError::bad_request(
+                "OIDC configuration missing or invalid 'issuer' field (must be a string)",
+            )
         })?;
 
     let expected = issuer_url.trim_end_matches('/');

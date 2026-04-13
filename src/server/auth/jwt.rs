@@ -92,7 +92,10 @@ impl JwtValidator {
 
     /// Discover JWKS URI from OIDC issuer via .well-known/openid-configuration
     async fn discover_jwks_uri(&self, issuer_url: &str) -> Result<String> {
-        let discovery_url = format!("{}/.well-known/openid-configuration", issuer_url);
+        let discovery_url = format!(
+            "{}/.well-known/openid-configuration",
+            issuer_url.trim_end_matches('/')
+        );
 
         tracing::debug!("Discovering OIDC configuration from {}", discovery_url);
 
@@ -108,20 +111,24 @@ impl JwtValidator {
             .await
             .context("Failed to parse OIDC discovery document")?;
 
-        // RFC 8414 Section 3.1: The issuer field in the discovery document
-        // must match the requested issuer URL to prevent a malicious provider
-        // from claiming to be a different issuer.
-        let expected = issuer_url.trim_end_matches('/');
+        Self::validate_oidc_issuer(issuer_url, &discovery)?;
+
+        Ok(discovery.jwks_uri)
+    }
+
+    /// Validate that the OIDC discovery document's issuer matches the expected issuer URL.
+    /// Per RFC 8414 Section 3.1, a discovery document must not claim a different issuer.
+    fn validate_oidc_issuer(expected_issuer: &str, discovery: &OidcDiscovery) -> Result<()> {
+        let expected = expected_issuer.trim_end_matches('/');
         let actual = discovery.issuer.trim_end_matches('/');
         if expected != actual {
             return Err(anyhow!(
                 "OIDC issuer mismatch: expected '{}', discovery returned '{}'",
-                issuer_url,
+                expected_issuer,
                 discovery.issuer
             ));
         }
-
-        Ok(discovery.jwks_uri)
+        Ok(())
     }
 
     /// Fetch JWKS from a JWKS URI
@@ -718,25 +725,46 @@ mod tests {
         assert_eq!(discovery.jwks_uri, "https://example.com/jwks");
     }
 
-    /// Test the issuer validation logic used in discover_jwks_uri
     #[test]
-    fn test_oidc_issuer_mismatch_detection() {
-        let issuer_url = "https://accounts.example.com";
+    fn test_validate_oidc_issuer_match() {
+        let discovery = OidcDiscovery {
+            issuer: "https://accounts.example.com".to_string(),
+            jwks_uri: "https://accounts.example.com/jwks".to_string(),
+        };
+        assert!(
+            JwtValidator::validate_oidc_issuer("https://accounts.example.com", &discovery).is_ok()
+        );
+    }
 
-        // Mismatched issuer
-        let discovery_issuer = "https://evil.example.com";
-        let expected = issuer_url.trim_end_matches('/');
-        let actual = discovery_issuer.trim_end_matches('/');
-        assert_ne!(expected, actual, "Mismatched issuers should not be equal");
+    #[test]
+    fn test_validate_oidc_issuer_mismatch() {
+        let discovery = OidcDiscovery {
+            issuer: "https://evil.example.com".to_string(),
+            jwks_uri: "https://evil.example.com/jwks".to_string(),
+        };
+        let err = JwtValidator::validate_oidc_issuer("https://accounts.example.com", &discovery)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("OIDC issuer mismatch"),
+            "Expected issuer mismatch error, got: {}",
+            err
+        );
+    }
 
-        // Matching issuer
-        let discovery_issuer = "https://accounts.example.com";
-        let actual = discovery_issuer.trim_end_matches('/');
-        assert_eq!(expected, actual, "Matching issuers should be equal");
+    #[test]
+    fn test_validate_oidc_issuer_trailing_slash_normalization() {
+        // Discovery has trailing slash, expected does not
+        let discovery = OidcDiscovery {
+            issuer: "https://accounts.example.com/".to_string(),
+            jwks_uri: "https://accounts.example.com/jwks".to_string(),
+        };
+        assert!(
+            JwtValidator::validate_oidc_issuer("https://accounts.example.com", &discovery).is_ok()
+        );
 
-        // Trailing slash normalization
-        let discovery_issuer = "https://accounts.example.com/";
-        let actual = discovery_issuer.trim_end_matches('/');
-        assert_eq!(expected, actual, "Trailing slash should be normalized");
+        // Expected has trailing slash, discovery does not
+        assert!(
+            JwtValidator::validate_oidc_issuer("https://accounts.example.com/", &discovery).is_ok()
+        );
     }
 }
