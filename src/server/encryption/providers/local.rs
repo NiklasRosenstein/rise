@@ -92,7 +92,7 @@ mod tests {
         // Generate a random 32-byte key for testing
         use rand::RngCore;
         let mut key = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut key);
+        rand::rng().fill_bytes(&mut key);
         let key_base64 = BASE64.encode(key);
 
         let provider = LocalEncryptionProvider::new(&key_base64).unwrap();
@@ -109,7 +109,7 @@ mod tests {
         // Encrypting the same plaintext twice should produce different ciphertexts
         use rand::RngCore;
         let mut key = [0u8; 32];
-        rand::thread_rng().fill_bytes(&mut key);
+        rand::rng().fill_bytes(&mut key);
         let key_base64 = BASE64.encode(key);
         let provider = LocalEncryptionProvider::new(&key_base64).unwrap();
 
