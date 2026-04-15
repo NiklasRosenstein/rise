@@ -21,6 +21,12 @@
       "groupName": "Python dependencies"
     },
     {
+      "description": "Group non-major Docker image updates",
+      "matchDatasources": ["docker"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Docker images"
+    },
+    {
       "description": "Group all GitHub Actions updates",
       "matchManagers": ["github-actions"],
       "groupName": "GitHub Actions"
