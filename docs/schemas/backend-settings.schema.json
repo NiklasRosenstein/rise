@@ -405,7 +405,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Resource limits for deployed containers If not set, uses default conservative limits (10m CPU request, 64Mi memory request, 512Mi memory limit)"
+              "description": "Resource limits for deployed containers If not set, uses defaults: 500m CPU request, 256Mi memory request, 2 CPU limit, 2Gi memory limit"
             },
             "pod_security_enabled": {
               "default": true,
@@ -874,19 +874,24 @@
     "PodResourceLimits": {
       "description": "Resource limits for pods",
       "properties": {
+        "cpu_limit": {
+          "default": "2",
+          "description": "CPU limit (e.g., \"1\", \"2\", \"4\")",
+          "type": "string"
+        },
         "cpu_request": {
-          "default": "10m",
-          "description": "CPU request (e.g., \"10m\", \"100m\", \"1\")",
+          "default": "500m",
+          "description": "CPU request (e.g., \"100m\", \"500m\", \"1\")",
           "type": "string"
         },
         "memory_limit": {
-          "default": "512Mi",
-          "description": "Memory limit (e.g., \"512Mi\", \"1Gi\", \"2Gi\") CPU limit intentionally omitted to avoid throttling",
+          "default": "2Gi",
+          "description": "Memory limit (e.g., \"512Mi\", \"1Gi\", \"2Gi\")",
           "type": "string"
         },
         "memory_request": {
-          "default": "64Mi",
-          "description": "Memory request (e.g., \"64Mi\", \"128Mi\", \"1Gi\")",
+          "default": "256Mi",
+          "description": "Memory request (e.g., \"128Mi\", \"256Mi\", \"1Gi\")",
           "type": "string"
         }
       },
