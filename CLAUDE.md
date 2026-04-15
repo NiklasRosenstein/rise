@@ -184,16 +184,28 @@ For user-facing documentation, see the [`/docs`](./docs) directory. Key topics i
 
 Run these to match what CI checks. Fix any issues before committing.
 
+**Always run** (fast, catches most issues):
+
 ```bash
 cargo fmt --all                # Format code
-mise run lint                  # Clippy + fmt check + sqlx check + helm lint
-cargo test --all-features      # Unit tests (requires `mise run db:migrate` first)
+cargo clippy --all-features --all-targets -- -D warnings  # Lint (uses cached build artifacts)
 ```
 
-If you modified SQLX queries, also run:
+**Run selectively** based on what changed:
+
+| What changed | Command | Why |
+|---|---|---|
+| Any `.rs` file | `cargo test --all-features` | Unit tests (requires `mise run db:migrate` once) |
+| SQLX queries (`sqlx::query!` etc.) | `mise run sqlx:prepare` | Regenerate offline query cache (commit the result) |
+| Server settings structs (`src/server/settings.rs`) | `mise run config:schema:generate` | Regenerate `docs/schemas/backend-settings.schema.json` (commit the result) |
+| Helm chart (`helm/rise/`) | `helm lint helm/rise` | Validate chart templates |
+
+**Full CI-equivalent check** (slower, runs everything):
 
 ```bash
-mise run sqlx:prepare          # Regenerate offline query cache (commit the changes)
+mise run lint                  # cargo check + clippy + fmt check + sqlx check + helm lint
+mise run config:schema:check   # Verify backend config schema is up to date
+cargo test --all-features      # Unit tests
 ```
 
 The `mise run lint` task runs: `cargo all-features check`, `cargo all-features clippy -- -D warnings`, `cargo fmt --check`, `mise sqlx:check`, and `helm lint helm/rise`.

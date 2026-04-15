@@ -74,6 +74,11 @@ pub struct ServerSettings {
     /// Defaults to the RISE_DOCS_DIR environment variable.
     #[serde(default = "default_docs_dir")]
     pub docs_dir: Option<String>,
+
+    /// Allow HTTP and private/loopback IPs in SSRF-validated URLs.
+    /// WARNING: Only enable for local development. Never enable in production.
+    #[serde(default)]
+    pub allow_private_networks: bool,
 }
 
 fn default_cookie_secure() -> bool {
@@ -341,18 +346,32 @@ pub struct AccessClass {
 /// Resource limits for pods
 #[derive(Debug, Clone, Deserialize, JsonSchema)]
 pub struct PodResourceLimits {
-    /// CPU request (e.g., "10m", "100m", "1")
+    /// CPU request (e.g., "100m", "500m", "1")
     #[serde(default = "default_cpu_request")]
     pub cpu_request: String,
 
-    /// Memory request (e.g., "64Mi", "128Mi", "1Gi")
+    /// Memory request (e.g., "128Mi", "256Mi", "1Gi")
     #[serde(default = "default_memory_request")]
     pub memory_request: String,
 
+    /// CPU limit (e.g., "1", "2", "4")
+    #[serde(default = "default_cpu_limit")]
+    pub cpu_limit: String,
+
     /// Memory limit (e.g., "512Mi", "1Gi", "2Gi")
-    /// CPU limit intentionally omitted to avoid throttling
     #[serde(default = "default_memory_limit")]
     pub memory_limit: String,
+}
+
+impl Default for PodResourceLimits {
+    fn default() -> Self {
+        Self {
+            cpu_request: default_cpu_request(),
+            memory_request: default_memory_request(),
+            cpu_limit: default_cpu_limit(),
+            memory_limit: default_memory_limit(),
+        }
+    }
 }
 
 /// Health probe configuration
@@ -411,15 +430,19 @@ fn default_true() -> bool {
 }
 
 fn default_cpu_request() -> String {
-    "10m".to_string()
+    "500m".to_string()
 }
 
 fn default_memory_request() -> String {
-    "64Mi".to_string()
+    "256Mi".to_string()
+}
+
+fn default_cpu_limit() -> String {
+    "2".to_string()
 }
 
 fn default_memory_limit() -> String {
-    "512Mi".to_string()
+    "2Gi".to_string()
 }
 
 fn default_probe_path() -> String {
@@ -590,7 +613,7 @@ pub enum DeploymentControllerSettings {
         pod_security_enabled: bool,
 
         /// Resource limits for deployed containers
-        /// If not set, uses default conservative limits (10m CPU request, 64Mi memory request, 512Mi memory limit)
+        /// If not set, uses defaults: 500m CPU request, 256Mi memory request, 2 CPU limit, 2Gi memory limit
         #[serde(default)]
         pod_resources: Option<PodResourceLimits>,
 
