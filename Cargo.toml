@@ -94,7 +94,7 @@ uuid = { version = "1.18.1", features = ["v4", "serde"] }
 
 # Shared: CLI + Server
 axum = "0.8.7"
-jsonwebtoken = "9.2"
+jsonwebtoken = "10.0"
 sha2 = "0.10"
 urlencoding = "2.1"
 

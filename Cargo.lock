@@ -2451,6 +2451,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "jsonwebtoken"
+version = "10.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0529410abe238729a60b108898784df8984c87f6054c9c4fcacc47e4803c1ce1"
+dependencies = [
+ "base64 0.22.1",
+ "getrandom 0.2.17",
+ "js-sys",
+ "pem",
+ "serde",
+ "serde_json",
+ "signature",
+ "simple_asn1",
+]
+
+[[package]]
 name = "jwt"
 version = "0.16.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3587,7 +3603,7 @@ dependencies = [
  "config",
  "dirs",
  "futures",
- "jsonwebtoken",
+ "jsonwebtoken 10.3.0",
  "k8s-openapi",
  "kube",
  "lazy_static",
@@ -4208,7 +4224,7 @@ dependencies = [
  "chrono",
  "flate2",
  "http 0.2.12",
- "jsonwebtoken",
+ "jsonwebtoken 9.3.1",
  "pkcs8",
  "reqwest 0.11.27",
  "rsa",
