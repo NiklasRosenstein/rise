@@ -102,7 +102,7 @@ impl TokenStore for InMemoryTokenStore {
 /// This implementation generates a 64-character verifier (48 random bytes base64url encoded)
 pub fn generate_code_verifier() -> String {
     let mut random_bytes = [0u8; 48];
-    rand::thread_rng().fill_bytes(&mut random_bytes);
+    rand::rng().fill_bytes(&mut random_bytes);
     Base64UrlUnpadded::encode_string(&random_bytes)
 }
 
@@ -121,7 +121,7 @@ pub fn generate_code_challenge(verifier: &str) -> String {
 /// The state token is used to prevent CSRF attacks in the OAuth2 flow
 pub fn generate_state_token() -> String {
     let mut random_bytes = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut random_bytes);
+    rand::rng().fill_bytes(&mut random_bytes);
     Base64UrlUnpadded::encode_string(&random_bytes)
 }
 

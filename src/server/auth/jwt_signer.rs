@@ -166,9 +166,10 @@ impl JwtSigner {
             tracing::warn!("No RS256 keys configured - generating new key pair. JWTs will be invalidated on restart. Configure rs256_private_key_pem to persist keys.");
 
             use rsa::pkcs8::{EncodePrivateKey, EncodePublicKey};
+            use rsa::rand_core::OsRng;
             use rsa::{RsaPrivateKey, RsaPublicKey};
 
-            let mut rng = rand::thread_rng();
+            let mut rng = OsRng;
             let bits = 2048;
             let private_key = RsaPrivateKey::new(&mut rng, bits)
                 .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
