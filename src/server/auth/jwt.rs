@@ -93,6 +93,11 @@ impl JwtValidator {
     async fn discover_jwks_uri(&self, issuer_url: &str) -> Result<String> {
         let discovery_url = format!("{}/.well-known/openid-configuration", issuer_url);
 
+        // SSRF-validate the discovery URL before fetching
+        crate::server::ssrf::validate_url(&discovery_url)
+            .await
+            .map_err(|e| anyhow!("OIDC discovery URL failed SSRF validation: {}", e))?;
+
         tracing::debug!("Discovering OIDC configuration from {}", discovery_url);
 
         let response = self

@@ -38,6 +38,14 @@ async fn fetch_oidc_discovery(issuer_url: &str) -> Result<OidcDiscoveryDocument,
         issuer_url.trim_end_matches('/')
     );
 
+    // SSRF-validate the discovery URL before fetching
+    crate::server::ssrf::validate_url(&discovery_url)
+        .await
+        .map_err(|e| {
+            error!("OIDC discovery URL failed SSRF validation: {}", e);
+            format!("OIDC discovery URL failed SSRF validation: {}", e)
+        })?;
+
     let http_client = crate::server::ssrf::safe_client();
     let response = http_client.get(&discovery_url).send().await.map_err(|e| {
         error!(
@@ -672,6 +680,17 @@ pub async fn callback(
             format!("Failed to resolve OAuth endpoints: {}", e),
         )
     })?;
+
+    // SSRF-validate the token endpoint before exchanging credentials
+    crate::server::ssrf::validate_url(&endpoints.token_endpoint)
+        .await
+        .map_err(|e| {
+            error!("Token endpoint failed SSRF validation: {}", e);
+            (
+                StatusCode::BAD_REQUEST,
+                format!("Token endpoint failed SSRF validation: {}", e),
+            )
+        })?;
 
     // Exchange authorization code for tokens (with PKCE code verifier)
     let http_client = crate::server::ssrf::safe_client();
