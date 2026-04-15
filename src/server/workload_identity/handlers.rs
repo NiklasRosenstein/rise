@@ -76,11 +76,23 @@ async fn verify_oidc_issuer(
         format!("Invalid OIDC configuration: the issuer URL '{}' does not return valid OIDC discovery metadata", issuer_url),
     )?;
 
-    // Verify required OIDC fields are present
-    if config.get("issuer").is_none() {
-        return Err(ServerError::bad_request(
-            "OIDC configuration missing required 'issuer' field",
-        ));
+    // Verify required OIDC fields are present and validate issuer match (RFC 8414 Section 3.1)
+    let returned_issuer = config
+        .get("issuer")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            ServerError::bad_request(
+                "OIDC configuration missing or invalid 'issuer' field (must be a string)",
+            )
+        })?;
+
+    let expected = issuer_url.trim_end_matches('/');
+    let actual = returned_issuer.trim_end_matches('/');
+    if expected != actual {
+        return Err(ServerError::bad_request(format!(
+            "OIDC issuer mismatch: expected '{}', got '{}'",
+            issuer_url, returned_issuer
+        )));
     }
 
     if config.get("jwks_uri").is_none() {

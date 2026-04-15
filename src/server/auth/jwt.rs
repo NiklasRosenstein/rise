@@ -46,6 +46,7 @@ struct Jwk {
 /// OIDC Discovery document
 #[derive(Debug, Deserialize)]
 struct OidcDiscovery {
+    issuer: String,
     jwks_uri: String,
 }
 
@@ -93,7 +94,10 @@ impl JwtValidator {
 
     /// Discover JWKS URI from OIDC issuer via .well-known/openid-configuration
     async fn discover_jwks_uri(&self, issuer_url: &str) -> Result<String> {
-        let discovery_url = format!("{}/.well-known/openid-configuration", issuer_url);
+        let discovery_url = format!(
+            "{}/.well-known/openid-configuration",
+            issuer_url.trim_end_matches('/')
+        );
 
         // SSRF-validate the discovery URL before fetching
         crate::server::ssrf::validate_url(&discovery_url, self.allow_private_networks)
@@ -121,7 +125,24 @@ impl JwtValidator {
             .await
             .map_err(|e| anyhow!("JWKS URI failed SSRF validation: {}", e))?;
 
+        Self::validate_oidc_issuer(issuer_url, &discovery)?;
+
         Ok(discovery.jwks_uri)
+    }
+
+    /// Validate that the OIDC discovery document's issuer matches the expected issuer URL.
+    /// Per RFC 8414 Section 3.1, a discovery document must not claim a different issuer.
+    fn validate_oidc_issuer(expected_issuer: &str, discovery: &OidcDiscovery) -> Result<()> {
+        let expected = expected_issuer.trim_end_matches('/');
+        let actual = discovery.issuer.trim_end_matches('/');
+        if expected != actual {
+            return Err(anyhow!(
+                "OIDC issuer mismatch: expected '{}', discovery returned '{}'",
+                expected_issuer,
+                discovery.issuer
+            ));
+        }
+        Ok(())
     }
 
     /// Fetch JWKS from a JWKS URI
@@ -697,5 +718,67 @@ mod tests {
 
         let result_wrong = JwtValidator::validate_custom_claims(&jwt_claims, &expected_wrong);
         assert!(result_wrong.is_err());
+    }
+
+    #[test]
+    fn test_oidc_discovery_issuer_field_required() {
+        // Discovery document without issuer field should fail to deserialize
+        let json = r#"{"jwks_uri": "https://example.com/jwks"}"#;
+        let result: Result<OidcDiscovery, _> = serde_json::from_str(json);
+        assert!(
+            result.is_err(),
+            "Expected deserialization to fail without issuer field"
+        );
+    }
+
+    #[test]
+    fn test_oidc_discovery_deserialization() {
+        let json = r#"{"issuer": "https://example.com", "jwks_uri": "https://example.com/jwks"}"#;
+        let discovery: OidcDiscovery = serde_json::from_str(json).unwrap();
+        assert_eq!(discovery.issuer, "https://example.com");
+        assert_eq!(discovery.jwks_uri, "https://example.com/jwks");
+    }
+
+    #[test]
+    fn test_validate_oidc_issuer_match() {
+        let discovery = OidcDiscovery {
+            issuer: "https://accounts.example.com".to_string(),
+            jwks_uri: "https://accounts.example.com/jwks".to_string(),
+        };
+        assert!(
+            JwtValidator::validate_oidc_issuer("https://accounts.example.com", &discovery).is_ok()
+        );
+    }
+
+    #[test]
+    fn test_validate_oidc_issuer_mismatch() {
+        let discovery = OidcDiscovery {
+            issuer: "https://evil.example.com".to_string(),
+            jwks_uri: "https://evil.example.com/jwks".to_string(),
+        };
+        let err = JwtValidator::validate_oidc_issuer("https://accounts.example.com", &discovery)
+            .unwrap_err();
+        assert!(
+            err.to_string().contains("OIDC issuer mismatch"),
+            "Expected issuer mismatch error, got: {}",
+            err
+        );
+    }
+
+    #[test]
+    fn test_validate_oidc_issuer_trailing_slash_normalization() {
+        // Discovery has trailing slash, expected does not
+        let discovery = OidcDiscovery {
+            issuer: "https://accounts.example.com/".to_string(),
+            jwks_uri: "https://accounts.example.com/jwks".to_string(),
+        };
+        assert!(
+            JwtValidator::validate_oidc_issuer("https://accounts.example.com", &discovery).is_ok()
+        );
+
+        // Expected has trailing slash, discovery does not
+        assert!(
+            JwtValidator::validate_oidc_issuer("https://accounts.example.com/", &discovery).is_ok()
+        );
     }
 }
