@@ -1,5 +1,5 @@
 # Stage 1: Use official cargo-chef image as base
-FROM lukemathwalker/cargo-chef:latest-rust-1.91 AS chef
+FROM lukemathwalker/cargo-chef:latest-rust-1.94 AS chef
 WORKDIR /usr/src
 
 # Install build dependencies for Debian (including perl and make for vendored OpenSSL build)
