@@ -13,6 +13,17 @@
       "matchManagers": ["npm"],
       "matchUpdateTypes": ["minor", "patch"],
       "groupName": "npm dependencies"
+    },
+    {
+      "description": "Group non-major Python dependency updates",
+      "matchCategories": ["python"],
+      "matchUpdateTypes": ["minor", "patch"],
+      "groupName": "Python dependencies"
+    },
+    {
+      "description": "Group all GitHub Actions updates",
+      "matchManagers": ["github-actions"],
+      "groupName": "GitHub Actions"
     }
   ]
 }
