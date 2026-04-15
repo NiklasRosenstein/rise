@@ -1038,6 +1038,11 @@
     },
     "ServerSettings": {
       "properties": {
+        "allow_private_networks": {
+          "default": false,
+          "description": "Allow HTTP and private/loopback IPs in SSRF-validated URLs. WARNING: Only enable for local development. Never enable in production.",
+          "type": "boolean"
+        },
         "cookie_domain": {
           "default": "",
           "description": "Cookie domain for session cookies (e.g., \".rise.dev\" for all subdomains, \"\" for current host only)",

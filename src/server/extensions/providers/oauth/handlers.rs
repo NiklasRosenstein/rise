@@ -32,21 +32,24 @@ struct ResolvedEndpoints {
 }
 
 /// Fetch OIDC discovery document from issuer URL
-async fn fetch_oidc_discovery(issuer_url: &str) -> Result<OidcDiscoveryDocument, String> {
+async fn fetch_oidc_discovery(
+    issuer_url: &str,
+    allow_private_networks: bool,
+) -> Result<OidcDiscoveryDocument, String> {
     let discovery_url = format!(
         "{}/.well-known/openid-configuration",
         issuer_url.trim_end_matches('/')
     );
 
     // SSRF-validate the discovery URL before fetching
-    crate::server::ssrf::validate_url(&discovery_url)
+    crate::server::ssrf::validate_url(&discovery_url, allow_private_networks)
         .await
         .map_err(|e| {
             error!("OIDC discovery URL failed SSRF validation: {}", e);
             format!("OIDC discovery URL failed SSRF validation: {}", e)
         })?;
 
-    let http_client = crate::server::ssrf::safe_client();
+    let http_client = crate::server::ssrf::safe_client(allow_private_networks);
     let response = http_client.get(&discovery_url).send().await.map_err(|e| {
         error!(
             "Failed to fetch OIDC discovery from {}: {:?}",
@@ -75,7 +78,10 @@ async fn fetch_oidc_discovery(issuer_url: &str) -> Result<OidcDiscoveryDocument,
 }
 
 /// Resolve OAuth endpoints from spec, falling back to OIDC discovery
-async fn resolve_oauth_endpoints(spec: &OAuthExtensionSpec) -> Result<ResolvedEndpoints, String> {
+async fn resolve_oauth_endpoints(
+    spec: &OAuthExtensionSpec,
+    allow_private_networks: bool,
+) -> Result<ResolvedEndpoints, String> {
     // If both endpoints are provided in spec, use them directly
     if let (Some(auth), Some(token)) = (&spec.authorization_endpoint, &spec.token_endpoint) {
         return Ok(ResolvedEndpoints {
@@ -85,7 +91,7 @@ async fn resolve_oauth_endpoints(spec: &OAuthExtensionSpec) -> Result<ResolvedEn
     }
 
     // Fetch OIDC discovery document
-    let discovery = fetch_oidc_discovery(&spec.issuer_url).await?;
+    let discovery = fetch_oidc_discovery(&spec.issuer_url, allow_private_networks).await?;
 
     // Use spec override if provided, otherwise use discovery
     let authorization_endpoint = spec
@@ -518,12 +524,15 @@ pub async fn authorize(
     };
 
     // Resolve OAuth endpoints (from spec or OIDC discovery)
-    let endpoints = resolve_oauth_endpoints(&spec).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to resolve OAuth endpoints: {}", e),
-        )
-    })?;
+    let allow_private_networks = state.server_settings.allow_private_networks;
+    let endpoints = resolve_oauth_endpoints(&spec, allow_private_networks)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to resolve OAuth endpoints: {}", e),
+            )
+        })?;
 
     // Build authorization URL
     let mut auth_url = Url::parse(&endpoints.authorization_endpoint).map_err(|e| {
@@ -622,11 +631,13 @@ pub async fn callback(
         "Encryption provider not configured".to_string(),
     ))?;
 
+    let allow_private_networks = state.server_settings.allow_private_networks;
+
     use super::provider::{OAuthProvider, OAuthProviderConfig};
     let oauth_provider = OAuthProvider::new(OAuthProviderConfig {
         db_pool: state.db_pool.clone(),
         encryption_provider: encryption_provider.clone(),
-        http_client: crate::server::ssrf::safe_client(),
+        http_client: crate::server::ssrf::safe_client(allow_private_networks),
         api_domain: state.public_url.clone(),
     });
 
@@ -674,15 +685,17 @@ pub async fn callback(
     };
 
     // Resolve OAuth endpoints (from spec or OIDC discovery)
-    let endpoints = resolve_oauth_endpoints(&spec).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("Failed to resolve OAuth endpoints: {}", e),
-        )
-    })?;
+    let endpoints = resolve_oauth_endpoints(&spec, allow_private_networks)
+        .await
+        .map_err(|e| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                format!("Failed to resolve OAuth endpoints: {}", e),
+            )
+        })?;
 
     // SSRF-validate the token endpoint before exchanging credentials
-    crate::server::ssrf::validate_url(&endpoints.token_endpoint)
+    crate::server::ssrf::validate_url(&endpoints.token_endpoint, allow_private_networks)
         .await
         .map_err(|e| {
             error!("Token endpoint failed SSRF validation: {}", e);
@@ -693,7 +706,7 @@ pub async fn callback(
         })?;
 
     // Exchange authorization code for tokens (with PKCE code verifier)
-    let http_client = crate::server::ssrf::safe_client();
+    let http_client = crate::server::ssrf::safe_client(allow_private_networks);
     let response = http_client
         .post(&endpoints.token_endpoint)
         .header("Accept", "application/json")
@@ -1452,7 +1465,7 @@ async fn handle_refresh_token_grant(
             error!("Encryption provider not configured");
             oauth2_error("server_error", Some("Internal server error".to_string()))
         })?,
-        http_client: crate::server::ssrf::safe_client(),
+        http_client: crate::server::ssrf::safe_client(state.server_settings.allow_private_networks),
         api_domain: state.public_url.clone(),
     });
 
@@ -1656,8 +1669,9 @@ pub async fn oidc_discovery(
     }
 
     // Try to fetch upstream OIDC discovery
+    let allow_private_networks = state.server_settings.allow_private_networks;
     let upstream_issuer = &spec.issuer_url;
-    let discovery_result = fetch_oidc_discovery(upstream_issuer).await;
+    let discovery_result = fetch_oidc_discovery(upstream_issuer, allow_private_networks).await;
 
     match discovery_result {
         Ok(upstream_discovery) => {
@@ -1807,7 +1821,8 @@ pub async fn oidc_jwks(
     })?;
 
     // Try to fetch OIDC discovery to get jwks_uri
-    let discovery_result = fetch_oidc_discovery(&spec.issuer_url).await;
+    let allow_private_networks = state.server_settings.allow_private_networks;
+    let discovery_result = fetch_oidc_discovery(&spec.issuer_url, allow_private_networks).await;
 
     match discovery_result {
         Ok(discovery) => {
@@ -1818,7 +1833,7 @@ pub async fn oidc_jwks(
             ))?;
 
             // SSRF-validate the JWKS URI before fetching
-            crate::server::ssrf::validate_url(&jwks_uri)
+            crate::server::ssrf::validate_url(&jwks_uri, allow_private_networks)
                 .await
                 .map_err(|e| {
                     error!("JWKS URI failed SSRF validation: {}", e);
@@ -1828,7 +1843,7 @@ pub async fn oidc_jwks(
                     )
                 })?;
 
-            let http_client = crate::server::ssrf::safe_client();
+            let http_client = crate::server::ssrf::safe_client(allow_private_networks);
 
             // Fetch JWKS
             let jwks_response = http_client.get(&jwks_uri).send().await.map_err(|e| {

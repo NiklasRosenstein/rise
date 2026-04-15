@@ -78,14 +78,16 @@ impl JwksCache {
 pub struct JwtValidator {
     jwks_cache: Arc<RwLock<HashMap<String, JwksCache>>>,
     http_client: reqwest::Client,
+    allow_private_networks: bool,
 }
 
 impl JwtValidator {
     /// Create a new JWT validator
-    pub fn new() -> Self {
+    pub fn new(allow_private_networks: bool) -> Self {
         Self {
             jwks_cache: Arc::new(RwLock::new(HashMap::new())),
-            http_client: crate::server::ssrf::safe_client(),
+            http_client: crate::server::ssrf::safe_client(allow_private_networks),
+            allow_private_networks,
         }
     }
 
@@ -94,7 +96,7 @@ impl JwtValidator {
         let discovery_url = format!("{}/.well-known/openid-configuration", issuer_url);
 
         // SSRF-validate the discovery URL before fetching
-        crate::server::ssrf::validate_url(&discovery_url)
+        crate::server::ssrf::validate_url(&discovery_url, self.allow_private_networks)
             .await
             .map_err(|e| anyhow!("OIDC discovery URL failed SSRF validation: {}", e))?;
 
@@ -115,7 +117,7 @@ impl JwtValidator {
         // SSRF-validate the JWKS URI before returning it.
         // An attacker-controlled OIDC provider could return a jwks_uri pointing
         // to an internal IP (e.g., metadata endpoint, internal service).
-        crate::server::ssrf::validate_url(&discovery.jwks_uri)
+        crate::server::ssrf::validate_url(&discovery.jwks_uri, self.allow_private_networks)
             .await
             .map_err(|e| anyhow!("JWKS URI failed SSRF validation: {}", e))?;
 
@@ -380,7 +382,7 @@ impl JwtValidator {
 
 impl Default for JwtValidator {
     fn default() -> Self {
-        Self::new()
+        Self::new(false)
     }
 }
 
@@ -390,7 +392,7 @@ mod tests {
 
     #[test]
     fn test_jwt_validator_creation() {
-        let validator = JwtValidator::new();
+        let validator = JwtValidator::new(false);
         // Validator should be created with empty cache
         assert!(validator.jwks_cache.try_read().is_ok());
     }

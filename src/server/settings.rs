@@ -74,6 +74,11 @@ pub struct ServerSettings {
     /// Defaults to the RISE_DOCS_DIR environment variable.
     #[serde(default = "default_docs_dir")]
     pub docs_dir: Option<String>,
+
+    /// Allow HTTP and private/loopback IPs in SSRF-validated URLs.
+    /// WARNING: Only enable for local development. Never enable in production.
+    #[serde(default)]
+    pub allow_private_networks: bool,
 }
 
 fn default_cookie_secure() -> bool {
