@@ -765,8 +765,7 @@ Rise enforces secure-by-default Pod Security Standards for all deployed applicat
 - Writable root filesystem (for compatibility)
 
 **Resource limits (configurable):**
-- CPU request: 10m, Memory request: 64Mi, Memory limit: 512Mi
-- No CPU limit to avoid throttling
+- CPU request: 500m, CPU limit: 2, Memory request: 256Mi, Memory limit: 2Gi
 
 **Health probes (configurable):**
 - HTTP GET on application port at `/` path
@@ -782,6 +781,7 @@ type = "kubernetes"
 
 [deployment_controller.pod_resources]
 cpu_request = "50m"
+cpu_limit = "1"
 memory_request = "128Mi"
 memory_limit = "1Gi"
 ```
