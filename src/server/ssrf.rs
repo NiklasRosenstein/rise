@@ -59,15 +59,18 @@ fn is_blocked_ip(ip: &IpAddr) -> bool {
 /// Validate that a URL is safe to fetch (SSRF protection).
 ///
 /// Checks:
-/// 1. Scheme must be HTTPS
+/// 1. Scheme must be HTTPS (unless `allow_private_networks` is true)
 /// 2. Hostname must be present
-/// 3. All resolved IP addresses must not be in blocked ranges
-pub async fn validate_url(url: &str) -> Result<(), SsrfError> {
+/// 3. All resolved IP addresses must not be in blocked ranges (unless `allow_private_networks` is true)
+///
+/// When `allow_private_networks` is true, HTTP and private/loopback IPs are permitted.
+/// **WARNING**: Only enable for local development. Never enable in production.
+pub async fn validate_url(url: &str, allow_private_networks: bool) -> Result<(), SsrfError> {
     // Parse the URL
     let parsed = url::Url::parse(url).map_err(|e| SsrfError::InvalidUrl(e.to_string()))?;
 
-    // Require HTTPS
-    if parsed.scheme() != "https" {
+    // Require HTTPS (unless relaxed for development)
+    if !allow_private_networks && parsed.scheme() != "https" {
         return Err(SsrfError::HttpsRequired);
     }
 
@@ -78,9 +81,14 @@ pub async fn validate_url(url: &str) -> Result<(), SsrfError> {
 
     // If host is already an IP address, check it directly
     if let Ok(ip) = host.parse::<IpAddr>() {
-        if is_blocked_ip(&ip) {
+        if !allow_private_networks && is_blocked_ip(&ip) {
             return Err(SsrfError::BlockedIpRange(ip));
         }
+        return Ok(());
+    }
+
+    // Skip DNS resolution checks when private networks are allowed
+    if allow_private_networks {
         return Ok(());
     }
 
@@ -114,20 +122,25 @@ pub async fn validate_url(url: &str) -> Result<(), SsrfError> {
 /// The client has:
 /// - 10-second connect and total request timeout
 /// - Custom redirect policy (max 3 hops, HTTPS-only, blocks private/internal IPs)
-pub fn safe_client() -> reqwest::Client {
+///
+/// When `allow_private_networks` is true, redirect checks for HTTPS and blocked IPs are skipped.
+/// **WARNING**: Only enable for local development. Never enable in production.
+pub fn safe_client(allow_private_networks: bool) -> reqwest::Client {
     reqwest::Client::builder()
         .timeout(Duration::from_secs(10))
         .connect_timeout(Duration::from_secs(5))
-        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+        .redirect(reqwest::redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() >= 3 {
                 attempt.error("too many redirects")
-            } else if attempt.url().scheme() != "https" {
+            } else if !allow_private_networks && attempt.url().scheme() != "https" {
                 attempt.error("redirect target must use HTTPS")
             } else if let Some(host) = attempt.url().host_str() {
-                if let Ok(ip) = host.parse::<IpAddr>() {
-                    if is_blocked_ip(&ip) {
-                        return attempt
-                            .error(format!("redirect target resolves to blocked IP: {}", ip));
+                if !allow_private_networks {
+                    if let Ok(ip) = host.parse::<IpAddr>() {
+                        if is_blocked_ip(&ip) {
+                            return attempt
+                                .error(format!("redirect target resolves to blocked IP: {}", ip));
+                        }
                     }
                 }
                 attempt.follow()
@@ -221,41 +234,41 @@ mod tests {
 
     #[tokio::test]
     async fn test_validate_url_rejects_http() {
-        let result = validate_url("http://example.com").await;
+        let result = validate_url("http://example.com", false).await;
         assert!(matches!(result, Err(SsrfError::HttpsRequired)));
     }
 
     #[tokio::test]
     async fn test_validate_url_rejects_invalid_url() {
-        let result = validate_url("not-a-url").await;
+        let result = validate_url("not-a-url", false).await;
         assert!(matches!(result, Err(SsrfError::InvalidUrl(_))));
     }
 
     #[tokio::test]
     async fn test_validate_url_rejects_ip_loopback() {
-        let result = validate_url("https://127.0.0.1/path").await;
+        let result = validate_url("https://127.0.0.1/path", false).await;
         assert!(matches!(result, Err(SsrfError::BlockedIpRange(_))));
     }
 
     #[tokio::test]
     async fn test_validate_url_rejects_ip_metadata() {
-        let result = validate_url("https://169.254.169.254/latest/meta-data/").await;
+        let result = validate_url("https://169.254.169.254/latest/meta-data/", false).await;
         assert!(matches!(result, Err(SsrfError::BlockedIpRange(_))));
     }
 
     #[tokio::test]
     async fn test_validate_url_rejects_private_ip() {
-        let result = validate_url("https://10.0.0.1/internal").await;
+        let result = validate_url("https://10.0.0.1/internal", false).await;
         assert!(matches!(result, Err(SsrfError::BlockedIpRange(_))));
 
-        let result = validate_url("https://192.168.1.1/admin").await;
+        let result = validate_url("https://192.168.1.1/admin", false).await;
         assert!(matches!(result, Err(SsrfError::BlockedIpRange(_))));
     }
 
     #[tokio::test]
     async fn test_validate_url_accepts_public_https() {
         // Use a known public IP to avoid DNS dependency and make the test deterministic.
-        let result = validate_url("https://8.8.8.8/").await;
+        let result = validate_url("https://8.8.8.8/", false).await;
         assert!(
             result.is_ok(),
             "expected public HTTPS URL to be accepted, got: {:?}",
@@ -265,6 +278,43 @@ mod tests {
 
     #[test]
     fn test_safe_client_builds_successfully() {
-        let _client = safe_client();
+        let _client = safe_client(false);
+    }
+
+    // Tests for allow_private_networks = true
+
+    #[tokio::test]
+    async fn test_validate_url_allows_http_when_private_networks_enabled() {
+        let result = validate_url("http://localhost:5556", true).await;
+        assert!(
+            result.is_ok(),
+            "expected HTTP URL to be accepted with allow_private_networks, got: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_url_allows_loopback_when_private_networks_enabled() {
+        let result = validate_url("https://127.0.0.1/path", true).await;
+        assert!(
+            result.is_ok(),
+            "expected loopback IP to be accepted with allow_private_networks, got: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_url_allows_private_ip_when_private_networks_enabled() {
+        let result = validate_url("https://192.168.1.1/admin", true).await;
+        assert!(
+            result.is_ok(),
+            "expected private IP to be accepted with allow_private_networks, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn test_safe_client_builds_with_private_networks() {
+        let _client = safe_client(true);
     }
 }
