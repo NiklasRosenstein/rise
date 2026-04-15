@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose, Engine as _};
 use chrono::{DateTime, Utc};
-use jsonwebtoken::{decode, Algorithm, DecodingKey, Validation};
+use jsonwebtoken::dangerous::insecure_decode;
 use serde::Deserialize;
 use serde_json::Value;
 
@@ -63,17 +63,9 @@ struct TokenClaims {
 /// Extract expiration from JWT token and format it as a human-readable string
 /// Returns formatted string like "December 16, 2025 at 14:30 UTC (in 7 days)"
 pub fn format_token_expiration(token: &str) -> Result<String> {
-    // Decode token WITHOUT signature validation (we only want to read the expiration)
-    // We use an insecure validation since the backend has already validated the token
-    let mut validation = Validation::new(Algorithm::RS256);
-    validation.insecure_disable_signature_validation();
-    validation.validate_exp = false; // Don't validate expiration during decode
-    validation.validate_aud = false;
-
-    // Use a dummy decoding key since we're not validating the signature
-    let dummy_key = DecodingKey::from_secret(&[]);
-
-    let token_data = decode::<TokenClaims>(token, &dummy_key, &validation)
+    // Decode token WITHOUT validation so we can inspect the expiration claim.
+    // The backend has already validated the token before this point.
+    let token_data = insecure_decode::<TokenClaims>(token)
         .context("Failed to decode token to read expiration")?;
 
     // Convert UNIX timestamp to DateTime
@@ -166,5 +158,18 @@ mod tests {
         assert!(error
             .to_string()
             .contains("Failed to parse token claims JSON"));
+    }
+
+    #[test]
+    fn format_token_expiration_reads_exp_without_signature_validation() {
+        let token = format!(
+            "{}.{}.invalid-signature",
+            encode_segment(r#"{"alg":"RS256","typ":"JWT"}"#),
+            encode_segment(r#"{"exp":4102444800}"#),
+        );
+
+        let expiration = format_token_expiration(&token).expect("expiration should decode");
+
+        assert!(expiration.starts_with("January 01, 2100 at 00:00 UTC"));
     }
 }
