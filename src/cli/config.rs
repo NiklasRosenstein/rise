@@ -141,17 +141,26 @@ impl Config {
 
         let config_dir = home.join(".config").join("rise");
 
-        // Create directory if it doesn't exist
+        // Create directory if it doesn't exist, with restrictive permissions on Unix
         if !config_dir.exists() {
-            fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
-        }
-
-        // Restrict directory permissions to owner-only (0700) on Unix
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&config_dir, fs::Permissions::from_mode(0o700))
-                .context("Failed to set config directory permissions")?;
+            #[cfg(unix)]
+            {
+                // Create parent directories with default permissions
+                if let Some(parent) = config_dir.parent() {
+                    fs::create_dir_all(parent)
+                        .context("Failed to create config parent directory")?;
+                }
+                // Create the rise config directory with 0700 atomically
+                use std::os::unix::fs::DirBuilderExt;
+                fs::DirBuilder::new()
+                    .mode(0o700)
+                    .create(&config_dir)
+                    .context("Failed to create config directory")?;
+            }
+            #[cfg(not(unix))]
+            {
+                fs::create_dir_all(&config_dir).context("Failed to create config directory")?;
+            }
         }
 
         Ok(config_dir.join("config.json"))
@@ -176,17 +185,32 @@ impl Config {
     /// Save configuration to disk
     pub fn save(&self) -> Result<()> {
         let config_path = Self::config_path()?;
+        Self::write_config_file(&config_path, self)
+    }
 
-        let json = serde_json::to_string_pretty(self).context("Failed to serialize config")?;
+    /// Write configuration to a specific path with restrictive permissions on Unix
+    fn write_config_file(config_path: &std::path::Path, config: &Config) -> Result<()> {
+        let json = serde_json::to_string_pretty(config).context("Failed to serialize config")?;
 
-        fs::write(&config_path, json).context("Failed to write config file")?;
-
-        // Restrict file permissions to owner-only (0600) on Unix
+        // On Unix, create/write the file with 0600 permissions atomically
         #[cfg(unix)]
         {
-            use std::os::unix::fs::PermissionsExt;
-            fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600))
-                .context("Failed to set config file permissions")?;
+            use std::io::Write;
+            use std::os::unix::fs::OpenOptionsExt;
+            let mut file = fs::OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(0o600)
+                .open(config_path)
+                .context("Failed to create config file")?;
+            file.write_all(json.as_bytes())
+                .context("Failed to write config file")?;
+        }
+
+        #[cfg(not(unix))]
+        {
+            fs::write(config_path, json).context("Failed to write config file")?;
         }
 
         Ok(())
@@ -411,24 +435,19 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn test_config_file_permissions() {
+    fn test_write_config_file_permissions() {
         use std::os::unix::fs::PermissionsExt;
 
         let tmp_dir = tempfile::tempdir().unwrap();
-        let config_dir = tmp_dir.path().join(".config").join("rise");
-        fs::create_dir_all(&config_dir).unwrap();
-        let config_path = config_dir.join("config.json");
+        let config_path = tmp_dir.path().join("config.json");
 
         let c = Config {
             token: Some("secret-token".to_string()),
             ..Config::default()
         };
 
-        let json = serde_json::to_string_pretty(&c).unwrap();
-        fs::write(&config_path, json).unwrap();
-
-        // Apply the same permission logic as save()
-        fs::set_permissions(&config_path, fs::Permissions::from_mode(0o600)).unwrap();
+        // Exercise the actual write_config_file() implementation
+        Config::write_config_file(&config_path, &c).unwrap();
 
         let metadata = fs::metadata(&config_path).unwrap();
         let mode = metadata.permissions().mode() & 0o777;
@@ -437,5 +456,10 @@ mod tests {
             "Config file should have 0600 permissions, got {:o}",
             mode
         );
+
+        // Verify the content is valid JSON and round-trips correctly
+        let contents = fs::read_to_string(&config_path).unwrap();
+        let loaded: Config = serde_json::from_str(&contents).unwrap();
+        assert_eq!(loaded.token, Some("secret-token".to_string()));
     }
 }
