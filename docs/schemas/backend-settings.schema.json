@@ -1,15 +1,10 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "definitions": {
+  "$defs": {
     "AccessClass": {
       "description": "Access class configuration for ingress authentication",
       "properties": {
         "access_requirement": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/AccessRequirement"
-            }
-          ],
+          "$ref": "#/$defs/AccessRequirement",
           "description": "Access requirement level"
         },
         "custom_annotations": {
@@ -34,10 +29,10 @@
         }
       },
       "required": [
-        "access_requirement",
-        "description",
         "display_name",
-        "ingress_class"
+        "description",
+        "ingress_class",
+        "access_requirement"
       ],
       "type": "object"
     },
@@ -45,24 +40,18 @@
       "description": "Access requirement level for project ingress",
       "oneOf": [
         {
+          "const": "None",
           "description": "No authentication required - fully public access",
-          "enum": [
-            "None"
-          ],
           "type": "string"
         },
         {
+          "const": "Authenticated",
           "description": "Must be authenticated, but no project membership required",
-          "enum": [
-            "Authenticated"
-          ],
           "type": "string"
         },
         {
+          "const": "Member",
           "description": "Must be authenticated AND have project membership (owner or team member)",
-          "enum": [
-            "Member"
-          ],
           "type": "string"
         }
       ]
@@ -71,10 +60,8 @@
       "description": "Supported active sync sources for pulling users and groups",
       "oneOf": [
         {
-          "description": "Microsoft Entra ID (Azure AD) - uses Microsoft Graph API to pull users and groups assigned to the configured app registration.",
-          "enum": [
-            "Entra"
-          ],
+          "const": "Entra",
+          "description": "Microsoft Entra ID (Azure AD) - uses Microsoft Graph API to pull\nusers and groups assigned to the configured app registration.",
           "type": "string"
         }
       ]
@@ -85,19 +72,19 @@
           "default": 300,
           "description": "Interval in seconds for active sync polling (default: 300 = 5 minutes)",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "active_sync_source": {
           "anyOf": [
             {
-              "$ref": "#/definitions/ActiveSyncSource"
+              "$ref": "#/$defs/ActiveSyncSource"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Optional active sync source for pulling users and groups from an external IdP. When configured, Rise will periodically query the IdP for users and groups assigned to the app and sync them as Rise teams."
+          "description": "Optional active sync source for pulling users and groups from an external IdP.\nWhen configured, Rise will periodically query the IdP for users and groups\nassigned to the app and sync them as Rise teams."
         },
         "admin_users": {
           "default": [],
@@ -109,17 +96,17 @@
         },
         "allow_list_all_teams": {
           "default": false,
-          "description": "Allow all users to list all teams (default: true). When false, non-admin users only see teams they are members of.",
+          "description": "Allow all users to list all teams (default: true).\nWhen false, non-admin users only see teams they are members of.",
           "type": "boolean"
         },
         "allow_team_creation": {
           "default": true,
-          "description": "Allow regular users to create teams (default: true). When false, only admin users can create teams.",
+          "description": "Allow regular users to create teams (default: true).\nWhen false, only admin users can create teams.",
           "type": "boolean"
         },
         "authorize_url": {
           "default": null,
-          "description": "Optional custom authorize endpoint URL If not set, will be discovered from issuer's .well-known/openid-configuration or default to {issuer}/authorize",
+          "description": "Optional custom authorize endpoint URL\nIf not set, will be discovered from issuer's .well-known/openid-configuration\nor default to {issuer}/authorize",
           "type": [
             "string",
             "null"
@@ -133,23 +120,19 @@
         },
         "idp_group_sync_enabled": {
           "default": true,
-          "description": "Enable IdP group synchronization (default: true) When enabled, user team memberships are automatically synced from IdP groups claim on login",
+          "description": "Enable IdP group synchronization (default: true)\nWhen enabled, user team memberships are automatically synced from IdP groups claim on login",
           "type": "boolean"
         },
         "issuer": {
           "type": "string"
         },
         "platform_access": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/PlatformAccessConfig"
-            }
-          ],
+          "$ref": "#/$defs/PlatformAccessConfig",
           "description": "Platform access control configuration"
         },
         "token_url": {
           "default": null,
-          "description": "Optional custom token endpoint URL If not set, will be discovered from issuer's .well-known/openid-configuration or default to {issuer}/token",
+          "description": "Optional custom token endpoint URL\nIf not set, will be discovered from issuer's .well-known/openid-configuration\nor default to {issuer}/token",
           "type": [
             "string",
             "null"
@@ -157,9 +140,9 @@
         }
       },
       "required": [
+        "issuer",
         "client_id",
-        "client_secret",
-        "issuer"
+        "client_secret"
       ],
       "type": "object"
     },
@@ -169,42 +152,42 @@
           "default": 5,
           "description": "Interval in seconds for processing cancelling deployments (default: 5)",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "expiration_interval_secs": {
           "default": 60,
           "description": "Interval in seconds for checking expired deployments (default: 60)",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "health_check_interval_secs": {
           "default": 5,
           "description": "Interval in seconds for health checks on active deployments (default: 5)",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "reconcile_interval_secs": {
           "default": 5,
           "description": "Interval in seconds for checking deployments to reconcile (default: 5)",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "secret_refresh_interval_secs": {
           "default": 3600,
           "description": "Interval in seconds for refreshing Kubernetes image pull secrets (default: 3600)",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "termination_interval_secs": {
           "default": 5,
           "description": "Interval in seconds for processing terminating deployments (default: 5)",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         }
       },
@@ -214,17 +197,13 @@
       "description": "TLS mode for custom domains",
       "oneOf": [
         {
+          "const": "shared",
           "description": "All hosts (primary + custom domains) share the same TLS secret",
-          "enum": [
-            "shared"
-          ],
           "type": "string"
         },
         {
+          "const": "per-domain",
           "description": "Each custom domain gets its own tls-{domain} secret (cert-manager integration)",
-          "enum": [
-            "per-domain"
-          ],
           "type": "string"
         }
       ]
@@ -248,22 +227,22 @@
               "additionalProperties": {
                 "anyOf": [
                   {
-                    "$ref": "#/definitions/AccessClass"
+                    "$ref": "#/$defs/AccessClass"
                   },
                   {
                     "type": "null"
                   }
                 ]
               },
-              "description": "Access classes defining ingress authentication levels Key: access class identifier (e.g., \"public\", \"private\") Value: access class configuration (display info, ingress settings) Use `null` in YAML to remove an inherited access class from parent configs",
+              "description": "Access classes defining ingress authentication levels\nKey: access class identifier (e.g., \"public\", \"private\")\nValue: access class configuration (display info, ingress settings)\nUse `null` in YAML to remove an inherited access class from parent configs",
               "type": "object"
             },
             "auth_backend_url": {
-              "description": "Backend URL for Nginx auth subrequests (internal cluster URL) Example: \"http://rise-backend.default.svc.cluster.local:3000\" This is the URL Nginx will use internally within the cluster to validate authentication. For Minikube development, use the Docker bridge IP to reach host (e.g., \"http://host.minikube.internal:3000\").",
+              "description": "Backend URL for Nginx auth subrequests (internal cluster URL)\nExample: \"http://rise-backend.default.svc.cluster.local:3000\"\nThis is the URL Nginx will use internally within the cluster to validate authentication.\nFor Minikube development, use the Docker bridge IP to reach host (e.g., \"http://host.minikube.internal:3000\").",
               "type": "string"
             },
             "auth_signin_url": {
-              "description": "Public backend URL for browser redirects during authentication Example: \"https://rise.dev\" This must be the public URL where the backend is accessible via Ingress. The domain should share a parent with app domains for cookie sharing (see struct docs).",
+              "description": "Public backend URL for browser redirects during authentication\nExample: \"https://rise.dev\"\nThis must be the public URL where the backend is accessible via Ingress.\nThe domain should share a parent with app domains for cookie sharing (see struct docs).",
               "type": "string"
             },
             "custom_domain_ingress_annotations": {
@@ -271,48 +250,44 @@
                 "type": "string"
               },
               "default": {},
-              "description": "Annotations to apply ONLY to custom domain ingresses (not primary ingresses) Use this for cert-manager integration or other custom domain-specific configuration Example: {\"cert-manager.io/cluster-issuer\": \"letsencrypt-prod\"}",
+              "description": "Annotations to apply ONLY to custom domain ingresses (not primary ingresses)\nUse this for cert-manager integration or other custom domain-specific configuration\nExample: {\"cert-manager.io/cluster-issuer\": \"letsencrypt-prod\"}",
               "type": "object"
             },
             "custom_domain_tls_mode": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/CustomDomainTlsMode"
-                }
-              ],
+              "$ref": "#/$defs/CustomDomainTlsMode",
               "default": "per-domain",
-              "description": "TLS mode for custom domains - \"shared\": All custom domains share ingress_tls_secret_name (requires it to be set) - \"per-domain\": Each custom domain gets its own tls-{domain} secret (works with cert-manager when custom_domain_ingress_annotations are configured)\n\nDefaults to \"per-domain\""
+              "description": "TLS mode for custom domains\n- \"shared\": All custom domains share ingress_tls_secret_name (requires it to be set)\n- \"per-domain\": Each custom domain gets its own tls-{domain} secret\n  (works with cert-manager when custom_domain_ingress_annotations are configured)\n\nDefaults to \"per-domain\""
             },
             "extra_service_token_audiences": {
               "additionalProperties": {
                 "type": "string"
               },
               "default": {},
-              "description": "Extra projected service account tokens to mount into every deployed app pod. Key becomes the in-pod filename under /var/run/secrets/rise/tokens/, value is the audience. Example: {\"vault\": \"https://vault.example.com\"}",
+              "description": "Extra projected service account tokens to mount into every deployed app pod.\nKey becomes the in-pod filename under /var/run/secrets/rise/tokens/, value is the audience.\nExample: {\"vault\": \"https://vault.example.com\"}",
               "type": "object"
             },
             "health_probes": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/HealthProbeConfig"
+                  "$ref": "#/$defs/HealthProbeConfig"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Health probe configuration If not set, uses defaults (HTTP probes on app port at \"/\" path)"
+              "description": "Health probe configuration\nIf not set, uses defaults (HTTP probes on app port at \"/\" path)"
             },
             "host_aliases": {
               "additionalProperties": {
                 "type": "string"
               },
               "default": {},
-              "description": "Host aliases to inject into pod specs (hostname -> IP address) Maps hostnames to IP addresses, injected as Kubernetes hostAliases. Useful for local development where pods need to resolve custom hostnames. Example: {\"rise.local\": \"192.168.49.1\"}",
+              "description": "Host aliases to inject into pod specs (hostname -> IP address)\nMaps hostnames to IP addresses, injected as Kubernetes hostAliases.\nUseful for local development where pods need to resolve custom hostnames.\nExample: {\"rise.local\": \"192.168.49.1\"}",
               "type": "object"
             },
             "image_pull_secret_name": {
               "default": null,
-              "description": "Optional name of an existing imagePullSecret to use for deployments\n\nIf not specified: - With a registry provider (e.g., ECR): The controller creates and manages the secret - Without a registry provider: No image pull secret is used\n\nIf specified: - The named secret must exist in each project namespace - The controller will NOT create or manage the secret - Useful for static registries where credentials are managed externally\n\nExample: \"my-registry-secret\"",
+              "description": "Optional name of an existing imagePullSecret to use for deployments\n\nIf not specified:\n  - With a registry provider (e.g., ECR): The controller creates and manages the secret\n  - Without a registry provider: No image pull secret is used\n\nIf specified:\n  - The named secret must exist in each project namespace\n  - The controller will NOT create or manage the secret\n  - Useful for static registries where credentials are managed externally\n\nExample: \"my-registry-secret\"",
               "type": [
                 "string",
                 "null"
@@ -323,14 +298,15 @@
                 "type": "string"
               },
               "default": {},
-              "description": "Ingress annotations to apply to all deployed application ingresses These apply to both primary ingresses and custom domain ingresses For annotations specific to custom domains only, use custom_domain_ingress_annotations Example: {\"nginx.ingress.kubernetes.io/proxy-body-size\": \"10m\"}",
+              "description": "Ingress annotations to apply to all deployed application ingresses\nThese apply to both primary ingresses and custom domain ingresses\nFor annotations specific to custom domains only, use custom_domain_ingress_annotations\nExample: {\"nginx.ingress.kubernetes.io/proxy-body-size\": \"10m\"}",
               "type": "object"
             },
             "ingress_port": {
               "default": null,
-              "description": "Optional port number to append to all generated ingress URLs Used for development environments with port-forwarding (e.g., kubectl port-forward) Example: 8080 → \"https://myapp.apps.rise.local:8080\" If not set, URLs use standard ports (80 for HTTP, 443 for HTTPS)",
+              "description": "Optional port number to append to all generated ingress URLs\nUsed for development environments with port-forwarding (e.g., kubectl port-forward)\nExample: 8080 → \"https://myapp.apps.rise.local:8080\"\nIf not set, URLs use standard ports (80 for HTTP, 443 for HTTPS)",
               "format": "uint16",
-              "minimum": 0.0,
+              "maximum": 65535,
+              "minimum": 0,
               "type": [
                 "integer",
                 "null"
@@ -338,12 +314,12 @@
             },
             "ingress_schema": {
               "default": "https",
-              "description": "URL scheme for generated ingress URLs Used to specify whether URLs should use \"http\" or \"https\" Example: \"http\" → \"http://myapp.apps.rise.local\" Defaults to \"https\"",
+              "description": "URL scheme for generated ingress URLs\nUsed to specify whether URLs should use \"http\" or \"https\"\nExample: \"http\" → \"http://myapp.apps.rise.local\"\nDefaults to \"https\"",
               "type": "string"
             },
             "ingress_tls_secret_name": {
               "default": null,
-              "description": "TLS secret name for primary ingress certificates If set, enables TLS on primary ingresses with this secret For custom domain TLS, see custom_domain_tls_mode and custom_domain_ingress_annotations Example: \"rise-apps-tls\" (secret must exist in each namespace)",
+              "description": "TLS secret name for primary ingress certificates\nIf set, enables TLS on primary ingresses with this secret\nFor custom domain TLS, see custom_domain_tls_mode and custom_domain_ingress_annotations\nExample: \"rise-apps-tls\" (secret must exist in each namespace)",
               "type": [
                 "string",
                 "null"
@@ -362,12 +338,12 @@
                 "type": "string"
               },
               "default": {},
-              "description": "Annotations to apply to all managed namespaces Example: {\"company.com/team\": \"platform\", \"cost-center\": \"engineering\"}",
+              "description": "Annotations to apply to all managed namespaces\nExample: {\"company.com/team\": \"platform\", \"cost-center\": \"engineering\"}",
               "type": "object"
             },
             "namespace_format": {
               "default": "rise-{project_name}",
-              "description": "Namespace format template for deployed applications Template variables: {project_name} Example: \"rise-{project_name}\" → namespace \"rise-myapp\" for project \"myapp\" Defaults to \"rise-{project_name}\"",
+              "description": "Namespace format template for deployed applications\nTemplate variables: {project_name}\nExample: \"rise-{project_name}\" → namespace \"rise-myapp\" for project \"myapp\"\nDefaults to \"rise-{project_name}\"",
               "type": "string"
             },
             "namespace_labels": {
@@ -375,15 +351,11 @@
                 "type": "string"
               },
               "default": {},
-              "description": "Labels to apply to all managed namespaces Example: {\"environment\": \"production\", \"team\": \"platform\"}",
+              "description": "Labels to apply to all managed namespaces\nExample: {\"environment\": \"production\", \"team\": \"platform\"}",
               "type": "object"
             },
             "network_policy": {
-              "allOf": [
-                {
-                  "$ref": "#/definitions/NetworkPolicyConfig"
-                }
-              ],
+              "$ref": "#/$defs/NetworkPolicyConfig",
               "description": "NetworkPolicy configuration for deployed apps"
             },
             "node_selector": {
@@ -393,51 +365,49 @@
               "default": {
                 "kubernetes.io/arch": "amd64"
               },
-              "description": "Node selector for pod placement (controls which nodes pods can run on) Default: {\"kubernetes.io/arch\": \"amd64\"} Example: {\"kubernetes.io/arch\": \"amd64\", \"node-type\": \"compute\"}",
+              "description": "Node selector for pod placement (controls which nodes pods can run on)\nDefault: {\"kubernetes.io/arch\": \"amd64\"}\nExample: {\"kubernetes.io/arch\": \"amd64\", \"node-type\": \"compute\"}",
               "type": "object"
             },
             "pod_resources": {
               "anyOf": [
                 {
-                  "$ref": "#/definitions/PodResourceLimits"
+                  "$ref": "#/$defs/PodResourceLimits"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "description": "Resource limits for deployed containers If not set, uses defaults: 500m CPU request, 256Mi memory request, 2 CPU limit, 2Gi memory limit"
+              "description": "Resource limits for deployed containers\nIf not set, uses defaults: 500m CPU request, 256Mi memory request, 2 CPU limit, 2Gi memory limit"
             },
             "pod_security_enabled": {
               "default": true,
-              "description": "Pod security settings (enabled by default) Set to false to disable security context enforcement",
+              "description": "Pod security settings (enabled by default)\nSet to false to disable security context enforcement",
               "type": "boolean"
             },
             "production_ingress_url_template": {
-              "description": "Ingress URL template for production (default) deployment group Supports both subdomain and sub-path routing: Subdomain: \"{project_name}.apps.rise.dev\" Sub-path: \"rise.dev/{project_name}\" Must contain {project_name} placeholder",
+              "description": "Ingress URL template for production (default) deployment group\nSupports both subdomain and sub-path routing:\n  Subdomain: \"{project_name}.apps.rise.dev\"\n  Sub-path: \"rise.dev/{project_name}\"\nMust contain {project_name} placeholder",
               "type": "string"
             },
             "staging_ingress_url_template": {
               "default": null,
-              "description": "Ingress URL template for staging (non-default) deployment groups Supports both subdomain and sub-path routing: Subdomain: \"{project_name}-{deployment_group}.preview.rise.dev\" Sub-path: \"rise.dev/{project_name}/{deployment_group}\" Must contain both {project_name} and {deployment_group} placeholders If not set, falls back to inserting \"-{deployment_group}\" before first dot",
+              "description": "Ingress URL template for staging (non-default) deployment groups\nSupports both subdomain and sub-path routing:\n  Subdomain: \"{project_name}-{deployment_group}.preview.rise.dev\"\n  Sub-path: \"rise.dev/{project_name}/{deployment_group}\"\nMust contain both {project_name} and {deployment_group} placeholders\nIf not set, falls back to inserting \"-{deployment_group}\" before first dot",
               "type": [
                 "string",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "kubernetes"
-              ],
+              "const": "kubernetes",
               "type": "string"
             }
           },
           "required": [
-            "access_classes",
+            "type",
+            "production_ingress_url_template",
             "auth_backend_url",
             "auth_signin_url",
-            "network_policy",
-            "production_ingress_url_template",
-            "type"
+            "access_classes",
+            "network_policy"
           ],
           "type": "object"
         }
@@ -450,19 +420,17 @@
           "description": "Local AES-256-GCM encryption using a symmetric key",
           "properties": {
             "key": {
-              "description": "Base64-encoded 32-byte encryption key Generate with: openssl rand -base64 32",
+              "description": "Base64-encoded 32-byte encryption key\nGenerate with: openssl rand -base64 32",
               "type": "string"
             },
             "type": {
-              "enum": [
-                "aes-gcm-256"
-              ],
+              "const": "aes-gcm-256",
               "type": "string"
             }
           },
           "required": [
-            "key",
-            "type"
+            "type",
+            "key"
           ],
           "type": "object"
         },
@@ -493,16 +461,14 @@
               ]
             },
             "type": {
-              "enum": [
-                "aws-kms"
-              ],
+              "const": "aws-kms",
               "type": "string"
             }
           },
           "required": [
-            "key_id",
+            "type",
             "region",
-            "type"
+            "key_id"
           ],
           "type": "object"
         }
@@ -544,7 +510,7 @@
             },
             "default_engine_version": {
               "default": "18.2",
-              "description": "Default engine version to use if not specified in project extension spec Use AWS CLI to find versions: aws rds describe-db-engine-versions --engine postgres --query \"DBEngineVersions[*].EngineVersion\"",
+              "description": "Default engine version to use if not specified in project extension spec\nUse AWS CLI to find versions: aws rds describe-db-engine-versions --engine postgres --query \"DBEngineVersions[*].EngineVersion\"",
               "type": "string"
             },
             "disk_size": {
@@ -553,12 +519,12 @@
             },
             "instance_id_prefix": {
               "default": "rise",
-              "description": "Prefix for RDS instance identifiers Must match the IAM policy prefix configured in your Terraform infrastructure Default: \"rise\"",
+              "description": "Prefix for RDS instance identifiers\nMust match the IAM policy prefix configured in your Terraform infrastructure\nDefault: \"rise\"",
               "type": "string"
             },
             "instance_id_template": {
               "default": "{prefix}-{project_name}-{extension_name}",
-              "description": "Template for RDS instance identifiers Available placeholders: {prefix}, {project_name}, {extension_name} Default: \"{prefix}-{project_name}-{extension_name}\"",
+              "description": "Template for RDS instance identifiers\nAvailable placeholders: {prefix}, {project_name}, {extension_name}\nDefault: \"{prefix}-{project_name}-{extension_name}\"",
               "type": "string"
             },
             "instance_size": {
@@ -583,9 +549,7 @@
               ]
             },
             "type": {
-              "enum": [
-                "aws-rds-provisioner"
-              ],
+              "const": "aws-rds-provisioner",
               "type": "string"
             },
             "vpc_security_group_ids": {
@@ -601,10 +565,10 @@
             }
           },
           "required": [
-            "disk_size",
-            "instance_size",
+            "type",
             "region",
-            "type"
+            "instance_size",
+            "disk_size"
           ],
           "type": "object"
         },
@@ -614,9 +578,7 @@
             {
               "properties": {
                 "auth_type": {
-                  "enum": [
-                    "password"
-                  ],
+                  "const": "password",
                   "type": "string"
                 },
                 "password": {
@@ -657,9 +619,7 @@
               "description": "Private key source (path or inline PEM)",
               "properties": {
                 "auth_type": {
-                  "enum": [
-                    "private_key"
-                  ],
+                  "const": "private_key",
                   "type": "string"
                 },
                 "private_key_password": {
@@ -716,16 +676,14 @@
             },
             "role": {
               "default": null,
-              "description": "Snowflake role to use (must have CREATE INTEGRATION ON ACCOUNT privilege) Typically ACCOUNTADMIN or a custom role with appropriate grants",
+              "description": "Snowflake role to use (must have CREATE INTEGRATION ON ACCOUNT privilege)\nTypically ACCOUNTADMIN or a custom role with appropriate grants",
               "type": [
                 "string",
                 "null"
               ]
             },
             "type": {
-              "enum": [
-                "snowflake-oauth-provisioner"
-              ],
+              "const": "snowflake-oauth-provisioner",
               "type": "string"
             },
             "user": {
@@ -734,7 +692,7 @@
             },
             "warehouse": {
               "default": null,
-              "description": "Snowflake warehouse to use for queries Required for executing SQL statements",
+              "description": "Snowflake warehouse to use for queries\nRequired for executing SQL statements",
               "type": [
                 "string",
                 "null"
@@ -742,8 +700,8 @@
             }
           },
           "required": [
-            "account",
             "type",
+            "account",
             "user"
           ],
           "type": "object"
@@ -755,7 +713,7 @@
       "properties": {
         "providers": {
           "items": {
-            "$ref": "#/definitions/ExtensionProviderConfig"
+            "$ref": "#/$defs/ExtensionProviderConfig"
           },
           "type": "array"
         }
@@ -808,12 +766,12 @@
       "type": "object"
     },
     "NetworkPolicyConfig": {
-      "description": "NetworkPolicy configuration for deployed apps\n\nUses Kubernetes NetworkPolicy types directly. Egress semantics: - null: policyTypes is [\"Ingress\"] only, Kubernetes does not restrict egress - Empty list: policyTypes includes \"Egress\" with no rules = deny all egress - Non-empty list: explicit egress rules enforced",
+      "description": "NetworkPolicy configuration for deployed apps\n\nUses Kubernetes NetworkPolicy types directly. Egress semantics:\n- null: policyTypes is [\"Ingress\"] only, Kubernetes does not restrict egress\n- Empty list: policyTypes includes \"Egress\" with no rules = deny all egress\n- Non-empty list: explicit egress rules enforced",
       "properties": {
         "egress": {
           "description": "Egress rules (null = unrestricted egress)",
           "items": {
-            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyEgressRule"
+            "$ref": "#/$defs/io.k8s.api.networking.v1.NetworkPolicyEgressRule"
           },
           "type": [
             "array",
@@ -823,7 +781,7 @@
         "ingress": {
           "description": "Ingress rules",
           "items": {
-            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyIngressRule"
+            "$ref": "#/$defs/io.k8s.api.networking.v1.NetworkPolicyIngressRule"
           },
           "type": "array"
         }
@@ -853,11 +811,7 @@
           "type": "array"
         },
         "policy": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/PlatformAccessPolicy"
-            }
-          ],
+          "$ref": "#/$defs/PlatformAccessPolicy",
           "description": "Policy: \"allow_all\" (default) or \"restrictive\""
         }
       },
@@ -937,17 +891,15 @@
               ]
             },
             "type": {
-              "enum": [
-                "ecr"
-              ],
+              "const": "ecr",
               "type": "string"
             }
           },
           "required": [
-            "account_id",
-            "push_role_arn",
+            "type",
             "region",
-            "type"
+            "account_id",
+            "push_role_arn"
           ],
           "type": "object"
         },
@@ -955,7 +907,7 @@
           "properties": {
             "client_registry_url": {
               "default": null,
-              "description": "Optional client-facing registry URL for CLI push operations If not specified, defaults to registry_url",
+              "description": "Optional client-facing registry URL for CLI push operations\nIf not specified, defaults to registry_url",
               "type": [
                 "string",
                 "null"
@@ -969,15 +921,13 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "oci-client-auth"
-              ],
+              "const": "oci-client-auth",
               "type": "string"
             }
           },
           "required": [
-            "registry_url",
-            "type"
+            "type",
+            "registry_url"
           ],
           "type": "object"
         },
@@ -998,11 +948,11 @@
             },
             "mint_pull_secrets": {
               "default": false,
-              "description": "When true, the Kubernetes controller creates and manages image pull secrets in each project namespace. Set to false if the cluster has its own pull mechanism.",
+              "description": "When true, the Kubernetes controller creates and manages image pull secrets\nin each project namespace. Set to false if the cluster has its own pull mechanism.",
               "type": "boolean"
             },
             "namespace": {
-              "description": "Full image path prefix within the registry (e.g., \"my-org/my-project\" or \"my-org/my-project/rise-apps\")",
+              "description": "Full image path prefix within the registry\n(e.g., \"my-org/my-project\" or \"my-org/my-project/rise-apps\")",
               "type": "string"
             },
             "registry_url": {
@@ -1014,9 +964,7 @@
               "type": "string"
             },
             "type": {
-              "enum": [
-                "gitlab"
-              ],
+              "const": "gitlab",
               "type": "string"
             },
             "username": {
@@ -1025,12 +973,12 @@
             }
           },
           "required": [
-            "gitlab_url",
-            "namespace",
-            "registry_url",
-            "token",
             "type",
-            "username"
+            "gitlab_url",
+            "registry_url",
+            "namespace",
+            "username",
+            "token"
           ],
           "type": "object"
         }
@@ -1040,7 +988,7 @@
       "properties": {
         "allow_private_networks": {
           "default": false,
-          "description": "Allow HTTP and private/loopback IPs in SSRF-validated URLs. WARNING: Only enable for local development. Never enable in production.",
+          "description": "Allow HTTP and private/loopback IPs in SSRF-validated URLs.\nWARNING: Only enable for local development. Never enable in production.",
           "type": "boolean"
         },
         "cookie_domain": {
@@ -1055,7 +1003,7 @@
         },
         "docs_dir": {
           "default": null,
-          "description": "Directory to serve documentation files from (e.g., \"/var/rise/docs\" or \"docs\") Defaults to the RISE_DOCS_DIR environment variable.",
+          "description": "Directory to serve documentation files from (e.g., \"/var/rise/docs\" or \"docs\")\nDefaults to the RISE_DOCS_DIR environment variable.",
           "type": [
             "string",
             "null"
@@ -1063,7 +1011,7 @@
         },
         "frontend_dev_proxy_url": {
           "default": null,
-          "description": "Development-only frontend proxy target (for Vite), e.g. \"http://localhost:5173\" When set, non-API frontend routes are proxied to this URL instead of serving embedded assets.",
+          "description": "Development-only frontend proxy target (for Vite), e.g. \"http://localhost:5173\"\nWhen set, non-API frontend routes are proxied to this URL instead of serving embedded assets.",
           "type": [
             "string",
             "null"
@@ -1078,7 +1026,7 @@
             "email",
             "name"
           ],
-          "description": "JWT claims to include from IdP token when issuing Rise JWTs Default: [\"sub\", \"email\", \"name\"]",
+          "description": "JWT claims to include from IdP token when issuing Rise JWTs\nDefault: [\"sub\", \"email\", \"name\"]",
           "items": {
             "type": "string"
           },
@@ -1086,18 +1034,19 @@
         },
         "jwt_expiry_seconds": {
           "default": 86400,
-          "description": "JWT token expiry duration in seconds Default: 86400 (24 hours)",
+          "description": "JWT token expiry duration in seconds\nDefault: 86400 (24 hours)",
           "format": "uint64",
-          "minimum": 0.0,
+          "minimum": 0,
           "type": "integer"
         },
         "jwt_signing_secret": {
-          "description": "JWT signing secret for ingress authentication (base64-encoded, minimum 32 bytes) Generate with: openssl rand -base64 32 Required for ingress authentication",
+          "description": "JWT signing secret for ingress authentication (base64-encoded, minimum 32 bytes)\nGenerate with: openssl rand -base64 32\nRequired for ingress authentication",
           "type": "string"
         },
         "port": {
           "format": "uint16",
-          "minimum": 0.0,
+          "maximum": 65535,
+          "minimum": 0,
           "type": "integer"
         },
         "public_url": {
@@ -1105,7 +1054,7 @@
         },
         "rs256_private_key_pem": {
           "default": null,
-          "description": "Optional RS256 private key in PEM format for JWT signing If not provided, a new key pair will be generated on startup (tokens will be invalidated on restart) To persist keys across restarts, generate with: openssl genrsa -out rs256.key 2048",
+          "description": "Optional RS256 private key in PEM format for JWT signing\nIf not provided, a new key pair will be generated on startup (tokens will be invalidated on restart)\nTo persist keys across restarts, generate with: openssl genrsa -out rs256.key 2048",
           "type": [
             "string",
             "null"
@@ -1113,7 +1062,7 @@
         },
         "rs256_public_key_pem": {
           "default": null,
-          "description": "Optional RS256 public key in PEM format for JWT verification If not provided, will be derived from rs256_private_key_pem or generated Generate from private key with: openssl rsa -in rs256.key -pubout -out rs256.pub",
+          "description": "Optional RS256 public key in PEM format for JWT verification\nIf not provided, will be derived from rs256_private_key_pem or generated\nGenerate from private key with: openssl rsa -in rs256.key -pubout -out rs256.pub",
           "type": [
             "string",
             "null"
@@ -1121,7 +1070,7 @@
         },
         "static_dir": {
           "default": null,
-          "description": "Directory containing static assets (Tera templates, SVGs, Vite build output). Defaults to the RISE_STATIC_DIR environment variable.",
+          "description": "Directory containing static assets (Tera templates, SVGs, Vite build output).\nDefaults to the RISE_STATIC_DIR environment variable.",
           "type": [
             "string",
             "null"
@@ -1130,9 +1079,9 @@
       },
       "required": [
         "host",
-        "jwt_signing_secret",
         "port",
-        "public_url"
+        "public_url",
+        "jwt_signing_secret"
       ],
       "type": "object"
     },
@@ -1162,14 +1111,14 @@
         "ports": {
           "description": "ports is a list of destination ports for outgoing traffic. Each item in this list is combined using a logical OR. If this field is empty or missing, this rule matches all ports (traffic not restricted by port). If this field is present and contains at least one item, then this rule allows traffic only if the traffic matches at least one port in the list.",
           "items": {
-            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyPort"
+            "$ref": "#/$defs/io.k8s.api.networking.v1.NetworkPolicyPort"
           },
           "type": "array"
         },
         "to": {
           "description": "to is a list of destinations for outgoing traffic of pods selected for this rule. Items in this list are combined using a logical OR operation. If this field is empty or missing, this rule matches all destinations (traffic not restricted by destination). If this field is present and contains at least one item, this rule allows traffic only if the traffic matches at least one item in the to list.",
           "items": {
-            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyPeer"
+            "$ref": "#/$defs/io.k8s.api.networking.v1.NetworkPolicyPeer"
           },
           "type": "array"
         }
@@ -1182,14 +1131,14 @@
         "from": {
           "description": "from is a list of sources which should be able to access the pods selected for this rule. Items in this list are combined using a logical OR operation. If this field is empty or missing, this rule matches all sources (traffic not restricted by source). If this field is present and contains at least one item, this rule allows traffic only if the traffic matches at least one item in the from list.",
           "items": {
-            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyPeer"
+            "$ref": "#/$defs/io.k8s.api.networking.v1.NetworkPolicyPeer"
           },
           "type": "array"
         },
         "ports": {
           "description": "ports is a list of ports which should be made accessible on the pods selected for this rule. Each item in this list is combined using a logical OR. If this field is empty or missing, this rule matches all ports (traffic not restricted by port). If this field is present and contains at least one item, then this rule allows traffic only if the traffic matches at least one port in the list.",
           "items": {
-            "$ref": "#/definitions/io.k8s.api.networking.v1.NetworkPolicyPort"
+            "$ref": "#/$defs/io.k8s.api.networking.v1.NetworkPolicyPort"
           },
           "type": "array"
         }
@@ -1200,27 +1149,15 @@
       "description": "NetworkPolicyPeer describes a peer to allow traffic to/from. Only certain combinations of fields are allowed",
       "properties": {
         "ipBlock": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/io.k8s.api.networking.v1.IPBlock"
-            }
-          ],
+          "$ref": "#/$defs/io.k8s.api.networking.v1.IPBlock",
           "description": "ipBlock defines policy on a particular IPBlock. If this field is set then neither of the other fields can be."
         },
         "namespaceSelector": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector"
-            }
-          ],
+          "$ref": "#/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector",
           "description": "namespaceSelector selects namespaces using cluster-scoped labels. This field follows standard label selector semantics; if present but empty, it selects all namespaces.\n\nIf podSelector is also set, then the NetworkPolicyPeer as a whole selects the pods matching podSelector in the namespaces selected by namespaceSelector. Otherwise it selects all pods in the namespaces selected by namespaceSelector."
         },
         "podSelector": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector"
-            }
-          ],
+          "$ref": "#/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelector",
           "description": "podSelector is a label selector which selects pods. This field follows standard label selector semantics; if present but empty, it selects all pods.\n\nIf namespaceSelector is also set, then the NetworkPolicyPeer as a whole selects the pods matching podSelector in the Namespaces selected by NamespaceSelector. Otherwise it selects the pods matching podSelector in the policy's own namespace."
         }
       },
@@ -1235,11 +1172,7 @@
           "type": "integer"
         },
         "port": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/io.k8s.apimachinery.pkg.util.intstr.IntOrString"
-            }
-          ],
+          "$ref": "#/$defs/io.k8s.apimachinery.pkg.util.intstr.IntOrString",
           "description": "port represents the port on the given protocol. This can either be a numerical or named port on a pod. If this field is not provided, this matches all port names and numbers. If present, only traffic on the specified protocol AND port will be matched."
         },
         "protocol": {
@@ -1255,7 +1188,7 @@
         "matchExpressions": {
           "description": "matchExpressions is a list of label selector requirements. The requirements are ANDed.",
           "items": {
-            "$ref": "#/definitions/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement"
+            "$ref": "#/$defs/io.k8s.apimachinery.pkg.apis.meta.v1.LabelSelectorRequirement"
           },
           "type": "array"
         },
@@ -1299,20 +1232,21 @@
       "x-kubernetes-int-or-string": true
     }
   },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
   "properties": {
     "auth": {
-      "$ref": "#/definitions/AuthSettings"
+      "$ref": "#/$defs/AuthSettings"
     },
     "controller": {
-      "$ref": "#/definitions/ControllerSettings"
+      "$ref": "#/$defs/ControllerSettings"
     },
     "database": {
-      "$ref": "#/definitions/DatabaseSettings"
+      "$ref": "#/$defs/DatabaseSettings"
     },
     "deployment_controller": {
       "anyOf": [
         {
-          "$ref": "#/definitions/DeploymentControllerSettings"
+          "$ref": "#/$defs/DeploymentControllerSettings"
         },
         {
           "type": "null"
@@ -1322,7 +1256,7 @@
     "encryption": {
       "anyOf": [
         {
-          "$ref": "#/definitions/EncryptionSettings"
+          "$ref": "#/$defs/EncryptionSettings"
         },
         {
           "type": "null"
@@ -1332,7 +1266,7 @@
     "extensions": {
       "anyOf": [
         {
-          "$ref": "#/definitions/ExtensionsSettings"
+          "$ref": "#/$defs/ExtensionsSettings"
         },
         {
           "type": "null"
@@ -1342,7 +1276,7 @@
     "registry": {
       "anyOf": [
         {
-          "$ref": "#/definitions/RegistrySettings"
+          "$ref": "#/$defs/RegistrySettings"
         },
         {
           "type": "null"
@@ -1350,13 +1284,13 @@
       ]
     },
     "server": {
-      "$ref": "#/definitions/ServerSettings"
+      "$ref": "#/$defs/ServerSettings"
     }
   },
   "required": [
+    "server",
     "auth",
-    "database",
-    "server"
+    "database"
   ],
   "title": "Settings",
   "type": "object"
