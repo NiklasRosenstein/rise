@@ -96,7 +96,7 @@
         },
         "allow_list_all_teams": {
           "default": false,
-          "description": "Allow all users to list all teams (default: true).\nWhen false, non-admin users only see teams they are members of.",
+          "description": "Allow all users to list all teams (default: false).\nWhen false, non-admin users only see teams they are members of.",
           "type": "boolean"
         },
         "allow_team_creation": {

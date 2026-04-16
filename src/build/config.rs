@@ -115,7 +115,7 @@ pub fn load_full_project_config(app_path: &str) -> Result<Option<ProjectBuildCon
         // Deserialize and collect any unused fields
         let mut unused_fields = Vec::new();
         let deserializer = toml::Deserializer::parse(&content)
-            .map_err(|e| anyhow::anyhow!("Failed to parse TOML: {e}"))?;
+            .map_err(|e| anyhow::Error::new(e).context("Failed to parse TOML"))?;
         let config: ProjectBuildConfig = serde_ignored::deserialize(deserializer, |path| {
             unused_fields.push(path.to_string());
         })?;
