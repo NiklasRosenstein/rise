@@ -81,8 +81,8 @@ base64 = "0.22"
 bytes = "1.9"
 chrono = { version = "0.4.38", features = ["serde"] }
 futures = "0.3"
-rand = "0.9.4"
-reqwest = { version = "0.12.24", features = ["json", "stream"] }
+rand = "0.10.0"
+reqwest = { version = "0.13.0", features = ["json", "stream"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 tokio = { version = "1.48.0", features = ["full"] }
@@ -94,7 +94,7 @@ uuid = { version = "1.18.1", features = ["v4", "serde"] }
 # Shared: CLI + Server
 axum = "0.8.7"
 jsonwebtoken = { version = "10.0", features = ["rust_crypto"] }
-sha2 = "0.10"
+sha2 = "0.11"
 urlencoding = "2.1"
 
 # CLI-only dependencies
@@ -146,7 +146,7 @@ k8s-openapi = { version = "0.27", features = ["v1_31", "schemars"], optional = t
 rustls = { version = "0.23", features = ["ring"], optional = true }
 
 # Snowflake feature dependencies
-snowflake-connector-rs = { version = "0.4", optional = true }
+snowflake-connector-rs = { version = "0.9", optional = true }
 
 # Server: OAuth2 token endpoint
 subtle = { version = "2.6.1", optional = true }
