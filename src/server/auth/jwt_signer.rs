@@ -128,7 +128,11 @@ impl JwtSigner {
             let mut hasher = Sha256::new();
             hasher.update(public_pem.as_bytes());
             let hash = hasher.finalize();
-            let key_id = format!("{:x}", hash)[..16].to_string();
+            let key_id: String = hash
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>()[..16]
+                .to_string();
 
             (encoding_key, decoding_key, public_pem.to_string(), key_id)
         } else if let Some(private_pem) = rs256_private_key_pem {
@@ -158,7 +162,11 @@ impl JwtSigner {
             let mut hasher = Sha256::new();
             hasher.update(public_key_pem.as_bytes());
             let hash = hasher.finalize();
-            let key_id = format!("{:x}", hash)[..16].to_string();
+            let key_id: String = hash
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>()[..16]
+                .to_string();
 
             (encoding_key, decoding_key, public_key_pem, key_id)
         } else {
@@ -197,7 +205,11 @@ impl JwtSigner {
             let mut hasher = Sha256::new();
             hasher.update(public_key_pem.as_bytes());
             let hash = hasher.finalize();
-            let key_id = format!("{:x}", hash)[..16].to_string();
+            let key_id: String = hash
+                .iter()
+                .map(|b| format!("{:02x}", b))
+                .collect::<String>()[..16]
+                .to_string();
 
             (encoding_key, decoding_key, public_key_pem, key_id)
         };

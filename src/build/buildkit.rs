@@ -22,7 +22,7 @@ pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(&contents);
     let result = hasher.finalize();
-    Ok(format!("{:x}", result))
+    Ok(result.iter().map(|b| format!("{:02x}", b)).collect())
 }
 
 /// Compute SHA256 hash of a string
@@ -30,7 +30,7 @@ fn compute_string_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)
+    result.iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// Generate buildkitd.toml configuration for insecure registries

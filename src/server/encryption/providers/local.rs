@@ -90,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn test_encrypt_decrypt_roundtrip() {
         // Generate a random 32-byte key for testing
-        use rand::RngCore;
+        use rand::Rng;
         let mut key = [0u8; 32];
         rand::rng().fill_bytes(&mut key);
         let key_base64 = BASE64.encode(key);
@@ -107,7 +107,7 @@ mod tests {
     #[tokio::test]
     async fn test_different_nonces() {
         // Encrypting the same plaintext twice should produce different ciphertexts
-        use rand::RngCore;
+        use rand::Rng;
         let mut key = [0u8; 32];
         rand::rng().fill_bytes(&mut key);
         let key_base64 = BASE64.encode(key);

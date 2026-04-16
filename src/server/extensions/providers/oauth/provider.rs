@@ -42,7 +42,7 @@ impl Clone for OAuthProvider {
 /// Generate a secure random token for Rise client secret (32 bytes, base64url encoded)
 fn generate_rise_client_secret() -> String {
     use base64::Engine;
-    use rand::Rng;
+    use rand::RngExt;
 
     let mut rng = rand::rng();
     let bytes: Vec<u8> = (0..32).map(|_| rng.random()).collect();
