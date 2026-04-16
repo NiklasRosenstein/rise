@@ -714,9 +714,9 @@ pub enum EncryptionSettings {
 }
 
 impl Settings {
-    pub fn json_schema_value() -> Result<serde_json::Value, anyhow::Error> {
+    pub fn json_schema_value() -> serde_json::Value {
         let schema = schemars::schema_for!(Settings);
-        Ok(serde_json::to_value(schema)?)
+        schema.to_value()
     }
 
     fn substitute_env_vars_in_string_with(
