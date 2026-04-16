@@ -533,120 +533,121 @@ pub async fn create_deployment(
         }
     });
 
-    if deploy_opts.image.is_some() && deploy_opts.push_image {
-        // Push-image path: pull image locally, tag it, and push to Rise registry
-        let source_image = deploy_opts.image.unwrap();
-        info!(
-            "Pulling and pushing image '{}' to Rise registry",
-            source_image
-        );
-
-        // Determine container CLI from config/build args
-        let container_cli = match &deploy_opts.build_args.container_cli {
-            Some(cli) => cli.clone(),
-            None => config.get_container_cli().command().to_string(),
-        };
-
-        login_to_registry(
-            http_client,
-            backend_url,
-            &token,
-            &container_cli,
-            &deployment_info.credentials,
-            deploy_opts.project_name,
-            &deployment_info.deployment_id,
-        )
-        .await?;
-
-        // Pull the source image for linux/amd64
-        if let Err(e) = build::docker_pull(&container_cli, source_image, "linux/amd64") {
-            update_deployment_status(
-                http_client,
-                backend_url,
-                &token,
-                deploy_opts.project_name,
-                &deployment_info.deployment_id,
-                "Failed",
-                Some(&e.to_string()),
-            )
-            .await?;
-            return Err(e);
-        }
-
-        // Tag it with the Rise registry image tag
-        if let Err(e) = build::docker_tag(&container_cli, source_image, &deployment_info.image_tag)
-        {
-            update_deployment_status(
-                http_client,
-                backend_url,
-                &token,
-                deploy_opts.project_name,
-                &deployment_info.deployment_id,
-                "Failed",
-                Some(&e.to_string()),
-            )
-            .await?;
-            return Err(e);
-        }
-
-        // Update status to Building (reusing existing state for push phase)
-        update_deployment_status(
-            http_client,
-            backend_url,
-            &token,
-            deploy_opts.project_name,
-            &deployment_info.deployment_id,
-            "Building",
-            None,
-        )
-        .await?;
-
-        // Push to Rise registry
-        if let Err(e) = build::docker_push(&container_cli, &deployment_info.image_tag) {
-            update_deployment_status(
-                http_client,
-                backend_url,
-                &token,
-                deploy_opts.project_name,
-                &deployment_info.deployment_id,
-                "Failed",
-                Some(&e.to_string()),
-            )
-            .await?;
-            return Err(e);
-        }
-
-        // Mark as pushed (controller will take over deployment)
-        update_deployment_status(
-            http_client,
-            backend_url,
-            &token,
-            deploy_opts.project_name,
-            &deployment_info.deployment_id,
-            "Pushed",
-            None,
-        )
-        .await?;
-
-        info!(
-            "✓ Successfully pushed {} to {}",
-            source_image, deployment_info.image_tag
-        );
-    } else if deploy_opts.image.is_some() || deploy_opts.from_deployment.is_some() {
-        // Pre-built image path or redeploy from existing deployment: Skip build/push, backend already marked as Pushed
-        if let Some(from_deployment) = &deploy_opts.from_deployment {
+    if let Some(source_image) = &deploy_opts.image {
+        if deploy_opts.push_image {
+            // Push-image path: pull image locally, tag it, and push to Rise registry
             info!(
-                "✓ Deployment created from existing deployment '{}' with {} environment variables",
-                from_deployment,
-                if deploy_opts.use_source_env_vars {
-                    "source"
-                } else {
-                    "current project"
-                }
+                "Pulling and pushing image '{}' to Rise registry",
+                source_image
+            );
+
+            // Determine container CLI from config/build args
+            let container_cli = match &deploy_opts.build_args.container_cli {
+                Some(cli) => cli.clone(),
+                None => config.get_container_cli().command().to_string(),
+            };
+
+            login_to_registry(
+                http_client,
+                backend_url,
+                &token,
+                &container_cli,
+                &deployment_info.credentials,
+                deploy_opts.project_name,
+                &deployment_info.deployment_id,
+            )
+            .await?;
+
+            // Pull the source image for linux/amd64
+            if let Err(e) = build::docker_pull(&container_cli, source_image, "linux/amd64") {
+                update_deployment_status(
+                    http_client,
+                    backend_url,
+                    &token,
+                    deploy_opts.project_name,
+                    &deployment_info.deployment_id,
+                    "Failed",
+                    Some(&e.to_string()),
+                )
+                .await?;
+                return Err(e);
+            }
+
+            // Tag it with the Rise registry image tag
+            if let Err(e) =
+                build::docker_tag(&container_cli, source_image, &deployment_info.image_tag)
+            {
+                update_deployment_status(
+                    http_client,
+                    backend_url,
+                    &token,
+                    deploy_opts.project_name,
+                    &deployment_info.deployment_id,
+                    "Failed",
+                    Some(&e.to_string()),
+                )
+                .await?;
+                return Err(e);
+            }
+
+            // Update status to Building (reusing existing state for push phase)
+            update_deployment_status(
+                http_client,
+                backend_url,
+                &token,
+                deploy_opts.project_name,
+                &deployment_info.deployment_id,
+                "Building",
+                None,
+            )
+            .await?;
+
+            // Push to Rise registry
+            if let Err(e) = build::docker_push(&container_cli, &deployment_info.image_tag) {
+                update_deployment_status(
+                    http_client,
+                    backend_url,
+                    &token,
+                    deploy_opts.project_name,
+                    &deployment_info.deployment_id,
+                    "Failed",
+                    Some(&e.to_string()),
+                )
+                .await?;
+                return Err(e);
+            }
+
+            // Mark as pushed (controller will take over deployment)
+            update_deployment_status(
+                http_client,
+                backend_url,
+                &token,
+                deploy_opts.project_name,
+                &deployment_info.deployment_id,
+                "Pushed",
+                None,
+            )
+            .await?;
+
+            info!(
+                "✓ Successfully pushed {} to {}",
+                source_image, deployment_info.image_tag
             );
         } else {
+            // Pre-built image path: Skip build/push, backend already marked as Pushed
             info!("✓ Pre-built image deployment created");
         }
+    } else if let Some(from_deployment) = &deploy_opts.from_deployment {
+        // Redeploy from existing deployment: Skip build/push, backend already marked as Pushed
+        info!(
+            "✓ Deployment created from existing deployment '{}' with {} environment variables",
+            from_deployment,
+            if deploy_opts.use_source_env_vars {
+                "source"
+            } else {
+                "current project"
+            }
+        );
     } else {
         // Build from source path: Execute build and push
         let options = BuildOptions::from_build_args(
