@@ -1,7 +1,6 @@
 const express = require('express');
 const jwt = require('jsonwebtoken');
 const jwkToPem = require('jwk-to-pem');
-const fetch = require('node-fetch');
 
 const app = express();
 const PORT = process.env.PORT || 8080;
