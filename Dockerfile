@@ -23,7 +23,7 @@ RUN mkdir -p src && \
 RUN cargo chef prepare --recipe-path recipe.json
 
 # Stage 2.5: Build frontend assets
-FROM node:20-alpine AS frontend-builder
+FROM node:24-alpine AS frontend-builder
 WORKDIR /usr/src/frontend
 
 COPY frontend/package.json ./
