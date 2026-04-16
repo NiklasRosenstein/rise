@@ -165,7 +165,7 @@ postgresql:
 
   image:
     repository: postgres
-    tag: "16-alpine"
+    tag: "18-alpine"
     pullPolicy: IfNotPresent
 
   auth:
@@ -193,7 +193,7 @@ dex:
 
   image:
     repository: ghcr.io/dexidp/dex
-    tag: v2.40.0
+    tag: v2.45.1
     pullPolicy: IfNotPresent
 
   imagePullSecrets: []

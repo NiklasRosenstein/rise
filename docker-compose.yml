@@ -5,7 +5,7 @@ volumes:
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: rise-postgres
     restart: unless-stopped
     ports:
@@ -24,7 +24,7 @@ services:
 
   # OIDC provider for authentication in the development environment.
   dex:
-    image: dexidp/dex:v2.37.0
+    image: dexidp/dex:v2.45.1
     container_name: rise-dex
     restart: unless-stopped
     user: "0:0"
@@ -43,7 +43,7 @@ services:
 
   # Docker registry for images pushed by the rise CLI in the development environment.
   registry:
-    image: registry:2
+    image: registry:3
     container_name: rise-registry
     restart: unless-stopped
     ports:
