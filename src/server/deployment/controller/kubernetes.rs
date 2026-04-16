@@ -1332,7 +1332,12 @@ impl KubernetesController {
                                 last_timestamp: event
                                     .last_timestamp
                                     .as_ref()
-                                    .map(|ts| ts.0)
+                                    .and_then(|ts| {
+                                        chrono::DateTime::from_timestamp(
+                                            ts.0.as_second(),
+                                            ts.0.subsec_nanosecond() as u32,
+                                        )
+                                    })
                                     .unwrap_or_else(Utc::now),
                             };
                             events_by_pod
@@ -2379,10 +2384,10 @@ impl KubernetesController {
                 ..Default::default()
             },
             spec: Some(NetworkPolicySpec {
-                pod_selector: LabelSelector {
+                pod_selector: Some(LabelSelector {
                     match_labels: Some(Self::group_labels(project, deployment)),
                     ..Default::default()
-                },
+                }),
                 policy_types: Some(policy_types),
                 egress: egress_rules,
                 ingress: Some(self.network_policy.ingress.clone()),

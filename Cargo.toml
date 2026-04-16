@@ -40,7 +40,6 @@ cli = [
 backend = [
     # Server core (former "server" feature)
     "dep:config",
-    "dep:oauth2",
     "dep:openssl",
     "dep:rsa",
     "dep:sqlx",
@@ -101,17 +100,16 @@ urlencoding = "2.1"
 # CLI-only dependencies
 clap = { version = "4.5.53", features = ["derive"], optional = true }
 comfy-table = { version = "7.1", optional = true }
-dirs = { version = "5.0", optional = true }
+dirs = { version = "6.0", optional = true }
 rsa = { version = "0.9", optional = true }
 tempfile = { version = "3.0", optional = true }
-toml = { version = "0.8", optional = true }
+toml = { version = "1", optional = true }
 url = { version = "2.5", optional = true }
 webbrowser = { version = "1.0.2", optional = true }
 serde_ignored = { version = "0.1", optional = true }
 
 # Server core dependencies
 config = { version = "0.15.19", optional = true }
-oauth2 = { version = "4.4", optional = true }
 openssl = { version = "0.10.75", features = ["vendored"], optional = true }
 sqlx = { version = "0.8", features = ["runtime-tokio-native-tls", "postgres", "uuid", "chrono", "migrate"], optional = true }
 tower = { version = "0.5.2", optional = true }
@@ -143,8 +141,8 @@ aws-sdk-rds = { version = "1.80", optional = true }
 aws-sdk-sts = { version = "1.80", optional = true }
 
 # Kubernetes feature dependencies
-kube = { version = "0.95", features = ["client", "runtime", "derive"], optional = true }
-k8s-openapi = { version = "0.23", features = ["v1_30", "schemars"], optional = true }
+kube = { version = "3", features = ["client", "runtime", "derive"], optional = true }
+k8s-openapi = { version = "0.27", features = ["v1_31", "schemars"], optional = true }
 rustls = { version = "0.23", features = ["ring"], optional = true }
 
 # Snowflake feature dependencies
@@ -153,7 +151,7 @@ snowflake-connector-rs = { version = "0.4", optional = true }
 # Server: OAuth2 token endpoint
 subtle = { version = "2.6.1", optional = true }
 serde_urlencoded = { version = "0.7.1", optional = true }
-schemars = { version = "0.8.22", optional = true }
+schemars = { version = "1", optional = true }
 
 [dev-dependencies]
 tempfile = "3.0"

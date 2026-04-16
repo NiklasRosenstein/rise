@@ -205,7 +205,7 @@ pub struct AuthSettings {
     /// When false, only admin users can create teams.
     #[serde(default = "default_allow_team_creation")]
     pub allow_team_creation: bool,
-    /// Allow all users to list all teams (default: true).
+    /// Allow all users to list all teams (default: false).
     /// When false, non-admin users only see teams they are members of.
     #[serde(default = "default_allow_list_all_teams")]
     pub allow_list_all_teams: bool,
@@ -714,9 +714,9 @@ pub enum EncryptionSettings {
 }
 
 impl Settings {
-    pub fn json_schema_value() -> Result<serde_json::Value, anyhow::Error> {
+    pub fn json_schema_value() -> serde_json::Value {
         let schema = schemars::schema_for!(Settings);
-        Ok(serde_json::to_value(schema)?)
+        schema.to_value()
     }
 
     fn substitute_env_vars_in_string_with(

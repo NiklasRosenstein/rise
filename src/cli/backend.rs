@@ -37,7 +37,7 @@ pub async fn handle_backend_command(cmd: BackendCommands) -> Result<()> {
         }
         #[cfg(feature = "backend")]
         BackendCommands::ConfigSchema => {
-            let schema = crate::server::settings::Settings::json_schema_value()?;
+            let schema = crate::server::settings::Settings::json_schema_value();
             println!("{}", serde_json::to_string_pretty(&schema)?);
             Ok(())
         }
