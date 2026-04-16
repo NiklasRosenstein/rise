@@ -10,6 +10,9 @@
   "keywords": ["oauth", "rise", "exchange-flow"],
   "author": "",
   "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "express": "^5.0.0",
     "express-session": "^1.17.3",
