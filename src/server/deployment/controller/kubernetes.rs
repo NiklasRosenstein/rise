@@ -1352,7 +1352,7 @@ impl KubernetesController {
 
         // Sort events by timestamp (most recent first) and cap per pod
         for events in events_by_pod.values_mut() {
-            events.sort_by(|a, b| b.last_timestamp.cmp(&a.last_timestamp));
+            events.sort_by_key(|e| std::cmp::Reverse(e.last_timestamp));
             events.truncate(MAX_EVENTS_PER_POD);
         }
 

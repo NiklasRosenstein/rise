@@ -1212,16 +1212,15 @@ async fn token_endpoint_inner(
                 ));
             }
         }
+        "refresh_token" if has_code_verifier => {
+            // refresh_token grant: REJECT code_verifier (PKCE is only for authorization_code grant)
+            return Err(oauth2_error(
+                "invalid_request",
+                Some("code_verifier not supported for refresh_token grant (PKCE is only for authorization_code)".to_string()),
+            ));
+        }
         "refresh_token" => {
             // refresh_token grant: ALLOW client_secret (confidential) or no auth (public)
-            // REJECT code_verifier (PKCE is only for authorization_code grant)
-            if has_code_verifier {
-                return Err(oauth2_error(
-                    "invalid_request",
-                    Some("code_verifier not supported for refresh_token grant (PKCE is only for authorization_code)".to_string()),
-                ));
-            }
-            // Note: client_secret is optional for refresh_token grant (public clients)
         }
         _ => {
             // Unknown grant type will be rejected later
