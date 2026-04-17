@@ -190,10 +190,22 @@ curl -sfL https://get.k3s.io | INSTALL_K3S_EXEC="--flannel-backend=none --cluste
 sleep 10
 mkdir -p ~/.kube
 sudo cat /etc/rancher/k3s/k3s.yaml > ~/.kube/config
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/operator-crds.yaml
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/tigera-operator.yaml
-kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/custom-resources.yaml
-helm install --repo https://kubernetes.github.io/ingress-nginx ingress-nginx --namespace ingress-nginx ingress-nginx --create-namespace
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/operator-crds.yaml --server-side --force-conflicts
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/tigera-operator.yaml --server-side --force-conflicts
+kubectl apply -f https://raw.githubusercontent.com/projectcalico/calico/v3.31.4/manifests/custom-resources.yaml --server-side --force-conflicts
+helm upgrade --install --repo https://kubernetes.github.io/ingress-nginx ingress-nginx --namespace ingress-nginx ingress-nginx --create-namespace
+
+set +x
+echo
+echo
+echo "Note: You need to apply the configuration from config/k3s.yaml for Rise-deployed apps to work properly."
+echo "Double-check that the IP in the configuration matches that of the node in K3s:"
+echo
+echo "K3s internal IP: $(kubectl get node $(hostname) -o jsonpath='{.metadata.annotations.k3s\\.io/internal-ip}')"
+echo
+echo '```'
+cat config/k3s.yaml
+echo '```'
 """
 
 [tasks."test:e2e-build"]

@@ -50,14 +50,14 @@ deployment_controller:
   production_ingress_url_template: "{project_name}.rise.local"
   staging_ingress_url_template: "{project_name}-{deployment_group}.preview.rise.local"
   namespace_format: "rise-{project_name}"
-  auth_backend_url: "http://host.minikube.internal:3000" # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host)
-  auth_signin_url: "http://rise.local:3000" # Domain for user-facing OAuth redirects
+  auth_backend_url: "http://host.minikube.internal:3000" # URL for Nginx auth subrequests (Docker bridge IP for Minikube to reach host), must be resolvable by Nginx pod
+  auth_signin_url: "http://rise.local:3000" # Domain for user-facing OAuth redirects, must be resolvable by users' browsers
   ingress_annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
   ingress_port: 8080 # `mise minikube:up` port-forwards ingress to this port
   ingress_schema: "http" # Use http for local development
   host_aliases:
-    rise.local: "192.168.49.1" # Minikube host IP
+    rise.local: "192.168.49.1" # Minikube host IP, allowing app pods to access Rise backend
   # Extra projected service account tokens mounted in every app pod at
   # /var/run/secrets/rise/tokens/<name>
   # extra_service_token_audiences:
