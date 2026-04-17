@@ -24,7 +24,7 @@ Replace `<postgresql-pod>` with your actual pod name (e.g., `rise-postgresql-0`)
 Ensure `postgresql.image.tag` is set to the target major version and that `postgresql.upgrade.image.tag` matches the same major version (e.g., both targeting PG 18). Then enable the upgrade:
 
 ```bash
-helm upgrade <release> rise/rise \
+helm upgrade <release> <chart> \
   --set postgresql.upgrade.enabled=true \
   --set postgresql.image.tag="18-alpine" \
   --set postgresql.upgrade.image.tag="18-alpine3.21"
@@ -49,7 +49,7 @@ kubectl exec -it <postgresql-pod> -- psql -U rise -c "SELECT version();"
 Once verified, disable the upgrade flag so the pgautoupgrade init container no longer runs:
 
 ```bash
-helm upgrade <release> rise/rise \
+helm upgrade <release> <chart> \
   --set postgresql.upgrade.enabled=false
 ```
 
