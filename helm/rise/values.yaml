@@ -189,6 +189,8 @@ postgresql:
   # Major version upgrade support using pgautoupgrade
   # Enable this temporarily when upgrading PostgreSQL major versions (e.g., 16 -> 18).
   # See docs/upgrading-postgresql.md for the full procedure.
+  # IMPORTANT: The pgautoupgrade image tag must match the TARGET PostgreSQL major version
+  # (i.e., the same major version as postgresql.image.tag above).
   upgrade:
     enabled: false
     image:

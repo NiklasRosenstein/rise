@@ -39,5 +39,6 @@ Components deployed:
   - PostgreSQL: 1 replica ({{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }})
 
 NOTE: PostgreSQL major version upgrades require a data migration step.
-  If upgrading from an older major version, see docs/upgrading-postgresql.md.
+  To upgrade, set postgresql.upgrade.enabled=true and run 'helm upgrade'.
+  See the project's docs/upgrading-postgresql.md for the full procedure.
 {{- end }}

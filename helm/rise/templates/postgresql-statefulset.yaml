@@ -25,8 +25,29 @@ spec:
         fsGroup: 999
       {{- if .Values.postgresql.persistence.enabled }}
       initContainers:
+      {{- if .Values.postgresql.upgrade.enabled }}
+      # Run pg_upgrade using pgautoupgrade when a major version mismatch is detected.
+      # When upgrade is enabled, this replaces the version-check container since
+      # pgautoupgrade handles both detection and migration.
+      - name: pg-upgrade
+        image: "{{ .Values.postgresql.upgrade.image.repository }}:{{ .Values.postgresql.upgrade.image.tag }}"
+        imagePullPolicy: {{ .Values.postgresql.upgrade.image.pullPolicy }}
+        env:
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: POSTGRES_USER
+          value: {{ .Values.postgresql.auth.username | quote }}
+        - name: POSTGRES_PASSWORD
+          value: {{ .Values.postgresql.auth.password | quote }}
+        - name: POSTGRES_DB
+          value: {{ .Values.postgresql.auth.database | quote }}
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+      {{- else }}
       # Check if the existing data directory is compatible with the PostgreSQL version.
       # Exits non-zero with a clear message when a major version upgrade is needed.
+      # Skipped when postgresql.upgrade.enabled is true (pgautoupgrade handles it).
       - name: pg-version-check
         image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
         imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
@@ -58,33 +79,23 @@ spec:
           echo "  Data directory version: $DATA_VERSION"
           echo "  Server version:         $SERVER_VERSION"
           echo ""
-          echo "PostgreSQL cannot start with a data directory from a"
-          echo "different major version. To upgrade, set:"
-          echo ""
-          echo "  postgresql.upgrade.enabled=true"
-          echo ""
-          echo "and run 'helm upgrade' again."
-          echo ""
-          echo "See docs/upgrading-postgresql.md for the full procedure."
+          if [ "$DATA_VERSION" -gt "$SERVER_VERSION" ] 2>/dev/null; then
+            echo "The data directory was created by a NEWER version of PostgreSQL."
+            echo "Downgrading is not supported. Either:"
+            echo ""
+            echo "  1. Pin postgresql.image.tag back to version $DATA_VERSION, or"
+            echo "  2. Restore from a backup taken before the version change"
+          else
+            echo "PostgreSQL cannot start with a data directory from a"
+            echo "different major version. To run the in-place upgrade:"
+            echo ""
+            echo "  1. Back up your database: kubectl exec <pod> -- pg_dump -U <user> <db> > backup.sql"
+            echo "  2. Set postgresql.upgrade.enabled=true"
+            echo "  3. Run 'helm upgrade' again"
+            echo "  4. Verify the upgrade, then set postgresql.upgrade.enabled=false"
+          fi
           echo "============================================================"
           exit 1
-        volumeMounts:
-        - name: data
-          mountPath: /var/lib/postgresql/data
-      {{- if .Values.postgresql.upgrade.enabled }}
-      # Run pg_upgrade using pgautoupgrade when a major version mismatch is detected.
-      - name: pg-upgrade
-        image: "{{ .Values.postgresql.upgrade.image.repository }}:{{ .Values.postgresql.upgrade.image.tag }}"
-        imagePullPolicy: {{ .Values.postgresql.upgrade.image.pullPolicy }}
-        env:
-        - name: PGDATA
-          value: /var/lib/postgresql/data/pgdata
-        - name: POSTGRES_USER
-          value: {{ .Values.postgresql.auth.username | quote }}
-        - name: POSTGRES_PASSWORD
-          value: {{ .Values.postgresql.auth.password | quote }}
-        - name: POSTGRES_DB
-          value: {{ .Values.postgresql.auth.database | quote }}
         volumeMounts:
         - name: data
           mountPath: /var/lib/postgresql/data
