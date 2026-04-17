@@ -1,6 +1,6 @@
 use base64ct::{Base64UrlUnpadded, Encoding};
 use moka::sync::Cache;
-use rand::RngCore;
+use rand::Rng;
 use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;

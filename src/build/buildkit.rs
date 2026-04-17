@@ -11,6 +11,16 @@ use crate::config::{ContainerCli, ContainerRuntime};
 
 use super::method::{requires_buildkit, BuildMethod};
 
+/// Encode a byte slice as a lowercase hex string without per-byte allocations.
+fn hex_encode(bytes: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        write!(s, "{:02x}", b).unwrap();
+    }
+    s
+}
+
 /// Daemon version label value. Bump this whenever the managed BuildKit daemon
 /// creation parameters change (e.g. new flags, image updates) to force
 /// recreation of stale daemons.
@@ -22,7 +32,7 @@ pub(crate) fn compute_file_hash(path: &Path) -> Result<String> {
     let mut hasher = Sha256::new();
     hasher.update(&contents);
     let result = hasher.finalize();
-    Ok(format!("{:x}", result))
+    Ok(hex_encode(&result))
 }
 
 /// Compute SHA256 hash of a string
@@ -30,7 +40,7 @@ fn compute_string_hash(content: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(content.as_bytes());
     let result = hasher.finalize();
-    format!("{:x}", result)
+    hex_encode(&result)
 }
 
 /// Generate buildkitd.toml configuration for insecure registries

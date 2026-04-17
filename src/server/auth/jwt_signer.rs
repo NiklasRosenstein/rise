@@ -72,6 +72,21 @@ pub enum JwtSignerError {
     PemError(String),
 }
 
+/// Compute a short key ID from a public key PEM.
+///
+/// Takes the SHA-256 hash of the PEM bytes and encodes only the first 8 bytes
+/// as hex, producing a 16-character key ID.
+fn compute_key_id(public_key_pem: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write;
+    let hash = Sha256::digest(public_key_pem);
+    let mut key_id = String::with_capacity(16);
+    for b in &hash[..8] {
+        write!(key_id, "{:02x}", b).unwrap();
+    }
+    key_id
+}
+
 impl JwtSigner {
     /// Create a new JWT signer with both HS256 and RS256 support
     ///
@@ -123,12 +138,7 @@ impl JwtSigner {
                 JwtSignerError::RsaKeyError(format!("Invalid RS256 public key: {}", e))
             })?;
 
-            // Generate key ID from public key
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(public_pem.as_bytes());
-            let hash = hasher.finalize();
-            let key_id = format!("{:x}", hash)[..16].to_string();
+            let key_id = compute_key_id(public_pem.as_bytes());
 
             (encoding_key, decoding_key, public_pem.to_string(), key_id)
         } else if let Some(private_pem) = rs256_private_key_pem {
@@ -153,12 +163,7 @@ impl JwtSigner {
             let decoding_key = DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
                 .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
 
-            // Generate key ID from public key
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(public_key_pem.as_bytes());
-            let hash = hasher.finalize();
-            let key_id = format!("{:x}", hash)[..16].to_string();
+            let key_id = compute_key_id(public_key_pem.as_bytes());
 
             (encoding_key, decoding_key, public_key_pem, key_id)
         } else {
@@ -192,12 +197,7 @@ impl JwtSigner {
             let decoding_key = DecodingKey::from_rsa_pem(public_key_pem.as_bytes())
                 .map_err(|e| JwtSignerError::RsaKeyError(e.to_string()))?;
 
-            // Generate key ID (SHA-256 hash of the public key)
-            use sha2::{Digest, Sha256};
-            let mut hasher = Sha256::new();
-            hasher.update(public_key_pem.as_bytes());
-            let hash = hasher.finalize();
-            let key_id = format!("{:x}", hash)[..16].to_string();
+            let key_id = compute_key_id(public_key_pem.as_bytes());
 
             (encoding_key, decoding_key, public_key_pem, key_id)
         };

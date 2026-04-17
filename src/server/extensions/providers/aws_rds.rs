@@ -1148,7 +1148,7 @@ impl AwsRdsProvisioner {
     }
 
     fn generate_password(&self) -> String {
-        use rand::Rng;
+        use rand::RngExt;
         const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";
         let mut rng = rand::rng();
         (0..32)

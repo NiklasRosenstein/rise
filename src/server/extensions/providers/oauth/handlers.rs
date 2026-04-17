@@ -114,7 +114,7 @@ async fn resolve_oauth_endpoints(
 
 /// Generate a random state token for CSRF protection
 fn generate_state_token() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     let mut rng = rand::rng();
     (0..32)
         .map(|_| format!("{:02x}", rng.random::<u8>()))
@@ -123,7 +123,7 @@ fn generate_state_token() -> String {
 
 /// Generate a PKCE code verifier (random string)
 fn generate_code_verifier() -> String {
-    use rand::Rng;
+    use rand::RngExt;
     const CHARSET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
     let mut rng = rand::rng();
     (0..128)
