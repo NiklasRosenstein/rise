@@ -1,6 +1,6 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended", "customManagers:githubActionsVersions"],
+  "extends": ["config:recommended", "customManagers:githubActionsVersions", ":automergeMinor", ":automergePatch"],
   "packageRules": [
     {
       "description": "Group all Rust toolchain version updates",
