@@ -35,3 +35,10 @@ Get the application URL by running these commands:
 
 Components deployed:
   - Rise Backend: {{ .Values.replicaCount }} replica(s)
+{{- if .Values.postgresql.enabled }}
+  - PostgreSQL: 1 replica ({{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }})
+
+NOTE: PostgreSQL major version upgrades require a data migration step.
+  To upgrade, set postgresql.upgrade.enabled=true and run 'helm upgrade'.
+  See the project's docs/upgrading-postgresql.md for the full procedure.
+{{- end }}
