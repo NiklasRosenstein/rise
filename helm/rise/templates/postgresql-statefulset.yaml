@@ -23,6 +23,73 @@ spec:
         runAsNonRoot: true
         runAsUser: 999  # postgres user in official image
         fsGroup: 999
+      {{- if .Values.postgresql.persistence.enabled }}
+      initContainers:
+      # Check if the existing data directory is compatible with the PostgreSQL version.
+      # Exits non-zero with a clear message when a major version upgrade is needed.
+      - name: pg-version-check
+        image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"
+        imagePullPolicy: {{ .Values.postgresql.image.pullPolicy }}
+        command:
+        - /bin/sh
+        - -e
+        - -c
+        - |
+          PGDATA="/var/lib/postgresql/data/pgdata"
+          PG_VERSION_FILE="$PGDATA/PG_VERSION"
+
+          # Fresh install — no data directory yet
+          if [ ! -f "$PG_VERSION_FILE" ]; then
+            echo "pg-version-check: no existing data directory, nothing to check"
+            exit 0
+          fi
+
+          DATA_VERSION=$(cat "$PG_VERSION_FILE")
+          SERVER_VERSION=$(pg_config --version | sed 's/PostgreSQL //' | cut -d. -f1)
+
+          if [ "$DATA_VERSION" = "$SERVER_VERSION" ]; then
+            echo "pg-version-check: data directory version ($DATA_VERSION) matches server version ($SERVER_VERSION)"
+            exit 0
+          fi
+
+          echo "============================================================"
+          echo "ERROR: PostgreSQL major version mismatch!"
+          echo ""
+          echo "  Data directory version: $DATA_VERSION"
+          echo "  Server version:         $SERVER_VERSION"
+          echo ""
+          echo "PostgreSQL cannot start with a data directory from a"
+          echo "different major version. To upgrade, set:"
+          echo ""
+          echo "  postgresql.upgrade.enabled=true"
+          echo ""
+          echo "and run 'helm upgrade' again."
+          echo ""
+          echo "See docs/upgrading-postgresql.md for the full procedure."
+          echo "============================================================"
+          exit 1
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+      {{- if .Values.postgresql.upgrade.enabled }}
+      # Run pg_upgrade using pgautoupgrade when a major version mismatch is detected.
+      - name: pg-upgrade
+        image: "{{ .Values.postgresql.upgrade.image.repository }}:{{ .Values.postgresql.upgrade.image.tag }}"
+        imagePullPolicy: {{ .Values.postgresql.upgrade.image.pullPolicy }}
+        env:
+        - name: PGDATA
+          value: /var/lib/postgresql/data/pgdata
+        - name: POSTGRES_USER
+          value: {{ .Values.postgresql.auth.username | quote }}
+        - name: POSTGRES_PASSWORD
+          value: {{ .Values.postgresql.auth.password | quote }}
+        - name: POSTGRES_DB
+          value: {{ .Values.postgresql.auth.database | quote }}
+        volumeMounts:
+        - name: data
+          mountPath: /var/lib/postgresql/data
+      {{- end }}
+      {{- end }}
       containers:
       - name: postgresql
         image: "{{ .Values.postgresql.image.repository }}:{{ .Values.postgresql.image.tag }}"

@@ -74,6 +74,10 @@ sqlx migrate run
 
 Enable automated backups (7+ days), take manual snapshots before major changes, enable point-in-time recovery.
 
+### Major Version Upgrades
+
+If you use the Helm chart's built-in PostgreSQL, see [Upgrading PostgreSQL](./upgrading-postgresql.md) for the major version upgrade procedure.
+
 ### Connection Pooling
 
 Rise uses SQLx with connection pooling. Configure pool size based on load in `config/production.toml` if needed.
