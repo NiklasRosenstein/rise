@@ -11,7 +11,7 @@ buildkit = "0.28.0"
 "cargo:cargo-all-features" = "latest"
 mdbook = "latest"
 helm = "latest"
-rust = { version = "1.94.1", profile = "default" }
+rust = { version = "1.95.0", profile = "default" }
 kubectl = "latest"
 k9s = "latest"
 

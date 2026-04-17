@@ -1,7 +1,12 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
+  "extends": ["config:recommended", "customManagers:githubActionsVersions"],
   "packageRules": [
+    {
+      "description": "Group all Rust toolchain version updates",
+      "matchDepNames": ["rust"],
+      "groupName": "rust"
+    },
     {
       "description": "Group non-major Rust dependency updates",
       "matchManagers": ["cargo"],
