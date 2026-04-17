@@ -21,15 +21,16 @@ Replace `<postgresql-pod>` with your actual pod name (e.g., `rise-postgresql-0`)
 
 ### 2. Upgrade with pgautoupgrade enabled
 
+Ensure `postgresql.image.tag` is set to the target major version and that `postgresql.upgrade.image.tag` matches the same major version (e.g., both targeting PG 18). Then enable the upgrade:
+
 ```bash
 helm upgrade <release> rise/rise \
-  --set postgresql.upgrade.enabled=true
+  --set postgresql.upgrade.enabled=true \
+  --set postgresql.image.tag="18-alpine" \
+  --set postgresql.upgrade.image.tag="18-alpine3.21"
 ```
 
-The pod will run two init containers before starting PostgreSQL:
-
-1. **pg-version-check** -- detects the major version mismatch
-2. **pg-upgrade** -- runs pgautoupgrade to migrate the data directory
+With `postgresql.upgrade.enabled=true`, the pod runs a single **pg-upgrade** init container (using the pgautoupgrade image) before starting PostgreSQL. This container detects the version mismatch and migrates the data directory automatically.
 
 Watch the pod logs to confirm the upgrade completes:
 

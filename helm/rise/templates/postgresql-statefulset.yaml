@@ -87,12 +87,18 @@ spec:
             echo "  2. Restore from a backup taken before the version change"
           else
             echo "PostgreSQL cannot start with a data directory from a"
-            echo "different major version. To run the in-place upgrade:"
+            echo "different major version."
             echo ""
-            echo "  1. Back up your database: kubectl exec <pod> -- pg_dump -U <user> <db> > backup.sql"
-            echo "  2. Set postgresql.upgrade.enabled=true"
-            echo "  3. Run 'helm upgrade' again"
-            echo "  4. Verify the upgrade, then set postgresql.upgrade.enabled=false"
+            echo "Before upgrading, take a backup of your database. If you"
+            echo "already changed versions and hit this error, either:"
+            echo "  1. Temporarily pin postgresql.image.tag back to version $DATA_VERSION"
+            echo "     so PostgreSQL can start, then take a dump/backup, or"
+            echo "  2. Restore from an existing backup or volume snapshot"
+            echo ""
+            echo "Then run the in-place upgrade:"
+            echo "  1. Set postgresql.upgrade.enabled=true"
+            echo "  2. Run 'helm upgrade' again"
+            echo "  3. Verify the upgrade, then set postgresql.upgrade.enabled=false"
           fi
           echo "============================================================"
           exit 1
