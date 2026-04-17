@@ -22,6 +22,7 @@ env:
   IMAGE_NAME: niklasrosenstein/rise
   BUILDER_IMAGE_NAME: niklasrosenstein/rise-builder
   CHART_REGISTRY: ghcr.io/niklasrosenstein/rise
+  # renovate: datasource=github-tags depName=rust packageName=rust-lang/rust extractVersion=^(?<version>\d+\.\d+\.\d+)$
   RUST_VERSION: "1.95.0"
 
 jobs:
