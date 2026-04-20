@@ -165,7 +165,7 @@ postgresql:
 
   image:
     repository: postgres
-    tag: "18-alpine"
+    tag: "18-trixie"
     pullPolicy: IfNotPresent
 
   auth:
@@ -191,11 +191,9 @@ postgresql:
   # See docs/upgrading-postgresql.md for the full procedure.
   # IMPORTANT: The pgautoupgrade image tag must match the TARGET PostgreSQL major version
   # (i.e., the same major version as postgresql.image.tag above).
-   # NOTE: This Debian-based tag requirement applies specifically to the pgautoupgrade image
-   # below, not necessarily to the main postgresql.image.tag above. Avoid pgautoupgrade
-   # Alpine tags (e.g., use "18-trixie" instead), because their postgres user has UID 70,
-   # which doesn't match our pod's runAsUser (999). pgautoupgrade then tries gosu when
-   # UIDs don't match, which fails without root.
+  # NOTE: Use Debian-based tags (e.g., "18-trixie") for both the main and upgrade images.
+  # Alpine postgres images use UID 70, which doesn't match our pod's runAsUser (999).
+  # pgautoupgrade tries gosu when UIDs don't match, which fails without root.
   upgrade:
     enabled: false
     image:
