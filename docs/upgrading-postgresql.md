@@ -27,7 +27,7 @@ Ensure `postgresql.image.tag` is set to the target major version and that `postg
 helm upgrade <release> <chart> \
   --set postgresql.upgrade.enabled=true \
   --set postgresql.image.tag="18-alpine" \
-  --set postgresql.upgrade.image.tag="18-alpine3.21"
+  --set postgresql.upgrade.image.tag="18-trixie"
 ```
 
 With `postgresql.upgrade.enabled=true`, the pod runs a single **pg-upgrade** init container (using the pgautoupgrade image) before starting PostgreSQL. This container detects the version mismatch and migrates the data directory automatically.

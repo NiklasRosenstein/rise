@@ -33,6 +33,8 @@ spec:
         image: "{{ .Values.postgresql.upgrade.image.repository }}:{{ .Values.postgresql.upgrade.image.tag }}"
         imagePullPolicy: {{ .Values.postgresql.upgrade.image.pullPolicy }}
         env:
+        - name: PGAUTO_ONESHOT
+          value: "yes"
         - name: PGDATA
           value: /var/lib/postgresql/data/pgdata
         - name: POSTGRES_USER
