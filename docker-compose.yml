@@ -5,7 +5,7 @@ volumes:
 
 services:
   postgres:
-    image: postgres:18-alpine
+    image: postgres:18-trixie
     container_name: rise-postgres
     restart: unless-stopped
     ports:

@@ -172,7 +172,7 @@ The chart can deploy a PostgreSQL database using a simple StatefulSet.
 |-----------|-------------|---------|
 | `postgresql.enabled` | Enable PostgreSQL deployment | `false` |
 | `postgresql.image.repository` | PostgreSQL image repository | `postgres` |
-| `postgresql.image.tag` | PostgreSQL image tag | `16-alpine` |
+| `postgresql.image.tag` | PostgreSQL image tag | `18-trixie` |
 | `postgresql.image.pullPolicy` | Image pull policy | `IfNotPresent` |
 | `postgresql.auth.username` | PostgreSQL username | `rise` |
 | `postgresql.auth.password` | PostgreSQL password | `rise123` |
