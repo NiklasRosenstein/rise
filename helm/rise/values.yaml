@@ -195,7 +195,7 @@ postgresql:
     enabled: false
     image:
       repository: pgautoupgrade/pgautoupgrade
-      tag: "18-alpine3.21"
+      tag: "18-alpine"
       pullPolicy: IfNotPresent
 
 # Dex OIDC provider (optional)
