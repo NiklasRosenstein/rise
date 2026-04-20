@@ -26,7 +26,7 @@ Ensure `postgresql.image.tag` is set to the target major version and that `postg
 ```bash
 helm upgrade <release> <chart> \
   --set postgresql.upgrade.enabled=true \
-  --set postgresql.image.tag="18-alpine" \
+  --set postgresql.image.tag="18-trixie" \
   --set postgresql.upgrade.image.tag="18-trixie"
 ```
 
