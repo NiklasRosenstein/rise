@@ -103,7 +103,7 @@ impl TokenStore for InMemoryTokenStore {
 pub fn generate_code_verifier() -> String {
     let mut random_bytes = [0u8; 48];
     rand::rng().fill_bytes(&mut random_bytes);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(random_bytes)
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&random_bytes[..])
 }
 
 /// Generate a PKCE code challenge from a code verifier using S256 method
@@ -113,7 +113,7 @@ pub fn generate_code_challenge(verifier: &str) -> String {
     let mut hasher = Sha256::new();
     hasher.update(verifier.as_bytes());
     let hash = hasher.finalize();
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(hash)
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&hash[..])
 }
 
 /// Generate a cryptographically secure random state token
@@ -122,7 +122,7 @@ pub fn generate_code_challenge(verifier: &str) -> String {
 pub fn generate_state_token() -> String {
     let mut random_bytes = [0u8; 32];
     rand::rng().fill_bytes(&mut random_bytes);
-    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(random_bytes)
+    base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(&random_bytes[..])
 }
 
 #[cfg(test)]
