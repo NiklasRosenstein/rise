@@ -294,7 +294,7 @@ impl AppState {
         Self::run_migrations(&db_pool).await?;
 
         // Initialize JWT validator (JWKS is fetched on-demand)
-        let jwt_validator = Arc::new(JwtValidator::new(settings.server.ssrf_config()));
+        let jwt_validator = Arc::new(JwtValidator::new(settings.server.ssrf.clone()));
 
         // Initialize JWT signer for ingress authentication (required)
         let jwt_signer = Arc::new(

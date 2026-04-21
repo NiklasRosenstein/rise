@@ -75,26 +75,9 @@ pub struct ServerSettings {
     #[serde(default = "default_docs_dir")]
     pub docs_dir: Option<String>,
 
-    /// Allow HTTP and private/loopback IPs in SSRF-validated URLs.
-    /// WARNING: Only enable for local development. Never enable in production.
+    /// SSRF validation configuration.
     #[serde(default)]
-    pub allow_private_networks: bool,
-
-    /// Hostnames that are allowed to resolve to private/internal IP addresses.
-    /// Use this to permit SSRF-validated requests to trusted internal services
-    /// (e.g., an internal Keycloak or OIDC provider) without enabling `allow_private_networks`.
-    #[serde(default)]
-    pub ssrf_trusted_hosts: Vec<String>,
-}
-
-impl ServerSettings {
-    /// Build an [`SsrfConfig`](super::ssrf::SsrfConfig) from the server settings.
-    pub fn ssrf_config(&self) -> super::ssrf::SsrfConfig {
-        super::ssrf::SsrfConfig {
-            allow_private_networks: self.allow_private_networks,
-            trusted_hosts: self.ssrf_trusted_hosts.clone(),
-        }
-    }
+    pub ssrf: super::ssrf::SsrfConfig,
 }
 
 fn default_cookie_secure() -> bool {

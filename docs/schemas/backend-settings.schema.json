@@ -986,11 +986,6 @@
     },
     "ServerSettings": {
       "properties": {
-        "allow_private_networks": {
-          "default": false,
-          "description": "Allow HTTP and private/loopback IPs in SSRF-validated URLs.\nWARNING: Only enable for local development. Never enable in production.",
-          "type": "boolean"
-        },
         "cookie_domain": {
           "default": "",
           "description": "Cookie domain for session cookies (e.g., \".rise.dev\" for all subdomains, \"\" for current host only)",
@@ -1068,13 +1063,9 @@
             "null"
           ]
         },
-        "ssrf_trusted_hosts": {
-          "default": [],
-          "description": "Hostnames that are allowed to resolve to private/internal IP addresses.\nUse this to permit SSRF-validated requests to trusted internal services\n(e.g., an internal Keycloak or OIDC provider) without enabling `allow_private_networks`.",
-          "items": {
-            "type": "string"
-          },
-          "type": "array"
+        "ssrf": {
+          "$ref": "#/$defs/SsrfConfig",
+          "description": "SSRF validation configuration."
         },
         "static_dir": {
           "default": null,
@@ -1091,6 +1082,30 @@
         "public_url",
         "jwt_signing_secret"
       ],
+      "type": "object"
+    },
+    "SsrfConfig": {
+      "description": "SSRF validation configuration.\n\nControls how Rise validates URLs before making server-side requests.\nAll fields default to the most restrictive settings (HTTPS required,\nprivate networks blocked, no trusted hosts).",
+      "properties": {
+        "allow_http": {
+          "default": false,
+          "description": "Allow HTTP (non-TLS) URLs in SSRF-validated requests.\nWARNING: Only enable for local development. Never enable in production.",
+          "type": "boolean"
+        },
+        "allow_private_networks": {
+          "default": false,
+          "description": "Allow private/loopback IPs in SSRF-validated URLs.\nWARNING: Only enable for local development. Never enable in production.",
+          "type": "boolean"
+        },
+        "trusted_hosts": {
+          "default": [],
+          "description": "Hostnames that are allowed to resolve to private/internal IP addresses.\nUse this to permit SSRF-validated requests to trusted internal services\n(e.g., an internal Keycloak or OIDC provider) without enabling\n`allow_private_networks`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
       "type": "object"
     },
     "io.k8s.api.networking.v1.IPBlock": {

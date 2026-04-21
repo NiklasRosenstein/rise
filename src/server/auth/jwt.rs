@@ -404,10 +404,7 @@ impl JwtValidator {
 
 impl Default for JwtValidator {
     fn default() -> Self {
-        Self::new(crate::server::ssrf::SsrfConfig {
-            allow_private_networks: false,
-            trusted_hosts: vec![],
-        })
+        Self::new(crate::server::ssrf::SsrfConfig::default())
     }
 }
 

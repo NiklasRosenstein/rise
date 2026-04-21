@@ -156,7 +156,7 @@ pub async fn create_workload_identity(
 
     // Verify OIDC issuer is reachable and has valid configuration
     // (also validates HTTPS requirement and SSRF protections)
-    verify_oidc_issuer(&req.issuer_url, &state.server_settings.ssrf_config()).await?;
+    verify_oidc_issuer(&req.issuer_url, &state.server_settings.ssrf).await?;
 
     // Create service account
     let sa = service_accounts::create(&state.db_pool, project.id, &req.issuer_url, &req.claims)
@@ -351,7 +351,7 @@ pub async fn update_workload_identity(
         }
 
         // Validate SSRF protections (HTTPS requirement + blocks private/internal IPs)
-        ssrf::validate_url(issuer_url, &state.server_settings.ssrf_config())
+        ssrf::validate_url(issuer_url, &state.server_settings.ssrf)
             .await
             .map_err(|e| {
                 tracing::warn!(

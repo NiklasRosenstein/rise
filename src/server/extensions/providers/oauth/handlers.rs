@@ -524,7 +524,7 @@ pub async fn authorize(
     };
 
     // Resolve OAuth endpoints (from spec or OIDC discovery)
-    let ssrf_config = state.server_settings.ssrf_config();
+    let ssrf_config = state.server_settings.ssrf.clone();
     let endpoints = resolve_oauth_endpoints(&spec, &ssrf_config)
         .await
         .map_err(|e| {
@@ -631,7 +631,7 @@ pub async fn callback(
         "Encryption provider not configured".to_string(),
     ))?;
 
-    let ssrf_config = state.server_settings.ssrf_config();
+    let ssrf_config = state.server_settings.ssrf.clone();
 
     use super::provider::{OAuthProvider, OAuthProviderConfig};
     let oauth_provider = OAuthProvider::new(OAuthProviderConfig {
@@ -1464,7 +1464,7 @@ async fn handle_refresh_token_grant(
             error!("Encryption provider not configured");
             oauth2_error("server_error", Some("Internal server error".to_string()))
         })?,
-        http_client: crate::server::ssrf::safe_client(&state.server_settings.ssrf_config()),
+        http_client: crate::server::ssrf::safe_client(&state.server_settings.ssrf),
         api_domain: state.public_url.clone(),
     });
 
@@ -1668,7 +1668,7 @@ pub async fn oidc_discovery(
     }
 
     // Try to fetch upstream OIDC discovery
-    let ssrf_config = state.server_settings.ssrf_config();
+    let ssrf_config = state.server_settings.ssrf.clone();
     let upstream_issuer = &spec.issuer_url;
     let discovery_result = fetch_oidc_discovery(upstream_issuer, &ssrf_config).await;
 
@@ -1820,7 +1820,7 @@ pub async fn oidc_jwks(
     })?;
 
     // Try to fetch OIDC discovery to get jwks_uri
-    let ssrf_config = state.server_settings.ssrf_config();
+    let ssrf_config = state.server_settings.ssrf.clone();
     let discovery_result = fetch_oidc_discovery(&spec.issuer_url, &ssrf_config).await;
 
     match discovery_result {

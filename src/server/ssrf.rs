@@ -1,12 +1,30 @@
+use schemars::JsonSchema;
+use serde::Deserialize;
 use std::net::IpAddr;
 use std::time::Duration;
 
 /// SSRF validation configuration.
-#[derive(Debug, Clone)]
+///
+/// Controls how Rise validates URLs before making server-side requests.
+/// All fields default to the most restrictive settings (HTTPS required,
+/// private networks blocked, no trusted hosts).
+#[derive(Debug, Clone, Default, Deserialize, JsonSchema)]
 pub struct SsrfConfig {
-    /// Allow HTTP and private/loopback IPs (development only).
+    /// Allow private/loopback IPs in SSRF-validated URLs.
+    /// WARNING: Only enable for local development. Never enable in production.
+    #[serde(default)]
     pub allow_private_networks: bool,
-    /// Hostnames exempt from private IP blocking (e.g., internal OIDC providers).
+
+    /// Allow HTTP (non-TLS) URLs in SSRF-validated requests.
+    /// WARNING: Only enable for local development. Never enable in production.
+    #[serde(default)]
+    pub allow_http: bool,
+
+    /// Hostnames that are allowed to resolve to private/internal IP addresses.
+    /// Use this to permit SSRF-validated requests to trusted internal services
+    /// (e.g., an internal Keycloak or OIDC provider) without enabling
+    /// `allow_private_networks`.
+    #[serde(default)]
     pub trusted_hosts: Vec<String>,
 }
 
@@ -16,6 +34,11 @@ impl SsrfConfig {
         self.trusted_hosts
             .iter()
             .any(|h| h.eq_ignore_ascii_case(host))
+    }
+
+    /// Whether HTTP is allowed (either via `allow_http` or `allow_private_networks`).
+    fn http_allowed(&self) -> bool {
+        self.allow_http || self.allow_private_networks
     }
 }
 
@@ -77,7 +100,7 @@ fn is_blocked_ip(ip: &IpAddr) -> bool {
 /// Validate that a URL is safe to fetch (SSRF protection).
 ///
 /// Checks:
-/// 1. Scheme must be HTTPS (unless `allow_private_networks` is true)
+/// 1. Scheme must be HTTPS (unless `allow_http` or `allow_private_networks` is true)
 /// 2. Hostname must be present
 /// 3. All resolved IP addresses must not be in blocked ranges (unless the hostname
 ///    is in `trusted_hosts` or `allow_private_networks` is true)
@@ -85,15 +108,12 @@ fn is_blocked_ip(ip: &IpAddr) -> bool {
 /// Trusted hosts are allowed to resolve to private IPs while keeping SSRF
 /// protection for all other hostnames. Use this for internal services like
 /// Keycloak or other OIDC providers that resolve to cluster-internal addresses.
-///
-/// When `allow_private_networks` is true, HTTP and private/loopback IPs are permitted.
-/// **WARNING**: Only enable `allow_private_networks` for local development. Never enable in production.
 pub async fn validate_url(url: &str, config: &SsrfConfig) -> Result<(), SsrfError> {
     // Parse the URL
     let parsed = url::Url::parse(url).map_err(|e| SsrfError::InvalidUrl(e.to_string()))?;
 
-    // Require HTTPS (unless relaxed for development)
-    if !config.allow_private_networks && parsed.scheme() != "https" {
+    // Require HTTPS (unless relaxed)
+    if !config.http_allowed() && parsed.scheme() != "https" {
         return Err(SsrfError::HttpsRequired);
     }
 
@@ -146,11 +166,11 @@ pub async fn validate_url(url: &str, config: &SsrfConfig) -> Result<(), SsrfErro
 /// Create an HTTP client configured with SSRF mitigations.
 ///
 /// The client has:
-/// - 10-second connect and total request timeout
+/// - 5-second connect timeout and 10-second total request timeout
 /// - Custom redirect policy (max 3 hops, HTTPS-only, blocks private/internal IPs)
 ///
 /// When `allow_private_networks` is true, redirect checks for HTTPS and blocked IPs are skipped.
-/// **WARNING**: Only enable `allow_private_networks` for local development. Never enable in production.
+/// When `allow_http` is true, only the HTTPS requirement on redirects is relaxed.
 pub fn safe_client(config: &SsrfConfig) -> reqwest::Client {
     let config = config.clone();
     reqwest::Client::builder()
@@ -159,7 +179,7 @@ pub fn safe_client(config: &SsrfConfig) -> reqwest::Client {
         .redirect(reqwest::redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() >= 3 {
                 attempt.error("too many redirects")
-            } else if !config.allow_private_networks && attempt.url().scheme() != "https" {
+            } else if !config.http_allowed() && attempt.url().scheme() != "https" {
                 attempt.error("redirect target must use HTTPS")
             } else if let Some(host) = attempt.url().host_str() {
                 if !config.allow_private_networks && !config.is_trusted_host(host) {
@@ -184,23 +204,28 @@ mod tests {
     use super::*;
 
     fn strict() -> SsrfConfig {
-        SsrfConfig {
-            allow_private_networks: false,
-            trusted_hosts: vec![],
-        }
+        SsrfConfig::default()
     }
 
     fn permissive() -> SsrfConfig {
         SsrfConfig {
             allow_private_networks: true,
+            allow_http: true,
             trusted_hosts: vec![],
+        }
+    }
+
+    fn with_allow_http() -> SsrfConfig {
+        SsrfConfig {
+            allow_http: true,
+            ..SsrfConfig::default()
         }
     }
 
     fn with_trusted(hosts: &[&str]) -> SsrfConfig {
         SsrfConfig {
-            allow_private_networks: false,
             trusted_hosts: hosts.iter().map(|s| s.to_string()).collect(),
+            ..SsrfConfig::default()
         }
     }
 
@@ -408,5 +433,27 @@ mod tests {
         let config = with_trusted(&["Keycloak.Example.COM"]);
         assert!(config.is_trusted_host("keycloak.example.com"));
         assert!(config.is_trusted_host("KEYCLOAK.EXAMPLE.COM"));
+    }
+
+    // Tests for allow_http
+
+    #[tokio::test]
+    async fn test_validate_url_allows_http_when_allow_http_enabled() {
+        let result = validate_url("http://example.com", &with_allow_http()).await;
+        assert!(
+            result.is_ok(),
+            "expected HTTP URL to be accepted with allow_http, got: {:?}",
+            result
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_url_allow_http_still_blocks_private_ips() {
+        let result = validate_url("https://10.0.0.1/internal", &with_allow_http()).await;
+        assert!(
+            matches!(result, Err(SsrfError::BlockedIpRange(_))),
+            "expected private IP to be blocked even with allow_http, got: {:?}",
+            result
+        );
     }
 }
