@@ -22,10 +22,10 @@ use crate::server::workload_identity::models::{
 /// enforces request timeout and redirect limits.
 async fn verify_oidc_issuer(
     issuer_url: &str,
-    allow_private_networks: bool,
+    ssrf_config: &ssrf::SsrfConfig,
 ) -> Result<(), ServerError> {
     // Validate the issuer URL against SSRF (requires HTTPS, blocks private IPs)
-    ssrf::validate_url(issuer_url, allow_private_networks)
+    ssrf::validate_url(issuer_url, ssrf_config)
         .await
         .map_err(|e| {
             tracing::warn!(
@@ -46,7 +46,7 @@ async fn verify_oidc_issuer(
     tracing::debug!("Verifying OIDC issuer at: {}", discovery_url);
 
     // Use SSRF-safe client (timeout + redirect limits)
-    let client = ssrf::safe_client(allow_private_networks);
+    let client = ssrf::safe_client(ssrf_config);
 
     // Attempt to fetch the OIDC configuration
     let response = client.get(&discovery_url)
@@ -156,11 +156,7 @@ pub async fn create_workload_identity(
 
     // Verify OIDC issuer is reachable and has valid configuration
     // (also validates HTTPS requirement and SSRF protections)
-    verify_oidc_issuer(
-        &req.issuer_url,
-        state.server_settings.allow_private_networks,
-    )
-    .await?;
+    verify_oidc_issuer(&req.issuer_url, &state.server_settings.ssrf_config()).await?;
 
     // Create service account
     let sa = service_accounts::create(&state.db_pool, project.id, &req.issuer_url, &req.claims)
@@ -355,7 +351,7 @@ pub async fn update_workload_identity(
         }
 
         // Validate SSRF protections (HTTPS requirement + blocks private/internal IPs)
-        ssrf::validate_url(issuer_url, state.server_settings.allow_private_networks)
+        ssrf::validate_url(issuer_url, &state.server_settings.ssrf_config())
             .await
             .map_err(|e| {
                 tracing::warn!(

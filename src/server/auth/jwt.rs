@@ -79,16 +79,17 @@ impl JwksCache {
 pub struct JwtValidator {
     jwks_cache: Arc<RwLock<HashMap<String, JwksCache>>>,
     http_client: reqwest::Client,
-    allow_private_networks: bool,
+    ssrf_config: crate::server::ssrf::SsrfConfig,
 }
 
 impl JwtValidator {
     /// Create a new JWT validator
-    pub fn new(allow_private_networks: bool) -> Self {
+    pub fn new(ssrf_config: crate::server::ssrf::SsrfConfig) -> Self {
+        let http_client = crate::server::ssrf::safe_client(&ssrf_config);
         Self {
             jwks_cache: Arc::new(RwLock::new(HashMap::new())),
-            http_client: crate::server::ssrf::safe_client(allow_private_networks),
-            allow_private_networks,
+            http_client,
+            ssrf_config,
         }
     }
 
@@ -100,7 +101,7 @@ impl JwtValidator {
         );
 
         // SSRF-validate the discovery URL before fetching
-        crate::server::ssrf::validate_url(&discovery_url, self.allow_private_networks)
+        crate::server::ssrf::validate_url(&discovery_url, &self.ssrf_config)
             .await
             .map_err(|e| anyhow!("OIDC discovery URL failed SSRF validation: {}", e))?;
 
@@ -121,7 +122,7 @@ impl JwtValidator {
         // SSRF-validate the JWKS URI before returning it.
         // An attacker-controlled OIDC provider could return a jwks_uri pointing
         // to an internal IP (e.g., metadata endpoint, internal service).
-        crate::server::ssrf::validate_url(&discovery.jwks_uri, self.allow_private_networks)
+        crate::server::ssrf::validate_url(&discovery.jwks_uri, &self.ssrf_config)
             .await
             .map_err(|e| anyhow!("JWKS URI failed SSRF validation: {}", e))?;
 
@@ -403,7 +404,10 @@ impl JwtValidator {
 
 impl Default for JwtValidator {
     fn default() -> Self {
-        Self::new(false)
+        Self::new(crate::server::ssrf::SsrfConfig {
+            allow_private_networks: false,
+            trusted_hosts: vec![],
+        })
     }
 }
 
@@ -413,7 +417,7 @@ mod tests {
 
     #[test]
     fn test_jwt_validator_creation() {
-        let validator = JwtValidator::new(false);
+        let validator = JwtValidator::default();
         // Validator should be created with empty cache
         assert!(validator.jwks_cache.try_read().is_ok());
     }

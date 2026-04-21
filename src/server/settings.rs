@@ -79,6 +79,22 @@ pub struct ServerSettings {
     /// WARNING: Only enable for local development. Never enable in production.
     #[serde(default)]
     pub allow_private_networks: bool,
+
+    /// Hostnames that are allowed to resolve to private/internal IP addresses.
+    /// Use this to permit SSRF-validated requests to trusted internal services
+    /// (e.g., an internal Keycloak or OIDC provider) without enabling `allow_private_networks`.
+    #[serde(default)]
+    pub ssrf_trusted_hosts: Vec<String>,
+}
+
+impl ServerSettings {
+    /// Build an [`SsrfConfig`](super::ssrf::SsrfConfig) from the server settings.
+    pub fn ssrf_config(&self) -> super::ssrf::SsrfConfig {
+        super::ssrf::SsrfConfig {
+            allow_private_networks: self.allow_private_networks,
+            trusted_hosts: self.ssrf_trusted_hosts.clone(),
+        }
+    }
 }
 
 fn default_cookie_secure() -> bool {
