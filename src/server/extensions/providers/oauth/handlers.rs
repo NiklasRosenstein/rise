@@ -524,8 +524,8 @@ pub async fn authorize(
     };
 
     // Resolve OAuth endpoints (from spec or OIDC discovery)
-    let ssrf_config = state.server_settings.ssrf.clone();
-    let endpoints = resolve_oauth_endpoints(&spec, &ssrf_config)
+    let ssrf_config = &state.server_settings.ssrf;
+    let endpoints = resolve_oauth_endpoints(&spec, ssrf_config)
         .await
         .map_err(|e| {
             (
