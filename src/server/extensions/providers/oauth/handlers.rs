@@ -685,7 +685,7 @@ pub async fn callback(
     };
 
     // Resolve OAuth endpoints (from spec or OIDC discovery)
-    let endpoints = resolve_oauth_endpoints(&spec, &ssrf_config)
+    let endpoints = resolve_oauth_endpoints(&spec, ssrf_config)
         .await
         .map_err(|e| {
             (
@@ -695,7 +695,7 @@ pub async fn callback(
         })?;
 
     // SSRF-validate the token endpoint before exchanging credentials
-    crate::server::ssrf::validate_url(&endpoints.token_endpoint, &ssrf_config)
+    crate::server::ssrf::validate_url(&endpoints.token_endpoint, ssrf_config)
         .await
         .map_err(|e| {
             error!("Token endpoint failed SSRF validation: {}", e);
@@ -706,7 +706,7 @@ pub async fn callback(
         })?;
 
     // Exchange authorization code for tokens (with PKCE code verifier)
-    let http_client = crate::server::ssrf::safe_client(&ssrf_config);
+    let http_client = crate::server::ssrf::safe_client(ssrf_config);
     let response = http_client
         .post(&endpoints.token_endpoint)
         .header("Accept", "application/json")
@@ -1832,7 +1832,7 @@ pub async fn oidc_jwks(
             ))?;
 
             // SSRF-validate the JWKS URI before fetching
-            crate::server::ssrf::validate_url(&jwks_uri, &ssrf_config)
+            crate::server::ssrf::validate_url(&jwks_uri, ssrf_config)
                 .await
                 .map_err(|e| {
                     error!("JWKS URI failed SSRF validation: {}", e);
@@ -1842,7 +1842,7 @@ pub async fn oidc_jwks(
                     )
                 })?;
 
-            let http_client = crate::server::ssrf::safe_client(&ssrf_config);
+            let http_client = crate::server::ssrf::safe_client(ssrf_config);
 
             // Fetch JWKS
             let jwks_response = http_client.get(&jwks_uri).send().await.map_err(|e| {
