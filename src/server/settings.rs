@@ -75,10 +75,9 @@ pub struct ServerSettings {
     #[serde(default = "default_docs_dir")]
     pub docs_dir: Option<String>,
 
-    /// Allow HTTP and private/loopback IPs in SSRF-validated URLs.
-    /// WARNING: Only enable for local development. Never enable in production.
+    /// SSRF validation configuration.
     #[serde(default)]
-    pub allow_private_networks: bool,
+    pub ssrf: super::ssrf::SsrfConfig,
 }
 
 fn default_cookie_secure() -> bool {
