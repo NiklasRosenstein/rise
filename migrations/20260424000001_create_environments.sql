@@ -32,7 +32,7 @@ CREATE INDEX idx_deployments_environment_id ON deployments(environment_id);
 ALTER TABLE project_env_vars ADD COLUMN environment_id UUID REFERENCES environments(id) ON DELETE CASCADE;
 ALTER TABLE project_env_vars DROP CONSTRAINT project_env_vars_project_id_key_key;
 CREATE UNIQUE INDEX idx_project_env_vars_unique_key
-    ON project_env_vars(project_id, key, COALESCE(environment_id, '00000000-0000-0000-0000-000000000000'::uuid));
+    ON project_env_vars(project_id, key, environment_id) NULLS NOT DISTINCT;
 
 -- 4. Add allowed_environment_ids to service_accounts
 ALTER TABLE service_accounts ADD COLUMN allowed_environment_ids UUID[];
