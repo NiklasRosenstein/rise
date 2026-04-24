@@ -1,4 +1,6 @@
-use super::models::{EnvVarResponse, EnvVarValueResponse, EnvVarsResponse, SetEnvVarRequest};
+use super::models::{
+    EnvVarResponse, EnvVarValueResponse, EnvVarsResponse, MoveEnvVarRequest, SetEnvVarRequest,
+};
 use crate::db::{env_vars as db_env_vars, environments as db_environments, projects};
 use crate::server::auth::context::AuthContext;
 use crate::server::deployment::models as deployment_models;
@@ -120,12 +122,14 @@ pub async fn set_project_env_var(
     // New deployments will use the updated values.
 
     // Return masked response
-    Ok(Json(EnvVarResponse::from_db_model(
+    let mut response = EnvVarResponse::from_db_model(
         env_var.key,
         env_var.value,
         env_var.is_secret,
         env_var.is_protected,
-    )))
+    );
+    response.environment = params.get("environment").cloned();
+    Ok(Json(response))
 }
 
 /// List all environment variables for a project
@@ -168,6 +172,13 @@ pub async fn list_project_env_vars(
             .await
             .internal_err("Failed to list environment variables")?;
 
+    // Build environment ID -> name lookup
+    let environments = db_environments::list_for_project(&state.db_pool, project.id)
+        .await
+        .internal_err("Failed to list environments")?;
+    let env_name_map: HashMap<uuid::Uuid, String> =
+        environments.into_iter().map(|e| (e.id, e.name)).collect();
+
     // Convert to API response
     let mut env_vars = Vec::new();
     for var in db_env_vars {
@@ -188,20 +199,25 @@ pub async fn list_project_env_vars(
             var.value.clone()
         };
 
-        env_vars.push(
-            if var.is_secret && (!include_unprotected || var.is_protected) {
-                // Mask protected secrets
-                EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_protected)
-            } else {
-                // Return plaintext or decrypted value
-                EnvVarResponse {
-                    key: var.key,
-                    value,
-                    is_secret: var.is_secret,
-                    is_protected: var.is_protected,
-                }
-            },
-        );
+        let environment = var
+            .environment_id
+            .and_then(|id| env_name_map.get(&id).cloned());
+
+        let mut response = if var.is_secret && (!include_unprotected || var.is_protected) {
+            // Mask protected secrets
+            EnvVarResponse::from_db_model(var.key, var.value, var.is_secret, var.is_protected)
+        } else {
+            // Return plaintext or decrypted value
+            EnvVarResponse {
+                key: var.key,
+                value,
+                is_secret: var.is_secret,
+                is_protected: var.is_protected,
+                environment: None,
+            }
+        };
+        response.environment = environment;
+        env_vars.push(response);
     }
 
     Ok(Json(EnvVarsResponse { env_vars }))
@@ -259,6 +275,94 @@ pub async fn delete_project_env_var(
     // New deployments will not have the deleted variable.
 
     Ok(StatusCode::NO_CONTENT)
+}
+
+/// Move a project environment variable to a different environment
+pub async fn move_project_env_var(
+    State(state): State<AppState>,
+    auth: AuthContext,
+    Path((project_id_or_name, key)): Path<(String, String)>,
+    Json(payload): Json<MoveEnvVarRequest>,
+) -> Result<Json<EnvVarResponse>, ServerError> {
+    let project = if let Ok(uuid) = project_id_or_name.parse() {
+        projects::find_by_id(&state.db_pool, uuid)
+            .await
+            .internal_err("Failed to get project")?
+    } else {
+        projects::find_by_name(&state.db_pool, &project_id_or_name)
+            .await
+            .internal_err("Failed to get project")?
+    }
+    .ok_or_else(|| ServerError::not_found("Project not found"))?;
+
+    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
+    if !is_sa {
+        ensure_project_access_or_admin(&state, &user, &project).await?;
+    }
+
+    // Resolve source environment
+    let from_env_id = if let Some(ref name) = payload.from_environment {
+        let env = db_environments::find_by_name(&state.db_pool, project.id, name)
+            .await
+            .internal_err("Failed to find source environment")?
+            .ok_or_else(|| {
+                ServerError::not_found(format!("Source environment '{}' not found", name))
+            })?;
+        Some(env.id)
+    } else {
+        None
+    };
+
+    // Resolve target environment
+    let to_env_id = if let Some(ref name) = payload.to_environment {
+        let env = db_environments::find_by_name(&state.db_pool, project.id, name)
+            .await
+            .internal_err("Failed to find target environment")?
+            .ok_or_else(|| {
+                ServerError::not_found(format!("Target environment '{}' not found", name))
+            })?;
+        Some(env.id)
+    } else {
+        None
+    };
+
+    // Check for conflict at the target environment
+    let existing_at_target =
+        db_env_vars::get_project_env_var(&state.db_pool, project.id, &key, to_env_id)
+            .await
+            .internal_err("Failed to check target environment")?;
+    if existing_at_target.is_some() {
+        let target_label = payload
+            .to_environment
+            .as_deref()
+            .unwrap_or("global");
+        return Err(ServerError::bad_request(format!(
+            "Environment variable '{}' already exists in environment '{}'",
+            key, target_label
+        )));
+    }
+
+    let env_var =
+        db_env_vars::update_env_var_environment(&state.db_pool, project.id, &key, from_env_id, to_env_id)
+            .await
+            .internal_err("Failed to move environment variable")?;
+
+    tracing::info!(
+        "Moved environment variable '{}' for project '{}' from {:?} to {:?}",
+        key,
+        project.name,
+        payload.from_environment,
+        payload.to_environment
+    );
+
+    let mut response = EnvVarResponse::from_db_model(
+        env_var.key,
+        env_var.value,
+        env_var.is_secret,
+        env_var.is_protected,
+    );
+    response.environment = payload.to_environment;
+    Ok(Json(response))
 }
 
 /// List all environment variables for a deployment (read-only)
@@ -336,6 +440,7 @@ pub async fn list_deployment_env_vars(
                     value,
                     is_secret: var.is_secret,
                     is_protected: var.is_protected,
+                    environment: None,
                 }
             },
         );
@@ -558,6 +663,7 @@ pub async fn preview_deployment_env_vars(
                     value: decrypted,
                     is_secret: true,
                     is_protected: false,
+                    environment: None,
                 },
             );
         } else if var.is_secret {
@@ -569,6 +675,7 @@ pub async fn preview_deployment_env_vars(
                     value: "••••••••".to_string(),
                     is_secret: true,
                     is_protected: true,
+                    environment: None,
                 },
             );
         } else {
@@ -580,6 +687,7 @@ pub async fn preview_deployment_env_vars(
                     value: var.value,
                     is_secret: false,
                     is_protected: false,
+                    environment: None,
                 },
             );
         }
@@ -594,6 +702,7 @@ pub async fn preview_deployment_env_vars(
                 value: "8080".to_string(),
                 is_secret: false,
                 is_protected: false,
+                environment: None,
             },
         );
     }
@@ -620,6 +729,7 @@ pub async fn preview_deployment_env_vars(
                         value,
                         is_secret: false,
                         is_protected: false,
+                        environment: None,
                     },
                 );
             }
@@ -645,6 +755,7 @@ pub async fn preview_deployment_env_vars(
                         value,
                         is_secret: false,
                         is_protected: false,
+                        environment: None,
                     },
                 );
             }
@@ -665,18 +776,21 @@ pub async fn preview_deployment_env_vars(
                             value: v,
                             is_secret: false,
                             is_protected: false,
+                            environment: None,
                         },
                         InjectedEnvVarValue::Secret { decrypted, .. } => EnvVarResponse {
                             key: var.key.clone(),
                             value: decrypted,
                             is_secret: true,
                             is_protected: false,
+                            environment: None,
                         },
                         InjectedEnvVarValue::Protected { .. } => EnvVarResponse {
                             key: var.key.clone(),
                             value: "••••••••".to_string(),
                             is_secret: true,
                             is_protected: true,
+                            environment: None,
                         },
                     };
                     // Extension vars override user vars for the same key

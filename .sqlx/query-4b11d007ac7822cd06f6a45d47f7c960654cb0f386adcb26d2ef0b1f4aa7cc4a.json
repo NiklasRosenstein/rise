@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        UPDATE environments\n        SET\n            name = COALESCE($2, name),\n            primary_deployment_group = CASE WHEN $3 THEN $4 ELSE primary_deployment_group END,\n            is_default = COALESCE($5, is_default),\n            is_production = COALESCE($6, is_production),\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at\n        ",
+  "query": "\n        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at\n        FROM environments\n        WHERE project_id = $1 AND name = $2\n        ",
   "describe": {
     "columns": [
       {
@@ -35,11 +35,16 @@
       },
       {
         "ordinal": 6,
+        "name": "color",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
@@ -47,11 +52,7 @@
     "parameters": {
       "Left": [
         "Uuid",
-        "Text",
-        "Bool",
-        "Text",
-        "Bool",
-        "Bool"
+        "Text"
       ]
     },
     "nullable": [
@@ -62,8 +63,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "2cec065d0de2f8efe65e9be4ea24b5c44c13399dabf7360f72a557f5fed0f67e"
+  "hash": "4b11d007ac7822cd06f6a45d47f7c960654cb0f386adcb26d2ef0b1f4aa7cc4a"
 }

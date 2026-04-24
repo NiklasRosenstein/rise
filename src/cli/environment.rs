@@ -11,6 +11,7 @@ struct EnvironmentResponse {
     primary_deployment_group: Option<String>,
     is_default: bool,
     is_production: bool,
+    color: String,
     created_at: String,
     updated_at: String,
 }
@@ -24,6 +25,7 @@ struct CreateEnvironmentRequest {
     is_default: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     is_production: Option<bool>,
+    color: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -36,6 +38,8 @@ struct UpdateEnvironmentRequest {
     is_default: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     is_production: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    color: Option<String>,
 }
 
 pub async fn handle_environment_command(
@@ -56,6 +60,7 @@ pub async fn handle_environment_command(
             group,
             default,
             production,
+            color,
         } => {
             let project_name = crate::resolve_project_name(project.clone(), path)?;
             create_environment(
@@ -67,6 +72,7 @@ pub async fn handle_environment_command(
                 group.as_deref(),
                 *default,
                 *production,
+                color,
             )
             .await
         }
@@ -90,6 +96,7 @@ pub async fn handle_environment_command(
             group,
             default,
             production,
+            color,
         } => {
             let project_name = crate::resolve_project_name(project.clone(), path)?;
             update_environment(
@@ -102,6 +109,7 @@ pub async fn handle_environment_command(
                 group.as_deref(),
                 *default,
                 *production,
+                color.as_deref(),
             )
             .await
         }
@@ -126,6 +134,7 @@ async fn create_environment(
     group: Option<&str>,
     is_default: bool,
     is_production: bool,
+    color: &str,
 ) -> Result<()> {
     let url = format!("{}/api/v1/projects/{}/environments", backend_url, project);
 
@@ -134,6 +143,7 @@ async fn create_environment(
         primary_deployment_group: group.map(|g| g.to_string()),
         is_default: if is_default { Some(true) } else { None },
         is_production: if is_production { Some(true) } else { None },
+        color: color.to_string(),
     };
 
     let response = http_client
@@ -171,6 +181,7 @@ async fn create_environment(
     if env.is_production {
         println!("  Production: yes");
     }
+    println!("  Color: {}", env.color);
 
     Ok(())
 }
@@ -218,6 +229,7 @@ async fn list_environments(
             Cell::new("PRIMARY GROUP").add_attribute(Attribute::Bold),
             Cell::new("DEFAULT").add_attribute(Attribute::Bold),
             Cell::new("PRODUCTION").add_attribute(Attribute::Bold),
+            Cell::new("COLOR").add_attribute(Attribute::Bold),
         ]);
 
     for env in envs {
@@ -226,6 +238,7 @@ async fn list_environments(
             Cell::new(env.primary_deployment_group.as_deref().unwrap_or("-")),
             Cell::new(if env.is_default { "yes" } else { "-" }),
             Cell::new(if env.is_production { "yes" } else { "-" }),
+            Cell::new(&env.color),
         ]);
     }
 
@@ -280,6 +293,7 @@ async fn show_environment(
         "Production:     {}",
         if env.is_production { "yes" } else { "no" }
     );
+    println!("Color:          {}", env.color);
     println!("Created:        {}", env.created_at);
     println!("Updated:        {}", env.updated_at);
 
@@ -297,6 +311,7 @@ async fn update_environment(
     group: Option<&str>,
     is_default: Option<bool>,
     is_production: Option<bool>,
+    color: Option<&str>,
 ) -> Result<()> {
     let url = format!(
         "{}/api/v1/projects/{}/environments/{}",
@@ -316,6 +331,7 @@ async fn update_environment(
         primary_deployment_group,
         is_default,
         is_production,
+        color: color.map(|c| c.to_string()),
     };
 
     let response = http_client

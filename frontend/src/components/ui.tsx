@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 function cx(...parts: Array<string | false | null | undefined>) {
     return parts.filter(Boolean).join(' ');
@@ -184,6 +185,260 @@ export function MonoStatusPill({ tone = 'muted', uppercase = true, className = '
     return <span className={cx('mono-status-pill', toneClass, uppercase && 'mono-status-pill-up', className)}>{children}</span>;
 }
 
+export const ENV_COLOR_STYLES = {
+    green:  { color: '#34d399', borderColor: '#2e6c44', background: 'rgba(44, 105, 66, 0.2)' },
+    blue:   { color: '#60a5fa', borderColor: '#2e5a8c', background: 'rgba(44, 80, 140, 0.2)' },
+    yellow: { color: '#fbbf24', borderColor: '#7b6333', background: 'rgba(139, 112, 57, 0.22)' },
+    red:    { color: '#f87171', borderColor: '#7d4b4b', background: 'rgba(125, 75, 75, 0.24)' },
+    purple: { color: '#a78bfa', borderColor: '#6b3fa0', background: 'rgba(107, 63, 160, 0.2)' },
+    orange: { color: '#fb923c', borderColor: '#8c5a2e', background: 'rgba(140, 90, 46, 0.22)' },
+    gray:   { color: '#9ca3af', borderColor: '#4a4a4a', background: 'rgba(74, 74, 74, 0.2)' },
+};
+
+const ENV_COLORS = Object.keys(ENV_COLOR_STYLES) as Array<keyof typeof ENV_COLOR_STYLES>;
+
+export function EnvironmentColorDot({ color = 'green', size = '0.75rem', className = '' }) {
+    const style = ENV_COLOR_STYLES[color] || ENV_COLOR_STYLES.green;
+    return (
+        <span
+            className={className}
+            style={{ display: 'inline-block', width: size, height: size, borderRadius: '50%', backgroundColor: style.color, flexShrink: 0 }}
+        />
+    );
+}
+
+export function EnvironmentColorPicker({ value, onChange }) {
+    return (
+        <div className="flex items-center gap-2">
+            {ENV_COLORS.map((c) => (
+                <button
+                    key={c}
+                    type="button"
+                    onClick={() => onChange(c)}
+                    className="mono-color-pick"
+                    style={{
+                        outlineColor: value === c ? ENV_COLOR_STYLES[c].color : 'transparent',
+                    }}
+                    aria-label={c}
+                >
+                    <EnvironmentColorDot color={c} size="0.75rem" />
+                </button>
+            ))}
+        </div>
+    );
+}
+
+export function EnvironmentCombobox({
+    environments,
+    selected,
+    onChange,
+    placeholder = 'All environments',
+}) {
+    const [query, setQuery] = useState('');
+    const [isOpen, setIsOpen] = useState(false);
+    const wrapRef = useRef<HTMLDivElement | null>(null);
+    const listRef = useRef<HTMLDivElement | null>(null);
+    const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+
+    useEffect(() => {
+        function handleClickOutside(e: MouseEvent) {
+            const target = e.target as Node;
+            if (wrapRef.current?.contains(target) || listRef.current?.contains(target)) return;
+            setIsOpen(false);
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const filtered = environments.filter((env) =>
+        env.name.toLowerCase().includes(query.toLowerCase()) && !selected.includes(env.name)
+    );
+
+    const handleSelect = (name: string) => {
+        onChange([...selected, name]);
+    };
+
+    const handleRemove = (name: string) => {
+        onChange(selected.filter((n) => n !== name));
+    };
+
+    const selectedEnvs = environments.filter((env) => selected.includes(env.name));
+
+    const open = () => {
+        if (wrapRef.current) {
+            const rect = wrapRef.current.getBoundingClientRect();
+            setPos({ top: rect.bottom + 2, left: rect.left, width: rect.width });
+        }
+        setIsOpen(true);
+    };
+
+    return (
+        <>
+            <div
+                ref={wrapRef}
+                className="mono-input flex flex-wrap items-center gap-1 cursor-text"
+                style={{ minHeight: '2.1rem', paddingTop: '0.25rem', paddingBottom: '0.25rem' }}
+                onClick={() => { if (!isOpen) open(); }}
+            >
+                {selectedEnvs.map((env) => (
+                    <span key={env.name} className="mono-env-chip">
+                        <EnvironmentColorDot color={env.color} size="0.5rem" />
+                        {env.name}
+                        <button
+                            type="button"
+                            className="mono-env-chip-x"
+                            onClick={(e) => { e.stopPropagation(); handleRemove(env.name); }}
+                            aria-label={`Remove ${env.name}`}
+                        >
+                            &times;
+                        </button>
+                    </span>
+                ))}
+                <input
+                    type="text"
+                    className="mono-env-combo-input"
+                    placeholder={selectedEnvs.length === 0 ? placeholder : ''}
+                    value={query}
+                    onChange={(e) => { setQuery(e.target.value); if (!isOpen) open(); }}
+                    onFocus={() => { if (!isOpen) open(); }}
+                    tabIndex={-1}
+                />
+            </div>
+            {isOpen && createPortal(
+                <div
+                    ref={listRef}
+                    className="mono-dropdown-list"
+                    style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
+                >
+                    {filtered.length === 0 ? (
+                        <div className="mono-env-combo-empty">No environments</div>
+                    ) : (
+                        filtered.map((env) => (
+                            <button
+                                key={env.name}
+                                type="button"
+                                className="mono-dropdown-option"
+                                onClick={() => handleSelect(env.name)}
+                            >
+                                <EnvironmentColorDot color={env.color} size="0.6rem" />
+                                <span>{env.name}</span>
+                            </button>
+                        ))
+                    )}
+                </div>,
+                document.body
+            )}
+        </>
+    );
+}
+
+export function MonoDropdown({
+    options,
+    value,
+    onChange,
+    placeholder = 'Select...',
+    allowNull = false,
+}) {
+    const [isOpen, setIsOpen] = useState(false);
+    const triggerRef = useRef<HTMLButtonElement | null>(null);
+    const listRef = useRef<HTMLDivElement | null>(null);
+    const [pos, setPos] = useState({ top: 0, left: 0, width: 0 });
+
+    useEffect(() => {
+        function handleClickOutside(e: MouseEvent) {
+            const target = e.target as Node;
+            if (triggerRef.current?.contains(target) || listRef.current?.contains(target)) return;
+            setIsOpen(false);
+        }
+        document.addEventListener('mousedown', handleClickOutside);
+        return () => document.removeEventListener('mousedown', handleClickOutside);
+    }, []);
+
+    const open = () => {
+        if (triggerRef.current) {
+            const rect = triggerRef.current.getBoundingClientRect();
+            setPos({ top: rect.bottom + 2, left: rect.left, width: rect.width });
+        }
+        setIsOpen(true);
+    };
+
+    const selected = options.find((opt) => opt.value === value);
+
+    return (
+        <>
+            <button
+                ref={triggerRef}
+                type="button"
+                className="mono-input mono-dropdown-trigger"
+                onClick={() => isOpen ? setIsOpen(false) : open()}
+            >
+                {selected ? (
+                    <span className="inline-flex items-center gap-2">
+                        {selected.icon}
+                        {selected.label}
+                    </span>
+                ) : (
+                    <span style={{ color: 'var(--mono-muted)' }}>{placeholder}</span>
+                )}
+            </button>
+            {isOpen && createPortal(
+                <div
+                    ref={listRef}
+                    className="mono-dropdown-list"
+                    style={{ position: 'fixed', top: pos.top, left: pos.left, width: pos.width }}
+                >
+                    {allowNull && (
+                        <button
+                            type="button"
+                            className={cx('mono-dropdown-option', value == null && 'active')}
+                            onClick={() => { onChange(null); setIsOpen(false); }}
+                        >
+                            <span style={{ color: 'var(--mono-muted)' }}>{placeholder}</span>
+                        </button>
+                    )}
+                    {options.map((opt) => (
+                        <button
+                            key={opt.value}
+                            type="button"
+                            className={cx('mono-dropdown-option', value === opt.value && 'active')}
+                            onClick={() => { onChange(opt.value); setIsOpen(false); }}
+                        >
+                            {opt.icon}
+                            <span>{opt.label}</span>
+                        </button>
+                    ))}
+                </div>,
+                document.body
+            )}
+        </>
+    );
+}
+
+export function EnvironmentDropdown({ environments, value, onChange, placeholder = 'Global (all environments)' }) {
+    const options = environments.map((env) => ({
+        value: env.name,
+        label: env.name,
+        icon: <EnvironmentColorDot color={env.color} size="0.6rem" />,
+    }));
+    return <MonoDropdown options={options} value={value} onChange={onChange} placeholder={placeholder} allowNull />;
+}
+
+export function MonoTag({ color = 'muted', className = '', children }) {
+    const colorClass = {
+        muted: 'mono-tag-muted',
+        purple: 'mono-tag-purple',
+        yellow: 'mono-tag-yellow',
+        gray: 'mono-tag-gray',
+        green: 'mono-tag-green',
+        blue: 'mono-tag-blue',
+        red: 'mono-tag-red',
+        orange: 'mono-tag-orange',
+        indigo: 'mono-tag-indigo',
+    }[color] || 'mono-tag-muted';
+
+    return <span className={cx('mono-tag', colorClass, className)}>{children}</span>;
+}
+
 export function MonoNotice({ tone = 'info', title = '', className = '', children }) {
     const toneClass = {
         info: 'mono-notice-info',
@@ -255,6 +510,7 @@ export function FormField({
     rows = 3,
     list = undefined,
     children = null,
+    autoFocus = false,
 }) {
     const inputClasses = `mono-input ${error ? 'mono-input-error' : ''}`;
 
@@ -301,6 +557,7 @@ export function FormField({
                     placeholder={placeholder}
                     disabled={disabled}
                     list={list}
+                    autoFocus={autoFocus}
                     className={inputClasses}
                 />
             )}

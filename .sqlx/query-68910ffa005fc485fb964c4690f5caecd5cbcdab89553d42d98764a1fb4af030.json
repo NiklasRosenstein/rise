@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at\n        FROM environments\n        WHERE project_id = $1 AND name = $2\n        ",
+  "query": "\n        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at\n        FROM environments\n        WHERE project_id = $1\n        ORDER BY\n            is_production DESC,\n            is_default DESC,\n            name ASC\n        ",
   "describe": {
     "columns": [
       {
@@ -35,19 +35,23 @@
       },
       {
         "ordinal": 6,
+        "name": "color",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 7,
+        "ordinal": 8,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid",
-        "Text"
+        "Uuid"
       ]
     },
     "nullable": [
@@ -58,8 +62,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "10e03f5ac3c0371d9d41a2a568e22fa35ca5cc1319062013d748c4d39bcdfe61"
+  "hash": "68910ffa005fc485fb964c4690f5caecd5cbcdab89553d42d98764a1fb4af030"
 }

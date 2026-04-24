@@ -10,6 +10,8 @@ struct EnvVarResponse {
     value: String, // Will be masked ("••••••••") for protected secrets
     is_secret: bool,
     is_protected: bool,
+    #[serde(default)]
+    environment: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -215,16 +217,34 @@ pub async fn list_env(
         return Ok(());
     }
 
+    // Check if any var has an environment label (only when showing all environments)
+    let show_env_col = environment.is_none()
+        && env_vars_response
+            .env_vars
+            .iter()
+            .any(|v| v.environment.is_some());
+
     let mut table = Table::new();
     table
         .load_preset(UTF8_FULL)
-        .apply_modifier(UTF8_ROUND_CORNERS)
-        .set_header(vec![
+        .apply_modifier(UTF8_ROUND_CORNERS);
+
+    if show_env_col {
+        table.set_header(vec![
+            Cell::new("KEY").add_attribute(Attribute::Bold),
+            Cell::new("VALUE").add_attribute(Attribute::Bold),
+            Cell::new("TYPE").add_attribute(Attribute::Bold),
+            Cell::new("PROTECTED").add_attribute(Attribute::Bold),
+            Cell::new("ENVIRONMENT").add_attribute(Attribute::Bold),
+        ]);
+    } else {
+        table.set_header(vec![
             Cell::new("KEY").add_attribute(Attribute::Bold),
             Cell::new("VALUE").add_attribute(Attribute::Bold),
             Cell::new("TYPE").add_attribute(Attribute::Bold),
             Cell::new("PROTECTED").add_attribute(Attribute::Bold),
         ]);
+    }
 
     for var in env_vars_response.env_vars {
         let var_type = if var.is_secret { "secret" } else { "plain" };
@@ -237,12 +257,16 @@ pub async fn list_env(
         } else {
             "-"
         };
-        table.add_row(vec![
+        let mut row = vec![
             Cell::new(&var.key),
             Cell::new(&var.value),
             Cell::new(var_type),
             Cell::new(protected),
-        ]);
+        ];
+        if show_env_col {
+            row.push(Cell::new(var.environment.as_deref().unwrap_or("(global)")));
+        }
+        table.add_row(row);
     }
 
     println!("{}", table);

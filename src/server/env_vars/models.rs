@@ -10,6 +10,15 @@ pub struct SetEnvVarRequest {
     pub is_protected: Option<bool>,
 }
 
+/// Request to move an environment variable to a different environment
+#[derive(Debug, Deserialize)]
+pub struct MoveEnvVarRequest {
+    /// Source environment name (null for global)
+    pub from_environment: Option<String>,
+    /// Target environment name (null for global)
+    pub to_environment: Option<String>,
+}
+
 /// API response for a single environment variable
 /// Secrets are always masked in the response unless explicitly decrypted
 #[derive(Debug, Serialize)]
@@ -18,6 +27,8 @@ pub struct EnvVarResponse {
     pub value: String, // Masked as "••••••••" if is_secret = true (unless decrypted)
     pub is_secret: bool,
     pub is_protected: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
 }
 
 impl EnvVarResponse {
@@ -34,6 +45,7 @@ impl EnvVarResponse {
             value: displayed_value,
             is_secret,
             is_protected,
+            environment: None,
         }
     }
 }

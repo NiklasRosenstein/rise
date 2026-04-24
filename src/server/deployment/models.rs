@@ -65,6 +65,8 @@ pub struct Deployment {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment_color: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<String>, // RFC3339 timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,

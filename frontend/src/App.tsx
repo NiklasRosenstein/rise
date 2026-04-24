@@ -8,7 +8,7 @@ import { maybeMigrateLegacyHashRoute, navigate, usePathLocation } from './lib/na
 import { Footer } from './components/ui';
 import { useToast } from './components/toast';
 import { PlatformAccessDenied } from './components/states';
-import { DeploymentDetail } from './features/deployments';
+import { DeploymentDetail, EnvironmentDeploymentView } from './features/deployments';
 import { DocsPage } from './features/docs';
 import { HomePage } from './features/home';
 import { ProjectsList, ProjectDetail } from './features/projects';
@@ -18,7 +18,7 @@ import { CommandPalette } from './components/command-palette';
 
 function Sidebar({ currentView, docsItems = [], availableExtensionTypes = [], currentDocSlug = '', docsDefaultSlug = '' }) {
     const isHomeActive = currentView === 'home';
-    const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail' || currentView === 'extension-detail';
+    const isProjectsActive = currentView === 'projects' || currentView === 'project-detail' || currentView === 'deployment-detail' || currentView === 'environment-deployment' || currentView === 'extension-detail';
     const isTeamsActive = currentView === 'teams' || currentView === 'team-detail';
     const isDocsActive = currentView === 'docs';
     const enabledExtensionTypes = new Set(availableExtensionTypes || []);
@@ -432,7 +432,11 @@ export function App() {
 
     if (route.startsWith('project/')) {
         const parts = route.split('/');
-        if (parts[2] === 'extensions') {
+        if (parts[2] === 'environment' && parts[3]) {
+            view = 'environment-deployment';
+            params.projectName = parts[1];
+            params.environmentName = parts[3];
+        } else if (parts[2] === 'extensions') {
             if (parts.length === 3) {
                 view = 'project-detail';
                 params.projectName = parts[1];
@@ -486,6 +490,7 @@ export function App() {
 
     const projectTabLabelMap = {
         deployments: 'Deployments',
+        environments: 'Environments',
         'service-accounts': 'Service Accounts',
         'env-vars': 'Environment Variables',
         domains: 'Domains',
@@ -538,6 +543,13 @@ export function App() {
             ? [
                   { label: 'Teams', href: '/teams' },
                   { label: `Team: ${params.teamName}` },
+              ]
+            : view === 'environment-deployment'
+            ? [
+                  { label: 'Projects', href: '/projects' },
+                  { label: `Project: ${params.projectName}`, href: `/project/${params.projectName}` },
+                  { label: 'Environments', href: `/project/${params.projectName}/environments` },
+                  { label: `Environment: ${params.environmentName}` },
               ]
             : view === 'deployment-detail'
             ? [
@@ -649,6 +661,7 @@ export function App() {
                         {view === 'docs' && <DocsPage initialSlug={params.docSlug} />}
                         {view === 'project-detail' && <ProjectDetail projectName={params.projectName} initialTab={params.tab} />}
                         {view === 'team-detail' && <TeamDetail teamName={params.teamName} currentUser={user} />}
+                        {view === 'environment-deployment' && <EnvironmentDeploymentView projectName={params.projectName} environmentName={params.environmentName} />}
                         {view === 'deployment-detail' && <DeploymentDetail projectName={params.projectName} deploymentId={params.deploymentId} />}
                         {view === 'extension-detail' && <ExtensionDetailPage projectName={params.projectName} extensionType={params.extensionType} extensionInstance={params.extensionInstance} />}
                     </main>

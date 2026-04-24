@@ -1,7 +1,7 @@
 use super::handlers;
 use crate::server::state::AppState;
 use axum::{
-    routing::{get, put},
+    routing::{get, post, put},
     Router,
 };
 
@@ -12,6 +12,10 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/projects/{project_id_or_name}/env/{key}",
             put(handlers::set_project_env_var).delete(handlers::delete_project_env_var),
+        )
+        .route(
+            "/projects/{project_id_or_name}/env/{key}/move",
+            post(handlers::move_project_env_var),
         )
         .route(
             "/projects/{project_id_or_name}/env/{key}/value",

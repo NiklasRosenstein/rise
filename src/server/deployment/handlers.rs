@@ -390,15 +390,15 @@ async fn convert_deployment(
     };
     let can_rollback = state_machine::can_create_from(&deployment);
 
-    // Resolve environment name
-    let environment = if let Some(env_id) = deployment.environment_id {
-        crate::db::environments::find_by_id(&state.db_pool, env_id)
+    // Resolve environment name and color
+    let (environment, environment_color) = if let Some(env_id) = deployment.environment_id {
+        let env = crate::db::environments::find_by_id(&state.db_pool, env_id)
             .await
             .ok()
-            .flatten()
-            .map(|e| e.name)
+            .flatten();
+        (env.as_ref().map(|e| e.name.clone()), env.map(|e| e.color))
     } else {
-        None
+        (None, None)
     };
 
     Deployment {
@@ -410,6 +410,7 @@ async fn convert_deployment(
         status: convert_status_from_db(deployment.status),
         deployment_group: deployment.deployment_group,
         environment,
+        environment_color,
         expires_at: deployment.expires_at.map(|dt| dt.to_rfc3339()),
         error_message: deployment.error_message,
         completed_at: deployment.completed_at.map(|dt| dt.to_rfc3339()),
@@ -486,19 +487,26 @@ async fn resolve_deployment_target(
                 Ok((group.to_string(), default_env))
             }
         }
-        // Neither specified: default group
+        // Neither specified: use the default environment's primary group, or fall back to "default"
         (None, None) => {
-            let group = models::DEFAULT_DEPLOYMENT_GROUP;
-            let env = environments::find_by_primary_group(pool, project_id, group)
+            // First, check if there's a default environment with a primary group
+            let default_env = environments::find_default(pool, project_id)
                 .await
-                .internal_err("Failed to look up environment by group")?;
-            if let Some(env) = env {
-                Ok((group.to_string(), Some(env)))
+                .internal_err("Failed to look up default environment")?;
+            if let Some(env) = default_env {
+                let group = env
+                    .primary_deployment_group
+                    .clone()
+                    .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
+                Ok((group, Some(env)))
             } else {
-                let default_env = environments::find_default(pool, project_id)
+                // No default environment — fall back to "default" group and try to find
+                // an environment whose primary group is "default"
+                let group = models::DEFAULT_DEPLOYMENT_GROUP;
+                let env = environments::find_by_primary_group(pool, project_id, group)
                     .await
-                    .internal_err("Failed to look up default environment")?;
-                Ok((group.to_string(), default_env))
+                    .internal_err("Failed to look up environment by group")?;
+                Ok((group.to_string(), env))
             }
         }
     }

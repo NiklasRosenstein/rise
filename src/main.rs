@@ -631,6 +631,9 @@ enum EnvironmentCommands {
         /// Set as the production environment (gets the production URL)
         #[arg(long)]
         production: bool,
+        /// Badge color (green, blue, yellow, red, purple, orange, gray)
+        #[arg(long, default_value = "green")]
+        color: String,
     },
     /// List all environments for a project
     #[command(visible_alias = "ls")]
@@ -679,6 +682,9 @@ enum EnvironmentCommands {
         /// Set as the production environment
         #[arg(long)]
         production: Option<bool>,
+        /// Badge color (green, blue, yellow, red, purple, orange, gray)
+        #[arg(long)]
+        color: Option<String>,
     },
     /// Delete an environment
     #[command(visible_alias = "del")]

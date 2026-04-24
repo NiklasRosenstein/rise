@@ -146,7 +146,7 @@ class RiseAPI {
     async createDeploymentFrom(projectName, sourceDeploymentId, useSourceEnvVars = false) {
         // Get the source deployment to extract its configuration
         const sourceDeployment = await this.request(`/projects/${projectName}/deployments/${sourceDeploymentId}`);
-        
+
         return this.request(`/deployments`, {
             method: 'POST',
             body: JSON.stringify({
@@ -164,17 +164,25 @@ class RiseAPI {
         return this.request(`/projects/${projectName}/workload-identities`);
     }
 
-    async createServiceAccount(projectName, issuerUrl, claims) {
+    async createServiceAccount(projectName, issuerUrl, claims, allowedEnvironments = null) {
+        const body = { issuer_url: issuerUrl, claims };
+        if (allowedEnvironments !== null) {
+            body.allowed_environments = allowedEnvironments;
+        }
         return this.request(`/projects/${projectName}/workload-identities`, {
             method: 'POST',
-            body: JSON.stringify({ issuer_url: issuerUrl, claims })
+            body: JSON.stringify(body)
         });
     }
 
-    async updateServiceAccount(projectName, saId, issuerUrl, claims) {
+    async updateServiceAccount(projectName, saId, issuerUrl, claims, allowedEnvironments = undefined) {
+        const body = { issuer_url: issuerUrl, claims };
+        if (allowedEnvironments !== undefined) {
+            body.allowed_environments = allowedEnvironments;
+        }
         return this.request(`/projects/${projectName}/workload-identities/${saId}`, {
             method: 'PUT',
-            body: JSON.stringify({ issuer_url: issuerUrl, claims })
+            body: JSON.stringify(body)
         });
     }
 
@@ -184,24 +192,65 @@ class RiseAPI {
         });
     }
 
+    // Environment endpoints
+    async getProjectEnvironments(projectName) {
+        return this.request(`/projects/${projectName}/environments`);
+    }
+
+    async createEnvironment(projectName, data) {
+        return this.request(`/projects/${projectName}/environments`, {
+            method: 'POST',
+            body: JSON.stringify(data)
+        });
+    }
+
+    async updateEnvironment(projectName, envName, updates) {
+        return this.request(`/projects/${projectName}/environments/${encodeURIComponent(envName)}`, {
+            method: 'PUT',
+            body: JSON.stringify(updates)
+        });
+    }
+
+    async deleteEnvironment(projectName, envName) {
+        return this.request(`/projects/${projectName}/environments/${encodeURIComponent(envName)}`, {
+            method: 'DELETE'
+        });
+    }
+
     // Environment variable endpoints
-    async getProjectEnvVars(projectName) {
-        return this.request(`/projects/${projectName}/env`);
+    async getProjectEnvVars(projectName, environment = null) {
+        const params = new URLSearchParams();
+        if (environment) params.set('environment', environment);
+        const qs = params.toString();
+        return this.request(`/projects/${projectName}/env${qs ? '?' + qs : ''}`);
     }
 
     async getDeploymentEnvVars(projectName, deploymentId) {
         return this.request(`/projects/${projectName}/deployments/${deploymentId}/env`);
     }
 
-    async setEnvVar(projectName, key, value, isSecret, isProtected = true) {
-        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}`, {
+    async setEnvVar(projectName, key, value, isSecret, isProtected = true, environment = null) {
+        const params = new URLSearchParams();
+        if (environment) params.set('environment', environment);
+        const qs = params.toString();
+        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}${qs ? '?' + qs : ''}`, {
             method: 'PUT',
             body: JSON.stringify({ value, is_secret: isSecret, is_protected: isProtected })
         });
     }
 
-    async getEnvVarValue(projectName, key) {
-        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}/value`);
+    async moveEnvVar(projectName, key, fromEnvironment = null, toEnvironment = null) {
+        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}/move`, {
+            method: 'POST',
+            body: JSON.stringify({ from_environment: fromEnvironment, to_environment: toEnvironment })
+        });
+    }
+
+    async getEnvVarValue(projectName, key, environment = null) {
+        const params = new URLSearchParams();
+        if (environment) params.set('environment', environment);
+        const qs = params.toString();
+        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}/value${qs ? '?' + qs : ''}`);
     }
 
     async getDeploymentEnvVarValue(projectName, deploymentId, key) {
@@ -210,8 +259,11 @@ class RiseAPI {
         );
     }
 
-    async deleteEnvVar(projectName, key) {
-        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}`, {
+    async deleteEnvVar(projectName, key, environment = null) {
+        const params = new URLSearchParams();
+        if (environment) params.set('environment', environment);
+        const qs = params.toString();
+        return this.request(`/projects/${projectName}/env/${encodeURIComponent(key)}${qs ? '?' + qs : ''}`, {
             method: 'DELETE'
         });
     }

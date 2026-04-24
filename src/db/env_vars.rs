@@ -145,6 +145,36 @@ pub async fn upsert_project_env_var(
     Ok(env_var)
 }
 
+/// Update the environment of a project environment variable.
+pub async fn update_env_var_environment(
+    pool: &PgPool,
+    project_id: Uuid,
+    key: &str,
+    from_environment_id: Option<Uuid>,
+    to_environment_id: Option<Uuid>,
+) -> Result<ProjectEnvVar> {
+    let existing = get_project_env_var(pool, project_id, key, from_environment_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("Environment variable not found"))?;
+
+    let env_var = sqlx::query_as!(
+        ProjectEnvVar,
+        r#"
+        UPDATE project_env_vars
+        SET environment_id = $2, updated_at = NOW()
+        WHERE id = $1
+        RETURNING id, project_id, key, value, is_secret, is_protected, environment_id, created_at, updated_at
+        "#,
+        existing.id,
+        to_environment_id
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to update environment variable environment")?;
+
+    Ok(env_var)
+}
+
 /// Delete a project environment variable by key and optional environment.
 pub async fn delete_project_env_var(
     pool: &PgPool,
@@ -468,6 +498,7 @@ mod tests {
             Some("staging"),
             false,
             false,
+            "green",
         )
         .await
         .unwrap();

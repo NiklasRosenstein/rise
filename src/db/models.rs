@@ -118,6 +118,7 @@ pub struct Environment {
     pub primary_deployment_group: Option<String>,
     pub is_default: bool,
     pub is_production: bool,
+    pub color: String,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

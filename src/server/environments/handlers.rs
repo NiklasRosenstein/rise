@@ -40,6 +40,7 @@ pub async fn create_environment(
         payload.primary_deployment_group.as_deref(),
         payload.is_default,
         payload.is_production,
+        &payload.color,
     )
     .await
     .map_err(|e| {
@@ -182,6 +183,7 @@ pub async fn update_environment(
             .map(|o| o.as_deref()),
         payload.is_default,
         payload.is_production,
+        payload.color.as_deref(),
     )
     .await
     .map_err(|e| {

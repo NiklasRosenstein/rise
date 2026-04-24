@@ -5,7 +5,7 @@ use axum::{
 };
 use uuid::Uuid;
 
-use crate::db::{projects, service_accounts, users};
+use crate::db::{environments as db_environments, projects, service_accounts, users};
 use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::project::handlers::{check_read_permission, check_write_permission};
@@ -15,6 +15,36 @@ use crate::server::workload_identity::models::{
     CreateWorkloadIdentityRequest, ListWorkloadIdentitiesResponse, UpdateWorkloadIdentityRequest,
     WorkloadIdentityResponse,
 };
+use std::collections::HashMap;
+
+/// Resolve allowed_environment_ids (UUIDs) to environment names for API responses.
+fn resolve_env_ids_to_names(
+    allowed_env_ids: &Option<Vec<uuid::Uuid>>,
+    env_name_map: &HashMap<uuid::Uuid, String>,
+) -> Option<Vec<String>> {
+    allowed_env_ids.as_ref().map(|ids| {
+        ids.iter()
+            .filter_map(|id| env_name_map.get(id).cloned())
+            .collect()
+    })
+}
+
+/// Resolve allowed environment names to IDs, returning an error if any name is not found.
+async fn resolve_env_names_to_ids(
+    pool: &sqlx::PgPool,
+    project_id: uuid::Uuid,
+    names: &[String],
+) -> Result<Vec<uuid::Uuid>, ServerError> {
+    let mut ids = Vec::with_capacity(names.len());
+    for name in names {
+        let env = db_environments::find_by_name(pool, project_id, name)
+            .await
+            .internal_err("Failed to find environment")?
+            .ok_or_else(|| ServerError::not_found(format!("Environment '{}' not found", name)))?;
+        ids.push(env.id);
+    }
+    Ok(ids)
+}
 
 /// Verify that an OIDC issuer is reachable and has valid configuration.
 ///
@@ -158,10 +188,36 @@ pub async fn create_workload_identity(
     // (also validates HTTPS requirement and SSRF protections)
     verify_oidc_issuer(&req.issuer_url, &state.server_settings.ssrf).await?;
 
+    // Resolve allowed_environments names to IDs
+    let allowed_env_ids = if let Some(ref env_names) = req.allowed_environments {
+        if env_names.is_empty() {
+            None
+        } else {
+            Some(resolve_env_names_to_ids(&state.db_pool, project.id, env_names).await?)
+        }
+    } else {
+        None
+    };
+
     // Create service account
     let sa = service_accounts::create(&state.db_pool, project.id, &req.issuer_url, &req.claims)
         .await
         .internal_err("Failed to create service account")?;
+
+    // Set allowed_environment_ids if specified
+    let sa = if let Some(ref env_ids) = allowed_env_ids {
+        service_accounts::update(
+            &state.db_pool,
+            sa.id,
+            None,
+            None,
+            Some(Some(env_ids.as_slice())),
+        )
+        .await
+        .internal_err("Failed to set allowed environments")?
+    } else {
+        sa
+    };
 
     // Get user for response
     let sa_user = users::find_by_id(&state.db_pool, sa.user_id)
@@ -173,12 +229,20 @@ pub async fn create_workload_identity(
     let claims: std::collections::HashMap<String, String> =
         serde_json::from_value(sa.claims).internal_err("Failed to deserialize claims")?;
 
+    // Build environment name lookup for response
+    let environments = db_environments::list_for_project(&state.db_pool, project.id)
+        .await
+        .internal_err("Failed to list environments")?;
+    let env_name_map: HashMap<uuid::Uuid, String> =
+        environments.into_iter().map(|e| (e.id, e.name)).collect();
+
     Ok(Json(WorkloadIdentityResponse {
         id: sa.id.to_string(),
         email: sa_user.email,
         project_name: project.name,
         issuer_url: sa.issuer_url,
         claims,
+        allowed_environments: resolve_env_ids_to_names(&sa.allowed_environment_ids, &env_name_map),
         created_at: sa.created_at.to_rfc3339(),
     }))
 }
@@ -210,6 +274,13 @@ pub async fn list_workload_identities(
         .await
         .internal_err("Failed to list service accounts")?;
 
+    // Build environment name lookup for responses
+    let environments = db_environments::list_for_project(&state.db_pool, project.id)
+        .await
+        .internal_err("Failed to list environments")?;
+    let env_name_map: HashMap<uuid::Uuid, String> =
+        environments.into_iter().map(|e| (e.id, e.name)).collect();
+
     // Convert to response
     let mut workload_identities = Vec::new();
     for sa in sas {
@@ -229,6 +300,10 @@ pub async fn list_workload_identities(
             project_name: project.name.clone(),
             issuer_url: sa.issuer_url,
             claims,
+            allowed_environments: resolve_env_ids_to_names(
+                &sa.allowed_environment_ids,
+                &env_name_map,
+            ),
             created_at: sa.created_at.to_rfc3339(),
         });
     }
@@ -286,12 +361,20 @@ pub async fn get_workload_identity(
     let claims: std::collections::HashMap<String, String> =
         serde_json::from_value(sa.claims).internal_err("Failed to deserialize claims")?;
 
+    // Build environment name lookup for response
+    let environments = db_environments::list_for_project(&state.db_pool, project.id)
+        .await
+        .internal_err("Failed to list environments")?;
+    let env_name_map: HashMap<uuid::Uuid, String> =
+        environments.into_iter().map(|e| (e.id, e.name)).collect();
+
     Ok(Json(WorkloadIdentityResponse {
         id: sa.id.to_string(),
         email: sa_user.email,
         project_name: project.name,
         issuer_url: sa.issuer_url,
         claims,
+        allowed_environments: resolve_env_ids_to_names(&sa.allowed_environment_ids, &env_name_map),
         created_at: sa.created_at.to_rfc3339(),
     }))
 }
@@ -338,9 +421,9 @@ pub async fn update_workload_identity(
     }
 
     // Validate that at least one field is provided
-    if req.issuer_url.is_none() && req.claims.is_none() {
+    if req.issuer_url.is_none() && req.claims.is_none() && req.allowed_environments.is_none() {
         return Err(ServerError::bad_request(
-            "At least one field (issuer_url or claims) must be provided for update",
+            "At least one field (issuer_url, claims, or allowed_environments) must be provided for update",
         ));
     }
 
@@ -384,13 +467,30 @@ pub async fn update_workload_identity(
         }
     }
 
+    // Resolve allowed_environments names to IDs if provided
+    let allowed_env_ids_param = match &req.allowed_environments {
+        None => None,             // Don't change
+        Some(None) => Some(None), // Clear restriction
+        Some(Some(names)) => {
+            if names.is_empty() {
+                Some(None) // Empty list = clear restriction
+            } else {
+                Some(Some(
+                    resolve_env_names_to_ids(&state.db_pool, project.id, names).await?,
+                ))
+            }
+        }
+    };
+
     // Update service account
     let updated_sa = service_accounts::update(
         &state.db_pool,
         sa_id,
         req.issuer_url.as_deref(),
         req.claims.as_ref(),
-        None, // Don't change allowed_environment_ids
+        allowed_env_ids_param
+            .as_ref()
+            .map(|opt| opt.as_ref().map(|v| v.as_slice())),
     )
     .await
     .internal_err("Failed to update service account")?;
@@ -405,12 +505,23 @@ pub async fn update_workload_identity(
     let claims: std::collections::HashMap<String, String> =
         serde_json::from_value(updated_sa.claims).internal_err("Failed to deserialize claims")?;
 
+    // Build environment name lookup for response
+    let environments = db_environments::list_for_project(&state.db_pool, project.id)
+        .await
+        .internal_err("Failed to list environments")?;
+    let env_name_map: HashMap<uuid::Uuid, String> =
+        environments.into_iter().map(|e| (e.id, e.name)).collect();
+
     Ok(Json(WorkloadIdentityResponse {
         id: updated_sa.id.to_string(),
         email: sa_user.email,
         project_name: project.name,
         issuer_url: updated_sa.issuer_url,
         claims,
+        allowed_environments: resolve_env_ids_to_names(
+            &updated_sa.allowed_environment_ids,
+            &env_name_map,
+        ),
         created_at: updated_sa.created_at.to_rfc3339(),
     }))
 }

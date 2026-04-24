@@ -12,19 +12,21 @@ pub async fn create(
     primary_deployment_group: Option<&str>,
     is_default: bool,
     is_production: bool,
+    color: &str,
 ) -> Result<Environment> {
     let env = sqlx::query_as!(
         Environment,
         r#"
-        INSERT INTO environments (project_id, name, primary_deployment_group, is_default, is_production)
-        VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at
+        INSERT INTO environments (project_id, name, primary_deployment_group, is_default, is_production, color)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at
         "#,
         project_id,
         name,
         primary_deployment_group,
         is_default,
-        is_production
+        is_production,
+        color
     )
     .fetch_one(pool)
     .await
@@ -38,7 +40,7 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Env
     let envs = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at
         FROM environments
         WHERE project_id = $1
         ORDER BY
@@ -64,7 +66,7 @@ pub async fn find_by_name(
     let env = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at
         FROM environments
         WHERE project_id = $1 AND name = $2
         "#,
@@ -87,7 +89,7 @@ pub async fn find_by_primary_group(
     let env = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at
         FROM environments
         WHERE project_id = $1 AND primary_deployment_group = $2
         "#,
@@ -106,7 +108,7 @@ pub async fn find_default(pool: &PgPool, project_id: Uuid) -> Result<Option<Envi
     let env = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at
         FROM environments
         WHERE project_id = $1 AND is_default = true
         "#,
@@ -125,7 +127,7 @@ pub async fn find_production(pool: &PgPool, project_id: Uuid) -> Result<Option<E
     let env = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at
         FROM environments
         WHERE project_id = $1 AND is_production = true
         "#,
@@ -143,7 +145,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Environment>> 
     let env = sqlx::query_as!(
         Environment,
         r#"
-        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at
+        SELECT id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at
         FROM environments
         WHERE id = $1
         "#,
@@ -160,6 +162,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Environment>> 
 ///
 /// Uses a transaction to atomically swap `is_default` and `is_production` flags
 /// when setting them on this environment (clearing them from any other environment first).
+#[allow(clippy::too_many_arguments)]
 pub async fn update(
     pool: &PgPool,
     id: Uuid,
@@ -168,6 +171,7 @@ pub async fn update(
     primary_deployment_group: Option<Option<&str>>,
     is_default: Option<bool>,
     is_production: Option<bool>,
+    color: Option<&str>,
 ) -> Result<Environment> {
     let mut tx = pool.begin().await.context("Failed to begin transaction")?;
 
@@ -204,16 +208,18 @@ pub async fn update(
             primary_deployment_group = CASE WHEN $3 THEN $4 ELSE primary_deployment_group END,
             is_default = COALESCE($5, is_default),
             is_production = COALESCE($6, is_production),
+            color = COALESCE($7, color),
             updated_at = NOW()
         WHERE id = $1
-        RETURNING id, project_id, name, primary_deployment_group, is_default, is_production, created_at, updated_at
+        RETURNING id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at
         "#,
         id,
         name,
         primary_deployment_group.is_some(),  // $3: whether to update primary_deployment_group
         primary_deployment_group.flatten(),    // $4: the new value (can be NULL)
         is_default,
-        is_production
+        is_production,
+        color
     )
     .fetch_one(&mut *tx)
     .await
@@ -253,7 +259,16 @@ pub async fn delete(pool: &PgPool, id: Uuid) -> Result<bool> {
 /// Creates a single environment named "production" with `is_default=true`, `is_production=true`,
 /// and `primary_deployment_group="default"`.
 pub async fn create_default_for_project(pool: &PgPool, project_id: Uuid) -> Result<Environment> {
-    create(pool, project_id, "production", Some("default"), true, true).await
+    create(
+        pool,
+        project_id,
+        "production",
+        Some("default"),
+        true,
+        true,
+        "green",
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -274,7 +289,16 @@ mod tests {
         )
         .await?;
 
-        let env = create(&pool, project.id, "staging", Some("staging"), false, false).await?;
+        let env = create(
+            &pool,
+            project.id,
+            "staging",
+            Some("staging"),
+            false,
+            false,
+            "green",
+        )
+        .await?;
         assert_eq!(env.name, "staging");
         assert_eq!(env.primary_deployment_group.as_deref(), Some("staging"));
         assert!(!env.is_default);
@@ -323,13 +347,41 @@ mod tests {
         .await?;
 
         // Create production env
-        let prod = create(&pool, project.id, "production", Some("default"), true, true).await?;
+        let prod = create(
+            &pool,
+            project.id,
+            "production",
+            Some("default"),
+            true,
+            true,
+            "green",
+        )
+        .await?;
 
         // Create staging env
-        let staging = create(&pool, project.id, "staging", Some("staging"), false, false).await?;
+        let staging = create(
+            &pool,
+            project.id,
+            "staging",
+            Some("staging"),
+            false,
+            false,
+            "green",
+        )
+        .await?;
 
         // Update staging to be default - should swap
-        let staging = update(&pool, staging.id, project.id, None, None, Some(true), None).await?;
+        let staging = update(
+            &pool,
+            staging.id,
+            project.id,
+            None,
+            None,
+            Some(true),
+            None,
+            None,
+        )
+        .await?;
         assert!(staging.is_default);
 
         // Verify prod is no longer default
@@ -375,8 +427,26 @@ mod tests {
         )
         .await?;
 
-        create(&pool, project.id, "production", Some("default"), true, true).await?;
-        create(&pool, project.id, "staging", Some("staging"), false, false).await?;
+        create(
+            &pool,
+            project.id,
+            "production",
+            Some("default"),
+            true,
+            true,
+            "green",
+        )
+        .await?;
+        create(
+            &pool,
+            project.id,
+            "staging",
+            Some("staging"),
+            false,
+            false,
+            "green",
+        )
+        .await?;
 
         let found = find_by_primary_group(&pool, project.id, "default").await?;
         assert!(found.is_some());
@@ -405,9 +475,27 @@ mod tests {
         )
         .await?;
 
-        create(&pool, project.id, "dev", None, false, false).await?;
-        create(&pool, project.id, "production", Some("default"), true, true).await?;
-        create(&pool, project.id, "staging", Some("staging"), false, false).await?;
+        create(&pool, project.id, "dev", None, false, false, "green").await?;
+        create(
+            &pool,
+            project.id,
+            "production",
+            Some("default"),
+            true,
+            true,
+            "green",
+        )
+        .await?;
+        create(
+            &pool,
+            project.id,
+            "staging",
+            Some("staging"),
+            false,
+            false,
+            "green",
+        )
+        .await?;
 
         let envs = list_for_project(&pool, project.id).await?;
         assert_eq!(envs.len(), 3);
