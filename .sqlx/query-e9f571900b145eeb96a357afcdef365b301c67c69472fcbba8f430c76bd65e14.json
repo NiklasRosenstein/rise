@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        SELECT id, project_id, user_id, issuer_url, claims, sequence, allowed_environment_ids,\n               deleted_at, created_at, updated_at\n        FROM service_accounts\n        WHERE project_id = $1 AND deleted_at IS NULL\n        ORDER BY sequence ASC\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "user_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 3,
+        "name": "issuer_url",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "claims",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 5,
+        "name": "sequence",
+        "type_info": "Int4"
+      },
+      {
+        "ordinal": 6,
+        "name": "allowed_environment_ids",
+        "type_info": "UuidArray"
+      },
+      {
+        "ordinal": 7,
+        "name": "deleted_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 9,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "e9f571900b145eeb96a357afcdef365b301c67c69472fcbba8f430c76bd65e14"
+}

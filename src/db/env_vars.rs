@@ -4,49 +4,93 @@ use uuid::Uuid;
 
 use crate::db::models::{DeploymentEnvVar, ProjectEnvVar};
 
-/// List all environment variables for a project
-pub async fn list_project_env_vars(pool: &PgPool, project_id: Uuid) -> Result<Vec<ProjectEnvVar>> {
-    let env_vars = sqlx::query_as!(
-        ProjectEnvVar,
-        r#"
-        SELECT id, project_id, key, value, is_secret, is_protected, created_at, updated_at
-        FROM project_env_vars
-        WHERE project_id = $1
-        ORDER BY key ASC
-        "#,
-        project_id
-    )
-    .fetch_all(pool)
-    .await
-    .context("Failed to list project environment variables")?;
+/// List all environment variables for a project.
+///
+/// If `environment_id` is provided, returns both global vars (environment_id IS NULL) and
+/// environment-specific vars for that environment. If not provided, returns all vars.
+pub async fn list_project_env_vars(
+    pool: &PgPool,
+    project_id: Uuid,
+    environment_id: Option<Uuid>,
+) -> Result<Vec<ProjectEnvVar>> {
+    let env_vars = if let Some(env_id) = environment_id {
+        sqlx::query_as!(
+            ProjectEnvVar,
+            r#"
+            SELECT id, project_id, key, value, is_secret, is_protected, environment_id, created_at, updated_at
+            FROM project_env_vars
+            WHERE project_id = $1 AND (environment_id IS NULL OR environment_id = $2)
+            ORDER BY key ASC, environment_id NULLS LAST
+            "#,
+            project_id,
+            env_id
+        )
+        .fetch_all(pool)
+        .await
+        .context("Failed to list project environment variables")?
+    } else {
+        sqlx::query_as!(
+            ProjectEnvVar,
+            r#"
+            SELECT id, project_id, key, value, is_secret, is_protected, environment_id, created_at, updated_at
+            FROM project_env_vars
+            WHERE project_id = $1
+            ORDER BY key ASC, environment_id NULLS LAST
+            "#,
+            project_id
+        )
+        .fetch_all(pool)
+        .await
+        .context("Failed to list project environment variables")?
+    };
 
     Ok(env_vars)
 }
 
-/// Get a specific project environment variable by key
+/// Get a specific project environment variable by key and optional environment.
 pub async fn get_project_env_var(
     pool: &PgPool,
     project_id: Uuid,
     key: &str,
+    environment_id: Option<Uuid>,
 ) -> Result<Option<ProjectEnvVar>> {
-    let env_var = sqlx::query_as!(
-        ProjectEnvVar,
-        r#"
-        SELECT id, project_id, key, value, is_secret, is_protected, created_at, updated_at
-        FROM project_env_vars
-        WHERE project_id = $1 AND key = $2
-        "#,
-        project_id,
-        key
-    )
-    .fetch_optional(pool)
-    .await
-    .context("Failed to get project environment variable")?;
+    let env_var = if let Some(env_id) = environment_id {
+        sqlx::query_as!(
+            ProjectEnvVar,
+            r#"
+            SELECT id, project_id, key, value, is_secret, is_protected, environment_id, created_at, updated_at
+            FROM project_env_vars
+            WHERE project_id = $1 AND key = $2 AND environment_id = $3
+            "#,
+            project_id,
+            key,
+            env_id
+        )
+        .fetch_optional(pool)
+        .await
+        .context("Failed to get project environment variable")?
+    } else {
+        sqlx::query_as!(
+            ProjectEnvVar,
+            r#"
+            SELECT id, project_id, key, value, is_secret, is_protected, environment_id, created_at, updated_at
+            FROM project_env_vars
+            WHERE project_id = $1 AND key = $2 AND environment_id IS NULL
+            "#,
+            project_id,
+            key
+        )
+        .fetch_optional(pool)
+        .await
+        .context("Failed to get project environment variable")?
+    };
 
     Ok(env_var)
 }
 
-/// Create or update a project environment variable (upsert)
+/// Create or update a project environment variable (upsert).
+///
+/// The unique constraint is on `(project_id, key, COALESCE(environment_id, nil_uuid))`.
 pub async fn upsert_project_env_var(
     pool: &PgPool,
     project_id: Uuid,
@@ -54,70 +98,135 @@ pub async fn upsert_project_env_var(
     value: &str,
     is_secret: bool,
     is_protected: bool,
+    environment_id: Option<Uuid>,
 ) -> Result<ProjectEnvVar> {
-    let env_var = sqlx::query_as!(
-        ProjectEnvVar,
-        r#"
-        INSERT INTO project_env_vars (project_id, key, value, is_secret, is_protected)
-        VALUES ($1, $2, $3, $4, $5)
-        ON CONFLICT (project_id, key)
-        DO UPDATE SET
-            value = EXCLUDED.value,
-            is_secret = EXCLUDED.is_secret,
-            is_protected = EXCLUDED.is_protected,
-            updated_at = NOW()
-        RETURNING id, project_id, key, value, is_secret, is_protected, created_at, updated_at
-        "#,
-        project_id,
-        key,
-        value,
-        is_secret,
-        is_protected
-    )
-    .fetch_one(pool)
-    .await
-    .context("Failed to upsert project environment variable")?;
+    // We use the COALESCE-based unique index for conflict detection.
+    // sqlx doesn't support ON CONFLICT on expressions directly, so we use a
+    // two-step approach: try to find existing, then insert or update.
+    let existing = get_project_env_var(pool, project_id, key, environment_id).await?;
+
+    let env_var = if let Some(existing) = existing {
+        sqlx::query_as!(
+            ProjectEnvVar,
+            r#"
+            UPDATE project_env_vars
+            SET value = $2, is_secret = $3, is_protected = $4, updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, project_id, key, value, is_secret, is_protected, environment_id, created_at, updated_at
+            "#,
+            existing.id,
+            value,
+            is_secret,
+            is_protected
+        )
+        .fetch_one(pool)
+        .await
+        .context("Failed to update project environment variable")?
+    } else {
+        sqlx::query_as!(
+            ProjectEnvVar,
+            r#"
+            INSERT INTO project_env_vars (project_id, key, value, is_secret, is_protected, environment_id)
+            VALUES ($1, $2, $3, $4, $5, $6)
+            RETURNING id, project_id, key, value, is_secret, is_protected, environment_id, created_at, updated_at
+            "#,
+            project_id,
+            key,
+            value,
+            is_secret,
+            is_protected,
+            environment_id
+        )
+        .fetch_one(pool)
+        .await
+        .context("Failed to insert project environment variable")?
+    };
 
     Ok(env_var)
 }
 
-/// Delete a project environment variable by key
-pub async fn delete_project_env_var(pool: &PgPool, project_id: Uuid, key: &str) -> Result<bool> {
-    let result = sqlx::query!(
-        r#"
-        DELETE FROM project_env_vars
-        WHERE project_id = $1 AND key = $2
-        "#,
-        project_id,
-        key
-    )
-    .execute(pool)
-    .await
-    .context("Failed to delete project environment variable")?;
+/// Delete a project environment variable by key and optional environment.
+pub async fn delete_project_env_var(
+    pool: &PgPool,
+    project_id: Uuid,
+    key: &str,
+    environment_id: Option<Uuid>,
+) -> Result<bool> {
+    let result = if let Some(env_id) = environment_id {
+        sqlx::query!(
+            r#"
+            DELETE FROM project_env_vars
+            WHERE project_id = $1 AND key = $2 AND environment_id = $3
+            "#,
+            project_id,
+            key,
+            env_id
+        )
+        .execute(pool)
+        .await
+        .context("Failed to delete project environment variable")?
+    } else {
+        sqlx::query!(
+            r#"
+            DELETE FROM project_env_vars
+            WHERE project_id = $1 AND key = $2 AND environment_id IS NULL
+            "#,
+            project_id,
+            key
+        )
+        .execute(pool)
+        .await
+        .context("Failed to delete project environment variable")?
+    };
 
     Ok(result.rows_affected() > 0)
 }
 
-/// Copy all project environment variables to a deployment
-/// This creates a snapshot of the project's env vars at deployment creation time
+/// Copy project environment variables to a deployment, resolving environment-scoped overrides.
+///
+/// For each key, if an environment-specific value exists for the target environment, it takes
+/// priority over the global value. Global vars (environment_id IS NULL) are used as the base.
 pub async fn copy_project_env_vars_to_deployment(
     pool: &PgPool,
     project_id: Uuid,
     deployment_id: Uuid,
+    environment_id: Option<Uuid>,
 ) -> Result<u64> {
-    let result = sqlx::query!(
-        r#"
-        INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
-        SELECT $1, key, value, is_secret, is_protected
-        FROM project_env_vars
-        WHERE project_id = $2
-        "#,
-        deployment_id,
-        project_id
-    )
-    .execute(pool)
-    .await
-    .context("Failed to copy project environment variables to deployment")?;
+    let result = if let Some(env_id) = environment_id {
+        sqlx::query!(
+            r#"
+            WITH resolved AS (
+                SELECT DISTINCT ON (key) key, value, is_secret, is_protected
+                FROM project_env_vars
+                WHERE project_id = $2 AND (environment_id IS NULL OR environment_id = $3)
+                ORDER BY key, CASE WHEN environment_id IS NOT NULL THEN 0 ELSE 1 END
+            )
+            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
+            SELECT $1, key, value, is_secret, is_protected FROM resolved
+            "#,
+            deployment_id,
+            project_id,
+            env_id
+        )
+        .execute(pool)
+        .await
+        .context("Failed to copy project environment variables to deployment")?
+    } else {
+        // No environment context: only copy global vars (environment_id IS NULL)
+        sqlx::query!(
+            r#"
+            INSERT INTO deployment_env_vars (deployment_id, key, value, is_secret, is_protected)
+            SELECT $1, key, value, is_secret, is_protected
+            FROM project_env_vars
+            WHERE project_id = $2 AND environment_id IS NULL
+            "#,
+            deployment_id,
+            project_id
+        )
+        .execute(pool)
+        .await
+        .context("Failed to copy project environment variables to deployment")?
+    };
 
     Ok(result.rows_affected())
 }
@@ -311,6 +420,7 @@ mod tests {
                 image_digest: None,
                 rolled_back_from_deployment_id: None,
                 deployment_group: DEFAULT_DEPLOYMENT_GROUP,
+                environment_id: None,
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
@@ -332,5 +442,90 @@ mod tests {
         assert_eq!(env_var.value, "secret-value");
         assert!(env_var.is_secret);
         assert!(!env_var.is_protected);
+    }
+
+    #[sqlx::test]
+    async fn env_var_environment_scoping(pool: PgPool) {
+        let user = crate::db::users::create(&pool, "env-scope-test@example.com")
+            .await
+            .unwrap();
+
+        let project = crate::db::projects::create(
+            &pool,
+            "env-scope-test-project",
+            ProjectStatus::Stopped,
+            "default".to_string(),
+            Some(user.id),
+            None,
+        )
+        .await
+        .unwrap();
+
+        let env = crate::db::environments::create(
+            &pool,
+            project.id,
+            "staging",
+            Some("staging"),
+            false,
+            false,
+        )
+        .await
+        .unwrap();
+
+        // Set global var
+        upsert_project_env_var(&pool, project.id, "DB_URL", "global-db", false, false, None)
+            .await
+            .unwrap();
+
+        // Set env-specific var with same key
+        upsert_project_env_var(
+            &pool,
+            project.id,
+            "DB_URL",
+            "staging-db",
+            false,
+            false,
+            Some(env.id),
+        )
+        .await
+        .unwrap();
+
+        // List with environment filter should show both
+        let vars = list_project_env_vars(&pool, project.id, Some(env.id))
+            .await
+            .unwrap();
+        assert_eq!(vars.len(), 2);
+
+        // Copy to deployment should resolve: env-specific wins for DB_URL
+        let deployment = deployments::create(
+            &pool,
+            CreateDeploymentParams {
+                deployment_id: "20260424-120000",
+                project_id: project.id,
+                created_by_id: user.id,
+                status: DeploymentStatus::Pending,
+                image: None,
+                image_digest: None,
+                rolled_back_from_deployment_id: None,
+                deployment_group: "staging",
+                environment_id: Some(env.id),
+                expires_at: None,
+                http_port: 8080,
+                is_active: false,
+            },
+        )
+        .await
+        .unwrap();
+
+        copy_project_env_vars_to_deployment(&pool, project.id, deployment.id, Some(env.id))
+            .await
+            .unwrap();
+
+        let dep_vars = list_deployment_env_vars(&pool, deployment.id)
+            .await
+            .unwrap();
+        assert_eq!(dep_vars.len(), 1);
+        assert_eq!(dep_vars[0].key, "DB_URL");
+        assert_eq!(dep_vars[0].value, "staging-db");
     }
 }

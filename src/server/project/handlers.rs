@@ -162,6 +162,13 @@ pub async fn create_project(
         }
     })?;
 
+    // Bootstrap default "production" environment for new project
+    crate::db::environments::create_default_for_project(&state.db_pool, project.id)
+        .await
+        .map_err(|e| {
+            ServerError::internal_anyhow(e, "Failed to create default environment for project")
+        })?;
+
     // Transaction for app user/team additions
     use crate::server::error::ServerErrorExt;
 

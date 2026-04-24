@@ -78,7 +78,7 @@ impl OAuthProvider {
         client_secret_ref: &str,
     ) -> Result<String> {
         // Get all environment variables for the project
-        let env_vars = db_env_vars::list_project_env_vars(&self.db_pool, project_id).await?;
+        let env_vars = db_env_vars::list_project_env_vars(&self.db_pool, project_id, None).await?;
 
         // Find the environment variable by key
         let env_var = env_vars
@@ -331,9 +331,13 @@ impl OAuthProvider {
         .context("Failed to update OAuth extension spec during migration")?;
 
         // Best-effort cleanup: delete the legacy env var
-        if let Err(e) =
-            db_env_vars::delete_project_env_var(&self.db_pool, ext.project_id, &client_secret_ref)
-                .await
+        if let Err(e) = db_env_vars::delete_project_env_var(
+            &self.db_pool,
+            ext.project_id,
+            &client_secret_ref,
+            None,
+        )
+        .await
         {
             warn!(
                 "Failed to delete migrated environment variable {}: {:?}",

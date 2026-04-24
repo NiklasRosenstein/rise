@@ -5,6 +5,7 @@ pub mod deployment;
 pub mod ecr;
 pub mod encryption;
 pub mod env_vars;
+pub mod environments;
 pub mod error;
 pub mod extensions;
 pub mod frontend;
@@ -131,6 +132,7 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
         .merge(deployment::routes::deployment_routes())
         .merge(workload_identity::routes::routes())
         .merge(env_vars::routes::routes())
+        .merge(environments::routes::routes())
         .merge(extensions::routes::routes())
         .merge(encryption::routes::routes())
         // Apply platform access middleware (runs second, after auth)
@@ -332,6 +334,7 @@ async fn run_kubernetes_controller_loop(
         kubeconfig,
         production_ingress_url_template,
         staging_ingress_url_template,
+        environment_ingress_url_template,
         ingress_port,
         ingress_schema,
         auth_backend_url,
@@ -357,6 +360,7 @@ async fn run_kubernetes_controller_loop(
             kubeconfig,
             production_ingress_url_template,
             staging_ingress_url_template,
+            environment_ingress_url_template,
             ingress_port,
             ingress_schema,
             auth_backend_url,
@@ -381,6 +385,7 @@ async fn run_kubernetes_controller_loop(
             kubeconfig,
             production_ingress_url_template,
             staging_ingress_url_template,
+            environment_ingress_url_template,
             ingress_port,
             ingress_schema,
             auth_backend_url,
@@ -438,6 +443,7 @@ async fn run_kubernetes_controller_loop(
         deployment::controller::KubernetesControllerConfig {
             production_ingress_url_template,
             staging_ingress_url_template,
+            environment_ingress_url_template,
             ingress_port,
             ingress_schema,
             registry_provider,

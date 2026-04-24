@@ -169,6 +169,7 @@ async fn init_kubernetes_backend(
         kubeconfig,
         production_ingress_url_template,
         staging_ingress_url_template,
+        environment_ingress_url_template,
         ingress_port,
         ingress_schema,
         auth_backend_url,
@@ -226,6 +227,7 @@ async fn init_kubernetes_backend(
             KubernetesControllerConfig {
                 production_ingress_url_template: production_ingress_url_template.clone(),
                 staging_ingress_url_template: staging_ingress_url_template.clone(),
+                environment_ingress_url_template: environment_ingress_url_template.clone(),
                 ingress_port: *ingress_port,
                 ingress_schema: ingress_schema.clone(),
                 registry_provider,

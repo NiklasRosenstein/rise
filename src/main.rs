@@ -64,6 +64,9 @@ struct DeployArgs {
     /// Deployment group (e.g., 'default', 'mr/27'). Defaults to 'default' if not specified.
     #[arg(long, short)]
     group: Option<String>,
+    /// Target environment (e.g., 'production', 'staging'). Resolved from group if not specified.
+    #[arg(long, short = 'E')]
+    environment: Option<String>,
     /// Expiration duration (e.g., '7d', '2h', '30m'). Deployment will be automatically cleaned up after this period.
     #[arg(long)]
     expire: Option<String>,
@@ -132,6 +135,10 @@ enum Commands {
         /// Secret to encrypt (or read from stdin if not provided)
         plaintext: Option<String>,
     },
+    /// Environment management commands (production, staging, etc.)
+    #[command(subcommand)]
+    #[command(visible_alias = "envs")]
+    Environment(EnvironmentCommands),
     /// Environment variable management commands
     #[command(subcommand)]
     #[command(visible_alias = "e")]
@@ -521,6 +528,9 @@ enum EnvCommands {
         /// Mark secret as protected (cannot be decrypted via API). Only applies to secrets. Defaults to true for secrets, must be false for non-secrets.
         #[arg(long)]
         protected: Option<bool>,
+        /// Scope variable to a specific environment (e.g., 'staging'). Without this, the variable is global.
+        #[arg(long, short = 'E')]
+        environment: Option<String>,
     },
     /// List environment variables for a project
     #[command(visible_alias = "ls")]
@@ -532,6 +542,9 @@ enum EnvCommands {
         /// Path to rise.toml (defaults to current directory)
         #[arg(long, default_value = ".")]
         path: String,
+        /// Filter by environment (shows global + environment-scoped vars merged)
+        #[arg(long, short = 'E')]
+        environment: Option<String>,
     },
     /// Get the value of a specific environment variable
     #[command(visible_alias = "g")]
@@ -544,6 +557,9 @@ enum EnvCommands {
         path: String,
         /// Variable name
         key: String,
+        /// Get environment-scoped variable
+        #[arg(long, short = 'E')]
+        environment: Option<String>,
     },
     /// Delete an environment variable from a project
     #[command(visible_alias = "unset")]
@@ -558,6 +574,9 @@ enum EnvCommands {
         path: String,
         /// Variable name
         key: String,
+        /// Delete environment-scoped variable
+        #[arg(long, short = 'E')]
+        environment: Option<String>,
     },
     /// Import environment variables from a file
     #[command(visible_alias = "i")]
@@ -572,6 +591,9 @@ enum EnvCommands {
         /// Format: KEY=value or KEY=secret:value (for secrets)
         /// Lines starting with # are comments
         file: std::path::PathBuf,
+        /// Scope imported variables to a specific environment
+        #[arg(long, short = 'E')]
+        environment: Option<String>,
     },
     /// Show environment variables for a deployment (read-only)
     ShowDeployment {
@@ -583,6 +605,93 @@ enum EnvCommands {
         path: String,
         /// Deployment ID
         deployment_id: String,
+    },
+}
+
+#[derive(Subcommand, Debug)]
+enum EnvironmentCommands {
+    /// Create a new environment for a project
+    #[command(visible_alias = "c")]
+    #[command(visible_alias = "new")]
+    Create {
+        /// Environment name (e.g., 'staging', 'dev')
+        name: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// Primary deployment group for this environment
+        #[arg(long, short)]
+        group: Option<String>,
+        /// Set as the default environment (fallback for unassociated groups)
+        #[arg(long)]
+        default: bool,
+        /// Set as the production environment (gets the production URL)
+        #[arg(long)]
+        production: bool,
+    },
+    /// List all environments for a project
+    #[command(visible_alias = "ls")]
+    #[command(visible_alias = "l")]
+    List {
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+    },
+    /// Show environment details
+    #[command(visible_alias = "s")]
+    Show {
+        /// Environment name
+        name: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+    },
+    /// Update an environment
+    #[command(visible_alias = "u")]
+    #[command(visible_alias = "edit")]
+    Update {
+        /// Environment name
+        name: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
+        /// New environment name
+        #[arg(long)]
+        rename: Option<String>,
+        /// Set primary deployment group (use empty string to clear)
+        #[arg(long, short)]
+        group: Option<String>,
+        /// Set as the default environment
+        #[arg(long)]
+        default: Option<bool>,
+        /// Set as the production environment
+        #[arg(long)]
+        production: Option<bool>,
+    },
+    /// Delete an environment
+    #[command(visible_alias = "del")]
+    #[command(visible_alias = "rm")]
+    Delete {
+        /// Environment name
+        name: String,
+        /// Project name (optional if rise.toml contains [project] section)
+        #[arg(long, short = 'p')]
+        project: Option<String>,
+        /// Path to rise.toml (defaults to current directory)
+        #[arg(long, default_value = ".")]
+        path: String,
     },
 }
 
@@ -1095,6 +1204,7 @@ async fn main() -> Result<()> {
                         path: &args.path,
                         image: args.image.as_deref(),
                         group: args.group.as_deref(),
+                        environment: args.environment.as_deref(),
                         expires_in: args.expire.as_deref(),
                         http_port: args.http_port,
                         build_args: &args.build_args,
@@ -1257,6 +1367,10 @@ async fn main() -> Result<()> {
                 .await?;
             }
         },
+        Commands::Environment(env_cmd) => {
+            environment::handle_environment_command(&http_client, &backend_url, &config, env_cmd)
+                .await?;
+        }
         Commands::Env(env_cmd) => {
             let token = config.get_token().ok_or_else(|| {
                 anyhow::anyhow!("Not authenticated. Please run 'rise login' first")
@@ -1269,6 +1383,7 @@ async fn main() -> Result<()> {
                     value,
                     secret,
                     protected,
+                    environment,
                 } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
                     // Protected defaults to true for secrets, false for non-secrets
@@ -1283,29 +1398,75 @@ async fn main() -> Result<()> {
                         value,
                         *secret,
                         is_protected,
+                        environment.as_deref(),
                     )
                     .await?;
                 }
-                EnvCommands::List { project, path } => {
+                EnvCommands::List {
+                    project,
+                    path,
+                    environment,
+                } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
-                    env::list_env(&http_client, &backend_url, &token, &project_name).await?;
+                    env::list_env(
+                        &http_client,
+                        &backend_url,
+                        &token,
+                        &project_name,
+                        environment.as_deref(),
+                    )
+                    .await?;
                 }
-                EnvCommands::Get { project, path, key } => {
+                EnvCommands::Get {
+                    project,
+                    path,
+                    key,
+                    environment,
+                } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
-                    env::get_env(&http_client, &backend_url, &token, &project_name, key).await?;
+                    env::get_env(
+                        &http_client,
+                        &backend_url,
+                        &token,
+                        &project_name,
+                        key,
+                        environment.as_deref(),
+                    )
+                    .await?;
                 }
-                EnvCommands::Delete { project, path, key } => {
+                EnvCommands::Delete {
+                    project,
+                    path,
+                    key,
+                    environment,
+                } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
-                    env::unset_env(&http_client, &backend_url, &token, &project_name, key).await?;
+                    env::unset_env(
+                        &http_client,
+                        &backend_url,
+                        &token,
+                        &project_name,
+                        key,
+                        environment.as_deref(),
+                    )
+                    .await?;
                 }
                 EnvCommands::Import {
                     project,
                     path,
                     file,
+                    environment,
                 } => {
                     let project_name = resolve_project_name(project.clone(), path)?;
-                    env::import_env(&http_client, &backend_url, &token, &project_name, file)
-                        .await?;
+                    env::import_env(
+                        &http_client,
+                        &backend_url,
+                        &token,
+                        &project_name,
+                        file,
+                        environment.as_deref(),
+                    )
+                    .await?;
                 }
                 EnvCommands::ShowDeployment {
                     project,

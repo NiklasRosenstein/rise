@@ -390,6 +390,7 @@ pub async fn update_workload_identity(
         sa_id,
         req.issuer_url.as_deref(),
         req.claims.as_ref(),
+        None, // Don't change allowed_environment_ids
     )
     .await
     .internal_err("Failed to update service account")?;

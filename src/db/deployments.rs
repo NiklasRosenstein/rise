@@ -16,6 +16,7 @@ pub struct CreateDeploymentParams<'a> {
     pub image_digest: Option<&'a str>,
     pub rolled_back_from_deployment_id: Option<Uuid>,
     pub deployment_group: &'a str,
+    pub environment_id: Option<Uuid>,
     pub expires_at: Option<DateTime<Utc>>,
     pub http_port: i32,
     pub is_active: bool,
@@ -29,7 +30,7 @@ pub async fn list_for_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Dep
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -63,7 +64,7 @@ pub async fn get_deployments_batch(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -97,7 +98,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Deployment>> {
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -129,7 +130,7 @@ pub async fn find_by_deployment_id(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -166,7 +167,7 @@ pub async fn find_by_deployment_id_unscoped(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -197,12 +198,12 @@ pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result
     let deployment = sqlx::query_as!(
         Deployment,
         r#"
-        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, rolled_back_from_deployment_id, deployment_group, expires_at, http_port, is_active)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+        INSERT INTO deployments (deployment_id, project_id, created_by_id, status, image, image_digest, rolled_back_from_deployment_id, deployment_group, environment_id, expires_at, http_port, is_active)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-                        deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -220,6 +221,7 @@ pub async fn create(pool: &PgPool, params: CreateDeploymentParams<'_>) -> Result
         params.image_digest,
         params.rolled_back_from_deployment_id,
         params.deployment_group,
+        params.environment_id,
         params.expires_at,
         params.http_port,
         params.is_active
@@ -247,7 +249,7 @@ pub async fn update_status(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -290,7 +292,7 @@ pub async fn update_status(
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -332,7 +334,7 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -362,7 +364,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -396,7 +398,7 @@ pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<V
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -434,7 +436,7 @@ pub async fn update_controller_metadata(
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -480,7 +482,7 @@ pub async fn mark_cancelled(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -515,7 +517,7 @@ pub async fn mark_stopped(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -550,7 +552,7 @@ pub async fn mark_superseded(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -585,7 +587,7 @@ pub async fn mark_expired(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -620,7 +622,7 @@ pub async fn mark_healthy(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -654,7 +656,7 @@ pub async fn mark_unhealthy(pool: &PgPool, id: Uuid, reason: String) -> Result<D
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -692,7 +694,7 @@ pub async fn mark_terminating(
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -726,7 +728,7 @@ pub async fn mark_cancelling(pool: &PgPool, id: Uuid) -> Result<Deployment> {
         RETURNING
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -786,7 +788,7 @@ pub async fn find_needing_reconcile(pool: &PgPool, limit: i64) -> Result<Vec<Dep
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -824,7 +826,7 @@ pub async fn find_active_for_project_and_group(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-                        deployment_group, expires_at,
+                        deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -862,7 +864,7 @@ pub async fn find_non_terminal_for_project_and_group(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-                        deployment_group, expires_at,
+                        deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -900,7 +902,7 @@ pub async fn find_active_deployment_for_group(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -938,7 +940,7 @@ pub async fn find_last_for_project_and_group(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -972,7 +974,7 @@ pub async fn find_expired(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> 
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-                        deployment_group, expires_at,
+                        deployment_group, environment_id, expires_at,
             termination_reason as "termination_reason: _",
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
@@ -1015,7 +1017,7 @@ pub async fn list_for_project_and_group(
             SELECT
                 id, deployment_id, project_id, created_by_id,
                 status as "status: DeploymentStatus",
-                deployment_group, expires_at,
+                deployment_group, environment_id, expires_at,
                 termination_reason as "termination_reason: _",
                 completed_at, error_message, build_logs,
                 controller_metadata as "controller_metadata: serde_json::Value",
@@ -1044,7 +1046,7 @@ pub async fn list_for_project_and_group(
             SELECT
                 id, deployment_id, project_id, created_by_id,
                 status as "status: DeploymentStatus",
-                deployment_group, expires_at,
+                deployment_group, environment_id, expires_at,
                 termination_reason as "termination_reason: _",
                 completed_at, error_message, build_logs,
                 controller_metadata as "controller_metadata: serde_json::Value",
@@ -1199,7 +1201,7 @@ pub async fn get_active_deployments_for_project(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             completed_at, error_message, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -1234,7 +1236,7 @@ pub async fn find_stuck_pre_pushed_before(
         SELECT
             id, deployment_id, project_id, created_by_id,
             status as "status: DeploymentStatus",
-            deployment_group, expires_at,
+            deployment_group, environment_id, expires_at,
             error_message, completed_at, build_logs,
             controller_metadata as "controller_metadata: serde_json::Value",
             image, image_digest, rolled_back_from_deployment_id,
@@ -1499,6 +1501,7 @@ mod tests {
                 image_digest: None,
                 rolled_back_from_deployment_id: None,
                 deployment_group: "default",
+                environment_id: None,
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
@@ -1579,6 +1582,7 @@ mod tests {
                 image_digest: None,
                 rolled_back_from_deployment_id: None,
                 deployment_group: "default",
+                environment_id: None,
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,

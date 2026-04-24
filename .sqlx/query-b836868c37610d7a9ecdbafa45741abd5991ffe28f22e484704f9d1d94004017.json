@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            DELETE FROM project_env_vars\n            WHERE project_id = $1 AND key = $2 AND environment_id = $3\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "b836868c37610d7a9ecdbafa45741abd5991ffe28f22e484704f9d1d94004017"
+}

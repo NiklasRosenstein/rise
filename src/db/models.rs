@@ -102,7 +102,22 @@ pub struct ServiceAccount {
     pub issuer_url: String,
     pub claims: serde_json::Value, // JSONB stored as serde_json::Value
     pub sequence: i32,
+    /// If set, restricts which environments this SA can deploy to; NULL means any environment
+    pub allowed_environment_ids: Option<Vec<Uuid>>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Environment model - represents a deployment environment within a project
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct Environment {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub name: String,
+    pub primary_deployment_group: Option<String>,
+    pub is_default: bool,
+    pub is_production: bool,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }
@@ -116,6 +131,7 @@ pub struct Deployment {
     pub created_by_id: Uuid,
     pub status: DeploymentStatus,
     pub deployment_group: String,
+    pub environment_id: Option<Uuid>,
     pub expires_at: Option<DateTime<Utc>>,
     pub termination_reason: Option<TerminationReason>,
     pub completed_at: Option<DateTime<Utc>>,
@@ -217,6 +233,8 @@ pub struct ProjectEnvVar {
     pub value: String,
     pub is_secret: bool,
     pub is_protected: bool,
+    /// If set, this env var is scoped to a specific environment; NULL means global
+    pub environment_id: Option<Uuid>,
     pub created_at: DateTime<Utc>,
     pub updated_at: DateTime<Utc>,
 }

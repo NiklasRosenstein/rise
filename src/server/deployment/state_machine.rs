@@ -148,6 +148,7 @@ mod tests {
             created_by_id: Uuid::nil(),
             status,
             deployment_group: "default".to_string(),
+            environment_id: None,
             expires_at: None,
             termination_reason: None,
             completed_at: None,

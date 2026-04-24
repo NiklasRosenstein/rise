@@ -5,6 +5,7 @@ pub mod deployment;
 pub mod domain;
 pub mod encrypt;
 pub mod env;
+pub mod environment;
 pub mod extension;
 pub mod login;
 pub mod project;

@@ -1,5 +1,5 @@
 use super::models::{EnvVarResponse, EnvVarValueResponse, EnvVarsResponse, SetEnvVarRequest};
-use crate::db::{env_vars as db_env_vars, projects};
+use crate::db::{env_vars as db_env_vars, environments as db_environments, projects};
 use crate::server::auth::context::AuthContext;
 use crate::server::deployment::models as deployment_models;
 use crate::server::error::{ServerError, ServerErrorExt};
@@ -13,11 +13,31 @@ use axum::{
 };
 use std::collections::HashMap;
 
+/// Resolve an optional environment name from query params to an environment ID.
+async fn resolve_environment_id(
+    pool: &sqlx::PgPool,
+    project_id: uuid::Uuid,
+    params: &HashMap<String, String>,
+) -> Result<Option<uuid::Uuid>, ServerError> {
+    if let Some(env_name) = params.get("environment") {
+        let env = db_environments::find_by_name(pool, project_id, env_name)
+            .await
+            .internal_err("Failed to find environment")?
+            .ok_or_else(|| {
+                ServerError::not_found(format!("Environment '{}' not found", env_name))
+            })?;
+        Ok(Some(env.id))
+    } else {
+        Ok(None)
+    }
+}
+
 /// Set or update a project environment variable
 pub async fn set_project_env_var(
     State(state): State<AppState>,
     auth: AuthContext,
     Path((project_id_or_name, key)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
     Json(payload): Json<SetEnvVarRequest>,
 ) -> Result<Json<EnvVarResponse>, ServerError> {
     // Find project by ID or name
@@ -72,7 +92,9 @@ pub async fn set_project_env_var(
         payload.value.clone()
     };
 
-    // Store in database
+    // Resolve environment from query parameter
+    let environment_id = resolve_environment_id(&state.db_pool, project.id, &params).await?;
+
     let env_var = db_env_vars::upsert_project_env_var(
         &state.db_pool,
         project.id,
@@ -80,6 +102,7 @@ pub async fn set_project_env_var(
         &value_to_store,
         payload.is_secret,
         is_protected,
+        environment_id,
     )
     .await
     .internal_err("Failed to store environment variable")?;
@@ -137,10 +160,13 @@ pub async fn list_project_env_vars(
         .map(|v| v == "true")
         .unwrap_or(false);
 
-    // Get all environment variables
-    let db_env_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id)
-        .await
-        .internal_err("Failed to list environment variables")?;
+    // Resolve environment from query parameter
+    let environment_id = resolve_environment_id(&state.db_pool, project.id, &params).await?;
+
+    let db_env_vars =
+        db_env_vars::list_project_env_vars(&state.db_pool, project.id, environment_id)
+            .await
+            .internal_err("Failed to list environment variables")?;
 
     // Convert to API response
     let mut env_vars = Vec::new();
@@ -186,6 +212,7 @@ pub async fn delete_project_env_var(
     State(state): State<AppState>,
     auth: AuthContext,
     Path((project_id_or_name, key)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Result<StatusCode, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
@@ -206,10 +233,13 @@ pub async fn delete_project_env_var(
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }
 
-    // Delete environment variable
-    let deleted = db_env_vars::delete_project_env_var(&state.db_pool, project.id, &key)
-        .await
-        .internal_err("Failed to delete environment variable")?;
+    // Resolve environment from query parameter
+    let environment_id = resolve_environment_id(&state.db_pool, project.id, &params).await?;
+
+    let deleted =
+        db_env_vars::delete_project_env_var(&state.db_pool, project.id, &key, environment_id)
+            .await
+            .internal_err("Failed to delete environment variable")?;
 
     if !deleted {
         return Err(ServerError::not_found(format!(
@@ -319,6 +349,7 @@ pub async fn get_project_env_var_value(
     State(state): State<AppState>,
     auth: AuthContext,
     Path((project_id_or_name, key)): Path<(String, String)>,
+    Query(params): Query<HashMap<String, String>>,
 ) -> Result<Json<EnvVarValueResponse>, ServerError> {
     // Find project by ID or name
     let project = if let Ok(uuid) = project_id_or_name.parse() {
@@ -339,13 +370,16 @@ pub async fn get_project_env_var_value(
         ensure_project_access_or_admin(&state, &user, &project).await?;
     }
 
-    // Get the specific environment variable
-    let env_var = db_env_vars::get_project_env_var(&state.db_pool, project.id, &key)
-        .await
-        .internal_err("Failed to get environment variable")?
-        .ok_or_else(|| {
-            ServerError::not_found(format!("Environment variable '{}' not found", key))
-        })?;
+    // Resolve environment from query parameter
+    let environment_id = resolve_environment_id(&state.db_pool, project.id, &params).await?;
+
+    let env_var =
+        db_env_vars::get_project_env_var(&state.db_pool, project.id, &key, environment_id)
+            .await
+            .internal_err("Failed to get environment variable")?
+            .ok_or_else(|| {
+                ServerError::not_found(format!("Environment variable '{}' not found", key))
+            })?;
 
     // Validate: must be an unprotected secret
     if !env_var.is_secret || env_var.is_protected {
@@ -496,8 +530,10 @@ pub async fn preview_deployment_env_vars(
     // Collect all env vars into a map (later entries override earlier ones)
     let mut env_map: HashMap<String, EnvVarResponse> = HashMap::new();
 
-    // 1. Load user-set project vars
-    let db_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id)
+    // 1. Load user-set project vars (resolve environment from query param)
+    let preview_env_id = resolve_environment_id(&state.db_pool, project.id, &params).await?;
+
+    let db_vars = db_env_vars::list_project_env_vars(&state.db_pool, project.id, preview_env_id)
         .await
         .internal_err("Failed to list environment variables")?;
 
@@ -571,9 +607,12 @@ pub async fn preview_deployment_env_vars(
         .await
     {
         Ok(urls) => {
-            for (key, value) in
-                deployment_models::rise_system_env_vars(&state.public_url, &deployment_group, &urls)
-            {
+            for (key, value) in deployment_models::rise_system_env_vars(
+                &state.public_url,
+                &deployment_group,
+                &urls,
+                params.get("environment").map(|s| s.as_str()),
+            ) {
                 env_map.insert(
                     key.clone(),
                     EnvVarResponse {

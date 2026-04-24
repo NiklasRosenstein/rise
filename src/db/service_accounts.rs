@@ -90,7 +90,7 @@ pub async fn create(
         r#"
         INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence)
         VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, project_id, user_id, issuer_url, claims, sequence,
+        RETURNING id, project_id, user_id, issuer_url, claims, sequence, allowed_environment_ids,
                   deleted_at, created_at, updated_at
         "#,
         project_id,
@@ -113,7 +113,7 @@ pub async fn list_by_project(pool: &PgPool, project_id: Uuid) -> Result<Vec<Serv
     let sas = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, allowed_environment_ids,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE project_id = $1 AND deleted_at IS NULL
@@ -133,7 +133,7 @@ pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<ServiceAccount>
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, allowed_environment_ids,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE id = $1
@@ -156,7 +156,7 @@ pub async fn get_claims(
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, allowed_environment_ids,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE id = $1
@@ -193,12 +193,18 @@ pub async fn is_service_account(pool: &PgPool, user_id: Uuid) -> Result<bool> {
     Ok(exists)
 }
 
-/// Update a service account's issuer_url and/or claims
+/// Update a service account's issuer_url, claims, and/or allowed_environment_ids.
+///
+/// `allowed_environment_ids`:
+/// - `None` = don't change
+/// - `Some(None)` = set to NULL (allow any environment)
+/// - `Some(Some(ids))` = restrict to these environment IDs
 pub async fn update(
     pool: &PgPool,
     id: Uuid,
     issuer_url: Option<&str>,
     claims: Option<&HashMap<String, String>>,
+    allowed_environment_ids: Option<Option<&[Uuid]>>,
 ) -> Result<ServiceAccount> {
     // Convert claims HashMap to JSONB if provided
     let claims_json = if let Some(c) = claims {
@@ -207,6 +213,11 @@ pub async fn update(
         None
     };
 
+    // Flatten allowed_environment_ids for the query
+    let update_env_ids = allowed_environment_ids.is_some();
+    let env_ids: Option<Vec<Uuid>> =
+        allowed_environment_ids.and_then(|opt| opt.map(|ids| ids.to_vec()));
+
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"
@@ -214,14 +225,17 @@ pub async fn update(
         SET
             issuer_url = COALESCE($2, issuer_url),
             claims = COALESCE($3, claims),
+            allowed_environment_ids = CASE WHEN $4 THEN $5 ELSE allowed_environment_ids END,
             updated_at = NOW()
         WHERE id = $1 AND deleted_at IS NULL
-        RETURNING id, project_id, user_id, issuer_url, claims, sequence,
+        RETURNING id, project_id, user_id, issuer_url, claims, sequence, allowed_environment_ids,
                   deleted_at, created_at, updated_at
         "#,
         id,
         issuer_url,
-        claims_json
+        claims_json,
+        update_env_ids,
+        env_ids.as_deref()
     )
     .fetch_one(pool)
     .await
@@ -258,7 +272,7 @@ pub async fn find_by_project_and_issuer(
     let sas = sqlx::query_as!(
         ServiceAccount,
         r#"
-        SELECT id, project_id, user_id, issuer_url, claims, sequence,
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, allowed_environment_ids,
                deleted_at, created_at, updated_at
         FROM service_accounts
         WHERE project_id = $1 AND issuer_url = $2 AND deleted_at IS NULL
@@ -352,7 +366,7 @@ pub async fn create_with_raw_claims(
         r#"
         INSERT INTO service_accounts (project_id, user_id, issuer_url, claims, sequence)
         VALUES ($1, $2, $3, $4, $5)
-        RETURNING id, project_id, user_id, issuer_url, claims, sequence,
+        RETURNING id, project_id, user_id, issuer_url, claims, sequence, allowed_environment_ids,
                   deleted_at, created_at, updated_at
         "#,
         project_id,

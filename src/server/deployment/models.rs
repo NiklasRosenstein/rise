@@ -63,6 +63,8 @@ pub struct Deployment {
     #[serde(default = "default_group")]
     pub deployment_group: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_at: Option<String>, // RFC3339 timestamp
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
@@ -140,16 +142,18 @@ pub fn normalize_deployment_group(deployment_group: &str) -> String {
 /// - `RISE_APP_URLS` — JSON array of all URLs where the app can be accessed
 /// - `RISE_DEPLOYMENT_GROUP` — The deployment group name (e.g. "default", "mr/123")
 /// - `RISE_DEPLOYMENT_GROUP_NORMALIZED` — The group name normalized for URLs (e.g. "mr--123")
+/// - `RISE_ENVIRONMENT` — The environment name (e.g. "production", "staging"), if set
 pub fn rise_system_env_vars(
     public_url: &str,
     deployment_group: &str,
     deployment_urls: &DeploymentUrls,
+    environment_name: Option<&str>,
 ) -> Vec<(String, String)> {
     let mut all_urls = vec![deployment_urls.default_url.clone()];
     all_urls.extend(deployment_urls.custom_domain_urls.clone());
     let app_urls_json = serde_json::to_string(&all_urls).unwrap_or_else(|_| "[]".to_string());
 
-    vec![
+    let mut vars = vec![
         ("RISE_ISSUER".to_string(), public_url.to_string()),
         (
             "RISE_APP_URL".to_string(),
@@ -164,7 +168,13 @@ pub fn rise_system_env_vars(
             "RISE_DEPLOYMENT_GROUP_NORMALIZED".to_string(),
             normalize_deployment_group(deployment_group),
         ),
-    ]
+    ];
+
+    if let Some(env_name) = environment_name {
+        vars.push(("RISE_ENVIRONMENT".to_string(), env_name.to_string()));
+    }
+
+    vars
 }
 
 /// A runtime environment variable override included in a deployment request
@@ -184,8 +194,12 @@ pub struct CreateDeploymentRequest {
     pub project: String, // Project name
     #[serde(skip_serializing_if = "Option::is_none")]
     pub image: Option<String>, // Optional pre-built image reference
-    #[serde(default = "default_group")]
-    pub group: String, // Deployment group (e.g., 'default', 'mr/27')
+    /// Deployment group. Defaults to the primary group of the target environment.
+    #[serde(default)]
+    pub group: Option<String>,
+    /// Target environment name. If omitted, resolved from the deployment group.
+    #[serde(default)]
+    pub environment: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub expires_in: Option<String>, // Expiration duration (e.g., '7d', '2h', '30m')
     /// HTTP port the application listens on.
@@ -262,7 +276,7 @@ mod tests {
             custom_domain_urls: vec![],
         };
 
-        let vars = rise_system_env_vars("https://rise.dev", "default", &urls);
+        let vars = rise_system_env_vars("https://rise.dev", "default", &urls, None);
 
         let map: std::collections::HashMap<_, _> = vars.into_iter().collect();
         assert_eq!(map["RISE_ISSUER"], "https://rise.dev");
@@ -280,7 +294,7 @@ mod tests {
             custom_domain_urls: vec!["https://custom.example.com".to_string()],
         };
 
-        let vars = rise_system_env_vars("https://rise.dev", "mr/42", &urls);
+        let vars = rise_system_env_vars("https://rise.dev", "mr/42", &urls, None);
 
         let map: std::collections::HashMap<_, _> = vars.into_iter().collect();
         assert_eq!(map["RISE_APP_URL"], "https://custom.example.com");

@@ -814,6 +814,7 @@ pub async fn sync_env_vars(
             value,
             false,
             false,
+            None,
         )
         .await?;
     }

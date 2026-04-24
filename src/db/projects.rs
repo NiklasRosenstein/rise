@@ -662,6 +662,7 @@ mod tests {
                 image_digest: None,
                 rolled_back_from_deployment_id: None,
                 deployment_group: DEFAULT_DEPLOYMENT_GROUP,
+                environment_id: None,
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // Initially not active
@@ -704,6 +705,7 @@ mod tests {
                 image_digest: None,
                 rolled_back_from_deployment_id: None,
                 deployment_group: DEFAULT_DEPLOYMENT_GROUP,
+                environment_id: None,
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // This is NOT active
@@ -758,6 +760,7 @@ mod tests {
                 image_digest: None,
                 rolled_back_from_deployment_id: None,
                 deployment_group: DEFAULT_DEPLOYMENT_GROUP,
+                environment_id: None,
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,

@@ -436,6 +436,7 @@ pub struct DeploymentOptions<'a> {
     pub path: &'a str,
     pub image: Option<&'a str>,
     pub group: Option<&'a str>,
+    pub environment: Option<&'a str>,
     pub expires_in: Option<&'a str>,
     /// HTTP port the application listens on.
     /// If None, server will use project's PORT env var or default to 8080.
@@ -491,6 +492,7 @@ pub async fn create_deployment(
         deploy_opts.project_name,
         deploy_opts.image,
         deploy_opts.group,
+        deploy_opts.environment,
         deploy_opts.expires_in,
         deploy_opts.http_port,
         deploy_opts.from_deployment,
@@ -793,6 +795,7 @@ async fn call_create_deployment_api(
     project_name: &str,
     image: Option<&str>,
     group: Option<&str>,
+    environment: Option<&str>,
     expires_in: Option<&str>,
     http_port: Option<u16>,
     from_deployment: Option<&str>,
@@ -819,6 +822,11 @@ async fn call_create_deployment_api(
     // Add group field if provided (defaults to "default" on backend)
     if let Some(group_name) = group {
         payload["group"] = serde_json::json!(group_name);
+    }
+
+    // Add environment field if provided
+    if let Some(env_name) = environment {
+        payload["environment"] = serde_json::json!(env_name);
     }
 
     // Add expires_in field if provided

@@ -256,6 +256,7 @@ struct IngressUrl {
 pub struct KubernetesControllerConfig {
     pub production_ingress_url_template: String,
     pub staging_ingress_url_template: Option<String>,
+    pub environment_ingress_url_template: Option<String>,
     pub ingress_port: Option<u16>,
     pub ingress_schema: String,
     pub registry_provider: Arc<dyn RegistryProvider>,
@@ -287,6 +288,7 @@ pub struct KubernetesController {
     kube_client: Client,
     production_ingress_url_template: String,
     staging_ingress_url_template: Option<String>,
+    environment_ingress_url_template: Option<String>,
     ingress_port: Option<u16>,
     ingress_schema: String,
     registry_provider: Arc<dyn RegistryProvider>,
@@ -336,6 +338,7 @@ impl KubernetesController {
             kube_client,
             production_ingress_url_template: config.production_ingress_url_template,
             staging_ingress_url_template: config.staging_ingress_url_template,
+            environment_ingress_url_template: config.environment_ingress_url_template,
             ingress_port: config.ingress_port,
             ingress_schema: config.ingress_schema,
             registry_provider: config.registry_provider,
@@ -909,6 +912,36 @@ impl KubernetesController {
                     Self::escaped_group_name(&deployment.deployment_group)
                 )
             }
+        }
+    }
+
+    /// Resolve environment URL for a deployment, if applicable.
+    ///
+    /// Returns `Some(url)` when:
+    /// - The deployment belongs to an environment (environment_id is set)
+    /// - The environment has a primary_deployment_group matching the deployment's group
+    /// - The environment is a non-production environment and `environment_ingress_url_template` is configured
+    /// - OR the environment is the production environment → uses `production_ingress_url_template`
+    fn resolved_environment_url(
+        &self,
+        project: &Project,
+        environment: &crate::db::models::Environment,
+    ) -> Option<String> {
+        if environment.is_production {
+            // Production environments always get the production URL
+            Some(
+                self.production_ingress_url_template
+                    .replace("{project_name}", &project.name),
+            )
+        } else {
+            // Non-production environments get environment-specific URL if template is configured
+            self.environment_ingress_url_template
+                .as_ref()
+                .map(|env_template| {
+                    env_template
+                        .replace("{project_name}", &project.name)
+                        .replace("{environment}", &environment.name)
+                })
         }
     }
 
@@ -2136,6 +2169,88 @@ impl KubernetesController {
                         "Error checking for custom domain Ingress '{}': {}",
                         custom_domain_ingress_name, e
                     );
+                }
+            }
+        }
+
+        // 3. Handle environment-specific ingress
+        // If the deployment is in the primary group of a non-production environment,
+        // and environment_ingress_url_template is configured, create an additional ingress.
+        if let Some(env_id) = deployment.environment_id {
+            if let Some(env) =
+                crate::db::environments::find_by_id(&self.state.db_pool, env_id).await?
+            {
+                let is_primary_group =
+                    env.primary_deployment_group.as_deref() == Some(&deployment.deployment_group);
+                if is_primary_group && !env.is_production {
+                    if let Some(env_url) = self.resolved_environment_url(project, &env) {
+                        let env_ingress_name = format!("env-{}", env.name);
+                        let env_url_components = Self::parse_ingress_url(&env_url);
+
+                        // Create environment ingress using the same structure as primary
+                        let mut env_ingress =
+                            self.create_primary_ingress(project, deployment, metadata);
+                        env_ingress.metadata.name = Some(env_ingress_name.clone());
+
+                        // Replace the host in the ingress rules with the environment URL
+                        if let Some(ref mut spec) = env_ingress.spec {
+                            if let Some(ref mut rules) = spec.rules {
+                                for rule in rules.iter_mut() {
+                                    rule.host = Some(env_url_components.host.clone());
+                                }
+                            }
+                            // Update TLS hosts if TLS is configured
+                            if let Some(ref mut tls_entries) = spec.tls {
+                                for tls in tls_entries.iter_mut() {
+                                    tls.hosts = Some(vec![env_url_components.host.clone()]);
+                                }
+                            }
+                        }
+
+                        match ingress_api.get(&env_ingress_name).await {
+                            Ok(existing) => {
+                                let current_version = existing.metadata.resource_version.as_deref();
+                                if self.needs_apply(
+                                    deployment_id,
+                                    "ingress-environment",
+                                    current_version,
+                                ) || deployment.needs_reconcile
+                                {
+                                    let result = ingress_api
+                                        .patch(
+                                            &env_ingress_name,
+                                            &PatchParams::apply("rise").force(),
+                                            &Patch::Apply(&env_ingress),
+                                        )
+                                        .await?;
+                                    self.update_version_cache(
+                                        deployment_id,
+                                        "ingress-environment",
+                                        result.metadata.resource_version,
+                                    );
+                                    info!(
+                                        "Applied environment Ingress '{}' for environment '{}'",
+                                        env_ingress_name, env.name
+                                    );
+                                }
+                            }
+                            Err(kube::Error::Api(err)) if err.code == 404 => {
+                                let result = ingress_api
+                                    .create(&PostParams::default(), &env_ingress)
+                                    .await?;
+                                self.update_version_cache(
+                                    deployment_id,
+                                    "ingress-environment",
+                                    result.metadata.resource_version,
+                                );
+                                info!(
+                                    "Created environment Ingress '{}' for environment '{}'",
+                                    env_ingress_name, env.name
+                                );
+                            }
+                            Err(e) => return Err(e.into()),
+                        }
+                    }
                 }
             }
         }
@@ -4432,48 +4547,82 @@ impl DeploymentBackend for KubernetesController {
         let default_url_host = self.full_ingress_url(project, deployment);
         let default_url = format!("{}://{}", self.ingress_schema, default_url_host);
 
-        // Custom domains only apply to deployments in the default group
-        let (custom_domain_urls, primary_url) =
-            if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP {
-                // Fetch custom domains from database
-                let custom_domains = crate::db::custom_domains::list_project_custom_domains(
-                    &self.state.db_pool,
-                    project.id,
-                )
-                .await?;
+        // Load environment info if the deployment has one
+        let environment = if let Some(env_id) = deployment.environment_id {
+            crate::db::environments::find_by_id(&self.state.db_pool, env_id).await?
+        } else {
+            None
+        };
 
-                // Filter out custom domains that conflict with project default patterns
-                let custom_domains = self.filter_valid_custom_domains(custom_domains);
+        // Generate environment URL if this deployment is in the primary group of an environment
+        let environment_url = environment
+            .as_ref()
+            .filter(|env| {
+                env.primary_deployment_group.as_deref() == Some(&deployment.deployment_group)
+            })
+            .and_then(|env| {
+                self.resolved_environment_url(project, env).map(|url_host| {
+                    let full_host = self.full_ingress_url_from_host(&url_host);
+                    format!("{}://{}", self.ingress_schema, full_host)
+                })
+            });
 
-                // Find the starred (primary) custom domain
-                let starred = custom_domains.iter().find(|d| d.is_primary);
-                let primary = if let Some(starred) = starred {
-                    let host = if let Some(port) = self.ingress_port {
-                        format!("{}:{}", starred.domain, port)
-                    } else {
-                        starred.domain.clone()
-                    };
-                    format!("{}://{}", self.ingress_schema, host)
+        // Custom domains apply to deployments in the production environment's primary group
+        // (backward compat: also the "default" group when no environment is set)
+        let is_production_primary = environment
+            .as_ref()
+            .map(|env| {
+                env.is_production
+                    && env.primary_deployment_group.as_deref() == Some(&deployment.deployment_group)
+            })
+            .unwrap_or(deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP);
+
+        let (custom_domain_urls, primary_url) = if is_production_primary {
+            // Fetch custom domains from database
+            let custom_domains = crate::db::custom_domains::list_project_custom_domains(
+                &self.state.db_pool,
+                project.id,
+            )
+            .await?;
+
+            // Filter out custom domains that conflict with project default patterns
+            let custom_domains = self.filter_valid_custom_domains(custom_domains);
+
+            // Find the starred (primary) custom domain
+            let starred = custom_domains.iter().find(|d| d.is_primary);
+            let primary = if let Some(starred) = starred {
+                let host = if let Some(port) = self.ingress_port {
+                    format!("{}:{}", starred.domain, port)
                 } else {
-                    default_url.clone()
+                    starred.domain.clone()
                 };
-
-                // Build custom domain URLs with schema
-                let mut urls = Vec::new();
-                for domain in custom_domains {
-                    let url_host = if let Some(port) = self.ingress_port {
-                        format!("{}:{}", domain.domain, port)
-                    } else {
-                        domain.domain
-                    };
-                    let url = format!("{}://{}", self.ingress_schema, url_host);
-                    urls.push(url);
-                }
-                (urls, primary)
+                format!("{}://{}", self.ingress_schema, host)
             } else {
-                // Non-default groups don't get custom domain URLs
-                (Vec::new(), default_url.clone())
+                // Use environment URL as primary if available, else default
+                environment_url
+                    .clone()
+                    .unwrap_or_else(|| default_url.clone())
             };
+
+            // Build custom domain URLs with schema
+            let mut urls = Vec::new();
+            for domain in custom_domains {
+                let url_host = if let Some(port) = self.ingress_port {
+                    format!("{}:{}", domain.domain, port)
+                } else {
+                    domain.domain
+                };
+                let url = format!("{}://{}", self.ingress_schema, url_host);
+                urls.push(url);
+            }
+            (urls, primary)
+        } else {
+            // Use environment URL as primary if available, else default
+            let primary = environment_url
+                .clone()
+                .unwrap_or_else(|| default_url.clone());
+            (Vec::new(), primary)
+        };
 
         Ok(DeploymentUrls {
             default_url,
@@ -5060,6 +5209,7 @@ mod tests {
             kube_client,
             production_ingress_url_template: "{project_name}.test.local".to_string(),
             staging_ingress_url_template: None,
+            environment_ingress_url_template: None,
             ingress_port: None,
             ingress_schema: "https".to_string(),
             registry_provider: Arc::new(MockRegistryProvider),
@@ -5109,6 +5259,7 @@ mod tests {
             deployment_id: "20240108-103000".to_string(),
             created_by_id: uuid::Uuid::new_v4(),
             deployment_group: "default".to_string(),
+            environment_id: None,
             status: crate::db::models::DeploymentStatus::Deploying,
             expires_at: None,
             termination_reason: None,
@@ -5321,6 +5472,7 @@ mod tests {
             deployment_id: "20240108-103000".to_string(),
             created_by_id: Uuid::new_v4(),
             deployment_group: "default".to_string(),
+            environment_id: None,
             status: crate::db::models::DeploymentStatus::Deploying,
             expires_at: None,
             termination_reason: None,
@@ -5393,6 +5545,7 @@ mod tests {
             deployment_id: "20240108-103000".to_string(),
             created_by_id: Uuid::new_v4(),
             deployment_group: "default".to_string(),
+            environment_id: None,
             status: crate::db::models::DeploymentStatus::Deploying,
             expires_at: None,
             termination_reason: None,
@@ -5447,6 +5600,7 @@ mod tests {
             deployment_id: "20240108-103000".to_string(),
             created_by_id: Uuid::new_v4(),
             deployment_group: "default".to_string(),
+            environment_id: None,
             status: crate::db::models::DeploymentStatus::Deploying,
             expires_at: None,
             termination_reason: None,
@@ -5533,6 +5687,7 @@ mod tests {
             deployment_id: "20240108-103000".to_string(),
             created_by_id: Uuid::new_v4(),
             deployment_group: "default".to_string(),
+            environment_id: None,
             status: crate::db::models::DeploymentStatus::Deploying,
             expires_at: None,
             termination_reason: None,
@@ -5639,6 +5794,7 @@ mod tests {
             deployment_id: "20240108-103000".to_string(),
             created_by_id: Uuid::new_v4(),
             deployment_group: "default".to_string(),
+            environment_id: None,
             status: crate::db::models::DeploymentStatus::Deploying,
             expires_at: None,
             termination_reason: None,
@@ -5735,6 +5891,7 @@ mod tests {
             // Path-based routing template: rise.dev/{project_name}
             production_ingress_url_template: "rise.dev/{project_name}".to_string(),
             staging_ingress_url_template: None,
+            environment_ingress_url_template: None,
             ingress_port: None,
             ingress_schema: "https".to_string(),
             registry_provider: Arc::new(MockRegistryProvider),
@@ -5781,6 +5938,7 @@ mod tests {
             deployment_id: "20240108-103000".to_string(),
             created_by_id: Uuid::new_v4(),
             deployment_group: "default".to_string(),
+            environment_id: None,
             status: crate::db::models::DeploymentStatus::Deploying,
             expires_at: None,
             termination_reason: None,
