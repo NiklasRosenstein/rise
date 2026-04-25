@@ -28,10 +28,8 @@ pub async fn create_environment(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     let env = db_environments::create(
         &state.db_pool,
@@ -102,10 +100,8 @@ pub async fn list_environments(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     let envs = db_environments::list_for_project(&state.db_pool, project.id)
         .await
@@ -131,10 +127,8 @@ pub async fn get_environment(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     let env = db_environments::find_by_name(&state.db_pool, project.id, &env_name)
         .await
@@ -162,10 +156,8 @@ pub async fn update_environment(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     let env = db_environments::find_by_name(&state.db_pool, project.id, &env_name)
         .await
@@ -226,10 +218,8 @@ pub async fn delete_environment(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     let env = db_environments::find_by_name(&state.db_pool, project.id, &env_name)
         .await

@@ -54,12 +54,8 @@ pub async fn set_project_env_var(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check permission (SA access already validated, admin bypass for regular users)
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     // Normalize: when is_protected is omitted, infer from is_secret
     // This preserves backward compatibility: secrets default to protected, plain vars default to unprotected
@@ -151,12 +147,8 @@ pub async fn list_project_env_vars(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check permission (SA access already validated, admin bypass for regular users)
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     // Check if we should include unprotected values
     let include_unprotected = params
@@ -242,12 +234,8 @@ pub async fn delete_project_env_var(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check permission (SA access already validated, admin bypass for regular users)
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     // Resolve environment from query parameter
     let environment_id = resolve_environment_id(&state.db_pool, project.id, &params).await?;
@@ -295,10 +283,8 @@ pub async fn move_project_env_var(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     // Resolve source environment
     let from_env_id = if let Some(ref name) = payload.from_environment {
@@ -332,20 +318,22 @@ pub async fn move_project_env_var(
             .await
             .internal_err("Failed to check target environment")?;
     if existing_at_target.is_some() {
-        let target_label = payload
-            .to_environment
-            .as_deref()
-            .unwrap_or("global");
+        let target_label = payload.to_environment.as_deref().unwrap_or("global");
         return Err(ServerError::bad_request(format!(
             "Environment variable '{}' already exists in environment '{}'",
             key, target_label
         )));
     }
 
-    let env_var =
-        db_env_vars::update_env_var_environment(&state.db_pool, project.id, &key, from_env_id, to_env_id)
-            .await
-            .internal_err("Failed to move environment variable")?;
+    let env_var = db_env_vars::update_env_var_environment(
+        &state.db_pool,
+        project.id,
+        &key,
+        from_env_id,
+        to_env_id,
+    )
+    .await
+    .internal_err("Failed to move environment variable")?;
 
     tracing::info!(
         "Moved environment variable '{}' for project '{}' from {:?} to {:?}",
@@ -384,12 +372,8 @@ pub async fn list_deployment_env_vars(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check permission (SA access already validated, admin bypass for regular users)
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     // Get deployment by deployment_id within the project
     let deployment =
@@ -468,12 +452,8 @@ pub async fn get_project_env_var_value(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check permission (SA access already validated, admin bypass for regular users)
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     // Resolve environment from query parameter
     let environment_id = resolve_environment_id(&state.db_pool, project.id, &params).await?;
@@ -538,12 +518,8 @@ pub async fn get_deployment_env_var_value(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check permission (SA access already validated, admin bypass for regular users)
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     // Get deployment by deployment_id within the project
     let deployment =
@@ -620,12 +596,8 @@ pub async fn preview_deployment_env_vars(
     }
     .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check permission (SA access already validated, admin bypass for regular users)
-    if !is_sa {
-        ensure_project_access_or_admin(&state, &user, &project).await?;
-    }
+    let user = auth.user()?;
+    ensure_project_access_or_admin(&state, user, &project).await?;
 
     let deployment_group = params
         .get("deployment_group")
