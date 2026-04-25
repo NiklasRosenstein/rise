@@ -69,6 +69,8 @@ description = "Run the backend server."
 depends = ["backend:deps", "db:migrate"]
 run = "cargo run --features cli,backend -- backend server"
 alias = "br"
+env.https_proxy = ""
+env.HTTPS_PROXY = ""
 
 [tasks."backend:run-container"]
 description = "Build and run the backend server in its container (host network). Useful to validate the containerized version works as intended."

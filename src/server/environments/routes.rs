@@ -11,7 +11,7 @@ pub fn routes() -> Router<AppState> {
         .route(
             "/projects/{project}/environments/{name}",
             get(handlers::get_environment)
-                .put(handlers::update_environment)
+                .patch(handlers::update_environment)
                 .delete(handlers::delete_environment),
         )
 }

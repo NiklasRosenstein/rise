@@ -384,6 +384,27 @@ pub async fn create_with_raw_claims(
     Ok(sa)
 }
 
+/// Find an active service account by its synthetic user ID.
+///
+/// Each service account has a unique synthetic user, so this returns at most one result.
+pub async fn find_active_by_user_id(pool: &PgPool, user_id: Uuid) -> Result<Option<ServiceAccount>> {
+    let sa = sqlx::query_as!(
+        ServiceAccount,
+        r#"
+        SELECT id, project_id, user_id, issuer_url, claims, sequence, allowed_environment_ids,
+               deleted_at, created_at, updated_at
+        FROM service_accounts
+        WHERE user_id = $1 AND deleted_at IS NULL
+        "#,
+        user_id
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to find service account by user ID")?;
+
+    Ok(sa)
+}
+
 /// Soft delete a service account
 pub async fn soft_delete(pool: &PgPool, id: Uuid) -> Result<()> {
     sqlx::query!(

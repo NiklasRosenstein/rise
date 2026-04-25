@@ -2184,6 +2184,38 @@ impl KubernetesController {
                     env.primary_deployment_group.as_deref() == Some(&deployment.deployment_group);
                 if is_primary_group && !env.is_production {
                     if let Some(env_url) = self.resolved_environment_url(project, &env) {
+                        // Skip if the environment URL is the same as the primary ingress URL,
+                        // which happens when no staging_ingress_url_template is configured
+                        // and the fallback pattern matches the environment template.
+                        let primary_url = self.resolved_ingress_url(project, deployment);
+                        if env_url == primary_url {
+                            // Clean up any stale env ingress that may exist from before
+                            let stale_name = format!("env-{}", env.name);
+                            match ingress_api
+                                .delete(&stale_name, &DeleteParams::default())
+                                .await
+                            {
+                                Ok(_) => {
+                                    info!(
+                                        "Deleted stale environment Ingress '{}' (URL matches primary ingress)",
+                                        stale_name
+                                    );
+                                }
+                                Err(kube::Error::Api(err)) if err.code == 404 => {
+                                    // Already gone, nothing to do
+                                }
+                                Err(e) => {
+                                    warn!(
+                                        "Failed to delete stale environment Ingress '{}': {:?}",
+                                        stale_name, e
+                                    );
+                                }
+                            }
+                            debug!(
+                                "Skipping environment ingress for '{}': URL '{}' matches primary ingress",
+                                env.name, env_url
+                            );
+                        } else {
                         let env_ingress_name = format!("env-{}", env.name);
                         let env_url_components = Self::parse_ingress_url(&env_url);
 
@@ -2250,6 +2282,7 @@ impl KubernetesController {
                             }
                             Err(e) => return Err(e.into()),
                         }
+                    } // else (env_url != primary_url)
                     }
                 }
             }

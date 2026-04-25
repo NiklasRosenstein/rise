@@ -14,7 +14,7 @@ use super::models::{self, *};
 use super::state_machine;
 use super::utils::{create_deployment_with_hooks, generate_deployment_id};
 use crate::db::models::DeploymentStatus as DbDeploymentStatus;
-use crate::db::{deployments as db_deployments, projects, users};
+use crate::db::{deployments as db_deployments, projects, service_accounts, users};
 use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::registry::ImageTagType;
@@ -644,6 +644,31 @@ pub async fn create_deployment(
             .map_err(|_| {
                 ServerError::not_found(format!("Project '{}' not found", payload.project))
             })?;
+    }
+
+    // Enforce service account environment restrictions
+    if is_sa {
+        let sa = service_accounts::find_active_by_user_id(&state.db_pool, user.id)
+            .await
+            .internal_err("Failed to look up service account")?;
+        if let Some(ref allowed_env_ids) = sa.and_then(|sa| sa.allowed_environment_ids) {
+            let target_env_id = resolved_environment.as_ref().map(|e| e.id);
+            match target_env_id {
+                Some(env_id) if !allowed_env_ids.contains(&env_id) => {
+                    return Err(ServerError::forbidden(
+                        "This service account is not allowed to deploy to the requested environment",
+                    ));
+                }
+                None => {
+                    // SA has environment restrictions but no environment was specified;
+                    // block the deployment since we can't verify the target is allowed.
+                    return Err(ServerError::forbidden(
+                        "This service account requires an explicit environment target",
+                    ));
+                }
+                _ => {} // target environment is in the allowed list
+            }
+        }
     }
 
     // Generate deployment ID
