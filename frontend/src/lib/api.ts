@@ -206,7 +206,7 @@ class RiseAPI {
 
     async updateEnvironment(projectName, envName, updates) {
         return this.request(`/projects/${projectName}/environments/${encodeURIComponent(envName)}`, {
-            method: 'PUT',
+            method: 'PATCH',
             body: JSON.stringify(updates)
         });
     }

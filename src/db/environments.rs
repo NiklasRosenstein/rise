@@ -5,15 +5,18 @@ use uuid::Uuid;
 use crate::db::models::Environment;
 
 /// Create a new environment for a project
-pub async fn create(
-    pool: &PgPool,
+pub async fn create<'a, E>(
+    executor: E,
     project_id: Uuid,
     name: &str,
     primary_deployment_group: Option<&str>,
     is_default: bool,
     is_production: bool,
     color: &str,
-) -> Result<Environment> {
+) -> Result<Environment>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     let env = sqlx::query_as!(
         Environment,
         r#"
@@ -28,7 +31,7 @@ pub async fn create(
         is_production,
         color
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
     .context("Failed to create environment")?;
 
@@ -258,9 +261,12 @@ pub async fn delete(pool: &PgPool, id: Uuid) -> Result<bool> {
 ///
 /// Creates a single environment named "production" with `is_default=true`, `is_production=true`,
 /// and `primary_deployment_group="default"`.
-pub async fn create_default_for_project(pool: &PgPool, project_id: Uuid) -> Result<Environment> {
+pub async fn create_default_for_project<'a, E>(executor: E, project_id: Uuid) -> Result<Environment>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     create(
-        pool,
+        executor,
         project_id,
         "production",
         Some("default"),

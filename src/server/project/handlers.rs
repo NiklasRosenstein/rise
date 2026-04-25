@@ -140,8 +140,16 @@ pub async fn create_project(
         user.email
     );
 
+    use crate::server::error::ServerErrorExt;
+
+    let mut tx = state
+        .db_pool
+        .begin()
+        .await
+        .internal_err("Failed to start transaction")?;
+
     let project = projects::create(
-        &state.db_pool,
+        &mut *tx,
         &payload.name,
         crate::db::models::ProjectStatus::Stopped,
         payload.access_class,
@@ -163,20 +171,11 @@ pub async fn create_project(
     })?;
 
     // Bootstrap default "production" environment for new project
-    crate::db::environments::create_default_for_project(&state.db_pool, project.id)
+    crate::db::environments::create_default_for_project(&mut *tx, project.id)
         .await
         .map_err(|e| {
             ServerError::internal_anyhow(e, "Failed to create default environment for project")
         })?;
-
-    // Transaction for app user/team additions
-    use crate::server::error::ServerErrorExt;
-
-    let mut tx = state
-        .db_pool
-        .begin()
-        .await
-        .internal_err("Failed to start transaction")?;
 
     // Add app users if provided
     for user_identifier in &payload.app_users {

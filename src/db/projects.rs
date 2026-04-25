@@ -159,14 +159,17 @@ pub async fn find_by_ids(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Project>> {
 }
 
 /// Create a new project
-pub async fn create(
-    pool: &PgPool,
+pub async fn create<'a, E>(
+    executor: E,
     name: &str,
     status: ProjectStatus,
     access_class: String,
     owner_user_id: Option<Uuid>,
     owner_team_id: Option<Uuid>,
-) -> Result<Project> {
+) -> Result<Project>
+where
+    E: sqlx::Executor<'a, Database = sqlx::Postgres>,
+{
     let status_str = status.to_string();
 
     let project = sqlx::query_as!(
@@ -188,7 +191,7 @@ pub async fn create(
         owner_user_id,
         owner_team_id
     )
-    .fetch_one(pool)
+    .fetch_one(executor)
     .await
     .context("Failed to create project")?;
 
