@@ -387,7 +387,10 @@ pub async fn create_with_raw_claims(
 /// Find an active service account by its synthetic user ID.
 ///
 /// Each service account has a unique synthetic user, so this returns at most one result.
-pub async fn find_active_by_user_id(pool: &PgPool, user_id: Uuid) -> Result<Option<ServiceAccount>> {
+pub async fn find_active_by_user_id(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Option<ServiceAccount>> {
     let sa = sqlx::query_as!(
         ServiceAccount,
         r#"

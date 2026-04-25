@@ -2216,44 +2216,60 @@ impl KubernetesController {
                                 env.name, env_url
                             );
                         } else {
-                        let env_ingress_name = format!("env-{}", env.name);
-                        let env_url_components = Self::parse_ingress_url(&env_url);
+                            let env_ingress_name = format!("env-{}", env.name);
+                            let env_url_components = Self::parse_ingress_url(&env_url);
 
-                        // Create environment ingress using the same structure as primary
-                        let mut env_ingress =
-                            self.create_primary_ingress(project, deployment, metadata);
-                        env_ingress.metadata.name = Some(env_ingress_name.clone());
+                            // Create environment ingress using the same structure as primary
+                            let mut env_ingress =
+                                self.create_primary_ingress(project, deployment, metadata);
+                            env_ingress.metadata.name = Some(env_ingress_name.clone());
 
-                        // Replace the host in the ingress rules with the environment URL
-                        if let Some(ref mut spec) = env_ingress.spec {
-                            if let Some(ref mut rules) = spec.rules {
-                                for rule in rules.iter_mut() {
-                                    rule.host = Some(env_url_components.host.clone());
+                            // Replace the host in the ingress rules with the environment URL
+                            if let Some(ref mut spec) = env_ingress.spec {
+                                if let Some(ref mut rules) = spec.rules {
+                                    for rule in rules.iter_mut() {
+                                        rule.host = Some(env_url_components.host.clone());
+                                    }
+                                }
+                                // Update TLS hosts if TLS is configured
+                                if let Some(ref mut tls_entries) = spec.tls {
+                                    for tls in tls_entries.iter_mut() {
+                                        tls.hosts = Some(vec![env_url_components.host.clone()]);
+                                    }
                                 }
                             }
-                            // Update TLS hosts if TLS is configured
-                            if let Some(ref mut tls_entries) = spec.tls {
-                                for tls in tls_entries.iter_mut() {
-                                    tls.hosts = Some(vec![env_url_components.host.clone()]);
-                                }
-                            }
-                        }
 
-                        match ingress_api.get(&env_ingress_name).await {
-                            Ok(existing) => {
-                                let current_version = existing.metadata.resource_version.as_deref();
-                                if self.needs_apply(
-                                    deployment_id,
-                                    "ingress-environment",
-                                    current_version,
-                                ) || deployment.needs_reconcile
-                                {
+                            match ingress_api.get(&env_ingress_name).await {
+                                Ok(existing) => {
+                                    let current_version =
+                                        existing.metadata.resource_version.as_deref();
+                                    if self.needs_apply(
+                                        deployment_id,
+                                        "ingress-environment",
+                                        current_version,
+                                    ) || deployment.needs_reconcile
+                                    {
+                                        let result = ingress_api
+                                            .patch(
+                                                &env_ingress_name,
+                                                &PatchParams::apply("rise").force(),
+                                                &Patch::Apply(&env_ingress),
+                                            )
+                                            .await?;
+                                        self.update_version_cache(
+                                            deployment_id,
+                                            "ingress-environment",
+                                            result.metadata.resource_version,
+                                        );
+                                        info!(
+                                            "Applied environment Ingress '{}' for environment '{}'",
+                                            env_ingress_name, env.name
+                                        );
+                                    }
+                                }
+                                Err(kube::Error::Api(err)) if err.code == 404 => {
                                     let result = ingress_api
-                                        .patch(
-                                            &env_ingress_name,
-                                            &PatchParams::apply("rise").force(),
-                                            &Patch::Apply(&env_ingress),
-                                        )
+                                        .create(&PostParams::default(), &env_ingress)
                                         .await?;
                                     self.update_version_cache(
                                         deployment_id,
@@ -2261,28 +2277,13 @@ impl KubernetesController {
                                         result.metadata.resource_version,
                                     );
                                     info!(
-                                        "Applied environment Ingress '{}' for environment '{}'",
+                                        "Created environment Ingress '{}' for environment '{}'",
                                         env_ingress_name, env.name
                                     );
                                 }
+                                Err(e) => return Err(e.into()),
                             }
-                            Err(kube::Error::Api(err)) if err.code == 404 => {
-                                let result = ingress_api
-                                    .create(&PostParams::default(), &env_ingress)
-                                    .await?;
-                                self.update_version_cache(
-                                    deployment_id,
-                                    "ingress-environment",
-                                    result.metadata.resource_version,
-                                );
-                                info!(
-                                    "Created environment Ingress '{}' for environment '{}'",
-                                    env_ingress_name, env.name
-                                );
-                            }
-                            Err(e) => return Err(e.into()),
-                        }
-                    } // else (env_url != primary_url)
+                        } // else (env_url != primary_url)
                     }
                 }
             }
