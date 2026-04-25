@@ -218,3 +218,9 @@ run = "bash tests/e2e-build/run.sh"
 run = """
 sudo /usr/local/bin/k3s-uninstall.sh
 """
+
+[tasks."dev:oidc-issuer"]
+run = """
+( sleep 2 && curl http://localhost:9229/token -d '{"sub": "test", "aud": "http://rise.local:3000"}' ) &
+npx @oidc.pub/cli dev issuer --url http://localhost:9229
+"""
