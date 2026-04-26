@@ -483,13 +483,13 @@ kubectl annotate serviceaccount env-production \
 
 Deployments without an associated environment (legacy deployments) continue to use the namespace's `default` ServiceAccount.
 
-**Backwards compatibility**: If existing IAM bindings are configured on the namespace's `default` ServiceAccount (e.g., IRSA annotations), you can set `use_default_service_account_for_production: true` in the Kubernetes deployment controller config. When enabled, deployments in the production environment skip SA creation and use the `default` SA instead. Non-production environments still get their own `env-{name}` SAs.
+**Backwards compatibility**: By default, deployments in the production environment use the namespace's `default` ServiceAccount instead of creating a dedicated one (`use_default_service_account_for_production` defaults to `true`). This preserves existing IAM bindings (e.g., IRSA annotations) on the `default` SA. Non-production environments still get their own `env-{name}` SAs. To opt out and create a dedicated SA for production as well, set it to `false`:
 
 ```toml
 [deployment_controller]
 type = "kubernetes"
 # ... other settings ...
-use_default_service_account_for_production = true
+use_default_service_account_for_production = false
 ```
 
 #### Cert-Manager Setup

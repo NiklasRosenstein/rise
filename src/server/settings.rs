@@ -420,6 +420,10 @@ pub struct NetworkPolicyConfig {
 }
 
 // Default functions for pod security settings
+fn default_use_default_service_account_for_production() -> bool {
+    true
+}
+
 fn default_pod_security_enabled() -> bool {
     true
 }
@@ -618,8 +622,8 @@ pub enum DeploymentControllerSettings {
         /// `default` ServiceAccount instead of creating `env-{name}`.
         /// Useful for backwards compatibility when existing IAM bindings (e.g., IRSA)
         /// are configured on the `default` SA.
-        /// Defaults to false.
-        #[serde(default)]
+        /// Defaults to true.
+        #[serde(default = "default_use_default_service_account_for_production")]
         use_default_service_account_for_production: bool,
 
         /// NetworkPolicy configuration for deployed apps

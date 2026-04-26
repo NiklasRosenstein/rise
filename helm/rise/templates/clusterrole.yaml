@@ -65,7 +65,7 @@ rules:
 # ServiceAccount management (per-environment workload identity)
 - apiGroups: [""]
   resources: ["serviceaccounts"]
-  verbs: ["get", "list", "create", "update", "patch"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
 
 # Pod management (for status checking and logs)
 - apiGroups: [""]

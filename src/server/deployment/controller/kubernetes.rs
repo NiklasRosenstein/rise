@@ -5005,6 +5005,29 @@ impl DeploymentBackend for KubernetesController {
         })
     }
 
+    async fn cleanup_environment(
+        &self,
+        project: &Project,
+        environment_name: &str,
+    ) -> anyhow::Result<()> {
+        let namespace = Self::namespace_name(project);
+        let sa_name = Self::environment_service_account_name(environment_name);
+        let sa_api: Api<ServiceAccount> = Api::namespaced(self.kube_client.clone(), &namespace);
+
+        if let Err(e) = sa_api.delete(&sa_name, &DeleteParams::default()).await {
+            if !e.to_string().contains("404") {
+                return Err(e.into());
+            }
+        } else {
+            info!(
+                "Deleted ServiceAccount {} in namespace {} for deleted environment '{}'",
+                sa_name, namespace, environment_name
+            );
+        }
+
+        Ok(())
+    }
+
     async fn stream_logs(
         &self,
         deployment: &Deployment,

@@ -151,9 +151,9 @@ See the full list of auto-injected variables in [Deployments](deployments.md#aut
 
 ## Kubernetes ServiceAccounts
 
-Each environment gets a dedicated Kubernetes ServiceAccount named `env-{name}` (e.g., `env-production`, `env-staging`). This enables cloud IAM integrations like AWS IRSA or GCP Workload Identity, where different environments can assume different IAM roles.
+Each environment gets a dedicated Kubernetes ServiceAccount named `env-{name}` (e.g., `env-staging`). This enables cloud IAM integrations like AWS IRSA or GCP Workload Identity, where different environments can assume different IAM roles.
 
-For operator-level configuration details (including the `use_default_service_account_for_production` backwards-compatibility option), see the [Kubernetes deployment backend docs](../kubernetes.md#per-environment-serviceaccounts).
+By default, production environments use the namespace's `default` ServiceAccount to preserve existing IAM bindings (e.g., IRSA annotations). This can be changed via the `use_default_service_account_for_production` setting. For operator-level configuration details, see the [Kubernetes deployment backend docs](../kubernetes.md#per-environment-serviceaccounts).
 
 ## Service Account Restrictions
 
