@@ -3,6 +3,7 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use moka::future::Cache;
+use sha2::{Digest, Sha256};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -122,20 +123,15 @@ impl OAuthRateLimiter {
 
 /// Extract the client IP address from request headers.
 ///
-/// Checks `X-Forwarded-For` first (leftmost entry), then `X-Real-IP`, then falls back to
-/// `"unknown"` when neither header is present.
+/// Checks `X-Real-IP` first (set by the reverse proxy to the actual client IP), then falls back
+/// to the **rightmost** entry in `X-Forwarded-For` (the entry appended by the most recent trusted
+/// proxy), then falls back to `"unknown"`.
+///
+/// `X-Real-IP` is preferred because ingress-nginx sets it to the real connecting client address,
+/// while `X-Forwarded-For` can contain client-supplied values (the leftmost entries) that are
+/// trivially spoofable.
 pub fn extract_client_ip(headers: &HeaderMap) -> String {
-    if let Some(forwarded_for) = headers.get("x-forwarded-for") {
-        if let Ok(value) = forwarded_for.to_str() {
-            if let Some(ip) = value.split(',').next() {
-                let ip = ip.trim();
-                if !ip.is_empty() {
-                    return ip.to_string();
-                }
-            }
-        }
-    }
-
+    // Prefer X-Real-IP: set by the reverse proxy to the actual connecting client IP.
     if let Some(real_ip) = headers.get("x-real-ip") {
         if let Ok(value) = real_ip.to_str() {
             let value = value.trim();
@@ -145,16 +141,27 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
         }
     }
 
+    // Fall back to X-Forwarded-For: use the rightmost entry, which is the one appended by the
+    // nearest trusted proxy. The leftmost entries are client-controlled and must not be trusted.
+    if let Some(forwarded_for) = headers.get("x-forwarded-for") {
+        if let Ok(value) = forwarded_for.to_str() {
+            if let Some(ip) = value.rsplit(',').next() {
+                let ip = ip.trim();
+                if !ip.is_empty() {
+                    return ip.to_string();
+                }
+            }
+        }
+    }
+
     "unknown".to_string()
 }
 
-/// Number of leading characters from the `rise_jwt` cookie used as the session fingerprint.
-const SESSION_FINGERPRINT_LENGTH: usize = 40;
-
 /// Extract a session fingerprint from the `rise_jwt` cookie for rate limiting.
 ///
-/// Returns the first [`SESSION_FINGERPRINT_LENGTH`] characters of the token value, prefixed with
-/// `"session:"`, or `None` if the cookie is absent.
+/// Returns a SHA-256 hash of the full cookie value prefixed with `"session:"`, or `None` if the
+/// cookie is absent. Hashing ensures unique keys per-user (a prefix-based approach would collide
+/// because all HS256 JWTs share the same base64url-encoded header).
 pub fn extract_session_key(headers: &HeaderMap) -> Option<String> {
     let cookie_str = headers.get("cookie")?.to_str().ok()?;
 
@@ -162,8 +169,14 @@ pub fn extract_session_key(headers: &HeaderMap) -> Option<String> {
         let pair = pair.trim();
         if let Some(value) = pair.strip_prefix("rise_jwt=") {
             if !value.is_empty() {
-                let fingerprint: String = value.chars().take(SESSION_FINGERPRINT_LENGTH).collect();
-                return Some(format!("session:{}", fingerprint));
+                let hash = Sha256::digest(value.as_bytes());
+                let mut key = String::with_capacity("session:".len() + 64);
+                key.push_str("session:");
+                for b in hash.iter() {
+                    use std::fmt::Write;
+                    let _ = write!(key, "{b:02x}");
+                }
+                return Some(key);
             }
         }
     }
@@ -191,20 +204,26 @@ mod tests {
     use axum::http::{HeaderMap, HeaderValue};
 
     #[test]
-    fn test_extract_client_ip_forwarded_for() {
+    fn test_extract_client_ip_real_ip_preferred() {
+        let mut headers = HeaderMap::new();
+        headers.insert("x-real-ip", HeaderValue::from_static("9.10.11.12"));
+        headers.insert(
+            "x-forwarded-for",
+            HeaderValue::from_static("1.2.3.4, 5.6.7.8"),
+        );
+        // X-Real-IP takes precedence over X-Forwarded-For
+        assert_eq!(extract_client_ip(&headers), "9.10.11.12");
+    }
+
+    #[test]
+    fn test_extract_client_ip_forwarded_for_rightmost() {
         let mut headers = HeaderMap::new();
         headers.insert(
             "x-forwarded-for",
             HeaderValue::from_static("1.2.3.4, 5.6.7.8"),
         );
-        assert_eq!(extract_client_ip(&headers), "1.2.3.4");
-    }
-
-    #[test]
-    fn test_extract_client_ip_real_ip() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-real-ip", HeaderValue::from_static("9.10.11.12"));
-        assert_eq!(extract_client_ip(&headers), "9.10.11.12");
+        // Uses rightmost entry (proxy-appended), not leftmost (client-supplied)
+        assert_eq!(extract_client_ip(&headers), "5.6.7.8");
     }
 
     #[test]
@@ -216,15 +235,31 @@ mod tests {
     #[test]
     fn test_extract_session_key_present() {
         let mut headers = HeaderMap::new();
-        let token = "a".repeat(60);
         headers.insert(
             "cookie",
-            HeaderValue::from_str(&format!("rise_jwt={token}; other=value")).unwrap(),
+            HeaderValue::from_str("rise_jwt=some-token-value; other=value").unwrap(),
         );
         let key = extract_session_key(&headers).unwrap();
         assert!(key.starts_with("session:"));
-        // Fingerprint is capped at SESSION_FINGERPRINT_LENGTH chars
-        assert_eq!(key.len(), "session:".len() + SESSION_FINGERPRINT_LENGTH);
+        // SHA-256 hex digest is 64 chars
+        assert_eq!(key.len(), "session:".len() + 64);
+    }
+
+    #[test]
+    fn test_extract_session_key_different_tokens_produce_different_keys() {
+        let mut headers_a = HeaderMap::new();
+        headers_a.insert(
+            "cookie",
+            HeaderValue::from_static("rise_jwt=token-a"),
+        );
+        let mut headers_b = HeaderMap::new();
+        headers_b.insert(
+            "cookie",
+            HeaderValue::from_static("rise_jwt=token-b"),
+        );
+        let key_a = extract_session_key(&headers_a).unwrap();
+        let key_b = extract_session_key(&headers_b).unwrap();
+        assert_ne!(key_a, key_b);
     }
 
     #[test]
