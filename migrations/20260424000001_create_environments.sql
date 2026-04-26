@@ -8,12 +8,14 @@ CREATE TABLE environments (
     primary_deployment_group TEXT,
     is_default BOOLEAN NOT NULL DEFAULT false,
     is_production BOOLEAN NOT NULL DEFAULT false,
+    color TEXT NOT NULL DEFAULT 'green',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 
     UNIQUE (project_id, name),
     UNIQUE (project_id, primary_deployment_group),
-    CONSTRAINT valid_environment_name CHECK (name ~ '^[a-z][a-z0-9-]*$' AND name !~ '--')
+    CONSTRAINT valid_environment_name CHECK (name ~ '^[a-z][a-z0-9-]*$' AND name !~ '--'),
+    CONSTRAINT valid_environment_color CHECK (color IN ('green', 'blue', 'yellow', 'red', 'purple', 'orange', 'gray'))
 );
 
 -- Only one default per project
@@ -44,3 +46,4 @@ SELECT id, 'production', 'default', true, true FROM projects;
 UPDATE deployments d SET environment_id = e.id
 FROM environments e
 WHERE d.project_id = e.project_id AND d.deployment_group = 'default' AND e.name = 'production';
+
