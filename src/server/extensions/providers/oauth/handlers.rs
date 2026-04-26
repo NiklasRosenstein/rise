@@ -340,12 +340,30 @@ async fn validate_redirect_uri(
 pub async fn authorize(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
+    headers: HeaderMap,
     Query(req): Query<AuthorizeFlowQuery>,
 ) -> Result<Response, (StatusCode, String)> {
     debug!(
         "OAuth authorize request for project={}, extension={}",
         project_name, extension_name
     );
+
+    // Rate limiting
+    let client_ip = crate::server::rate_limit::extract_client_ip(&headers);
+    let session_key = crate::server::rate_limit::extract_session_key(&headers);
+    if let Err(retry_after) = state
+        .oauth_rate_limiter
+        .increment_and_check(&client_ip, session_key.as_deref())
+        .await
+    {
+        tracing::warn!(
+            ip = %client_ip,
+            project = %project_name,
+            extension = %extension_name,
+            "OAuth authorize endpoint rate limited"
+        );
+        return Ok(crate::server::rate_limit::rate_limit_response(retry_after));
+    }
 
     // Get project
     let project = db_projects::find_by_name(&state.db_pool, &project_name)
@@ -568,12 +586,30 @@ pub async fn authorize(
 pub async fn callback(
     State(state): State<AppState>,
     Path((project_name, extension_name)): Path<(String, String)>,
+    headers: HeaderMap,
     Query(req): Query<CallbackRequest>,
 ) -> Result<Response, (StatusCode, String)> {
     debug!(
         "OAuth callback for project={}, extension={}",
         project_name, extension_name
     );
+
+    // Rate limiting
+    let client_ip = crate::server::rate_limit::extract_client_ip(&headers);
+    let session_key = crate::server::rate_limit::extract_session_key(&headers);
+    if let Err(retry_after) = state
+        .oauth_rate_limiter
+        .increment_and_check(&client_ip, session_key.as_deref())
+        .await
+    {
+        tracing::warn!(
+            ip = %client_ip,
+            project = %project_name,
+            extension = %extension_name,
+            "OAuth callback endpoint rate limited"
+        );
+        return Ok(crate::server::rate_limit::rate_limit_response(retry_after));
+    }
 
     // Retrieve and validate state
     let oauth_state = state
@@ -1038,6 +1074,23 @@ pub async fn token_endpoint(
         "Token endpoint request for project={}, extension={}",
         project_name, extension_name
     );
+
+    // Rate limiting: count all attempts (including invalid ones) to thwart brute-force
+    let client_ip = crate::server::rate_limit::extract_client_ip(&headers);
+    let session_key = crate::server::rate_limit::extract_session_key(&headers);
+    if let Err(retry_after) = state
+        .oauth_rate_limiter
+        .increment_and_check(&client_ip, session_key.as_deref())
+        .await
+    {
+        tracing::warn!(
+            ip = %client_ip,
+            project = %project_name,
+            extension = %extension_name,
+            "OAuth token endpoint rate limited"
+        );
+        return crate::server::rate_limit::rate_limit_response(retry_after);
+    }
 
     // Extract Origin header for CORS validation (will be validated after we get the project)
     let origin = headers
