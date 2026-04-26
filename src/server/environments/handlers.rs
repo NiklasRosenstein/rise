@@ -55,6 +55,16 @@ pub async fn create_environment(
                             .unwrap_or("(none)")
                     ),
                 )
+            } else if msg.contains("idx_environments_default") {
+                ServerError::new(
+                    StatusCode::CONFLICT,
+                    "Only one default environment is allowed per project",
+                )
+            } else if msg.contains("idx_environments_production") {
+                ServerError::new(
+                    StatusCode::CONFLICT,
+                    "Only one production environment is allowed per project",
+                )
             } else {
                 ServerError::new(
                     StatusCode::CONFLICT,
@@ -68,6 +78,11 @@ pub async fn create_environment(
             ServerError::bad_request(format!(
                 "Invalid environment name '{}'. Must be lowercase alphanumeric with hyphens, no '--'.",
                 payload.name
+            ))
+        } else if msg.contains("valid_environment_color") {
+            ServerError::bad_request(format!(
+                "Invalid environment color '{}'. Allowed colors: green, blue, yellow, red, purple, orange, gray.",
+                payload.color
             ))
         } else {
             ServerError::internal_anyhow(e, "Failed to create environment")
@@ -181,12 +196,31 @@ pub async fn update_environment(
     .map_err(|e| {
         let msg = e.to_string();
         if msg.contains("duplicate key") || msg.contains("unique constraint") {
-            ServerError::new(
-                StatusCode::CONFLICT,
-                "Conflict: name or group already taken",
-            )
+            if msg.contains("primary_deployment_group") {
+                ServerError::new(
+                    StatusCode::CONFLICT,
+                    "Deployment group is already the primary group of another environment",
+                )
+            } else if msg.contains("idx_environments_default") {
+                ServerError::new(
+                    StatusCode::CONFLICT,
+                    "Only one default environment is allowed per project",
+                )
+            } else if msg.contains("idx_environments_production") {
+                ServerError::new(
+                    StatusCode::CONFLICT,
+                    "Only one production environment is allowed per project",
+                )
+            } else {
+                ServerError::new(
+                    StatusCode::CONFLICT,
+                    "Conflict: environment name already taken",
+                )
+            }
         } else if msg.contains("valid_environment_name") {
-            ServerError::bad_request("Invalid environment name")
+            ServerError::bad_request("Invalid environment name. Must be lowercase alphanumeric with hyphens, no '--'.")
+        } else if msg.contains("valid_environment_color") {
+            ServerError::bad_request("Invalid environment color. Allowed colors: green, blue, yellow, red, purple, orange, gray.")
         } else {
             ServerError::internal_anyhow(e, "Failed to update environment")
         }
