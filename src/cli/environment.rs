@@ -6,8 +6,8 @@ use serde::{Deserialize, Serialize};
 use crate::config::Config;
 
 #[derive(Debug, Deserialize)]
-struct EnvironmentResponse {
-    name: String,
+pub(crate) struct EnvironmentResponse {
+    pub(crate) name: String,
     primary_deployment_group: Option<String>,
     is_default: bool,
     is_production: bool,

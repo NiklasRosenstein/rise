@@ -141,7 +141,7 @@ rise env import my-app .env.staging -E staging
 
 When listing with `-E`, scoped variables override global variables with the same key. Without `-E`, only global variables are shown.
 
-See [Environment Variables](environment-variables.md) for more on secrets, imports, and variable management.
+Environment-scoped variables can also be defined declaratively in `rise.toml` under `[environments.<name>.env]`. See [Environment Variables](environment-variables.md#per-environment-variables-in-risetoml) for details.
 
 ## Auto-Injected Variable
 

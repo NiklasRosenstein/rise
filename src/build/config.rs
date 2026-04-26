@@ -19,6 +19,18 @@ pub struct ProjectBuildConfig {
     /// Build configuration (optional)
     #[serde(default)]
     pub build: Option<BuildConfig>,
+
+    /// Per-environment configuration (optional)
+    #[serde(default)]
+    pub environments: HashMap<String, EnvironmentConfig>,
+}
+
+/// Per-environment configuration
+#[derive(Debug, Deserialize, Serialize, Clone, Default)]
+pub struct EnvironmentConfig {
+    /// Plain-text environment variables scoped to this environment
+    #[serde(default)]
+    pub env: HashMap<String, String>,
 }
 
 /// Project metadata configuration
@@ -202,6 +214,119 @@ foo = "bar"
         assert_eq!(config.version, Some(1));
         assert!(config.project.is_some());
         assert_eq!(config.project.unwrap().name, "test-project");
+    }
+
+    #[test]
+    fn test_load_config_with_environments() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rise_toml_path = temp_dir.path().join("rise.toml");
+
+        std::fs::write(
+            &rise_toml_path,
+            r#"
+[project]
+name = "my-app"
+
+[project.env]
+LOG_LEVEL = "info"
+DATABASE_URL = "postgres://localhost/mydb"
+
+[environments.staging.env]
+DATABASE_URL = "postgres://staging-db/mydb"
+LOG_LEVEL = "debug"
+
+[environments.production.env]
+DATABASE_URL = "postgres://prod-db/mydb"
+"#,
+        )
+        .unwrap();
+
+        let result = load_full_project_config(temp_dir.path().to_str().unwrap());
+        assert!(result.is_ok());
+        let config = result.unwrap().unwrap();
+
+        // Check global env
+        let project = config.project.as_ref().unwrap();
+        assert_eq!(project.env.get("LOG_LEVEL").unwrap(), "info");
+        assert_eq!(
+            project.env.get("DATABASE_URL").unwrap(),
+            "postgres://localhost/mydb"
+        );
+
+        // Check environments
+        assert_eq!(config.environments.len(), 2);
+
+        let staging = config.environments.get("staging").unwrap();
+        assert_eq!(
+            staging.env.get("DATABASE_URL").unwrap(),
+            "postgres://staging-db/mydb"
+        );
+        assert_eq!(staging.env.get("LOG_LEVEL").unwrap(), "debug");
+
+        let production = config.environments.get("production").unwrap();
+        assert_eq!(
+            production.env.get("DATABASE_URL").unwrap(),
+            "postgres://prod-db/mydb"
+        );
+        assert!(!production.env.contains_key("LOG_LEVEL"));
+    }
+
+    #[test]
+    fn test_load_config_without_environments() {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let rise_toml_path = temp_dir.path().join("rise.toml");
+
+        std::fs::write(
+            &rise_toml_path,
+            r#"
+[project]
+name = "no-envs"
+
+[project.env]
+FOO = "bar"
+"#,
+        )
+        .unwrap();
+
+        let result = load_full_project_config(temp_dir.path().to_str().unwrap());
+        assert!(result.is_ok());
+        let config = result.unwrap().unwrap();
+        assert!(config.environments.is_empty());
+    }
+
+    #[test]
+    fn test_roundtrip_config_with_environments() {
+        let config = ProjectBuildConfig {
+            version: Some(1),
+            project: Some(ProjectConfig {
+                name: "roundtrip-app".to_string(),
+                access_class: "public".to_string(),
+                custom_domains: Vec::new(),
+                env: HashMap::from([("GLOBAL".to_string(), "val".to_string())]),
+            }),
+            build: None,
+            environments: HashMap::from([(
+                "staging".to_string(),
+                EnvironmentConfig {
+                    env: HashMap::from([("STAGE_VAR".to_string(), "stage_val".to_string())]),
+                },
+            )]),
+        };
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        write_project_config(temp_dir.path().to_str().unwrap(), &config).unwrap();
+
+        let loaded = load_full_project_config(temp_dir.path().to_str().unwrap())
+            .unwrap()
+            .unwrap();
+        assert_eq!(loaded.version, Some(1));
+        assert_eq!(loaded.project.as_ref().unwrap().name, "roundtrip-app");
+        assert_eq!(
+            loaded.project.as_ref().unwrap().env.get("GLOBAL").unwrap(),
+            "val"
+        );
+        let staging = loaded.environments.get("staging").unwrap();
+        assert_eq!(staging.env.get("STAGE_VAR").unwrap(), "stage_val");
     }
 
     #[test]
