@@ -149,6 +149,12 @@ Rise injects `RISE_ENVIRONMENT` into every deployment that has an associated env
 
 See the full list of auto-injected variables in [Deployments](deployments.md#auto-injected-environment-variables) and [Environment Variables](environment-variables.md#auto-injected-variables).
 
+## Kubernetes ServiceAccounts
+
+Each environment gets a dedicated Kubernetes ServiceAccount named `env-{name}` (e.g., `env-production`, `env-staging`). This enables cloud IAM integrations like AWS IRSA or GCP Workload Identity, where different environments can assume different IAM roles.
+
+For operator-level configuration details (including the `use_default_service_account_for_production` backwards-compatibility option), see the [Kubernetes deployment backend docs](../kubernetes.md#per-environment-serviceaccounts).
+
 ## Service Account Restrictions
 
 Service accounts can optionally be restricted to deploy only to specific environments. When configured, the service account can only create deployments targeting one of its allowed environments.

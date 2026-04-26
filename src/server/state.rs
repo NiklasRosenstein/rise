@@ -185,6 +185,7 @@ async fn init_kubernetes_backend(
         access_classes,
         host_aliases,
         extra_service_token_audiences,
+        use_default_service_account_for_production,
         network_policy,
         pod_security_enabled,
         pod_resources,
@@ -245,6 +246,8 @@ async fn init_kubernetes_backend(
                 access_classes: filtered_access_classes,
                 host_aliases: host_aliases.clone(),
                 extra_service_token_audiences: extra_service_token_audiences.clone(),
+                use_default_service_account_for_production:
+                    *use_default_service_account_for_production,
                 network_policy: network_policy.clone(),
                 pod_security_enabled: *pod_security_enabled,
                 pod_resources: pod_resources.clone(),

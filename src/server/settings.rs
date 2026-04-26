@@ -614,6 +614,14 @@ pub enum DeploymentControllerSettings {
         #[serde(default)]
         extra_service_token_audiences: std::collections::HashMap<String, String>,
 
+        /// When true, deployments in the production environment use the namespace's
+        /// `default` ServiceAccount instead of creating `env-{name}`.
+        /// Useful for backwards compatibility when existing IAM bindings (e.g., IRSA)
+        /// are configured on the `default` SA.
+        /// Defaults to false.
+        #[serde(default)]
+        use_default_service_account_for_production: bool,
+
         /// NetworkPolicy configuration for deployed apps
         network_policy: NetworkPolicyConfig,
 

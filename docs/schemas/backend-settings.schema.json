@@ -407,6 +407,11 @@
             "type": {
               "const": "kubernetes",
               "type": "string"
+            },
+            "use_default_service_account_for_production": {
+              "default": false,
+              "description": "When true, deployments in the production environment use the namespace's\n`default` ServiceAccount instead of creating `env-{name}`.\nUseful for backwards compatibility when existing IAM bindings (e.g., IRSA)\nare configured on the `default` SA.\nDefaults to false.",
+              "type": "boolean"
             }
           },
           "required": [

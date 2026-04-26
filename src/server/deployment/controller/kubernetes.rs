@@ -276,6 +276,7 @@ pub struct KubernetesControllerConfig {
     /// Host aliases to inject into pod specs (hostname -> IP address)
     pub host_aliases: std::collections::HashMap<String, String>,
     pub extra_service_token_audiences: std::collections::HashMap<String, String>,
+    pub use_default_service_account_for_production: bool,
     pub network_policy: crate::server::settings::NetworkPolicyConfig,
     pub pod_security_enabled: bool,
     pub pod_resources: Option<crate::server::settings::PodResourceLimits>,
@@ -313,6 +314,7 @@ pub struct KubernetesController {
     /// Host aliases to inject into pod specs (hostname -> IP address)
     host_aliases: std::collections::HashMap<String, String>,
     extra_service_token_audiences: std::collections::HashMap<String, String>,
+    use_default_service_account_for_production: bool,
     network_policy: crate::server::settings::NetworkPolicyConfig,
     pod_security_enabled: bool,
     pod_resources: Option<crate::server::settings::PodResourceLimits>,
@@ -357,6 +359,8 @@ impl KubernetesController {
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: config.host_aliases,
             extra_service_token_audiences: config.extra_service_token_audiences,
+            use_default_service_account_for_production: config
+                .use_default_service_account_for_production,
             network_policy: config.network_policy,
             pod_security_enabled: config.pod_security_enabled,
             pod_resources: config.pod_resources,
@@ -1619,6 +1623,17 @@ impl KubernetesController {
                     return Ok(None);
                 }
             };
+
+        // When configured, production environments use the namespace's `default` SA
+        // instead of creating a dedicated one (backwards compatibility for existing IRSA bindings).
+        if self.use_default_service_account_for_production && environment.is_production {
+            debug!(
+                project = project.name,
+                environment = environment.name,
+                "Skipping ServiceAccount creation for production (use_default_service_account_for_production=true)"
+            );
+            return Ok(None);
+        }
 
         let sa_name = Self::environment_service_account_name(&environment.name);
         let sa = self.create_service_account(project, &environment.name, namespace);
@@ -5408,6 +5423,7 @@ mod tests {
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
             extra_service_token_audiences: std::collections::HashMap::new(),
+            use_default_service_account_for_production: false,
             network_policy: test_network_policy(),
             pod_security_enabled: true,
             pod_resources: None,
@@ -6090,6 +6106,7 @@ mod tests {
             resource_versions: Arc::new(std::sync::RwLock::new(std::collections::HashMap::new())),
             host_aliases: std::collections::HashMap::new(),
             extra_service_token_audiences: std::collections::HashMap::new(),
+            use_default_service_account_for_production: false,
             network_policy: test_network_policy(),
             pod_security_enabled: true,
             pod_resources: None,
