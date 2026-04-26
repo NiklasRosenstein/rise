@@ -567,6 +567,13 @@ pub async fn delete_team(
             }
         }
         std::process::exit(1);
+    } else if response.status() == reqwest::StatusCode::CONFLICT {
+        let error: TeamErrorResponse = response
+            .json()
+            .await
+            .context("Failed to parse error response")?;
+        eprintln!("Error: {}", error.error);
+        std::process::exit(1);
     } else {
         let status = response.status();
         let error_text = response
