@@ -669,6 +669,7 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // Initially not active
+                health_check_config: None,
             },
         )
         .await
@@ -712,6 +713,7 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // This is NOT active
+                health_check_config: None,
             },
         )
         .await
@@ -767,6 +769,7 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
+                health_check_config: None,
             },
         )
         .await

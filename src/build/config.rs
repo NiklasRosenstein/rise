@@ -20,6 +20,10 @@ pub struct ProjectBuildConfig {
     #[serde(default)]
     pub build: Option<BuildConfig>,
 
+    /// Health check configuration (optional)
+    #[serde(default)]
+    pub health_check: Option<HealthCheckConfig>,
+
     /// Per-environment configuration (optional)
     #[serde(default)]
     pub environments: HashMap<String, EnvironmentConfig>,
@@ -54,6 +58,62 @@ pub struct ProjectConfig {
 
 fn default_access_class() -> String {
     "public".to_string()
+}
+
+fn default_probe_path() -> String {
+    "/".to_string()
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_initial_delay() -> i32 {
+    10
+}
+
+fn default_period_seconds() -> i32 {
+    10
+}
+
+fn default_timeout_seconds() -> i32 {
+    5
+}
+
+fn default_failure_threshold() -> i32 {
+    3
+}
+
+/// Health check (liveness/readiness probe) configuration for a deployment
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct HealthCheckConfig {
+    /// Enable liveness probes (default: true)
+    #[serde(default = "default_true")]
+    pub liveness_enabled: bool,
+
+    /// Enable readiness probes (default: true)
+    #[serde(default = "default_true")]
+    pub readiness_enabled: bool,
+
+    /// HTTP path for health probes (default: "/")
+    #[serde(default = "default_probe_path")]
+    pub path: String,
+
+    /// Initial delay in seconds before the first probe (default: 10)
+    #[serde(default = "default_initial_delay")]
+    pub initial_delay_seconds: i32,
+
+    /// How often to probe in seconds (default: 10)
+    #[serde(default = "default_period_seconds")]
+    pub period_seconds: i32,
+
+    /// Probe timeout in seconds (default: 5)
+    #[serde(default = "default_timeout_seconds")]
+    pub timeout_seconds: i32,
+
+    /// Number of failures before the probe is considered failed (default: 3)
+    #[serde(default = "default_failure_threshold")]
+    pub failure_threshold: i32,
 }
 
 /// Build configuration options for a project
@@ -305,6 +365,7 @@ FOO = "bar"
                 env: HashMap::from([("GLOBAL".to_string(), "val".to_string())]),
             }),
             build: None,
+            health_check: None,
             environments: HashMap::from([(
                 "staging".to_string(),
                 EnvironmentConfig {

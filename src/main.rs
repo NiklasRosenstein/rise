@@ -1201,6 +1201,14 @@ async fn main() -> Result<()> {
                 // 2. Source deployment's http_port (if --from is used)
                 // 3. Project's PORT env var (if set)
                 // 4. Default 8080
+
+                // Read health check configuration from rise.toml if present
+                let health_check_config = build::config::load_full_project_config(&args.path)
+                    .ok()
+                    .flatten()
+                    .and_then(|c| c.health_check)
+                    .and_then(|hc| serde_json::to_value(hc).ok());
+
                 deployment::create_deployment(
                     &http_client,
                     &backend_url,
@@ -1218,6 +1226,7 @@ async fn main() -> Result<()> {
                         use_source_env_vars: args.use_source_env_vars,
                         push_image: args.push_image,
                         env_overrides,
+                        health_check_config,
                     },
                 )
                 .await?;

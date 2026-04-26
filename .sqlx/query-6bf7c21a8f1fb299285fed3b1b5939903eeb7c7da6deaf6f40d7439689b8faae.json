@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n        SELECT\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at,\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        FROM deployments\n        WHERE deployment_id = $1 AND project_id = $2\n        ",
+  "query": "\n        UPDATE deployments\n        SET status = $2,\n            deploying_started_at = CASE\n                WHEN $2 = 'Deploying' AND deploying_started_at IS NULL THEN NOW()\n                ELSE deploying_started_at\n            END,\n            first_healthy_at = CASE\n                WHEN $2 = 'Healthy' AND first_healthy_at IS NULL THEN NOW()\n                ELSE first_healthy_at\n            END\n        WHERE id = $1\n        RETURNING\n            id, deployment_id, project_id, created_by_id,\n            status as \"status: DeploymentStatus\",\n            deployment_group, environment_id, expires_at,\n            completed_at, error_message, build_logs,\n            controller_metadata as \"controller_metadata: serde_json::Value\",\n            image, image_digest, rolled_back_from_deployment_id,\n            http_port, needs_reconcile, is_active,\n            deploying_started_at,\n            first_healthy_at,\n            health_check_config as \"health_check_config: serde_json::Value\",\n            termination_reason as \"termination_reason: _\",\n            created_at, updated_at\n        ",
   "describe": {
     "columns": [
       {
@@ -105,6 +105,11 @@
       },
       {
         "ordinal": 20,
+        "name": "health_check_config: serde_json::Value",
+        "type_info": "Jsonb"
+      },
+      {
+        "ordinal": 21,
         "name": "termination_reason: _",
         "type_info": {
           "Custom": {
@@ -122,20 +127,20 @@
         }
       },
       {
-        "ordinal": 21,
+        "ordinal": 22,
         "name": "created_at",
         "type_info": "Timestamptz"
       },
       {
-        "ordinal": 22,
+        "ordinal": 23,
         "name": "updated_at",
         "type_info": "Timestamptz"
       }
     ],
     "parameters": {
       "Left": [
-        "Text",
-        "Uuid"
+        "Uuid",
+        "Text"
       ]
     },
     "nullable": [
@@ -160,9 +165,10 @@
       true,
       true,
       true,
+      true,
       false,
       false
     ]
   },
-  "hash": "ac97c79fc64068f8850f81423d4914fd7c1ea892bddbeb4afcc0a502a4d3924f"
+  "hash": "6bf7c21a8f1fb299285fed3b1b5939903eeb7c7da6deaf6f40d7439689b8faae"
 }

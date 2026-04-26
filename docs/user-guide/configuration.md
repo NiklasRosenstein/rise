@@ -47,6 +47,31 @@ args = ["NODE_ENV=production", "BUILD_VERSION"]
 | `managed_buildkit` | Boolean | Enable/disable managed BuildKit daemon (auto-enables when `SSL_CERT_FILE` is set) |
 | `no_cache` | Boolean | Disable build cache |
 
+### `[health_check]` Section
+
+Configure liveness and readiness probes for your application. These settings are captured at deployment creation time and override the server-wide defaults.
+
+```toml
+[health_check]
+path = "/healthz"
+initial_delay_seconds = 5
+period_seconds = 10
+timeout_seconds = 3
+failure_threshold = 3
+liveness_enabled = true
+readiness_enabled = true
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `liveness_enabled` | Boolean | `true` | Enable Kubernetes liveness probe |
+| `readiness_enabled` | Boolean | `true` | Enable Kubernetes readiness probe |
+| `path` | String | `"/"` | HTTP path used for health probe requests |
+| `initial_delay_seconds` | Integer | `10` | Seconds to wait before the first probe |
+| `period_seconds` | Integer | `10` | How often (in seconds) to perform the probe |
+| `timeout_seconds` | Integer | `5` | Probe timeout in seconds |
+| `failure_threshold` | Integer | `3` | Number of consecutive failures before the probe is considered failed |
+
 ### `[environments.<name>]` Section
 
 Define per-environment settings. Currently supports environment-scoped variables. Environments must already exist on the backend (create them with `rise environment create`).
@@ -83,6 +108,10 @@ backend = "pack"
 builder = "heroku/builder:24"
 buildpacks = ["heroku/nodejs", "heroku/procfile"]
 args = ["BP_NODE_VERSION=20"]
+
+[health_check]
+path = "/healthz"
+initial_delay_seconds = 5
 
 [environments.staging.env]
 DATABASE_URL = "postgres://staging-db/mydb"
