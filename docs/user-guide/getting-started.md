@@ -78,17 +78,21 @@ Skip the build step entirely:
 rise deploy --image nginx:latest --http-port 80
 ```
 
-### Deploying to a Custom Group
+### Deploying to an Environment
 
-Deploy preview or staging environments alongside production:
+Deploy to a specific environment:
+
+```bash
+rise deploy -E staging
+```
+
+Or deploy to a custom group (e.g., for merge request previews):
 
 ```bash
 rise deploy --group mr/123 --expire 7d
 ```
 
-Custom groups get their own URL (e.g., `https://my-app-mr-123.preview.example.com`) and can auto-expire.
-
-See [Deployments](deployments.md) for the full lifecycle, deployment groups, rollback, and more.
+See [Deployments](deployments.md) for the full lifecycle and [Environments](environments.md) for URL routing, variable scoping, and more.
 
 ## Environment Variables
 

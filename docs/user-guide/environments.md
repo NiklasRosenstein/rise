@@ -1,6 +1,8 @@
 # Environments
 
-Environments give semantic names (like "production", "staging", "dev") to deployment targets, with properties like colors, URL routing, variable scoping, and access control.
+Environments give semantic names (like "production", "staging", "dev") to deployment targets, with URL routing, variable scoping, and access control.
+
+Deployment groups are just labels — typically reflecting the source of a deployment (e.g., the Git branch name). Environments layer on top of groups to control which deployments receive production traffic, get environment-specific URLs, and use scoped variables. The environment marked as **production** determines which deployments are served at the project's main URL.
 
 ## Default Setup
 
@@ -107,12 +109,14 @@ See [Deployments](deployments.md) for the full deployment lifecycle.
 
 ## URL Routing
 
-When an environment has a primary deployment group, and the deployment is in that group, the deployment controller creates an additional ingress with an environment-specific URL:
+The environment's **production** flag controls which deployments get the project's main URL. When a deployment is in an environment's primary deployment group, the controller creates an ingress with an environment-specific URL:
 
-- **Production environment** uses the production URL template (e.g., `my-app.apps.rise.dev`)
-- **Non-production environments** use the environment URL template (e.g., `staging--my-app.preview.rise.dev`)
+- **Production environment** → production URL (e.g., `my-app.apps.rise.dev`). Custom domains also apply to these deployments.
+- **Non-production environments** → environment URL (e.g., `staging--my-app.preview.rise.dev`)
 
-This requires the operator to configure `environment_ingress_url_template` in the backend settings. See the [Operator Guide](../configuration.md) for details.
+The deployment group name itself does not determine URL routing — only the environment flags do.
+
+Non-production environment URLs require the operator to configure `environment_ingress_url_template` in the backend settings. See the [Operator Guide](../configuration.md) for details.
 
 ## Environment-Scoped Variables
 
