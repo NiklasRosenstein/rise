@@ -19,30 +19,33 @@ pub struct OAuthRateLimiter {
 impl OAuthRateLimiter {
     pub const IP_MAX: u32 = 10;
     pub const IP_WINDOW_SECS: u64 = 300; // 5 minutes
+    pub const IP_MAX_CAPACITY: u64 = 50_000;
 
     pub const SESSION_MAX: u32 = 5;
     pub const SESSION_WINDOW_SECS: u64 = 300; // 5 minutes
+    pub const SESSION_MAX_CAPACITY: u64 = 10_000;
 
     pub const GLOBAL_MAX: u32 = 1000;
     pub const GLOBAL_WINDOW_SECS: u64 = 60; // 1 minute
+    pub const GLOBAL_MAX_CAPACITY: u64 = 1;
 
     pub fn new() -> Self {
         let ip_limiter = Arc::new(
             Cache::builder()
                 .time_to_live(Duration::from_secs(Self::IP_WINDOW_SECS))
-                .max_capacity(50_000)
+                .max_capacity(Self::IP_MAX_CAPACITY)
                 .build(),
         );
         let session_limiter = Arc::new(
             Cache::builder()
                 .time_to_live(Duration::from_secs(Self::SESSION_WINDOW_SECS))
-                .max_capacity(10_000)
+                .max_capacity(Self::SESSION_MAX_CAPACITY)
                 .build(),
         );
         let global_limiter = Arc::new(
             Cache::builder()
                 .time_to_live(Duration::from_secs(Self::GLOBAL_WINDOW_SECS))
-                .max_capacity(1)
+                .max_capacity(Self::GLOBAL_MAX_CAPACITY)
                 .build(),
         );
         Self {
@@ -100,6 +103,12 @@ impl OAuthRateLimiter {
     /// Increment counters then check limits. All attempts are counted even if they exceed
     /// the limit, preventing the counter from resetting during an attack.
     ///
+    /// Note: The increment and check are two separate cache operations and are not atomic.
+    /// Under high concurrency a few extra requests may slip through just as a window expires,
+    /// but this is acceptable for in-memory rate limiting where strict atomicity would require
+    /// a distributed lock. The increment-first order ensures that even simultaneous requests
+    /// are counted, making it harder to bypass the limit by parallelising requests.
+    ///
     /// Returns `Ok(())` if within limits after incrementing, `Err(retry_after_secs)` if exceeded.
     pub async fn increment_and_check(
         &self,
@@ -139,10 +148,13 @@ pub fn extract_client_ip(headers: &HeaderMap) -> String {
     "unknown".to_string()
 }
 
+/// Number of leading characters from the `rise_jwt` cookie used as the session fingerprint.
+const SESSION_FINGERPRINT_LENGTH: usize = 40;
+
 /// Extract a session fingerprint from the `rise_jwt` cookie for rate limiting.
 ///
-/// Returns the first 40 characters of the token value, prefixed with `"session:"`, or `None`
-/// if the cookie is absent.
+/// Returns the first [`SESSION_FINGERPRINT_LENGTH`] characters of the token value, prefixed with
+/// `"session:"`, or `None` if the cookie is absent.
 pub fn extract_session_key(headers: &HeaderMap) -> Option<String> {
     let cookie_str = headers.get("cookie")?.to_str().ok()?;
 
@@ -150,7 +162,7 @@ pub fn extract_session_key(headers: &HeaderMap) -> Option<String> {
         let pair = pair.trim();
         if let Some(value) = pair.strip_prefix("rise_jwt=") {
             if !value.is_empty() {
-                let fingerprint: String = value.chars().take(40).collect();
+                let fingerprint: String = value.chars().take(SESSION_FINGERPRINT_LENGTH).collect();
                 return Some(format!("session:{}", fingerprint));
             }
         }
@@ -211,8 +223,8 @@ mod tests {
         );
         let key = extract_session_key(&headers).unwrap();
         assert!(key.starts_with("session:"));
-        // Fingerprint is capped at 40 chars
-        assert_eq!(key.len(), "session:".len() + 40);
+        // Fingerprint is capped at SESSION_FINGERPRINT_LENGTH chars
+        assert_eq!(key.len(), "session:".len() + SESSION_FINGERPRINT_LENGTH);
     }
 
     #[test]
