@@ -173,9 +173,18 @@ async fn process_sync(
 
     // 4. Re-load deployments since statuses may have changed
     let all_deployments = db_deployments::list_for_project(&state.db_pool, project.id).await?;
-    let project = db_projects::find_by_id(&state.db_pool, project.id)
-        .await?
-        .unwrap_or(project);
+    let project = match db_projects::find_by_id(&state.db_pool, project.id).await? {
+        Some(p) => p,
+        None => {
+            // Project was deleted between initial lookup and now — return empty children
+            return Ok(SyncResponse {
+                status: serde_json::json!({
+                    "lastSyncTime": Utc::now().to_rfc3339(),
+                }),
+                children: vec![],
+            });
+        }
+    };
 
     // 5. Get ResourceBuilder
     let resource_builder = match &state.resource_builder {
@@ -281,8 +290,8 @@ async fn perform_status_transitions(
     // Check for expired deployments
     check_expirations(state, non_terminal, project).await?;
 
-    // Check for failed deployments that need cleanup (have termination_reason unset)
-    check_failed_cleanup(state, non_terminal, project).await?;
+    // Failed deployments don't need explicit cleanup: `should_have_infrastructure` returns
+    // false for Failed status, so Metacontroller garbage-collects their K8s resources.
 
     Ok(())
 }
@@ -317,17 +326,15 @@ async fn check_deploying_timeout(
     if let Some(deploying_started_at) = deployment.deploying_started_at {
         let elapsed = Utc::now().signed_duration_since(deploying_started_at);
         if elapsed > chrono::Duration::minutes(DEPLOYING_TIMEOUT_MINUTES) {
-            warn!(
-                deployment_id = %deployment.deployment_id,
+            let error_msg = format!(
                 "Deployment timed out after {} seconds in Deploying state",
                 elapsed.num_seconds()
             );
-            db_deployments::mark_terminating(
-                &state.db_pool,
-                deployment.id,
-                TerminationReason::Failed,
-            )
-            .await?;
+            warn!(
+                deployment_id = %deployment.deployment_id,
+                "{}", error_msg
+            );
+            db_deployments::mark_failed(&state.db_pool, deployment.id, &error_msg).await?;
             db_projects::update_calculated_status(&state.db_pool, project.id).await?;
         }
     }
@@ -347,17 +354,11 @@ async fn complete_termination(
         Some(TerminationReason::UserStopped) => {
             db_deployments::mark_stopped(&state.db_pool, deployment.id).await?;
         }
-        Some(TerminationReason::Failed) => {
-            let error_message = deployment
-                .error_message
-                .as_deref()
-                .unwrap_or("Deployment failed");
-            db_deployments::mark_failed(&state.db_pool, deployment.id, error_message).await?;
-        }
         Some(TerminationReason::Expired) => {
             db_deployments::mark_expired(&state.db_pool, deployment.id).await?;
         }
-        Some(TerminationReason::Cancelled) | None => {
+        Some(TerminationReason::Failed) | Some(TerminationReason::Cancelled) | None => {
+            // Failed/Cancelled termination reasons and missing reasons all resolve to Stopped
             db_deployments::mark_stopped(&state.db_pool, deployment.id).await?;
         }
     }
@@ -649,35 +650,6 @@ async fn check_expirations(
     Ok(())
 }
 
-/// Queue failed deployments for infrastructure cleanup
-async fn check_failed_cleanup(
-    state: &AppState,
-    non_terminal: &[&Deployment],
-    project: &Project,
-) -> anyhow::Result<()> {
-    // We only check non-terminal here. Failed is terminal, so we need to separately
-    // load failed deployments that still need cleanup.
-    let all_deployments = db_deployments::list_for_project(&state.db_pool, project.id).await?;
-    for deployment in &all_deployments {
-        if deployment.status == DeploymentStatus::Failed
-            && deployment.termination_reason != Some(TerminationReason::Failed)
-        {
-            info!(
-                deployment_id = %deployment.deployment_id,
-                "Queueing failed deployment for cleanup"
-            );
-            db_deployments::mark_terminating(
-                &state.db_pool,
-                deployment.id,
-                TerminationReason::Failed,
-            )
-            .await?;
-        }
-    }
-    let _ = non_terminal; // suppress warning
-    Ok(())
-}
-
 // ── Compute desired children ───────────────────────────────────────────
 
 /// Compute the desired set of Kubernetes child resources for a project.
@@ -813,7 +785,7 @@ async fn compute_desired_children(
             active_deployment,
             &namespace,
             env_name.as_deref(),
-        );
+        )?;
         children.push(serde_json::to_value(&ingress)?);
 
         // Custom domain Ingress (only for production primary group)
@@ -840,7 +812,7 @@ async fn compute_desired_children(
                     &namespace,
                     &valid_domains,
                     env_name.as_deref(),
-                );
+                )?;
                 children.push(serde_json::to_value(&custom_ingress)?);
             }
         }
@@ -873,7 +845,7 @@ fn should_have_infrastructure(deployment: &Deployment) -> bool {
 async fn build_image_pull_secret(
     resource_builder: &ResourceBuilder,
     project: &Project,
-    _namespace: &str,
+    namespace: &str,
     observed: &ObservedChildren,
 ) -> anyhow::Result<Option<Secret>> {
     // Check if existing secret is fresh enough
@@ -914,6 +886,7 @@ async fn build_image_pull_secret(
 
     let secret = resource_builder.create_dockerconfigjson_secret(
         IMAGE_PULL_SECRET_NAME,
+        namespace,
         registry_host,
         &credentials,
     )?;

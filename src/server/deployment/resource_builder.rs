@@ -507,6 +507,7 @@ impl ResourceBuilder {
     pub fn create_dockerconfigjson_secret(
         &self,
         name: &str,
+        namespace: &str,
         registry_host: &str,
         credentials: &RegistryCredentials,
     ) -> anyhow::Result<Secret> {
@@ -545,6 +546,7 @@ impl ResourceBuilder {
         Ok(Secret {
             metadata: ObjectMeta {
                 name: Some(name.to_string()),
+                namespace: Some(namespace.to_string()),
                 annotations: Some(annotations),
                 ..Default::default()
             },
@@ -989,7 +991,10 @@ impl ResourceBuilder {
 
     // ── Ingress ────────────────────────────────────────────────────────
 
-    fn build_ingress_annotations(&self, project: &Project) -> BTreeMap<String, String> {
+    fn build_ingress_annotations(
+        &self,
+        project: &Project,
+    ) -> anyhow::Result<BTreeMap<String, String>> {
         let mut annotations: BTreeMap<String, String> = self
             .ingress_annotations
             .iter()
@@ -999,8 +1004,8 @@ impl ResourceBuilder {
         let access_class = self
             .access_classes
             .get(&project.access_class)
-            .unwrap_or_else(|| {
-                panic!(
+            .ok_or_else(|| {
+                anyhow::anyhow!(
                     "Access class '{}' not configured. Available: {}",
                     project.access_class,
                     self.access_classes
@@ -1009,7 +1014,7 @@ impl ResourceBuilder {
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
-            });
+            })?;
 
         match access_class.access_requirement {
             AccessRequirement::None => {}
@@ -1049,15 +1054,15 @@ impl ResourceBuilder {
             annotations.insert(key.clone(), value.clone());
         }
 
-        annotations
+        Ok(annotations)
     }
 
-    fn get_ingress_class_for_project(&self, project: &Project) -> &str {
+    fn get_ingress_class_for_project(&self, project: &Project) -> anyhow::Result<&str> {
         let access_class = self
             .access_classes
             .get(&project.access_class)
-            .unwrap_or_else(|| {
-                panic!(
+            .ok_or_else(|| {
+                anyhow::anyhow!(
                     "Access class '{}' not configured. Available: {}",
                     project.access_class,
                     self.access_classes
@@ -1066,8 +1071,8 @@ impl ResourceBuilder {
                         .collect::<Vec<_>>()
                         .join(", ")
                 )
-            });
-        &access_class.ingress_class
+            })?;
+        Ok(&access_class.ingress_class)
     }
 
     fn build_ingress_paths(
@@ -1117,10 +1122,10 @@ impl ResourceBuilder {
         deployment: &Deployment,
         namespace: &str,
         environment_name: Option<&str>,
-    ) -> Ingress {
+    ) -> anyhow::Result<Ingress> {
         let url_components = self.ingress_url_components(project, deployment);
 
-        let mut annotations = self.build_ingress_annotations(project);
+        let mut annotations = self.build_ingress_annotations(project)?;
 
         if let Some(ref path) = url_components.path_prefix {
             annotations.insert(
@@ -1152,7 +1157,7 @@ impl ResourceBuilder {
 
         let tls = self.build_primary_tls_config(&url_components.host);
 
-        Ingress {
+        Ok(Ingress {
             metadata: ObjectMeta {
                 name: Some(Self::ingress_name(project, deployment)),
                 namespace: Some(namespace.to_string()),
@@ -1161,13 +1166,13 @@ impl ResourceBuilder {
                 ..Default::default()
             },
             spec: Some(IngressSpec {
-                ingress_class_name: Some(self.get_ingress_class_for_project(project).to_string()),
+                ingress_class_name: Some(self.get_ingress_class_for_project(project)?.to_string()),
                 tls,
                 rules: Some(rules),
                 ..Default::default()
             }),
             ..Default::default()
-        }
+        })
     }
 
     pub fn create_custom_domain_ingress(
@@ -1177,8 +1182,8 @@ impl ResourceBuilder {
         namespace: &str,
         custom_domains: &[CustomDomain],
         environment_name: Option<&str>,
-    ) -> Ingress {
-        let mut annotations = self.build_ingress_annotations(project);
+    ) -> anyhow::Result<Ingress> {
+        let mut annotations = self.build_ingress_annotations(project)?;
 
         for (k, v) in &self.custom_domain_ingress_annotations {
             annotations.insert(k.clone(), v.clone());
@@ -1197,7 +1202,7 @@ impl ResourceBuilder {
 
         let tls = self.build_custom_domain_tls_config(custom_domains);
 
-        Ingress {
+        Ok(Ingress {
             metadata: ObjectMeta {
                 name: Some(Self::custom_domain_ingress_name(project, deployment)),
                 namespace: Some(namespace.to_string()),
@@ -1206,13 +1211,13 @@ impl ResourceBuilder {
                 ..Default::default()
             },
             spec: Some(IngressSpec {
-                ingress_class_name: Some(self.get_ingress_class_for_project(project).to_string()),
+                ingress_class_name: Some(self.get_ingress_class_for_project(project)?.to_string()),
                 tls,
                 rules: Some(rules),
                 ..Default::default()
             }),
             ..Default::default()
-        }
+        })
     }
 
     fn build_primary_tls_config(

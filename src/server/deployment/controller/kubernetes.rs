@@ -37,13 +37,13 @@ impl KubernetesBackend {
         }
     }
 
-    /// Test Kubernetes API connectivity
+    /// Test Kubernetes API connectivity by listing pods (ClusterRole grants pod read access)
     pub async fn test_connection(&self) -> Result<()> {
-        use k8s_openapi::api::core::v1::Namespace;
+        use k8s_openapi::api::core::v1::Pod;
         use kube::api::Api;
-        let ns_api: Api<Namespace> = Api::all(self.kube_client.clone());
-        ns_api
-            .list(&Default::default())
+        let pod_api: Api<Pod> = Api::all(self.kube_client.clone());
+        pod_api
+            .list(&kube::api::ListParams::default().limit(1))
             .await
             .map_err(|e| anyhow::anyhow!("Failed to connect to Kubernetes API: {}", e))?;
         Ok(())

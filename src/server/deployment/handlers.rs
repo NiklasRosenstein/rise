@@ -1544,25 +1544,32 @@ pub async fn stop_deployments_by_group(
 
     let mut stopped_ids = Vec::new();
 
-    // Mark each deployment as Terminating with UserStopped reason
+    // Mark each deployment using appropriate state transition
     for deployment in deployments {
-        match db_deployments::mark_terminating(
-            &state.db_pool,
-            deployment.id,
-            crate::db::models::TerminationReason::UserStopped,
-        )
-        .await
-        {
-            Ok(_) => {
+        let result = if state_machine::is_cancellable(&deployment.status) {
+            db_deployments::mark_cancelling(&state.db_pool, deployment.id)
+                .await
+                .map(|_| "Cancelling")
+        } else {
+            db_deployments::mark_terminating(
+                &state.db_pool,
+                deployment.id,
+                crate::db::models::TerminationReason::UserStopped,
+            )
+            .await
+            .map(|_| "Terminating")
+        };
+        match result {
+            Ok(new_status) => {
                 info!(
-                    "Marked deployment {} as Terminating",
-                    deployment.deployment_id
+                    "Marked deployment {} as {}",
+                    deployment.deployment_id, new_status
                 );
                 stopped_ids.push(deployment.deployment_id);
             }
             Err(e) => {
                 error!(
-                    "Failed to mark deployment {} as Terminating: {}",
+                    "Failed to stop deployment {}: {}",
                     deployment.deployment_id, e
                 );
             }
@@ -1655,16 +1662,26 @@ pub async fn stop_deployment(
         )));
     }
 
-    // Mark deployment as Terminating with UserStopped reason
-    let updated_deployment = db_deployments::mark_terminating(
-        &state.db_pool,
-        deployment.id,
-        crate::db::models::TerminationReason::UserStopped,
-    )
-    .await
-    .internal_err("Failed to stop deployment")?;
-
-    info!("Marked deployment {} as Terminating", deployment_id);
+    // Use the appropriate state transition based on current status:
+    // Pre-infrastructure states (Pending, Building, Pushing, Pushed, Deploying) → Cancelling
+    // Infrastructure states (Healthy, Unhealthy) → Terminating
+    let updated_deployment = if state_machine::is_cancellable(&deployment.status) {
+        let d = db_deployments::mark_cancelling(&state.db_pool, deployment.id)
+            .await
+            .internal_err("Failed to cancel deployment")?;
+        info!("Marked deployment {} as Cancelling", deployment_id);
+        d
+    } else {
+        let d = db_deployments::mark_terminating(
+            &state.db_pool,
+            deployment.id,
+            crate::db::models::TerminationReason::UserStopped,
+        )
+        .await
+        .internal_err("Failed to stop deployment")?;
+        info!("Marked deployment {} as Terminating", deployment_id);
+        d
+    };
 
     // Update project status
     projects::update_calculated_status(&state.db_pool, project.id)
