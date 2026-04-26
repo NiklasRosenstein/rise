@@ -248,15 +248,9 @@ mod tests {
     #[test]
     fn test_extract_session_key_different_tokens_produce_different_keys() {
         let mut headers_a = HeaderMap::new();
-        headers_a.insert(
-            "cookie",
-            HeaderValue::from_static("rise_jwt=token-a"),
-        );
+        headers_a.insert("cookie", HeaderValue::from_static("rise_jwt=token-a"));
         let mut headers_b = HeaderMap::new();
-        headers_b.insert(
-            "cookie",
-            HeaderValue::from_static("rise_jwt=token-b"),
-        );
+        headers_b.insert("cookie", HeaderValue::from_static("rise_jwt=token-b"));
         let key_a = extract_session_key(&headers_a).unwrap();
         let key_b = extract_session_key(&headers_b).unwrap();
         assert_ne!(key_a, key_b);
