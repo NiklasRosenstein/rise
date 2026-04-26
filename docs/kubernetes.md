@@ -378,6 +378,7 @@ All resources are labeled for management and selection:
 labels:
   rise.dev/managed-by: "rise"
   rise.dev/project: "my-app"
+  rise.dev/environment: "production"        # present when deployment has an environment
   rise.dev/deployment-group: "default"
   rise.dev/deployment-id: "20251207-143022"
   rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
@@ -697,6 +698,7 @@ metadata:
   labels:
     rise.dev/managed-by: "rise"
     rise.dev/project: "my-app"
+    rise.dev/environment: "production"
     rise.dev/deployment-group: "default"
     rise.dev/deployment-id: "20251207-143022"
     rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
@@ -705,6 +707,7 @@ spec:
   selector:
     matchLabels:
       rise.dev/project: "my-app"
+      rise.dev/environment: "production"
       rise.dev/deployment-group: "default"
       rise.dev/deployment-id: "20251207-143022"
       rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
@@ -712,6 +715,7 @@ spec:
     metadata:
       labels:
         rise.dev/project: "my-app"
+        rise.dev/environment: "production"
         rise.dev/deployment-group: "default"
         rise.dev/deployment-id: "20251207-143022"
         rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
@@ -739,10 +743,12 @@ metadata:
   labels:
     rise.dev/managed-by: "rise"
     rise.dev/project: "my-app"
+    rise.dev/environment: "production"
 spec:
   type: ClusterIP
   selector:
     rise.dev/project: "my-app"
+    rise.dev/environment: "production"
     rise.dev/deployment-group: "default"
     rise.dev/deployment-id: "20251207-143022"  # Updated on traffic switch
     rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"  # Updated on traffic switch
@@ -765,6 +771,7 @@ metadata:
   labels:
     rise.dev/managed-by: "rise"
     rise.dev/project: "my-app"
+    rise.dev/environment: "production"
   annotations:
     kubernetes.io/ingress.class: "nginx"
 spec:

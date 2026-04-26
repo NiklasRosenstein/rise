@@ -40,6 +40,7 @@ const LABEL_PROJECT: &str = "rise.dev/project";
 const LABEL_DEPLOYMENT_GROUP: &str = "rise.dev/deployment-group";
 const LABEL_DEPLOYMENT_ID: &str = "rise.dev/deployment-id";
 const LABEL_DEPLOYMENT_UUID: &str = "rise.dev/deployment-uuid";
+const LABEL_ENVIRONMENT: &str = "rise.dev/environment";
 const ANNOTATION_LAST_REFRESH: &str = "rise.dev/last-refresh";
 
 /// Image pull secret name used for private registry authentication
@@ -1508,17 +1509,30 @@ impl KubernetesController {
 
     /// Create common labels for all resources
     #[allow(dead_code)] // Will be used in reconciliation implementation
-    fn common_labels(project: &Project) -> BTreeMap<String, String> {
+    fn common_labels(
+        project: &Project,
+        environment_name: Option<&str>,
+    ) -> BTreeMap<String, String> {
         let mut labels = BTreeMap::new();
         labels.insert(LABEL_MANAGED_BY.to_string(), "rise".to_string());
         labels.insert(LABEL_PROJECT.to_string(), project.name.clone());
+        if let Some(env) = environment_name {
+            labels.insert(
+                LABEL_ENVIRONMENT.to_string(),
+                Self::sanitize_label_value(env),
+            );
+        }
         labels
     }
 
     /// Create deployment group labels (for resources shared across deployments in a group)
     /// Used by NetworkPolicy podSelector to target all pods in a deployment group.
-    fn group_labels(project: &Project, deployment: &Deployment) -> BTreeMap<String, String> {
-        let mut labels = Self::common_labels(project);
+    fn group_labels(
+        project: &Project,
+        deployment: &Deployment,
+        environment_name: Option<&str>,
+    ) -> BTreeMap<String, String> {
+        let mut labels = Self::common_labels(project, environment_name);
         labels.insert(
             LABEL_DEPLOYMENT_GROUP.to_string(),
             Self::sanitize_label_value(&deployment.deployment_group),
@@ -1528,8 +1542,12 @@ impl KubernetesController {
 
     /// Create deployment-specific labels
     #[allow(dead_code)] // Will be used in reconciliation implementation
-    fn deployment_labels(project: &Project, deployment: &Deployment) -> BTreeMap<String, String> {
-        let mut labels = Self::common_labels(project);
+    fn deployment_labels(
+        project: &Project,
+        deployment: &Deployment,
+        environment_name: Option<&str>,
+    ) -> BTreeMap<String, String> {
+        let mut labels = Self::common_labels(project, environment_name);
         labels.insert(
             LABEL_DEPLOYMENT_GROUP.to_string(),
             Self::sanitize_label_value(&deployment.deployment_group),
@@ -1555,6 +1573,7 @@ impl KubernetesController {
         deployment: &Deployment,
         project: &Project,
         metadata: &mut KubernetesMetadata,
+        environment_name: Option<&str>,
     ) -> Result<()> {
         let namespace = Self::namespace_name(project);
 
@@ -1580,35 +1599,77 @@ impl KubernetesController {
         }
 
         // 4. Apply Service
-        self.apply_service(deployment.id, project, deployment, &namespace, metadata)
-            .await?;
+        self.apply_service(
+            deployment.id,
+            project,
+            deployment,
+            &namespace,
+            metadata,
+            environment_name,
+        )
+        .await?;
 
         // 5. Apply Ingress
-        self.apply_ingress(deployment.id, project, deployment, &namespace, metadata)
-            .await?;
+        self.apply_ingress(
+            deployment.id,
+            project,
+            deployment,
+            &namespace,
+            metadata,
+            environment_name,
+        )
+        .await?;
 
         // 6. Apply NetworkPolicy
-        self.apply_network_policy(deployment.id, project, deployment, &namespace)
-            .await?;
+        self.apply_network_policy(
+            deployment.id,
+            project,
+            deployment,
+            &namespace,
+            environment_name,
+        )
+        .await?;
 
         Ok(())
+    }
+
+    /// Resolve the environment name for a deployment, if it has an `environment_id`.
+    async fn resolve_environment_name(&self, deployment: &Deployment) -> Result<Option<String>> {
+        let environment_id = match deployment.environment_id {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+
+        match crate::db::environments::find_by_id(&self.state.db_pool, environment_id).await? {
+            Some(env) => Ok(Some(env.name)),
+            None => {
+                warn!(
+                    deployment_id = %deployment.deployment_id,
+                    environment_id = %environment_id,
+                    "Environment not found for label resolution"
+                );
+                Ok(None)
+            }
+        }
     }
 
     /// Ensure the per-environment ServiceAccount exists in the project namespace.
     ///
     /// If the deployment has an `environment_id`, looks up the environment name and
     /// creates/updates the corresponding ServiceAccount via server-side apply.
-    /// Returns `Ok(Some(sa_name))` if a SA was ensured, or `Ok(None)` if the
+    /// Returns `Ok((sa_name, environment_name))` — both are `None` if the
     /// deployment has no environment (pods will use the `default` SA).
+    /// When `use_default_service_account_for_production` is set and the environment
+    /// is production, `sa_name` is `None` but `environment_name` is still returned.
     async fn ensure_environment_service_account(
         &self,
         deployment: &Deployment,
         project: &Project,
         namespace: &str,
-    ) -> Result<Option<String>> {
+    ) -> Result<(Option<String>, Option<String>)> {
         let environment_id = match deployment.environment_id {
             Some(id) => id,
-            None => return Ok(None),
+            None => return Ok((None, None)),
         };
 
         let environment =
@@ -1620,9 +1681,11 @@ impl KubernetesController {
                         environment_id = %environment_id,
                         "Environment not found, skipping ServiceAccount creation"
                     );
-                    return Ok(None);
+                    return Ok((None, None));
                 }
             };
+
+        let env_name = environment.name.clone();
 
         // When configured, production environments use the namespace's `default` SA
         // instead of creating a dedicated one (backwards compatibility for existing IRSA bindings).
@@ -1632,7 +1695,7 @@ impl KubernetesController {
                 environment = environment.name,
                 "Skipping ServiceAccount creation for production (use_default_service_account_for_production=true)"
             );
-            return Ok(None);
+            return Ok((None, Some(env_name)));
         }
 
         let sa_name = Self::environment_service_account_name(&environment.name);
@@ -1654,7 +1717,7 @@ impl KubernetesController {
             "Ensured environment ServiceAccount"
         );
 
-        Ok(Some(sa_name))
+        Ok((Some(sa_name), Some(env_name)))
     }
 
     /// Apply namespace with drift detection
@@ -1979,6 +2042,7 @@ impl KubernetesController {
         deployment: &Deployment,
         namespace: &str,
         metadata: &mut KubernetesMetadata,
+        environment_name: Option<&str>,
     ) -> Result<()> {
         let service_name = Self::service_name(project, deployment);
         let service_api: Api<Service> = Api::namespaced(self.kube_client.clone(), namespace);
@@ -1988,7 +2052,7 @@ impl KubernetesController {
                 let current_version = existing_svc.metadata.resource_version.as_deref();
 
                 if self.needs_apply(deployment_id, "service", current_version) {
-                    let svc = self.create_service(project, deployment, metadata);
+                    let svc = self.create_service(project, deployment, metadata, environment_name);
                     let result = service_api
                         .patch(
                             &service_name,
@@ -2007,7 +2071,7 @@ impl KubernetesController {
                 }
             }
             Err(kube::Error::Api(err)) if err.code == 404 => {
-                let svc = self.create_service(project, deployment, metadata);
+                let svc = self.create_service(project, deployment, metadata, environment_name);
                 let result = service_api.create(&PostParams::default(), &svc).await?;
                 self.update_version_cache(
                     deployment_id,
@@ -2034,6 +2098,7 @@ impl KubernetesController {
         deployment: &Deployment,
         namespace: &str,
         metadata: &mut KubernetesMetadata,
+        environment_name: Option<&str>,
     ) -> Result<()> {
         let ingress_name = Self::ingress_name(project, deployment);
         let custom_domain_ingress_name = Self::custom_domain_ingress_name(project, deployment);
@@ -2057,7 +2122,12 @@ impl KubernetesController {
                 // to fully replace the resource including removing old annotations.
                 // SSA patch may not properly remove annotations when switching access classes.
                 if deployment.needs_reconcile {
-                    let mut ingress = self.create_primary_ingress(project, deployment, metadata);
+                    let mut ingress = self.create_primary_ingress(
+                        project,
+                        deployment,
+                        metadata,
+                        environment_name,
+                    );
                     // Set resourceVersion for optimistic concurrency
                     ingress.metadata.resource_version = current_version.map(String::from);
                     let result = ingress_api
@@ -2073,7 +2143,12 @@ impl KubernetesController {
                         ingress_name
                     );
                 } else if self.needs_apply(deployment_id, "ingress", current_version) {
-                    let ingress = self.create_primary_ingress(project, deployment, metadata);
+                    let ingress = self.create_primary_ingress(
+                        project,
+                        deployment,
+                        metadata,
+                        environment_name,
+                    );
                     let result = ingress_api
                         .patch(
                             &ingress_name,
@@ -2095,7 +2170,8 @@ impl KubernetesController {
                 }
             }
             Err(kube::Error::Api(err)) if err.code == 404 => {
-                let ingress = self.create_primary_ingress(project, deployment, metadata);
+                let ingress =
+                    self.create_primary_ingress(project, deployment, metadata, environment_name);
                 let result = ingress_api.create(&PostParams::default(), &ingress).await?;
                 self.update_version_cache(
                     deployment_id,
@@ -2121,6 +2197,7 @@ impl KubernetesController {
                             deployment,
                             metadata,
                             &custom_domains,
+                            environment_name,
                         );
                         ingress.metadata.resource_version = current_version.map(String::from);
                         let result = ingress_api
@@ -2149,6 +2226,7 @@ impl KubernetesController {
                             deployment,
                             metadata,
                             &custom_domains,
+                            environment_name,
                         );
                         let result = ingress_api
                             .patch(
@@ -2179,6 +2257,7 @@ impl KubernetesController {
                         deployment,
                         metadata,
                         &custom_domains,
+                        environment_name,
                     );
                     let result = ingress_api.create(&PostParams::default(), &ingress).await?;
                     self.update_version_cache(
@@ -2287,8 +2366,12 @@ impl KubernetesController {
                             let env_url_components = Self::parse_ingress_url(&env_url);
 
                             // Create environment ingress using the same structure as primary
-                            let mut env_ingress =
-                                self.create_primary_ingress(project, deployment, metadata);
+                            let mut env_ingress = self.create_primary_ingress(
+                                project,
+                                deployment,
+                                metadata,
+                                environment_name,
+                            );
                             env_ingress.metadata.name = Some(env_ingress_name.clone());
 
                             // Replace the host in the ingress rules with the environment URL
@@ -2378,6 +2461,7 @@ impl KubernetesController {
         project: &Project,
         deployment: &Deployment,
         namespace: &str,
+        environment_name: Option<&str>,
     ) -> Result<()> {
         let np_name = Self::network_policy_name(project, deployment);
         let np_api: Api<NetworkPolicy> = Api::namespaced(self.kube_client.clone(), namespace);
@@ -2387,7 +2471,12 @@ impl KubernetesController {
                 let current_version = existing_np.metadata.resource_version.as_deref();
 
                 if self.needs_apply(deployment_id, "network-policy", current_version) {
-                    let np = self.create_network_policy(project, deployment, namespace);
+                    let np = self.create_network_policy(
+                        project,
+                        deployment,
+                        namespace,
+                        environment_name,
+                    );
                     let result = np_api
                         .patch(
                             &np_name,
@@ -2406,7 +2495,8 @@ impl KubernetesController {
                 }
             }
             Err(kube::Error::Api(err)) if err.code == 404 => {
-                let np = self.create_network_policy(project, deployment, namespace);
+                let np =
+                    self.create_network_policy(project, deployment, namespace, environment_name);
                 let result = np_api.create(&PostParams::default(), &np).await?;
                 self.update_version_cache(
                     deployment_id,
@@ -2424,7 +2514,8 @@ impl KubernetesController {
     /// Create Namespace resource
     fn create_namespace(&self, project: &Project) -> Namespace {
         // Start with common labels and merge in configured namespace labels
-        let mut labels = Self::common_labels(project);
+        // Namespace is project-scoped, not environment-scoped
+        let mut labels = Self::common_labels(project, None);
         for (k, v) in &self.namespace_labels {
             labels.insert(k.clone(), v.clone());
         }
@@ -2469,7 +2560,7 @@ impl KubernetesController {
             metadata: ObjectMeta {
                 name: Some(Self::environment_service_account_name(environment_name)),
                 namespace: Some(namespace.to_string()),
-                labels: Some(Self::common_labels(project)),
+                labels: Some(Self::common_labels(project, Some(environment_name))),
                 ..Default::default()
             },
             ..Default::default()
@@ -2482,17 +2573,22 @@ impl KubernetesController {
         project: &Project,
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
+        environment_name: Option<&str>,
     ) -> Service {
         Service {
             metadata: ObjectMeta {
                 name: Some(Self::service_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
-                labels: Some(Self::common_labels(project)),
+                labels: Some(Self::common_labels(project, environment_name)),
                 ..Default::default()
             },
             spec: Some(ServiceSpec {
                 type_: Some("ClusterIP".to_string()),
-                selector: Some(Self::deployment_labels(project, deployment)),
+                selector: Some(Self::deployment_labels(
+                    project,
+                    deployment,
+                    environment_name,
+                )),
                 ports: Some(vec![ServicePort {
                     name: Some("http".to_string()),
                     port: 80,
@@ -2521,7 +2617,8 @@ impl KubernetesController {
             metadata: ObjectMeta {
                 name: Some("rise-backend".to_string()),
                 namespace: Some(namespace.to_string()),
-                labels: Some(Self::common_labels(project)),
+                // Backend service is project-scoped, not environment-scoped
+                labels: Some(Self::common_labels(project, None)),
                 ..Default::default()
             },
             spec: Some(ServiceSpec {
@@ -2547,7 +2644,8 @@ impl KubernetesController {
             metadata: ObjectMeta {
                 name: Some("rise-backend".to_string()),
                 namespace: Some(namespace.to_string()),
-                labels: Some(Self::common_labels(project)),
+                // Backend service is project-scoped, not environment-scoped
+                labels: Some(Self::common_labels(project, None)),
                 ..Default::default()
             },
             spec: Some(ServiceSpec {
@@ -2582,7 +2680,8 @@ impl KubernetesController {
             metadata: ObjectMeta {
                 name: Some("rise-backend".to_string()),
                 namespace: Some(namespace.to_string()),
-                labels: Some(Self::common_labels(project)),
+                // Backend endpoints are project-scoped, not environment-scoped
+                labels: Some(Self::common_labels(project, None)),
                 ..Default::default()
             },
             subsets: Some(vec![EndpointSubset {
@@ -2607,6 +2706,7 @@ impl KubernetesController {
         project: &Project,
         deployment: &Deployment,
         namespace: &str,
+        environment_name: Option<&str>,
     ) -> NetworkPolicy {
         let (egress_rules, policy_types) = match &self.network_policy.egress {
             None => (None, vec!["Ingress".to_string()]),
@@ -2620,12 +2720,12 @@ impl KubernetesController {
             metadata: ObjectMeta {
                 name: Some(Self::network_policy_name(project, deployment)),
                 namespace: Some(namespace.to_string()),
-                labels: Some(Self::common_labels(project)),
+                labels: Some(Self::common_labels(project, environment_name)),
                 ..Default::default()
             },
             spec: Some(NetworkPolicySpec {
                 pod_selector: Some(LabelSelector {
-                    match_labels: Some(Self::group_labels(project, deployment)),
+                    match_labels: Some(Self::group_labels(project, deployment, environment_name)),
                     ..Default::default()
                 }),
                 policy_types: Some(policy_types),
@@ -2840,6 +2940,7 @@ impl KubernetesController {
         metadata: &KubernetesMetadata,
         env_vars: Vec<k8s_openapi::api::core::v1::EnvVar>,
         service_account_name: Option<String>,
+        environment_name: Option<&str>,
     ) -> K8sDeployment {
         // Build image reference - same logic as API layer's get_deployment_image_tag()
         // This ensures rollback deployments use the correct source image tag
@@ -2895,14 +2996,22 @@ impl KubernetesController {
             metadata: ObjectMeta {
                 name: Some(format!("{}-{}", project.name, deployment.deployment_id)),
                 namespace: metadata.namespace.clone(),
-                labels: Some(Self::deployment_labels(project, deployment)),
+                labels: Some(Self::deployment_labels(
+                    project,
+                    deployment,
+                    environment_name,
+                )),
                 ..Default::default()
             },
             spec: Some(DeploymentSpec {
                 replicas: Some(1),
                 min_ready_seconds: None,
                 selector: LabelSelector {
-                    match_labels: Some(Self::deployment_labels(project, deployment)),
+                    match_labels: Some(Self::deployment_labels(
+                        project,
+                        deployment,
+                        environment_name,
+                    )),
                     ..Default::default()
                 },
                 strategy: Some(k8s_openapi::api::apps::v1::DeploymentStrategy {
@@ -2918,7 +3027,11 @@ impl KubernetesController {
                 }),
                 template: PodTemplateSpec {
                     metadata: Some(ObjectMeta {
-                        labels: Some(Self::deployment_labels(project, deployment)),
+                        labels: Some(Self::deployment_labels(
+                            project,
+                            deployment,
+                            environment_name,
+                        )),
                         ..Default::default()
                     }),
                     spec: Some(PodSpec {
@@ -3138,6 +3251,7 @@ impl KubernetesController {
         project: &Project,
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
+        environment_name: Option<&str>,
     ) -> Ingress {
         let url_components = self.ingress_url_components(project, deployment);
 
@@ -3190,7 +3304,7 @@ impl KubernetesController {
             metadata: ObjectMeta {
                 name: Some(Self::ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
-                labels: Some(Self::common_labels(project)),
+                labels: Some(Self::common_labels(project, environment_name)),
                 // Always include annotations (even if empty) so SSA removes old keys
                 // when access_class changes from authenticated to public
                 annotations: Some(annotations),
@@ -3214,6 +3328,7 @@ impl KubernetesController {
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
         custom_domains: &[crate::db::models::CustomDomain],
+        environment_name: Option<&str>,
     ) -> Ingress {
         // Build common annotations (auth for private projects)
         // NOTE: We do NOT add x-forwarded-prefix annotation here
@@ -3244,7 +3359,7 @@ impl KubernetesController {
             metadata: ObjectMeta {
                 name: Some(Self::custom_domain_ingress_name(project, deployment)),
                 namespace: metadata.namespace.clone(),
-                labels: Some(Self::common_labels(project)),
+                labels: Some(Self::common_labels(project, environment_name)),
                 // Always include annotations (even if empty) so SSA removes old keys
                 // when access_class changes from authenticated to public
                 annotations: Some(annotations),
@@ -3776,12 +3891,19 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    let environment_name = self.resolve_environment_name(deployment).await?;
+
                     let service_name = Self::service_name(project, deployment);
                     let svc_api: Api<Service> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
                     // Create service with server-side apply (allows future updates)
-                    let svc = self.create_service(project, deployment, &metadata);
+                    let svc = self.create_service(
+                        project,
+                        deployment,
+                        &metadata,
+                        environment_name.as_deref(),
+                    );
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&svc);
                     let result = match svc_api.patch(&service_name, &patch_params, &patch).await {
@@ -3886,11 +4008,11 @@ impl DeploymentBackend for KubernetesController {
                     let env_vars = self.load_env_vars(project, deployment).await?;
 
                     // Ensure per-environment ServiceAccount exists
-                    let service_account_name = match self
+                    let (service_account_name, environment_name) = match self
                         .ensure_environment_service_account(deployment, project, namespace)
                         .await
                     {
-                        Ok(sa_name) => sa_name,
+                        Ok(result) => result,
                         Err(e) if is_namespace_not_found_error(&e) => {
                             warn!("Namespace missing during ServiceAccount creation, resetting to CreatingNamespace");
                             metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
@@ -3915,6 +4037,7 @@ impl DeploymentBackend for KubernetesController {
                                     &metadata,
                                     env_vars.clone(),
                                     service_account_name.clone(),
+                                    environment_name.as_deref(),
                                 )
                                 .await;
 
@@ -3983,6 +4106,7 @@ impl DeploymentBackend for KubernetesController {
                                     &metadata,
                                     env_vars,
                                     service_account_name,
+                                    environment_name.as_deref(),
                                 )
                                 .await;
                             match deploy_api.create(&PostParams::default(), &rs).await {
@@ -4145,6 +4269,8 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    let environment_name = self.resolve_environment_name(deployment).await?;
+
                     // Fetch custom domains (only for DEFAULT group)
                     let custom_domains = if deployment.deployment_group == DEFAULT_DEPLOYMENT_GROUP
                     {
@@ -4169,8 +4295,12 @@ impl DeploymentBackend for KubernetesController {
                         Api::namespaced(self.kube_client.clone(), namespace);
 
                     // 1. Apply primary ingress
-                    let primary_ingress =
-                        self.create_primary_ingress(project, deployment, &metadata);
+                    let primary_ingress = self.create_primary_ingress(
+                        project,
+                        deployment,
+                        &metadata,
+                        environment_name.as_deref(),
+                    );
                     let patch_params = PatchParams::apply("rise").force();
                     let patch = Patch::Apply(&primary_ingress);
                     let result = match ingress_api
@@ -4203,6 +4333,7 @@ impl DeploymentBackend for KubernetesController {
                             deployment,
                             &metadata,
                             &custom_domains,
+                            environment_name.as_deref(),
                         );
                         let patch = Patch::Apply(&custom_ingress);
                         match ingress_api
@@ -4287,13 +4418,20 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    let environment_name = self.resolve_environment_name(deployment).await?;
+
                     // BLUE/GREEN TRAFFIC SWITCH: Update Service selector to point to new deployment
                     let service_name = Self::service_name(project, deployment);
                     let svc_api: Api<Service> =
                         Api::namespaced(self.kube_client.clone(), namespace);
 
                     // Create updated service with selector pointing to this deployment
-                    let svc = self.create_service(project, deployment, &metadata);
+                    let svc = self.create_service(
+                        project,
+                        deployment,
+                        &metadata,
+                        environment_name.as_deref(),
+                    );
 
                     // Use server-side apply with force to update the service selector
                     let patch_params = PatchParams::apply("rise").force();
@@ -4352,11 +4490,33 @@ impl DeploymentBackend for KubernetesController {
                     // Load and decrypt environment variables for drift detection
                     let env_vars = self.load_env_vars(project, deployment).await?;
 
+                    // Resolve environment name before applying supporting resources
+                    // so that labels on Service/Ingress/NetworkPolicy include it.
+                    let namespace_for_sa = Self::namespace_name(project);
+                    let (service_account_name, environment_name) = match self
+                        .ensure_environment_service_account(deployment, project, &namespace_for_sa)
+                        .await
+                    {
+                        Ok(result) => result,
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!("Namespace missing during ServiceAccount creation in Completed phase, resetting to CreatingNamespace");
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    };
+
                     // Apply all supporting resources with drift detection
                     // This reconciles: Namespace, ImagePullSecret, BackendService, Service, Ingress
                     // Uses in-memory version cache to skip unchanged resources
                     match self
-                        .apply_supporting_resources(deployment, project, &mut metadata)
+                        .apply_supporting_resources(
+                            deployment,
+                            project,
+                            &mut metadata,
+                            environment_name.as_deref(),
+                        )
                         .await
                     {
                         Ok(_) => {}
@@ -4375,21 +4535,6 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
-                    // Ensure per-environment ServiceAccount exists
-                    let service_account_name = match self
-                        .ensure_environment_service_account(deployment, project, namespace)
-                        .await
-                    {
-                        Ok(sa_name) => sa_name,
-                        Err(e) if is_namespace_not_found_error(&e) => {
-                            warn!("Namespace missing during ServiceAccount creation in Completed phase, resetting to CreatingNamespace");
-                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
-                            metadata.namespace = None;
-                            continue;
-                        }
-                        Err(e) => return Err(e),
-                    };
-
                     // Check Deployment for drift
                     let deploy_name = metadata
                         .deployment_name
@@ -4407,6 +4552,7 @@ impl DeploymentBackend for KubernetesController {
                                     &metadata,
                                     env_vars.clone(),
                                     service_account_name,
+                                    environment_name.as_deref(),
                                 )
                                 .await;
 
@@ -5498,7 +5644,7 @@ mod tests {
         let metadata = sample_metadata("rise-test-project", "test-project-20240108-103000");
 
         let generated = controller
-            .create_deployment(&project, &deployment, &metadata, vec![], None)
+            .create_deployment(&project, &deployment, &metadata, vec![], None, None)
             .await;
 
         let pod_spec = generated
@@ -5523,7 +5669,7 @@ mod tests {
         let metadata = sample_metadata("rise-test-project", "test-project-20240108-103000");
 
         let generated = controller
-            .create_deployment(&project, &deployment, &metadata, vec![], None)
+            .create_deployment(&project, &deployment, &metadata, vec![], None, None)
             .await;
 
         let pod_spec = generated
@@ -5688,7 +5834,7 @@ mod tests {
             updated_at: chrono::Utc::now(),
         };
 
-        let labels = KubernetesController::deployment_labels(&project, &deployment);
+        let labels = KubernetesController::deployment_labels(&project, &deployment, None);
 
         // Verify the rise.dev/deployment-id label is present
         assert!(
@@ -5716,6 +5862,69 @@ mod tests {
         assert!(labels.contains_key(LABEL_MANAGED_BY));
         assert!(labels.contains_key(LABEL_PROJECT));
         assert!(labels.contains_key(LABEL_DEPLOYMENT_GROUP));
+
+        // Verify no environment label when None is passed
+        assert!(
+            !labels.contains_key(LABEL_ENVIRONMENT),
+            "Labels should not contain rise.dev/environment when None"
+        );
+    }
+
+    #[test]
+    fn test_deployment_labels_includes_environment() {
+        use crate::db::models::{Deployment, Project, ProjectStatus};
+        use uuid::Uuid;
+
+        let project = Project {
+            id: Uuid::new_v4(),
+            name: "test-project".to_string(),
+            status: ProjectStatus::Running,
+            access_class: "public".to_string(),
+            owner_user_id: None,
+            owner_team_id: None,
+            finalizers: vec![],
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let deployment = Deployment {
+            id: Uuid::new_v4(),
+            project_id: project.id,
+            deployment_id: "20240108-103000".to_string(),
+            created_by_id: Uuid::new_v4(),
+            deployment_group: "default".to_string(),
+            environment_id: None,
+            status: crate::db::models::DeploymentStatus::Deploying,
+            expires_at: None,
+            termination_reason: None,
+            completed_at: None,
+            error_message: None,
+            build_logs: None,
+            controller_metadata: serde_json::json!({}),
+            image: None,
+            image_digest: None,
+            rolled_back_from_deployment_id: None,
+            http_port: 8080,
+            needs_reconcile: false,
+            is_active: false,
+            deploying_started_at: None,
+            first_healthy_at: None,
+            created_at: chrono::Utc::now(),
+            updated_at: chrono::Utc::now(),
+        };
+
+        let labels =
+            KubernetesController::deployment_labels(&project, &deployment, Some("staging"));
+
+        assert_eq!(
+            labels.get(LABEL_ENVIRONMENT).unwrap(),
+            "staging",
+            "environment label should match provided name"
+        );
+        assert!(labels.contains_key(LABEL_MANAGED_BY));
+        assert!(labels.contains_key(LABEL_PROJECT));
+        assert!(labels.contains_key(LABEL_DEPLOYMENT_GROUP));
+        assert!(labels.contains_key(LABEL_DEPLOYMENT_ID));
     }
 
     #[test]
@@ -5828,7 +6037,7 @@ mod tests {
             pod_status: None,
         };
 
-        let ingress = controller.create_primary_ingress(&project, &deployment, &metadata);
+        let ingress = controller.create_primary_ingress(&project, &deployment, &metadata, None);
 
         // Verify the x-forwarded-prefix annotation is present
         let annotations = ingress.metadata.annotations.unwrap();
@@ -5929,6 +6138,7 @@ mod tests {
             &deployment,
             &metadata,
             &custom_domains,
+            None,
         );
 
         // Verify the x-forwarded-prefix annotation is NOT present
@@ -6022,7 +6232,7 @@ mod tests {
             pod_status: None,
         };
 
-        let ingress = controller.create_primary_ingress(&project, &deployment, &metadata);
+        let ingress = controller.create_primary_ingress(&project, &deployment, &metadata, None);
 
         // Verify the x-forwarded-prefix annotation is NOT present (subdomain-based routing)
         if let Some(annotations) = &ingress.metadata.annotations {
@@ -6183,7 +6393,7 @@ mod tests {
     async fn test_network_policy_standard_config() {
         let controller = create_mock_controller();
         let (project, deployment) = create_test_project_and_deployment();
-        let np = controller.create_network_policy(&project, &deployment, "ns");
+        let np = controller.create_network_policy(&project, &deployment, "ns", None);
 
         let spec = np.spec.as_ref().unwrap();
 
@@ -6254,7 +6464,7 @@ mod tests {
         }]);
 
         let (project, deployment) = create_test_project_and_deployment();
-        let np = controller.create_network_policy(&project, &deployment, "ns");
+        let np = controller.create_network_policy(&project, &deployment, "ns", None);
         let spec = np.spec.as_ref().unwrap();
 
         // policyTypes includes both Ingress and Egress
@@ -6276,7 +6486,7 @@ mod tests {
         controller.network_policy.egress = Some(vec![]);
 
         let (project, deployment) = create_test_project_and_deployment();
-        let np = controller.create_network_policy(&project, &deployment, "ns");
+        let np = controller.create_network_policy(&project, &deployment, "ns", None);
         let spec = np.spec.as_ref().unwrap();
 
         // policyTypes includes Egress (deny-all since rules are empty)
@@ -6311,7 +6521,7 @@ mod tests {
         }];
 
         let (project, deployment) = create_test_project_and_deployment();
-        let np = controller.create_network_policy(&project, &deployment, "ns");
+        let np = controller.create_network_policy(&project, &deployment, "ns", None);
         let spec = np.spec.as_ref().unwrap();
 
         let ingress = spec.ingress.as_ref().unwrap();
@@ -6356,6 +6566,7 @@ mod tests {
                 &metadata,
                 vec![],
                 Some("env-production".to_string()),
+                Some("production"),
             )
             .await;
 
@@ -6378,7 +6589,7 @@ mod tests {
         let metadata = sample_metadata("rise-test-project", "test-project-20240108-103000");
 
         let generated = controller
-            .create_deployment(&project, &deployment, &metadata, vec![], None)
+            .create_deployment(&project, &deployment, &metadata, vec![], None, None)
             .await;
 
         let pod_spec = generated
