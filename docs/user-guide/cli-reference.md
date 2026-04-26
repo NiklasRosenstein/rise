@@ -13,6 +13,7 @@ The Rise CLI (`rise`) provides commands for managing projects, deployments, team
 | `rise project` | `p` | `create` (`c`), `list` (`ls`), `show` (`s`), `update` (`u`), `delete` (`rm`) | [Configuration](configuration.md) |
 | `rise project app-user` | | `add` (`a`), `list` (`ls`), `remove` (`rm`) | [Authentication](authentication.md#app-users) |
 | `rise deployment` | `d` | `create` (`c`), `list` (`ls`), `show` (`s`), `stop`, `rollback`, `logs` | [Deployments](deployments.md) |
+| `rise environment` | `envs` | `create` (`c`), `list` (`ls`), `show` (`s`), `update` (`u`), `delete` (`rm`) | [Environments](environments.md) |
 | `rise env` | `e` | `set` (`s`), `list` (`ls`), `get` (`g`), `delete` (`rm`), `import` (`i`), `show-deployment` | [Environment Variables](environment-variables.md) |
 | `rise domain` | `dom` | `add` (`a`), `list` (`ls`), `remove` (`rm`) | [Custom Domains](custom-domains.md) |
 | `rise team` | `t` | `create` (`c`), `list` (`ls`), `show` (`s`), `update` (`u`), `delete` (`rm`) | |

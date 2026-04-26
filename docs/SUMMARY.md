@@ -5,6 +5,7 @@
   - [Getting Started](user-guide/getting-started.md)
   - [Project Configuration](user-guide/configuration.md)
   - [Deployments](user-guide/deployments.md)
+  - [Environments](user-guide/environments.md)
   - [Building Images](user-guide/builds.md)
   - [Environment Variables](user-guide/environment-variables.md)
   - [Custom Domains](user-guide/custom-domains.md)

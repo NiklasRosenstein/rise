@@ -176,6 +176,7 @@ See [Authentication](authentication.md#service-accounts-workload-identity) for G
 
 - **[Project Configuration](configuration.md)** — `rise.toml` format, build config, precedence rules
 - **[Deployments](deployments.md)** — lifecycle, groups, rollback, logs
+- **[Environments](environments.md)** — named deployment targets (production, staging, dev)
 - **[Building Images](builds.md)** — Docker, Pack, Railpack backends
 - **[Environment Variables](environment-variables.md)** — secrets, imports, auto-injected vars
 - **[Custom Domains](custom-domains.md)** — DNS setup, primary domain

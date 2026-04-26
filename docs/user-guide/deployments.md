@@ -15,6 +15,9 @@ rise deploy ./path/to/app
 
 # Specify a project explicitly
 rise deploy -p my-app
+
+# Deploy to a specific environment
+rise deploy -E staging
 ```
 
 `rise deploy` is a shortcut for `rise deployment create` (`rise d c`). After creating the deployment, Rise automatically follows its progress.
@@ -118,6 +121,8 @@ Each custom group gets its own URL: `https://{project}-{group}.preview.example.c
 
 Group names must match `[a-z0-9][a-z0-9/-]*[a-z0-9]` (no consecutive hyphens `--`, normalized length max 63 characters). When a new deployment in a group reaches `Healthy`, the previous deployment in that group is `Superseded`.
 
+> **Tip:** Use [Environments](environments.md) to give semantic names (like "staging" or "dev") to deployment groups, with URL routing, variable scoping, and access control.
+
 ### Auto-Expiration
 
 Set deployments to expire automatically:
@@ -208,6 +213,7 @@ Rise automatically injects these variables into every deployment:
 | `RISE_ISSUER` | Rise server URL and JWT issuer | `https://rise.example.com` |
 | `RISE_APP_URL` | Canonical URL where your app is accessible | `https://myapp.example.com` |
 | `RISE_APP_URLS` | JSON array of all URLs where your app is accessible | `["https://myapp.app.example.com", "https://myapp.example.com"]` |
+| `RISE_ENVIRONMENT` | Environment name (if the deployment has an associated environment) | `staging` |
 
 `PORT` defaults to 8080 and can be overridden per-deployment with `--http-port`, or set permanently with `rise env set`. `RISE_APP_URL` is your primary custom domain if set, otherwise the default project URL.
 
