@@ -11,7 +11,7 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-rise}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-rise123}
