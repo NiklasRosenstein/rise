@@ -289,5 +289,21 @@ pub async fn delete_environment(
         project.name
     );
 
+    // Best-effort cleanup of per-environment Kubernetes resources (e.g. ServiceAccount).
+    // Failures are logged but don't fail the request — the SA will be cleaned up on
+    // project deletion (namespace cascade) anyway.
+    if let Err(e) = state
+        .deployment_backend
+        .cleanup_environment(&project, &env_name)
+        .await
+    {
+        tracing::warn!(
+            "Failed to clean up environment resources for '{}' in project '{}': {:?}",
+            env_name,
+            project.name,
+            e
+        );
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }

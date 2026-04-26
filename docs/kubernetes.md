@@ -74,6 +74,7 @@ The Kubernetes controller creates and manages the following resources per projec
 | Deployment | One per deployment | Runs application pods |
 | Service | One per deployment group | Routes traffic to active deployment |
 | Ingress | One per deployment group | Exposes HTTP/HTTPS endpoints |
+| ServiceAccount | One per environment | Per-environment workload identity |
 | Secret | One per project | Stores image pull credentials |
 
 ### Naming Scheme
@@ -86,6 +87,7 @@ Resources follow consistent naming patterns:
 | Deployment | `{project}-{deployment_id}` | `my-app-20251207-143022` |
 | Service | `{escaped_group}` | `default`, `mr--26` |
 | Ingress | `{escaped_group}` | `default`, `mr--26` |
+| ServiceAccount | `env-{environment}` | `env-production`, `env-staging` |
 | Secret | `rise-registry-creds` | `rise-registry-creds` |
 
 **Character escaping**: Sequences of characters not in `[A-Za-z0-9-_.]` are replaced with `--`. For example, `mr/26` becomes `mr--26`. Consecutive hyphens (`--`) are disallowed in group names to prevent collisions, and the normalized result must be at most 63 characters (Kubernetes label value limit).
@@ -376,6 +378,7 @@ All resources are labeled for management and selection:
 labels:
   rise.dev/managed-by: "rise"
   rise.dev/project: "my-app"
+  rise.dev/environment: "production"        # present when deployment has an environment
   rise.dev/deployment-group: "default"
   rise.dev/deployment-id: "20251207-143022"
   rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
@@ -463,6 +466,31 @@ Examples:
 - `/var/run/secrets/rise/tokens/metrics`
 
 Token rotation and lifetime use Kubernetes defaults; Rise does not currently set `expirationSeconds`.
+
+#### Per-Environment ServiceAccounts
+
+Each environment gets its own Kubernetes ServiceAccount named `env-{environment}` (e.g., `env-production`, `env-staging`). The ServiceAccount is created or updated via server-side apply on each deployment reconcile, and pods are configured to use it instead of the namespace's `default` SA.
+
+This is useful for cloud IAM integrations such as AWS IRSA or GCP Workload Identity, where IAM roles are bound to specific ServiceAccounts. By giving each environment its own SA, you can grant different permissions per environment (e.g., production accesses a production database, staging accesses a staging database).
+
+**Example: Annotating the production SA for AWS IRSA**
+
+```bash
+kubectl annotate serviceaccount env-production \
+  -n rise-my-app \
+  eks.amazonaws.com/role-arn=arn:aws:iam::123456789012:role/my-app-production
+```
+
+Deployments without an associated environment (legacy deployments) continue to use the namespace's `default` ServiceAccount.
+
+**Backwards compatibility**: By default, deployments in the production environment use the namespace's `default` ServiceAccount instead of creating a dedicated one (`use_default_service_account_for_production` defaults to `true`). This preserves existing IAM bindings (e.g., IRSA annotations) on the `default` SA. Non-production environments still get their own `env-{name}` SAs. To opt out and create a dedicated SA for production as well, set it to `false`:
+
+```toml
+[deployment_controller]
+type = "kubernetes"
+# ... other settings ...
+use_default_service_account_for_production = false
+```
 
 #### Cert-Manager Setup
 
@@ -670,6 +698,7 @@ metadata:
   labels:
     rise.dev/managed-by: "rise"
     rise.dev/project: "my-app"
+    rise.dev/environment: "production"
     rise.dev/deployment-group: "default"
     rise.dev/deployment-id: "20251207-143022"
     rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
@@ -678,6 +707,7 @@ spec:
   selector:
     matchLabels:
       rise.dev/project: "my-app"
+      rise.dev/environment: "production"
       rise.dev/deployment-group: "default"
       rise.dev/deployment-id: "20251207-143022"
       rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
@@ -685,10 +715,12 @@ spec:
     metadata:
       labels:
         rise.dev/project: "my-app"
+        rise.dev/environment: "production"
         rise.dev/deployment-group: "default"
         rise.dev/deployment-id: "20251207-143022"
         rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"
     spec:
+      serviceAccountName: env-production
       imagePullSecrets:
         - name: rise-registry-creds
       containers:
@@ -711,10 +743,12 @@ metadata:
   labels:
     rise.dev/managed-by: "rise"
     rise.dev/project: "my-app"
+    rise.dev/environment: "production"
 spec:
   type: ClusterIP
   selector:
     rise.dev/project: "my-app"
+    rise.dev/environment: "production"
     rise.dev/deployment-group: "default"
     rise.dev/deployment-id: "20251207-143022"  # Updated on traffic switch
     rise.dev/deployment-uuid: "550e8400-e29b-41d4-a716-446655440000"  # Updated on traffic switch
@@ -737,6 +771,7 @@ metadata:
   labels:
     rise.dev/managed-by: "rise"
     rise.dev/project: "my-app"
+    rise.dev/environment: "production"
   annotations:
     kubernetes.io/ingress.class: "nginx"
 spec:
@@ -867,6 +902,9 @@ rules:
   - apiGroups: [""]
     resources: ["secrets", "services"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["serviceaccounts"]
+    verbs: ["get", "list", "create", "update", "patch"]
   - apiGroups: ["apps"]
     resources: ["deployments", "replicasets"]
     verbs: ["get", "list", "create", "update", "patch", "delete"]
