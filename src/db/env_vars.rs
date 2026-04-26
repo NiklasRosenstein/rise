@@ -454,6 +454,7 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
+            source_url: None,
             },
         )
         .await
@@ -543,6 +544,7 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
+            source_url: None,
             },
         )
         .await

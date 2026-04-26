@@ -50,6 +50,10 @@ pub struct ProjectConfig {
     /// Plain-text environment variables (non-secret)
     #[serde(default)]
     pub env: HashMap<String, String>,
+
+    /// URL to where the project code lives (e.g. a GitHub/GitLab repository)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_url: Option<String>,
 }
 
 fn default_access_class() -> String {
@@ -303,6 +307,7 @@ FOO = "bar"
                 access_class: "public".to_string(),
                 custom_domains: Vec::new(),
                 env: HashMap::from([("GLOBAL".to_string(), "val".to_string())]),
+                source_url: None,
             }),
             build: None,
             environments: HashMap::from([(

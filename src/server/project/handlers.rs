@@ -330,6 +330,7 @@ pub async fn list_projects(
             finalizers: vec![],      // Not populated in list view for performance
             app_users: vec![],       // Not populated in list view for performance
             app_teams: vec![],       // Not populated in list view for performance
+            source_url: project.source_url,
         });
     }
 
@@ -631,6 +632,14 @@ pub async fn update_project(
         .internal_err("Failed to update project status")?;
     }
 
+    // Update source_url if provided (Some(None) clears, Some(Some(url)) sets)
+    if let Some(source_url) = payload.source_url {
+        updated_project =
+            projects::update_source_url(&state.db_pool, updated_project.id, source_url)
+                .await
+                .internal_err("Failed to update project source URL")?;
+    }
+
     let owner_info = resolve_owner_info(&state, &updated_project)
         .await
         .map_err(|e| ServerError::internal(format!("Failed to resolve owner info: {}", e)))?;
@@ -869,6 +878,7 @@ fn convert_project(project: crate::db::models::Project, owner: Option<OwnerInfo>
         finalizers: project.finalizers.clone(),
         app_users: vec![], // Will be populated by caller if needed
         app_teams: vec![], // Will be populated by caller if needed
+        source_url: project.source_url,
     }
 }
 

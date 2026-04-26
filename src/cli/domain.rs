@@ -89,6 +89,7 @@ fn update_rise_toml_add_domain(app_path: &str, project: &str, domain: &str) -> R
             access_class: "private".to_string(),
             custom_domains: Vec::new(),
             env: std::collections::HashMap::new(),
+            source_url: None,
         });
     }
 

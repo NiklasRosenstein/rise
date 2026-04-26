@@ -17,7 +17,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 access_class,
                 owner_user_id, owner_team_id,
-                finalizers,
+                finalizers, source_url,
                 created_at, updated_at
             FROM projects
             WHERE owner_user_id = $1
@@ -36,7 +36,7 @@ pub async fn list(pool: &PgPool, owner_user_id: Option<Uuid>) -> Result<Vec<Proj
                 status as "status: ProjectStatus",
                 access_class,
                 owner_user_id, owner_team_id,
-                finalizers,
+                finalizers, source_url,
                 created_at, updated_at
             FROM projects
             ORDER BY created_at DESC
@@ -59,7 +59,7 @@ pub async fn list_accessible_by_user(pool: &PgPool, user_id: Uuid) -> Result<Vec
             p.status as "status: ProjectStatus",
             p.access_class,
             p.owner_user_id, p.owner_team_id,
-            p.finalizers,
+            p.finalizers, p.source_url,
             p.created_at, p.updated_at
         FROM projects p
         WHERE
@@ -96,7 +96,7 @@ pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<Project>> 
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE name = $1
@@ -120,7 +120,7 @@ pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<Project>> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE id = $1
@@ -144,7 +144,7 @@ pub async fn find_by_ids(pool: &PgPool, ids: &[Uuid]) -> Result<Vec<Project>> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE id = ANY($1)
@@ -182,7 +182,7 @@ where
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         name,
@@ -213,7 +213,7 @@ pub async fn update_status(pool: &PgPool, id: Uuid, status: ProjectStatus) -> Re
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         id,
@@ -239,7 +239,7 @@ pub async fn update_access_class(pool: &PgPool, id: Uuid, access_class: String) 
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         id,
@@ -270,7 +270,7 @@ pub async fn update_owner(
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         id,
@@ -280,6 +280,36 @@ pub async fn update_owner(
     .fetch_one(pool)
     .await
     .context("Failed to update project owner")?;
+
+    Ok(project)
+}
+
+/// Update project source URL
+pub async fn update_source_url(
+    pool: &PgPool,
+    id: Uuid,
+    source_url: Option<String>,
+) -> Result<Project> {
+    let project = sqlx::query_as!(
+        Project,
+        r#"
+        UPDATE projects
+        SET source_url = $2
+        WHERE id = $1
+        RETURNING
+            id, name,
+            status as "status: ProjectStatus",
+            access_class,
+            owner_user_id, owner_team_id,
+            finalizers, source_url,
+            created_at, updated_at
+        "#,
+        id,
+        source_url
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to update project source URL")?;
 
     Ok(project)
 }
@@ -471,7 +501,7 @@ pub async fn mark_deleting(pool: &PgPool, id: Uuid) -> Result<Project> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         "#,
         id
@@ -493,7 +523,7 @@ pub async fn find_deleting(pool: &PgPool, limit: i64) -> Result<Vec<Project>> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting'
@@ -567,7 +597,7 @@ pub async fn find_deleting_with_finalizer(
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE status = 'Deleting' AND $1 = ANY(finalizers)
@@ -612,7 +642,7 @@ pub async fn list_active(pool: &PgPool) -> Result<Vec<Project>> {
             status as "status: ProjectStatus",
             access_class,
             owner_user_id, owner_team_id,
-            finalizers,
+            finalizers, source_url,
             created_at, updated_at
         FROM projects
         WHERE status NOT IN ('Deleting', 'Terminated')
@@ -669,6 +699,7 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // Initially not active
+                source_url: None,
             },
         )
         .await
@@ -712,6 +743,7 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false, // This is NOT active
+                source_url: None,
             },
         )
         .await
@@ -767,6 +799,7 @@ mod tests {
                 expires_at: None,
                 http_port: 8080,
                 is_active: false,
+                source_url: None,
             },
         )
         .await

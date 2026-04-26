@@ -448,6 +448,9 @@ pub struct DeploymentOptions<'a> {
     pub push_image: bool,
     /// Runtime environment variable overrides to apply to the deployment.
     pub env_overrides: Vec<EnvOverride>,
+    /// URL to the source of this deployment (e.g. a CI job URL).
+    /// If None, auto-detection from CI environment variables is attempted.
+    pub source_url: Option<String>,
 }
 
 pub async fn create_deployment(
@@ -480,6 +483,16 @@ pub async fn create_deployment(
         .get_token()
         .ok_or_else(|| anyhow::anyhow!("Not authenticated. Run 'rise login' first."))?;
 
+    // Resolve source_url: use explicit value, or auto-detect from CI environment
+    let resolved_source_url = deploy_opts
+        .source_url
+        .clone()
+        .or_else(detect_ci_source_url);
+
+    if let Some(ref url) = resolved_source_url {
+        info!("Deployment source URL: {}", url);
+    }
+
     // Step 1: Create deployment and get deployment ID + credentials
     info!(
         "Creating deployment for project '{}'",
@@ -499,6 +512,7 @@ pub async fn create_deployment(
         deploy_opts.use_source_env_vars,
         deploy_opts.push_image,
         &deploy_opts.env_overrides,
+        resolved_source_url.as_deref(),
     )
     .await?;
 
@@ -787,6 +801,35 @@ async fn login_to_registry(
     Ok(())
 }
 
+/// Auto-detect CI source URL from well-known CI environment variables.
+///
+/// Checks common CI platforms in order:
+/// - GitLab CI: `CI_JOB_URL`
+/// - GitHub Actions: `GITHUB_SERVER_URL` + `GITHUB_REPOSITORY` + `GITHUB_RUN_ID`
+///
+/// Returns the first detected URL, or None if no CI environment is detected.
+fn detect_ci_source_url() -> Option<String> {
+    // GitLab CI
+    if let Ok(url) = std::env::var("CI_JOB_URL") {
+        if !url.is_empty() {
+            return Some(url);
+        }
+    }
+
+    // GitHub Actions
+    if let (Ok(server), Ok(repo), Ok(run_id)) = (
+        std::env::var("GITHUB_SERVER_URL"),
+        std::env::var("GITHUB_REPOSITORY"),
+        std::env::var("GITHUB_RUN_ID"),
+    ) {
+        if !server.is_empty() && !repo.is_empty() && !run_id.is_empty() {
+            return Some(format!("{}/{}/actions/runs/{}", server, repo, run_id));
+        }
+    }
+
+    None
+}
+
 #[allow(clippy::too_many_arguments)]
 async fn call_create_deployment_api(
     http_client: &Client,
@@ -802,6 +845,7 @@ async fn call_create_deployment_api(
     use_source_env_vars: bool,
     push_image: bool,
     env_overrides: &[EnvOverride],
+    source_url: Option<&str>,
 ) -> Result<CreateDeploymentResponse> {
     let url = format!("{}/api/v1/deployments", backend_url);
     let mut payload = serde_json::json!({
@@ -843,6 +887,11 @@ async fn call_create_deployment_api(
     // Add push_image field if set
     if push_image {
         payload["push_image"] = serde_json::json!(true);
+    }
+
+    // Add source_url if provided
+    if let Some(url) = source_url {
+        payload["source_url"] = serde_json::json!(url);
     }
 
     // Add env_overrides if any
