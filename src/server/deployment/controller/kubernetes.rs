@@ -5,7 +5,7 @@ use k8s_openapi::api::apps::v1::{Deployment as K8sDeployment, DeploymentSpec, Re
 use k8s_openapi::api::core::v1::{
     Capabilities, Container, ContainerPort, Event, HTTPGetAction, HostAlias, LocalObjectReference,
     Namespace, PodSecurityContext, PodSpec, PodTemplateSpec, Probe, ProjectedVolumeSource,
-    ResourceRequirements, SeccompProfile, Secret, SecurityContext, Service,
+    ResourceRequirements, SeccompProfile, Secret, SecurityContext, Service, ServiceAccount,
     ServiceAccountTokenProjection, ServicePort, ServiceSpec, Volume, VolumeMount, VolumeProjection,
 };
 use k8s_openapi::api::networking::v1::{
@@ -1590,6 +1590,58 @@ impl KubernetesController {
         Ok(())
     }
 
+    /// Ensure the per-environment ServiceAccount exists in the project namespace.
+    ///
+    /// If the deployment has an `environment_id`, looks up the environment name and
+    /// creates/updates the corresponding ServiceAccount via server-side apply.
+    /// Returns `Ok(Some(sa_name))` if a SA was ensured, or `Ok(None)` if the
+    /// deployment has no environment (pods will use the `default` SA).
+    async fn ensure_environment_service_account(
+        &self,
+        deployment: &Deployment,
+        project: &Project,
+        namespace: &str,
+    ) -> Result<Option<String>> {
+        let environment_id = match deployment.environment_id {
+            Some(id) => id,
+            None => return Ok(None),
+        };
+
+        let environment =
+            match crate::db::environments::find_by_id(&self.state.db_pool, environment_id).await? {
+                Some(env) => env,
+                None => {
+                    warn!(
+                        deployment_id = %deployment.deployment_id,
+                        environment_id = %environment_id,
+                        "Environment not found, skipping ServiceAccount creation"
+                    );
+                    return Ok(None);
+                }
+            };
+
+        let sa_name = Self::environment_service_account_name(&environment.name);
+        let sa = self.create_service_account(project, &environment.name, namespace);
+        let sa_api: Api<ServiceAccount> = Api::namespaced(self.kube_client.clone(), namespace);
+
+        sa_api
+            .patch(
+                &sa_name,
+                &PatchParams::apply("rise-controller").force(),
+                &Patch::Apply(&sa),
+            )
+            .await?;
+
+        debug!(
+            project = project.name,
+            environment = environment.name,
+            sa_name = sa_name,
+            "Ensured environment ServiceAccount"
+        );
+
+        Ok(Some(sa_name))
+    }
+
     /// Apply namespace with drift detection
     async fn apply_namespace(
         &self,
@@ -2385,6 +2437,30 @@ impl KubernetesController {
         }
     }
 
+    /// Generate the Kubernetes ServiceAccount name for a given environment.
+    /// Uses an `env-` prefix to avoid collision with the `default` SA.
+    fn environment_service_account_name(environment_name: &str) -> String {
+        format!("env-{}", environment_name)
+    }
+
+    /// Create a ServiceAccount resource for a project environment.
+    fn create_service_account(
+        &self,
+        project: &Project,
+        environment_name: &str,
+        namespace: &str,
+    ) -> ServiceAccount {
+        ServiceAccount {
+            metadata: ObjectMeta {
+                name: Some(Self::environment_service_account_name(environment_name)),
+                namespace: Some(namespace.to_string()),
+                labels: Some(Self::common_labels(project)),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
     /// Create Service resource
     fn create_service(
         &self,
@@ -2748,6 +2824,7 @@ impl KubernetesController {
         deployment: &Deployment,
         metadata: &KubernetesMetadata,
         env_vars: Vec<k8s_openapi::api::core::v1::EnvVar>,
+        service_account_name: Option<String>,
     ) -> K8sDeployment {
         // Build image reference - same logic as API layer's get_deployment_image_tag()
         // This ensures rollback deployments use the correct source image tag
@@ -2883,6 +2960,7 @@ impl KubernetesController {
                                     .collect(),
                             )
                         },
+                        service_account_name,
                         ..Default::default()
                     }),
                 },
@@ -3792,6 +3870,21 @@ impl DeploymentBackend for KubernetesController {
                     // Load and decrypt environment variables
                     let env_vars = self.load_env_vars(project, deployment).await?;
 
+                    // Ensure per-environment ServiceAccount exists
+                    let service_account_name = match self
+                        .ensure_environment_service_account(deployment, project, namespace)
+                        .await
+                    {
+                        Ok(sa_name) => sa_name,
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!("Namespace missing during ServiceAccount creation, resetting to CreatingNamespace");
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    };
+
                     // deploy_name already calculated above for migration check
                     let deploy_api: Api<K8sDeployment> =
                         Api::namespaced(self.kube_client.clone(), namespace);
@@ -3801,7 +3894,13 @@ impl DeploymentBackend for KubernetesController {
                         Ok(existing_deploy) => {
                             // Deployment exists - check for drift
                             let desired_deploy = self
-                                .create_deployment(project, deployment, &metadata, env_vars.clone())
+                                .create_deployment(
+                                    project,
+                                    deployment,
+                                    &metadata,
+                                    env_vars.clone(),
+                                    service_account_name.clone(),
+                                )
                                 .await;
 
                             if self.deployment_has_drifted(&existing_deploy, &desired_deploy) {
@@ -3863,7 +3962,13 @@ impl DeploymentBackend for KubernetesController {
                         Err(kube::Error::Api(ae)) if ae.code == 404 => {
                             // Deployment doesn't exist - create it
                             let rs = self
-                                .create_deployment(project, deployment, &metadata, env_vars)
+                                .create_deployment(
+                                    project,
+                                    deployment,
+                                    &metadata,
+                                    env_vars,
+                                    service_account_name,
+                                )
                                 .await;
                             match deploy_api.create(&PostParams::default(), &rs).await {
                                 Ok(_) => {
@@ -4255,6 +4360,21 @@ impl DeploymentBackend for KubernetesController {
                         .as_ref()
                         .ok_or_else(|| anyhow::anyhow!("No namespace in metadata"))?;
 
+                    // Ensure per-environment ServiceAccount exists
+                    let service_account_name = match self
+                        .ensure_environment_service_account(deployment, project, namespace)
+                        .await
+                    {
+                        Ok(sa_name) => sa_name,
+                        Err(e) if is_namespace_not_found_error(&e) => {
+                            warn!("Namespace missing during ServiceAccount creation in Completed phase, resetting to CreatingNamespace");
+                            metadata.reconcile_phase = ReconcilePhase::CreatingNamespace;
+                            metadata.namespace = None;
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    };
+
                     // Check Deployment for drift
                     let deploy_name = metadata
                         .deployment_name
@@ -4266,7 +4386,13 @@ impl DeploymentBackend for KubernetesController {
                     match deploy_api.get(deploy_name).await {
                         Ok(existing_deploy) => {
                             let desired_deploy = self
-                                .create_deployment(project, deployment, &metadata, env_vars.clone())
+                                .create_deployment(
+                                    project,
+                                    deployment,
+                                    &metadata,
+                                    env_vars.clone(),
+                                    service_account_name,
+                                )
                                 .await;
 
                             if self.deployment_has_drifted(&existing_deploy, &desired_deploy) {
@@ -4851,6 +4977,26 @@ impl KubernetesController {
             return true;
         }
 
+        // 4. ServiceAccount name
+        let actual_sa = actual
+            .spec
+            .as_ref()
+            .and_then(|s| s.template.spec.as_ref())
+            .and_then(|ps| ps.service_account_name.as_ref());
+        let desired_sa = desired
+            .spec
+            .as_ref()
+            .and_then(|s| s.template.spec.as_ref())
+            .and_then(|ps| ps.service_account_name.as_ref());
+
+        if actual_sa != desired_sa {
+            warn!(
+                "Deployment drift: service_account_name {:?} != {:?}",
+                actual_sa, desired_sa
+            );
+            return true;
+        }
+
         // Note: We do NOT check environment variables for drift.
         // Environment variables are snapshots at deployment time and should not
         // trigger reconciliation when project-level env vars change.
@@ -5336,7 +5482,7 @@ mod tests {
         let metadata = sample_metadata("rise-test-project", "test-project-20240108-103000");
 
         let generated = controller
-            .create_deployment(&project, &deployment, &metadata, vec![])
+            .create_deployment(&project, &deployment, &metadata, vec![], None)
             .await;
 
         let pod_spec = generated
@@ -5361,7 +5507,7 @@ mod tests {
         let metadata = sample_metadata("rise-test-project", "test-project-20240108-103000");
 
         let generated = controller
-            .create_deployment(&project, &deployment, &metadata, vec![])
+            .create_deployment(&project, &deployment, &metadata, vec![], None)
             .await;
 
         let pod_spec = generated
@@ -6161,5 +6307,106 @@ mod tests {
             ports[0].port,
             Some(k8s_openapi::apimachinery::pkg::util::intstr::IntOrString::Int(80))
         );
+    }
+
+    #[test]
+    fn test_environment_service_account_name() {
+        assert_eq!(
+            KubernetesController::environment_service_account_name("production"),
+            "env-production"
+        );
+        assert_eq!(
+            KubernetesController::environment_service_account_name("staging"),
+            "env-staging"
+        );
+        assert_eq!(
+            KubernetesController::environment_service_account_name("my-env-1"),
+            "env-my-env-1"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_deployment_with_service_account_name() {
+        let controller = create_mock_controller();
+        let project = sample_project();
+        let deployment = sample_deployment(project.id);
+        let metadata = sample_metadata("rise-test-project", "test-project-20240108-103000");
+
+        let generated = controller
+            .create_deployment(
+                &project,
+                &deployment,
+                &metadata,
+                vec![],
+                Some("env-production".to_string()),
+            )
+            .await;
+
+        let pod_spec = generated
+            .spec
+            .and_then(|spec| spec.template.spec)
+            .expect("pod spec should be present");
+
+        assert_eq!(
+            pod_spec.service_account_name,
+            Some("env-production".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_deployment_without_service_account_name() {
+        let controller = create_mock_controller();
+        let project = sample_project();
+        let deployment = sample_deployment(project.id);
+        let metadata = sample_metadata("rise-test-project", "test-project-20240108-103000");
+
+        let generated = controller
+            .create_deployment(&project, &deployment, &metadata, vec![], None)
+            .await;
+
+        let pod_spec = generated
+            .spec
+            .and_then(|spec| spec.template.spec)
+            .expect("pod spec should be present");
+
+        assert_eq!(pod_spec.service_account_name, None);
+    }
+
+    #[tokio::test]
+    async fn test_deployment_has_drifted_service_account_name() {
+        let controller = create_mock_controller();
+
+        let mut labels = BTreeMap::new();
+        labels.insert("app".to_string(), "test".to_string());
+
+        let mut d1 = create_test_deployment("test-deploy", 1, "nginx:1.0", labels.clone());
+        let mut d2 = create_test_deployment("test-deploy", 1, "nginx:1.0", labels);
+
+        // No drift when both have no SA
+        assert!(!controller.deployment_has_drifted(&d1, &d2));
+
+        // Set SA on desired but not actual -> drift
+        if let Some(spec) = d2.spec.as_mut() {
+            if let Some(pod_spec) = spec.template.spec.as_mut() {
+                pod_spec.service_account_name = Some("env-production".to_string());
+            }
+        }
+        assert!(controller.deployment_has_drifted(&d1, &d2));
+
+        // Set same SA on both -> no drift
+        if let Some(spec) = d1.spec.as_mut() {
+            if let Some(pod_spec) = spec.template.spec.as_mut() {
+                pod_spec.service_account_name = Some("env-production".to_string());
+            }
+        }
+        assert!(!controller.deployment_has_drifted(&d1, &d2));
+
+        // Different SA names -> drift
+        if let Some(spec) = d1.spec.as_mut() {
+            if let Some(pod_spec) = spec.template.spec.as_mut() {
+                pod_spec.service_account_name = Some("env-staging".to_string());
+            }
+        }
+        assert!(controller.deployment_has_drifted(&d1, &d2));
     }
 }
