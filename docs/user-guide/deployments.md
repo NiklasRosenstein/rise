@@ -15,6 +15,9 @@ rise deploy ./path/to/app
 
 # Specify a project explicitly
 rise deploy -p my-app
+
+# Deploy to a specific environment
+rise deploy -E staging
 ```
 
 `rise deploy` is a shortcut for `rise deployment create` (`rise d c`). After creating the deployment, Rise automatically follows its progress.
@@ -91,32 +94,24 @@ Deployments progress through the following states:
 
 ## Deployment Groups
 
-Projects can have multiple active deployments using deployment groups.
-
-### Default Group
-
-The `default` group represents the primary deployment:
+A deployment group is a label that identifies a set of related deployments. Only one deployment per group can be active at a time — when a new deployment in a group reaches `Healthy`, the previous one is `Superseded`. Group names typically reflect the source of the deployment (e.g., the Git branch or merge request it was deployed from).
 
 ```bash
+# Deploy to the default group
 rise deploy
-# Accessible at: https://my-app.app.example.com
-```
 
-### Custom Groups
-
-Create additional deployments with custom group names:
-
-```bash
-# Merge request preview
+# Deploy to a named group
 rise deploy --group mr/123 --expire 7d
-
-# Staging environment
-rise deploy --group staging
+rise deploy --group feature/login
 ```
 
-Each custom group gets its own URL: `https://{project}-{group}.preview.example.com`
+Group names must match `[a-z0-9][a-z0-9/-]*[a-z0-9]` (no consecutive hyphens `--`, normalized length max 63 characters). The default group is named `default`.
 
-Group names must match `[a-z0-9][a-z0-9/-]*[a-z0-9]` (no consecutive hyphens `--`, normalized length max 63 characters). When a new deployment in a group reaches `Healthy`, the previous deployment in that group is `Superseded`.
+### Environments
+
+[Environments](environments.md) give semantic meaning to deployment groups. Each environment has a primary deployment group and controls URL routing, variable scoping, and access. The environment marked as **production** determines which deployments receive production traffic and the project's main URL — not the deployment group name itself.
+
+New projects start with a `production` environment mapped to the `default` group. You can create additional environments for staging, dev, etc. See [Environments](environments.md) for details.
 
 ### Auto-Expiration
 
@@ -208,6 +203,7 @@ Rise automatically injects these variables into every deployment:
 | `RISE_ISSUER` | Rise server URL and JWT issuer | `https://rise.example.com` |
 | `RISE_APP_URL` | Canonical URL where your app is accessible | `https://myapp.example.com` |
 | `RISE_APP_URLS` | JSON array of all URLs where your app is accessible | `["https://myapp.app.example.com", "https://myapp.example.com"]` |
+| `RISE_ENVIRONMENT` | Environment name (if the deployment has an associated environment) | `staging` |
 
 `PORT` defaults to 8080 and can be overridden per-deployment with `--http-port`, or set permanently with `rise env set`. `RISE_APP_URL` is your primary custom domain if set, otherwise the default project URL.
 

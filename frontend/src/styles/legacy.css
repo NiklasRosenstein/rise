@@ -988,7 +988,9 @@ a {
 }
 
 .mono-main .mono-active-deployment-card:hover {
-    border-color: #686868 !important;
+    border-left-color: #686868 !important;
+    border-right-color: #686868 !important;
+    border-bottom-color: #686868 !important;
 }
 
 .mono-extension-create-button {
@@ -1273,6 +1275,170 @@ textarea:focus-visible {
     color: var(--mono-muted);
     border-color: #4a4a4a;
     background: rgba(74, 74, 74, 0.2);
+}
+
+.mono-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.2rem 0.5rem;
+    border-radius: 0;
+    font-size: 0.65rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    border: none;
+}
+
+.mono-tag-muted {
+    background: rgba(100, 100, 100, 0.35);
+    color: #aaa;
+}
+
+.mono-tag-purple {
+    background: rgba(107, 63, 160, 0.25);
+    color: #d4b4ff;
+}
+
+.mono-tag-yellow {
+    background: rgba(139, 112, 57, 0.25);
+    color: #ffe3a8;
+}
+
+.mono-tag-gray {
+    background: rgba(100, 100, 100, 0.25);
+    color: #c0c0c0;
+}
+
+.mono-tag-green {
+    background: rgba(44, 105, 66, 0.25);
+    color: #b7ffce;
+}
+
+.mono-tag-blue {
+    background: rgba(44, 80, 140, 0.25);
+    color: #a8d4ff;
+}
+
+.mono-tag-red {
+    background: rgba(125, 75, 75, 0.25);
+    color: #ffc0c0;
+}
+
+.mono-tag-orange {
+    background: rgba(140, 90, 46, 0.25);
+    color: #ffd0a8;
+}
+
+.mono-tag-indigo {
+    background: rgba(63, 63, 160, 0.25);
+    color: #b4b4ff;
+}
+
+.mono-color-pick {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 50%;
+    border: none;
+    background: transparent;
+    cursor: pointer;
+    outline: 2px solid transparent;
+    outline-offset: 1px;
+    transition: outline-color 0.15s ease;
+    padding: 0;
+}
+
+.mono-color-pick:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.mono-env-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.1rem 0.4rem;
+    background: rgba(100, 100, 100, 0.3);
+    color: var(--mono-text);
+    font-size: 0.75rem;
+    border: 1px solid var(--mono-line);
+    white-space: nowrap;
+}
+
+.mono-env-chip-x {
+    border: none;
+    background: transparent;
+    color: var(--mono-muted);
+    cursor: pointer;
+    padding: 0;
+    font-size: 0.85rem;
+    line-height: 1;
+}
+
+.mono-env-chip-x:hover {
+    color: var(--mono-text);
+}
+
+.mono-env-combo-input {
+    border: none;
+    background: transparent;
+    color: var(--mono-text);
+    outline: none;
+    font: inherit;
+    flex: 1;
+    min-width: 4rem;
+    padding: 0;
+}
+
+.mono-dropdown-trigger {
+    display: flex;
+    align-items: center;
+    text-align: left;
+    cursor: pointer;
+}
+
+.mono-dropdown-list {
+    z-index: 10000;
+    border: 1px solid var(--mono-line);
+    background: #121212;
+    max-height: 12rem;
+    overflow-y: auto;
+}
+
+.mono-dropdown-option {
+    display: flex;
+    align-items: center;
+    gap: 0.45rem;
+    width: 100%;
+    text-align: left;
+    border: none;
+    border-bottom: 1px solid #252525;
+    background: transparent;
+    color: var(--mono-text);
+    padding: 0.45rem 0.55rem;
+    font: inherit;
+    font-size: 0.82rem;
+    cursor: pointer;
+}
+
+.mono-dropdown-option:last-child {
+    border-bottom: none;
+}
+
+.mono-dropdown-option:hover {
+    background: #1b1b1b;
+}
+
+.mono-dropdown-option.active {
+    background: #1a1a1a;
+}
+
+.mono-env-combo-empty {
+    padding: 0.55rem;
+    color: var(--mono-muted);
+    font-size: 0.82rem;
 }
 
 .mono-notice {
@@ -1878,22 +2044,30 @@ textarea:focus-visible {
 }
 
 .mono-status-card.mono-status-card-ok {
-    border-color: #2e6c44;
+    border-left-color: #2e6c44;
+    border-right-color: #2e6c44;
+    border-bottom-color: #2e6c44;
     background: rgba(44, 105, 66, 0.2) !important;
 }
 
 .mono-status-card.mono-status-card-warn {
-    border-color: #7b6333;
+    border-left-color: #7b6333;
+    border-right-color: #7b6333;
+    border-bottom-color: #7b6333;
     background: rgba(139, 112, 57, 0.22) !important;
 }
 
 .mono-status-card.mono-status-card-bad {
-    border-color: #7d4b4b;
+    border-left-color: #7d4b4b;
+    border-right-color: #7d4b4b;
+    border-bottom-color: #7d4b4b;
     background: rgba(125, 75, 75, 0.24) !important;
 }
 
 .mono-status-card.mono-status-card-muted {
-    border-color: #4a4a4a;
+    border-left-color: #4a4a4a;
+    border-right-color: #4a4a4a;
+    border-bottom-color: #4a4a4a;
     background: rgba(74, 74, 74, 0.2) !important;
 }
 

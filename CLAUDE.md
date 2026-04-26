@@ -180,6 +180,17 @@ For user-facing documentation, see the [`/docs`](./docs) directory. Key topics i
 - When we log errors and don't handle them further, we should include a sensible amount of information about the error. Often logging the error with `{:?}` is good enough.
 - When capturing screenshots, the playwright tool will successfully install the driver even if you might think its install step failed. Always use minimum 1280px width and 800px height for the browser.
 
+### Tag/Badge Design Language
+
+The frontend uses two tiers of tag-like components. Prefer these reusable components over inline Tailwind for any tag-like UI.
+
+| Component | Style | Purpose |
+|---|---|---|
+| **`StatusBadge`** | Bordered, colored bg | Deployment/project lifecycle status (Running, Failed, Stopped...) |
+| **`MonoStatusPill`** | Bordered, colored bg | Extension status or other state indicators (Configured, Error, Not Enabled...) |
+| **`EnvironmentColorDot`** | Colored circle | Placed next to environment names to indicate color |
+| **`MonoTag`** | Borderless, translucent colored bg, square | Kind/category/property labels (env var types, boolean flags, scope tags...) |
+
 ### Before Commit & Push
 
 Run these to match what CI checks. Fix any issues before committing.

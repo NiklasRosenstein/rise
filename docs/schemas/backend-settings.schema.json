@@ -258,6 +258,14 @@
               "default": "per-domain",
               "description": "TLS mode for custom domains\n- \"shared\": All custom domains share ingress_tls_secret_name (requires it to be set)\n- \"per-domain\": Each custom domain gets its own tls-{domain} secret\n  (works with cert-manager when custom_domain_ingress_annotations are configured)\n\nDefaults to \"per-domain\""
             },
+            "environment_ingress_url_template": {
+              "default": null,
+              "description": "Ingress URL template for named environments (e.g., staging, dev)\nOnly used for non-production environments whose primary deployment group matches\nthe deployment's group. Production environments use `production_ingress_url_template`.\nSupports both subdomain and sub-path routing:\n  Subdomain: \"{environment}--{project_name}.apps.rise.dev\"\n  Sub-path: \"rise.dev/{project_name}/{environment}\"\nMust contain both {project_name} and {environment} placeholders\nIf not set, environment-specific URLs are not generated.",
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "extra_service_token_audiences": {
               "additionalProperties": {
                 "type": "string"

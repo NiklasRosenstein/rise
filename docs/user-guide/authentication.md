@@ -175,6 +175,8 @@ rise sa delete <project> <service-account-id>
 
 Service accounts can create, view, list, stop, and rollback deployments. They cannot manage projects, teams, or other service accounts.
 
+Service accounts can optionally be restricted to specific [environments](environments.md). When configured, the service account can only create deployments targeting one of its allowed environments. This is managed through the web UI or API.
+
 ### Local Testing
 
 To test service accounts locally, use [`@oidc.pub/cli`](https://oidc.pub) to run a dev OIDC issuer:

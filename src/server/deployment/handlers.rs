@@ -14,7 +14,7 @@ use super::models::{self, *};
 use super::state_machine;
 use super::utils::{create_deployment_with_hooks, generate_deployment_id};
 use crate::db::models::DeploymentStatus as DbDeploymentStatus;
-use crate::db::{deployments as db_deployments, projects, users};
+use crate::db::{deployments as db_deployments, projects, service_accounts, users};
 use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::registry::ImageTagType;
@@ -209,10 +209,22 @@ async fn insert_rise_env_vars(
         .await
         .internal_err("Failed to get deployment URLs")?;
 
+    // Resolve environment name for RISE_ENVIRONMENT
+    let environment_name = if let Some(env_id) = deployment.environment_id {
+        crate::db::environments::find_by_id(&state.db_pool, env_id)
+            .await
+            .ok()
+            .flatten()
+            .map(|e| e.name)
+    } else {
+        None
+    };
+
     let vars = models::rise_system_env_vars(
         &state.public_url,
         &deployment.deployment_group,
         &deployment_urls,
+        environment_name.as_deref(),
     );
 
     for (key, value) in &vars {
@@ -378,6 +390,17 @@ async fn convert_deployment(
     };
     let can_rollback = state_machine::can_create_from(&deployment);
 
+    // Resolve environment name and color
+    let (environment, environment_color) = if let Some(env_id) = deployment.environment_id {
+        let env = crate::db::environments::find_by_id(&state.db_pool, env_id)
+            .await
+            .ok()
+            .flatten();
+        (env.as_ref().map(|e| e.name.clone()), env.map(|e| e.color))
+    } else {
+        (None, None)
+    };
+
     Deployment {
         id: deployment.id.to_string(),
         deployment_id: deployment.deployment_id,
@@ -386,6 +409,8 @@ async fn convert_deployment(
         created_by_email,
         status: convert_status_from_db(deployment.status),
         deployment_group: deployment.deployment_group,
+        environment,
+        environment_color,
         expires_at: deployment.expires_at.map(|dt| dt.to_rfc3339()),
         error_message: deployment.error_message,
         completed_at: deployment.completed_at.map(|dt| dt.to_rfc3339()),
@@ -400,6 +425,90 @@ async fn convert_deployment(
         can_rollback,
         created: deployment.created_at.to_rfc3339(),
         updated: deployment.updated_at.to_rfc3339(),
+    }
+}
+
+/// Resolve the deployment target (group + environment) from request parameters.
+///
+/// Rules:
+/// - If environment specified, no group: use environment's primary deployment group.
+/// - If group specified, no environment: look up environment whose primary group matches;
+///   if none found, fall back to the project's default environment.
+/// - If both specified: use both as-is.
+/// - If neither specified: use "default" group, resolve environment from primary group mapping.
+async fn resolve_deployment_target(
+    pool: &sqlx::PgPool,
+    project_id: uuid::Uuid,
+    requested_environment: Option<&str>,
+    requested_group: Option<&str>,
+) -> Result<(String, Option<crate::db::models::Environment>), ServerError> {
+    use crate::db::environments;
+
+    match (requested_environment, requested_group) {
+        // Both specified
+        (Some(env_name), Some(group)) => {
+            let env = environments::find_by_name(pool, project_id, env_name)
+                .await
+                .internal_err("Failed to look up environment")?
+                .ok_or_else(|| {
+                    ServerError::not_found(format!("Environment '{}' not found", env_name))
+                })?;
+            Ok((group.to_string(), Some(env)))
+        }
+        // Environment only, no group
+        (Some(env_name), None) => {
+            let env = environments::find_by_name(pool, project_id, env_name)
+                .await
+                .internal_err("Failed to look up environment")?
+                .ok_or_else(|| {
+                    ServerError::not_found(format!("Environment '{}' not found", env_name))
+                })?;
+            let group = env.primary_deployment_group.clone().ok_or_else(|| {
+                ServerError::bad_request(format!(
+                    "Environment '{}' has no primary deployment group. Specify --group explicitly.",
+                    env_name
+                ))
+            })?;
+            Ok((group, Some(env)))
+        }
+        // Group only, no environment
+        (None, Some(group)) => {
+            // Check if this group is the primary group of an environment
+            let env = environments::find_by_primary_group(pool, project_id, group)
+                .await
+                .internal_err("Failed to look up environment by group")?;
+            if let Some(env) = env {
+                Ok((group.to_string(), Some(env)))
+            } else {
+                // Fall back to default environment
+                let default_env = environments::find_default(pool, project_id)
+                    .await
+                    .internal_err("Failed to look up default environment")?;
+                Ok((group.to_string(), default_env))
+            }
+        }
+        // Neither specified: use the default environment's primary group, or fall back to "default"
+        (None, None) => {
+            // First, check if there's a default environment with a primary group
+            let default_env = environments::find_default(pool, project_id)
+                .await
+                .internal_err("Failed to look up default environment")?;
+            if let Some(env) = default_env {
+                let group = env
+                    .primary_deployment_group
+                    .clone()
+                    .unwrap_or_else(|| models::DEFAULT_DEPLOYMENT_GROUP.to_string());
+                Ok((group, Some(env)))
+            } else {
+                // No default environment — fall back to "default" group and try to find
+                // an environment whose primary group is "default"
+                let group = models::DEFAULT_DEPLOYMENT_GROUP;
+                let env = environments::find_by_primary_group(pool, project_id, group)
+                    .await
+                    .internal_err("Failed to look up environment by group")?;
+                Ok((group.to_string(), env))
+            }
+        }
     }
 }
 
@@ -420,9 +529,10 @@ async fn resolve_effective_http_port(
     }
 
     // 2. Check project's PORT env var
-    let project_env_vars = crate::db::env_vars::list_project_env_vars(&state.db_pool, project_id)
-        .await
-        .internal_err("Failed to list project environment variables")?;
+    let project_env_vars =
+        crate::db::env_vars::list_project_env_vars(&state.db_pool, project_id, None)
+            .await
+            .internal_err("Failed to list project environment variables")?;
 
     if let Some(port_var) = project_env_vars.iter().find(|v| v.key == "PORT") {
         if let Ok(port) = port_var.value.parse::<u16>() {
@@ -451,12 +561,14 @@ pub async fn create_deployment(
 ) -> Result<Json<CreateDeploymentResponse>, ServerError> {
     info!("Creating deployment for project '{}'", payload.project);
 
-    // Validate deployment group name
-    if !is_valid_group_name(&payload.group) {
-        return Err(ServerError::bad_request(format!(
-            "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (no consecutive hyphens, normalized length max 63 chars)",
-            payload.group
-        )));
+    // Validate deployment group name if explicitly provided
+    if let Some(ref group) = payload.group {
+        if !is_valid_group_name(group) {
+            return Err(ServerError::bad_request(format!(
+                "Invalid group name '{}'. Must be 'default' or match pattern [a-z0-9][a-z0-9/-]*[a-z0-9] (no consecutive hyphens, normalized length max 63 chars)",
+                group
+            )));
+        }
     }
 
     // Validate http_port if provided (should be 1-65535)
@@ -502,6 +614,15 @@ pub async fn create_deployment(
         )));
     }
 
+    // Resolve deployment target (group + environment) from request parameters
+    let (resolved_group, resolved_environment) = resolve_deployment_target(
+        &state.db_pool,
+        project.id,
+        payload.environment.as_deref(),
+        payload.group.as_deref(),
+    )
+    .await?;
+
     // Resolve auth for project scope (validates SA claims if external token)
     // Only mask auth failures (401/403) as 404 to prevent project existence leakage;
     // preserve 409 (SA collision) and 5xx (misconfiguration) for diagnosability.
@@ -523,6 +644,31 @@ pub async fn create_deployment(
             .map_err(|_| {
                 ServerError::not_found(format!("Project '{}' not found", payload.project))
             })?;
+    }
+
+    // Enforce service account environment restrictions
+    if is_sa {
+        let sa = service_accounts::find_active_by_user_id(&state.db_pool, user.id)
+            .await
+            .internal_err("Failed to look up service account")?;
+        if let Some(ref allowed_env_ids) = sa.and_then(|sa| sa.allowed_environment_ids) {
+            let target_env_id = resolved_environment.as_ref().map(|e| e.id);
+            match target_env_id {
+                Some(env_id) if !allowed_env_ids.contains(&env_id) => {
+                    return Err(ServerError::forbidden(
+                        "This service account is not allowed to deploy to the requested environment",
+                    ));
+                }
+                None => {
+                    // SA has environment restrictions but no environment was specified;
+                    // block the deployment since we can't verify the target is allowed.
+                    return Err(ServerError::forbidden(
+                        "This service account requires an explicit environment target",
+                    ));
+                }
+                _ => {} // target environment is in the allowed list
+            }
+        }
     }
 
     // Generate deployment ID
@@ -609,10 +755,11 @@ pub async fn create_deployment(
                 image: source_deployment.image.as_deref(), // Copy image from source if present
                 image_digest: source_deployment.image_digest.as_deref(), // Copy digest from source if present
                 rolled_back_from_deployment_id: Some(original_source_id), // Track original source for image tag calculation
-                deployment_group: &payload.group, // Use requested group (may be different from source)
-                expires_at,                       // expires_at
+                deployment_group: &resolved_group, // Use requested group (may be different from source)
+                environment_id: resolved_environment.as_ref().map(|e| e.id),
+                expires_at,                        // expires_at
                 http_port: final_http_port as i32, // Use determined http_port
-                is_active: false,                 // Deployments start as inactive
+                is_active: false,                  // Deployments start as inactive
             },
             &project,
         )
@@ -639,6 +786,7 @@ pub async fn create_deployment(
                 &state.db_pool,
                 project.id,
                 new_deployment.id,
+                new_deployment.environment_id,
             )
             .await
             .internal_err("Failed to copy environment variables")?;
@@ -725,7 +873,8 @@ pub async fn create_deployment(
                     image: Some(user_image), // Store original user input for display
                     image_digest: None, // No digest — controller will use internal registry tag
                     rolled_back_from_deployment_id: None,
-                    deployment_group: &payload.group,
+                    deployment_group: &resolved_group,
+                    environment_id: resolved_environment.as_ref().map(|e| e.id),
                     expires_at,
                     http_port: effective_http_port as i32,
                     is_active: false,
@@ -744,6 +893,7 @@ pub async fn create_deployment(
                 &state.db_pool,
                 project.id,
                 deployment.id,
+                deployment.environment_id,
             )
             .await
             .internal_err("Failed to copy environment variables")?;
@@ -806,7 +956,8 @@ pub async fn create_deployment(
                 image: Some(user_image),
                 image_digest: Some(&image_digest),
                 rolled_back_from_deployment_id: None,
-                deployment_group: &payload.group,
+                deployment_group: &resolved_group,
+                environment_id: resolved_environment.as_ref().map(|e| e.id),
                 expires_at,
                 http_port: effective_http_port as i32,
                 is_active: false,
@@ -825,6 +976,7 @@ pub async fn create_deployment(
             &state.db_pool,
             project.id,
             deployment.id,
+            deployment.environment_id,
         )
         .await
         .internal_err("Failed to copy environment variables")?;
@@ -889,10 +1041,11 @@ pub async fn create_deployment(
                 image: None,        // image - NULL for build-from-source
                 image_digest: None, // image_digest - NULL for build-from-source
                 rolled_back_from_deployment_id: None, // Not a rollback
-                deployment_group: &payload.group, // deployment_group
-                expires_at,         // expires_at
+                deployment_group: &resolved_group, // deployment_group
+                environment_id: resolved_environment.as_ref().map(|e| e.id),
+                expires_at,                            // expires_at
                 http_port: effective_http_port as i32, // http_port
-                is_active: false,   // Deployments start as inactive
+                is_active: false,                      // Deployments start as inactive
             },
             &project,
         )
@@ -908,6 +1061,7 @@ pub async fn create_deployment(
             &state.db_pool,
             project.id,
             deployment.id,
+            deployment.environment_id,
         )
         .await
         .internal_err("Failed to copy environment variables")?;

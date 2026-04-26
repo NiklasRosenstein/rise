@@ -7,7 +7,7 @@ import { useToast } from '../components/toast';
 import { AutocompleteInput, Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, SegmentedRadioGroup } from '../components/ui';
 import { ProjectTable } from '../components/project-table';
 import { ActiveDeploymentsSummary, DeploymentDetail, DeploymentsList } from './deployments';
-import { DomainsList, EnvVarsList, ExtensionDetailPage, ExtensionsList, ServiceAccountsList } from './resources';
+import { DomainsList, EnvironmentsList, EnvVarsList, ExtensionDetailPage, ExtensionsList, ServiceAccountsList } from './resources';
 import { MonoTable, MonoTableBody, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
 import { useRowKeyboardNavigation, useSortableData } from '../lib/table';
@@ -619,16 +619,16 @@ export function ProjectDetail({ projectName, initialTab }) {
                         Overview
                     </button>
                     <button
+                        className={`mono-tab-button ${activeTab === 'environments' ? 'active' : ''}`}
+                        onClick={() => changeTab('environments')}
+                    >
+                        Environments
+                    </button>
+                    <button
                         className={`mono-tab-button ${activeTab === 'deployments' ? 'active' : ''}`}
                         onClick={() => changeTab('deployments')}
                     >
                         Deployments
-                    </button>
-                    <button
-                        className={`mono-tab-button ${activeTab === 'service-accounts' ? 'active' : ''}`}
-                        onClick={() => changeTab('service-accounts')}
-                    >
-                        Service Accounts
                     </button>
                     <button
                         className={`mono-tab-button ${activeTab === 'env-vars' ? 'active' : ''}`}
@@ -643,16 +643,22 @@ export function ProjectDetail({ projectName, initialTab }) {
                         Domains
                     </button>
                     <button
-                        className={`mono-tab-button ${activeTab === 'extensions' ? 'active' : ''}`}
-                        onClick={() => changeTab('extensions')}
-                    >
-                        Extensions
-                    </button>
-                    <button
                         className={`mono-tab-button ${activeTab === 'access' ? 'active' : ''}`}
                         onClick={() => changeTab('access')}
                     >
                         Access
+                    </button>
+                    <button
+                        className={`mono-tab-button ${activeTab === 'service-accounts' ? 'active' : ''}`}
+                        onClick={() => changeTab('service-accounts')}
+                    >
+                        Service Accounts
+                    </button>
+                    <button
+                        className={`mono-tab-button ${activeTab === 'extensions' ? 'active' : ''}`}
+                        onClick={() => changeTab('extensions')}
+                    >
+                        Extensions
                     </button>
                 </div>
             </div>
@@ -667,6 +673,11 @@ export function ProjectDetail({ projectName, initialTab }) {
                 {activeTab === 'deployments' && (
                     <div>
                         <DeploymentsList projectName={projectName} />
+                    </div>
+                )}
+                {activeTab === 'environments' && (
+                    <div>
+                        <EnvironmentsList projectName={projectName} />
                     </div>
                 )}
                 {activeTab === 'service-accounts' && (

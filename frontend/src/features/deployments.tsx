@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
 import { copyToClipboard, formatDate, formatISO8601, formatRelativeTimeRounded, formatTimeRemaining } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, ConfirmDialog, Modal, ModalActions, ModalSection, StatusBadge } from '../components/ui';
+import { Button, ConfirmDialog, ENV_COLOR_STYLES, EnvironmentColorDot, Modal, ModalActions, ModalSection, StatusBadge } from '../components/ui';
 import { MonoSortButton, MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import { EnvVarsList } from './resources';
 import { EmptyState, ErrorState, LoadingState } from '../components/states';
@@ -39,6 +39,7 @@ export function ActiveDeploymentsSummary({ projectName }) {
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [deploymentToStop, setDeploymentToStop] = useState(null);
     const [stopping, setStopping] = useState(false);
+    const [environments, setEnvironments] = useState([]);
     const { showToast } = useToast();
 
     const isTerminal = (status) => {
@@ -93,6 +94,9 @@ export function ActiveDeploymentsSummary({ projectName }) {
 
     useEffect(() => {
         loadSummary();
+        api.getProjectEnvironments(projectName)
+            .then(data => setEnvironments(data || []))
+            .catch(() => {});
         const interval = setInterval(loadSummary, 5000);
         return () => clearInterval(interval);
     }, [loadSummary]);
@@ -125,25 +129,29 @@ export function ActiveDeploymentsSummary({ projectName }) {
     const groups = Object.keys(activeDeployments);
     if (groups.length === 0) return <EmptyState message="No active deployments." />;
 
-    // Sort groups: "default" first, then by active deployment's created timestamp
+    // Build environment lookup by name
+    const envMap = {};
+    for (const env of environments) {
+        envMap[env.name] = env;
+    }
+
+    // Sort groups: production primary first, then production other, then other env primary, then rest
     const sortedGroups = groups.sort((a, b) => {
-        if (a === 'default') return -1;
-        if (b === 'default') return 1;
+        const dA = activeDeployments[a].active;
+        const dB = activeDeployments[b].active;
+        const envA = dA?.environment ? envMap[dA.environment] : null;
+        const envB = dB?.environment ? envMap[dB.environment] : null;
+        const prodA = envA?.is_production || false;
+        const prodB = envB?.is_production || false;
+        const primaryA = envA?.primary_deployment_group === a;
+        const primaryB = envB?.primary_deployment_group === b;
 
-        // Both non-default: sort by active deployment's created timestamp (descending)
-        const activeA = activeDeployments[a].active;
-        const activeB = activeDeployments[b].active;
-
-        // If both have active deployments, sort by created timestamp
-        if (activeA && activeB) {
-            return new Date(activeB.created) - new Date(activeA.created);
-        }
-
-        // Groups with active deployments come first
-        if (activeA && !activeB) return -1;
-        if (!activeA && activeB) return 1;
-
-        return 0;
+        // Production before non-production
+        if (prodA !== prodB) return prodA ? -1 : 1;
+        // Primary before non-primary
+        if (primaryA !== primaryB) return primaryA ? -1 : 1;
+        // Both same tier: alphabetical by group name
+        return a.localeCompare(b);
     });
 
     return (
@@ -162,10 +170,15 @@ export function ActiveDeploymentsSummary({ projectName }) {
                     // Count other progressing deployments (exclude the active one)
                     const otherProgressing = groupData.progressing.filter(d => d.deployment_id !== deployment.deployment_id).length;
 
+                    const envColor = deployment.environment_color
+                        ? (ENV_COLOR_STYLES[deployment.environment_color] || ENV_COLOR_STYLES.gray).color
+                        : null;
+
                     return (
                         <div
                             key={group}
                             className={`mono-active-deployment-card mono-status-card mono-status-card-${getStatusTone(deployment.status)} border border-gray-200 dark:border-gray-800 p-6`}
+                            style={envColor ? { borderTop: `3px solid ${envColor}` } : undefined}
                             onClick={() => navigate(`/deployment/${projectName}/${deployment.deployment_id}`)}
                             onKeyDown={(e) => {
                                 if (e.key === 'Enter' || e.key === ' ') {
@@ -214,6 +227,12 @@ export function ActiveDeploymentsSummary({ projectName }) {
                                     {formatRelativeTimeRounded(deployment.created)}
                                 </dd>
                             </div>
+                            {deployment.environment && (
+                                <div>
+                                    <dt className="text-gray-600 dark:text-gray-400">Environment</dt>
+                                    <dd className="text-gray-900 dark:text-gray-200 flex items-center gap-2"><EnvironmentColorDot color={deployment.environment_color} />{deployment.environment}</dd>
+                                </div>
+                            )}
                             {deployment.expires_at && (
                                 <div>
                                     <dt className="text-gray-600 dark:text-gray-400">Expires</dt>
@@ -262,6 +281,8 @@ export function DeploymentsList({ projectName }) {
     const [hasMore, setHasMore] = useState(true);
     const [groupFilter, setGroupFilter] = useState('');
     const [deploymentGroups, setDeploymentGroups] = useState([]);
+    const [environments, setEnvironments] = useState([]);
+    const [envFilter, setEnvFilter] = useState('');
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [deploymentToStop, setDeploymentToStop] = useState(null);
     const [stopping, setStopping] = useState(false);
@@ -280,7 +301,7 @@ export function DeploymentsList({ projectName }) {
         sortedDeployments.length
     );
 
-    // Load deployment groups
+    // Load deployment groups and environments
     useEffect(() => {
         async function loadGroups() {
             try {
@@ -291,6 +312,9 @@ export function DeploymentsList({ projectName }) {
             }
         }
         loadGroups();
+        api.getProjectEnvironments(projectName)
+            .then(data => setEnvironments(data || []))
+            .catch(() => {});
     }, [projectName]);
 
     const loadDeployments = useCallback(async () => {
@@ -319,6 +343,11 @@ export function DeploymentsList({ projectName }) {
 
     const handleGroupChange = (e) => {
         setGroupFilter(e.target.value);
+        setPage(0);
+    };
+
+    const handleEnvFilterChange = (e) => {
+        setEnvFilter(e.target.value);
         setPage(0);
     };
 
@@ -386,19 +415,24 @@ export function DeploymentsList({ projectName }) {
     if (loading && deployments.length === 0) return <LoadingState label="Loading deployments..." />;
     if (error) return <ErrorState message={`Error loading deployments: ${error}`} onRetry={loadDeployments} />;
 
+    // Client-side environment filter
+    const filteredDeployments = envFilter
+        ? sortedDeployments.filter(d => d.environment === envFilter)
+        : sortedDeployments;
+
     // Find the most recent deployment in the default group (only non-terminal)
-    const mostRecentDefault = sortedDeployments.find(d => d.deployment_group === 'default' && !isTerminal(d.status));
+    const mostRecentDefault = filteredDeployments.find(d => d.deployment_group === 'default' && !isTerminal(d.status));
 
     return (
         <div>
-            <div className="mb-4 flex items-center gap-2">
+            <div className="mb-4 flex items-center gap-4">
                 <label htmlFor="deployment-group-filter" className="flex items-center gap-2">
-                    <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Filter by group:</span>
+                    <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Group:</span>
                     <select
                         id="deployment-group-filter"
                         value={groupFilter}
                         onChange={handleGroupChange}
-                        className="bg-white dark:bg-gray-900 border border-gray-300 dark:border-gray-700 rounded px-3 py-2 text-sm text-gray-900 dark:text-gray-100 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                        className="mono-select text-sm"
                     >
                         <option value="">All groups</option>
                         {deploymentGroups.map(group => (
@@ -406,6 +440,22 @@ export function DeploymentsList({ projectName }) {
                         ))}
                     </select>
                 </label>
+                {environments.length > 0 && (
+                    <label htmlFor="deployment-env-filter" className="flex items-center gap-2">
+                        <span className="text-sm text-gray-600 dark:text-gray-400 whitespace-nowrap">Environment:</span>
+                        <select
+                            id="deployment-env-filter"
+                            value={envFilter}
+                            onChange={handleEnvFilterChange}
+                            className="mono-select text-sm"
+                        >
+                            <option value="">All environments</option>
+                            {environments.map(env => (
+                                <option key={env.name} value={env.name}>{env.name}</option>
+                            ))}
+                        </select>
+                    </label>
+                )}
             </div>
             {actionStatus && <p className="mono-inline-status mb-3">{actionStatus}</p>}
 
@@ -422,6 +472,7 @@ export function DeploymentsList({ projectName }) {
                             <MonoTh className="px-6 py-3 text-left">Created by</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Image</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Group</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Environment</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">URL</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Expires</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">
@@ -431,12 +482,12 @@ export function DeploymentsList({ projectName }) {
                         </tr>
                     </MonoTableHead>
                     <MonoTableBody>
-                        {sortedDeployments.length === 0 ? (
-                            <MonoTableEmptyRow colSpan={9}>
+                        {filteredDeployments.length === 0 ? (
+                            <MonoTableEmptyRow colSpan={10}>
                                 <EmptyState message="No deployments found." />
                             </MonoTableEmptyRow>
                         ) : (
-                            sortedDeployments.map((d, idx) => {
+                            filteredDeployments.map((d, idx) => {
                                     const isHighlighted = mostRecentDefault && d.id === mostRecentDefault.id;
                                     return (
                                     <MonoTableRow
@@ -455,6 +506,7 @@ export function DeploymentsList({ projectName }) {
                                         <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{d.created_by_email || '-'}</MonoTd>
                                         <MonoTd mono className="px-6 py-4 whitespace-nowrap text-xs text-gray-700 dark:text-gray-300">{d.image ? d.image.split('/').pop() : '-'}</MonoTd>
                                         <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{d.deployment_group}</MonoTd>
+                                        <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{d.environment ? <span className="inline-flex items-center gap-2"><EnvironmentColorDot color={d.environment_color} />{d.environment}</span> : '-'}</MonoTd>
                                         <MonoTd className="px-6 py-4 whitespace-nowrap text-sm">
                                             {d.primary_url ? (
                                                 <a
@@ -1266,6 +1318,46 @@ function PodStatusSection({ podStatus }: { podStatus: PodStatus }) {
     );
 }
 
+export function EnvironmentDeploymentView({ projectName, environmentName }) {
+    const [activeDeploymentId, setActiveDeploymentId] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+
+    useEffect(() => {
+        async function findActiveDeployment() {
+            try {
+                const deployments = await api.getProjectDeployments(projectName, { limit: 100 });
+                const active = deployments.find(
+                    (d) => d.environment === environmentName && d.is_active
+                );
+                setActiveDeploymentId(active ? active.deployment_id : null);
+                setLoading(false);
+            } catch (err) {
+                setError(err.message);
+                setLoading(false);
+            }
+        }
+        findActiveDeployment();
+    }, [projectName, environmentName]);
+
+    if (loading) return <LoadingState label="Loading environment deployment..." />;
+    if (error) return <ErrorState message={`Error: ${error}`} />;
+    if (!activeDeploymentId) {
+        return (
+            <div>
+                <p className="text-gray-600 dark:text-gray-400 mb-4">
+                    No active deployment in the <strong>{environmentName}</strong> environment.
+                </p>
+                <Button variant="secondary" size="sm" onClick={() => navigate(`/project/${projectName}/environments`)}>
+                    Back to Environments
+                </Button>
+            </div>
+        );
+    }
+
+    return <DeploymentDetail projectName={projectName} deploymentId={activeDeploymentId} />;
+}
+
 export function DeploymentDetail({ projectName, deploymentId }) {
     const [deployment, setDeployment] = useState(null);
     const [loading, setLoading] = useState(true);
@@ -1273,6 +1365,8 @@ export function DeploymentDetail({ projectName, deploymentId }) {
     const [rollbackDialogOpen, setRollbackDialogOpen] = useState(false);
     const [rolling, setRolling] = useState(false);
     const [useSourceEnvVars, setUseSourceEnvVars] = useState(false);
+    const [stopDialogOpen, setStopDialogOpen] = useState(false);
+    const [stopping, setStopping] = useState(false);
     const [detailActionStatus, setDetailActionStatus] = useState('');
     const { showToast } = useToast();
     const handleCopy = useCallback(async (value, label) => {
@@ -1303,6 +1397,23 @@ export function DeploymentDetail({ projectName, deploymentId }) {
 
     const handleRollbackClick = () => {
         setRollbackDialogOpen(true);
+    };
+
+    const handleStopConfirm = async () => {
+        setStopping(true);
+        setDetailActionStatus(`Stopping deployment ${deploymentId}...`);
+        try {
+            await api.stopDeployment(projectName, deploymentId);
+            showToast(`Deployment ${deploymentId} stopped successfully`, 'success');
+            setDetailActionStatus(`Stopped deployment ${deploymentId}.`);
+            setStopDialogOpen(false);
+            loadDeployment();
+        } catch (err) {
+            showToast(`Failed to stop deployment: ${err.message}`, 'error');
+            setDetailActionStatus(`Failed to stop deployment ${deploymentId}.`);
+        } finally {
+            setStopping(false);
+        }
     };
 
     const handleRollback = async () => {
@@ -1348,7 +1459,7 @@ export function DeploymentDetail({ projectName, deploymentId }) {
 
     return (
         <section>
-            <div className="flex justify-end items-center mb-4">
+            <div className="flex justify-end items-center gap-2 mb-4">
                 {deployment.can_rollback && (
                     <Button
                         variant="secondary"
@@ -1356,6 +1467,15 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                         onClick={handleRollbackClick}
                     >
                         {deployment.is_active ? 'Redeploy' : 'Rollback'}
+                    </Button>
+                )}
+                {!isTerminal(deployment.status) && (
+                    <Button
+                        variant="danger"
+                        size="sm"
+                        onClick={() => setStopDialogOpen(true)}
+                    >
+                        Stop
                     </Button>
                 )}
             </div>
@@ -1386,6 +1506,9 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                     </strong>
                 </div>
                 <div><span>group</span><strong>{deployment.deployment_group}</strong></div>
+                {deployment.environment && (
+                    <div><span>environment</span><strong className="inline-flex items-center gap-2"><EnvironmentColorDot color={deployment.environment_color} />{deployment.environment}</strong></div>
+                )}
                 <div>
                     <span>created</span>
                     <strong className="mono-copyable-value" title={formatISO8601(deployment.created)}>
@@ -1574,6 +1697,17 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                     </ModalActions>
                 </ModalSection>
             </Modal>
+
+            <ConfirmDialog
+                isOpen={stopDialogOpen}
+                onClose={() => setStopDialogOpen(false)}
+                onConfirm={handleStopConfirm}
+                title="Stop Deployment"
+                message={`Are you sure you want to stop deployment ${deploymentId}? Impact: traffic for group "${deployment?.deployment_group || 'default'}" may terminate.`}
+                confirmText="Stop Deployment"
+                variant="danger"
+                loading={stopping}
+            />
         </section>
     );
 }

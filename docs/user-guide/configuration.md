@@ -47,6 +47,25 @@ args = ["NODE_ENV=production", "BUILD_VERSION"]
 | `managed_buildkit` | Boolean | Enable/disable managed BuildKit daemon (auto-enables when `SSL_CERT_FILE` is set) |
 | `no_cache` | Boolean | Disable build cache |
 
+### `[environments.<name>]` Section
+
+Define per-environment settings. Currently supports environment-scoped variables. Environments must already exist on the backend (create them with `rise environment create`).
+
+```toml
+[environments.staging.env]
+DATABASE_URL = "postgres://staging-db/mydb"
+LOG_LEVEL = "debug"
+
+[environments.production.env]
+DATABASE_URL = "postgres://prod-db/mydb"
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `env` | Object | Plain-text environment variables scoped to this environment |
+
+See [Environment Variables](environment-variables.md#per-environment-variables-in-risetoml) for details.
+
 ### Full Example
 
 ```toml
@@ -64,6 +83,13 @@ backend = "pack"
 builder = "heroku/builder:24"
 buildpacks = ["heroku/nodejs", "heroku/procfile"]
 args = ["BP_NODE_VERSION=20"]
+
+[environments.staging.env]
+DATABASE_URL = "postgres://staging-db/mydb"
+LOG_LEVEL = "debug"
+
+[environments.production.env]
+DATABASE_URL = "postgres://prod-db/mydb"
 ```
 
 ## Project Creation Modes

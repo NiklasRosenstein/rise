@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n        UPDATE environments\n        SET\n            name = COALESCE($2, name),\n            primary_deployment_group = CASE WHEN $3 THEN $4 ELSE primary_deployment_group END,\n            is_default = COALESCE($5, is_default),\n            is_production = COALESCE($6, is_production),\n            color = COALESCE($7, color),\n            updated_at = NOW()\n        WHERE id = $1\n        RETURNING id, project_id, name, primary_deployment_group, is_default, is_production, color, created_at, updated_at\n        ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "name",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "primary_deployment_group",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_default",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_production",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "color",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Bool",
+        "Text",
+        "Bool",
+        "Bool",
+        "Text"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "29dfff451be9aaeccb96ce5390e856b242d746c5135711ee8db9618ec5059257"
+}

@@ -4,7 +4,7 @@ import { api } from '../lib/api';
 import { CONFIG } from '../lib/config';
 import { copyToClipboard, formatDate } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, FormField, Modal, ModalTabs, MonoCodeBlock, MonoNotice, MonoStatusPill, MonoTabButton } from '../components/ui';
+import { Button, FormField, Modal, ModalTabs, MonoCodeBlock, MonoNotice, MonoStatusPill, MonoTabButton, MonoTag } from '../components/ui';
 import { MonoTable, MonoTableBody, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 
 function statusToneFromState(state) {
@@ -873,12 +873,9 @@ export function OAuthDetailView({ extension, projectName }) {
                                 ) : (
                                     <div className="flex flex-wrap gap-2">
                                         {scopesArray.map((scope, idx) => (
-                                            <span
-                                                key={idx}
-                                                className="bg-indigo-600 text-white text-xs font-semibold px-3 py-1 rounded-full"
-                                            >
+                                            <MonoTag key={idx} color="indigo">
                                                 {scope}
-                                            </span>
+                                            </MonoTag>
                                         ))}
                                     </div>
                                 )}
@@ -1268,9 +1265,9 @@ export function SnowflakeOAuthDetailView({ extension, projectName }) {
                             {spec.blocked_roles && spec.blocked_roles.length > 0 ? (
                                 <div className="flex flex-wrap gap-2">
                                     {spec.blocked_roles.map((role, idx) => (
-                                        <span key={idx} className="bg-red-900/30 text-red-300 text-xs px-2 py-1 rounded">
+                                        <MonoTag key={idx} color="red">
                                             {role}
-                                        </span>
+                                        </MonoTag>
                                     ))}
                                 </div>
                             ) : (
@@ -1283,9 +1280,9 @@ export function SnowflakeOAuthDetailView({ extension, projectName }) {
                             {spec.scopes && spec.scopes.length > 0 ? (
                                 <div className="flex flex-wrap gap-2">
                                     {spec.scopes.map((scope, idx) => (
-                                        <span key={idx} className="bg-blue-100 dark:bg-blue-900/30 text-blue-900 dark:text-blue-300 text-xs px-2 py-1 rounded font-mono">
+                                        <MonoTag key={idx} color="blue">
                                             {scope}
-                                        </span>
+                                        </MonoTag>
                                     ))}
                                 </div>
                             ) : (

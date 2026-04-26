@@ -125,6 +125,8 @@ pub struct DomainsResponse {
 pub struct EnvVarItem {
     pub key: String,
     pub is_secret: bool,
+    #[serde(default)]
+    pub environment: Option<String>,
 }
 
 /// Response from env vars list endpoint

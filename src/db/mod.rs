@@ -1,6 +1,7 @@
 pub mod custom_domains;
 pub mod deployments;
 pub mod env_vars;
+pub mod environments;
 pub mod extensions;
 pub mod models;
 pub mod postgres_admin;

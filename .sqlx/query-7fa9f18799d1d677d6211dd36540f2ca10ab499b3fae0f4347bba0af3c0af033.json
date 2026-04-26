@@ -1,0 +1,72 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            SELECT id, project_id, key, value, is_secret, is_protected, environment_id, created_at, updated_at\n            FROM project_env_vars\n            WHERE project_id = $1 AND key = $2 AND environment_id = $3\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_secret",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_protected",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "environment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "7fa9f18799d1d677d6211dd36540f2ca10ab499b3fae0f4347bba0af3c0af033"
+}

@@ -1,0 +1,75 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n            INSERT INTO project_env_vars (project_id, key, value, is_secret, is_protected, environment_id)\n            VALUES ($1, $2, $3, $4, $5, $6)\n            RETURNING id, project_id, key, value, is_secret, is_protected, environment_id, created_at, updated_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 1,
+        "name": "project_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 2,
+        "name": "key",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 3,
+        "name": "value",
+        "type_info": "Text"
+      },
+      {
+        "ordinal": 4,
+        "name": "is_secret",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 5,
+        "name": "is_protected",
+        "type_info": "Bool"
+      },
+      {
+        "ordinal": 6,
+        "name": "environment_id",
+        "type_info": "Uuid"
+      },
+      {
+        "ordinal": 7,
+        "name": "created_at",
+        "type_info": "Timestamptz"
+      },
+      {
+        "ordinal": 8,
+        "name": "updated_at",
+        "type_info": "Timestamptz"
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "Text",
+        "Text",
+        "Bool",
+        "Bool",
+        "Uuid"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "5858bedbd1cb89eaddad39cf992e7d8f95a30830aa4948885ee8dbac6b41df2c"
+}

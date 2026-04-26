@@ -254,7 +254,7 @@ pub async fn create_project(
         let config_to_write = ProjectBuildConfig {
             version: Some(1),
             project: Some(project_config),
-            build: None,
+            ..Default::default()
         };
 
         write_project_config(path, &config_to_write)?;
@@ -467,6 +467,7 @@ pub async fn update_project(
     // Sync mode: Load rise.toml and push everything to backend
     if sync {
         use crate::build::config::load_full_project_config;
+        use crate::cli::environment::EnvironmentResponse;
         use tracing::info;
 
         let full_config = load_full_project_config(path)?
@@ -475,6 +476,8 @@ pub async fn update_project(
         let project_config = full_config
             .project
             .ok_or_else(|| anyhow::anyhow!("No [project] section found in rise.toml"))?;
+
+        let environments_config = full_config.environments;
 
         info!("Syncing project metadata from rise.toml to backend...");
 
@@ -534,7 +537,7 @@ pub async fn update_project(
             .await?;
         }
 
-        // Sync environment variables
+        // Sync global environment variables
         if !project_config.env.is_empty() {
             sync_env_vars(
                 http_client,
@@ -542,8 +545,74 @@ pub async fn update_project(
                 &token,
                 &update_response.project.name,
                 &project_config.env,
+                None,
             )
             .await?;
+        }
+
+        // Sync per-environment variables
+        if !environments_config.is_empty() {
+            // Validate that all referenced environments exist on the backend
+            let envs_url = format!(
+                "{}/api/v1/projects/{}/environments",
+                backend_url, update_response.project.name
+            );
+            let envs_response = http_client
+                .get(&envs_url)
+                .bearer_auth(&token)
+                .send()
+                .await
+                .context("Failed to fetch project environments")?;
+
+            if !envs_response.status().is_success() {
+                let status = envs_response.status();
+                let error_text = envs_response
+                    .text()
+                    .await
+                    .unwrap_or_else(|_| "Unknown error".to_string());
+                anyhow::bail!(
+                    "Failed to fetch project environments (status {}): {}",
+                    status,
+                    error_text
+                );
+            }
+
+            let backend_envs: Vec<EnvironmentResponse> = envs_response
+                .json()
+                .await
+                .context("Failed to parse environments response")?;
+            let backend_env_names: std::collections::HashSet<&str> =
+                backend_envs.iter().map(|e| e.name.as_str()).collect();
+
+            let missing: Vec<&String> = environments_config
+                .keys()
+                .filter(|name| !backend_env_names.contains(name.as_str()))
+                .collect();
+            if !missing.is_empty() {
+                let mut missing_sorted: Vec<&str> = missing.iter().map(|s| s.as_str()).collect();
+                missing_sorted.sort();
+                anyhow::bail!(
+                    "Environments referenced in rise.toml do not exist on the backend: {}. \
+                     Create them first with 'rise environment create <name> -p {}'.",
+                    missing_sorted.join(", "),
+                    update_response.project.name
+                );
+            }
+
+            // Sync env vars for each environment
+            for (env_name, env_config) in &environments_config {
+                if !env_config.env.is_empty() {
+                    sync_env_vars(
+                        http_client,
+                        backend_url,
+                        &token,
+                        &update_response.project.name,
+                        &env_config.env,
+                        Some(env_name),
+                    )
+                    .await?;
+                }
+            }
         }
 
         return Ok(());
@@ -773,12 +842,26 @@ pub async fn sync_env_vars(
     token: &str,
     project: &str,
     desired_env: &std::collections::HashMap<String, String>,
+    environment: Option<&str>,
 ) -> Result<()> {
     use crate::cli::env;
     use tracing::warn;
 
+    let scope_label = environment
+        .map(|e| format!(" (environment: {})", e))
+        .unwrap_or_default();
+
     // Fetch current env vars from backend
-    let url = format!("{}/api/v1/projects/{}/env", backend_url, project);
+    let url = if let Some(env_name) = environment {
+        format!(
+            "{}/api/v1/projects/{}/env?environment={}",
+            backend_url,
+            project,
+            urlencoding::encode(env_name)
+        )
+    } else {
+        format!("{}/api/v1/projects/{}/env", backend_url, project)
+    };
     let response = http_client
         .get(&url)
         .bearer_auth(token)
@@ -794,17 +877,18 @@ pub async fn sync_env_vars(
         }
     };
 
-    // Filter to only non-secret vars (rise.toml only manages plain-text vars)
+    // Filter to only non-secret vars matching the requested scope
+    // (rise.toml only manages plain-text vars)
     let current_non_secret_vars: Vec<String> = current_env_response
         .env_vars
         .into_iter()
-        .filter(|v| !v.is_secret)
+        .filter(|v| !v.is_secret && v.environment.as_deref() == environment)
         .map(|v| v.key)
         .collect();
 
     // Set/update vars from rise.toml (always non-secret, non-retrievable)
     for (key, value) in desired_env {
-        println!("Setting env var '{}' from rise.toml", key);
+        println!("Setting env var '{}' from rise.toml{}", key, scope_label);
         env::set_env(
             http_client,
             backend_url,
@@ -814,18 +898,22 @@ pub async fn sync_env_vars(
             value,
             false,
             false,
+            environment,
         )
         .await?;
     }
 
     // Warn about unmanaged non-secret vars
+    let delete_env_flag = environment
+        .map(|e| format!(" -E {}", e))
+        .unwrap_or_default();
     for key in &current_non_secret_vars {
         if !desired_env.contains_key(key) {
             warn!(
-                "Env var '{}' exists in backend but not in rise.toml. \
+                "Env var '{}' exists in backend{} but not in rise.toml. \
                  This variable is not managed by rise.toml. \
-                 Run 'rise env delete {} {}' to remove it.",
-                key, project, key
+                 Run 'rise env delete {} {}{}' to remove it.",
+                key, scope_label, project, key, delete_env_flag
             );
         }
     }

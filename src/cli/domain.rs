@@ -79,8 +79,7 @@ fn update_rise_toml_add_domain(app_path: &str, project: &str, domain: &str) -> R
     // Load existing config or create new one
     let mut config = load_full_project_config(app_path)?.unwrap_or(ProjectBuildConfig {
         version: Some(1),
-        project: None,
-        build: None,
+        ..Default::default()
     });
 
     // Ensure project section exists

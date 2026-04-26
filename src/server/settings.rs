@@ -491,6 +491,17 @@ pub enum DeploymentControllerSettings {
         #[serde(default)]
         staging_ingress_url_template: Option<String>,
 
+        /// Ingress URL template for named environments (e.g., staging, dev)
+        /// Only used for non-production environments whose primary deployment group matches
+        /// the deployment's group. Production environments use `production_ingress_url_template`.
+        /// Supports both subdomain and sub-path routing:
+        ///   Subdomain: "{environment}--{project_name}.apps.rise.dev"
+        ///   Sub-path: "rise.dev/{project_name}/{environment}"
+        /// Must contain both {project_name} and {environment} placeholders
+        /// If not set, environment-specific URLs are not generated.
+        #[serde(default)]
+        environment_ingress_url_template: Option<String>,
+
         /// Optional port number to append to all generated ingress URLs
         /// Used for development environments with port-forwarding (e.g., kubectl port-forward)
         /// Example: 8080 → "https://myapp.apps.rise.local:8080"
@@ -917,6 +928,7 @@ impl Settings {
             ref namespace_format,
             ref production_ingress_url_template,
             ref staging_ingress_url_template,
+            ref environment_ingress_url_template,
             ref access_classes,
             ref extra_service_token_audiences,
             ..
@@ -939,6 +951,19 @@ impl Settings {
                     staging_template,
                     "staging_ingress_url_template",
                     "{deployment_group}",
+                )?;
+            }
+
+            if let Some(ref environment_template) = environment_ingress_url_template {
+                Self::validate_format_string(
+                    environment_template,
+                    "environment_ingress_url_template",
+                    "{project_name}",
+                )?;
+                Self::validate_format_string(
+                    environment_template,
+                    "environment_ingress_url_template",
+                    "{environment}",
                 )?;
             }
 

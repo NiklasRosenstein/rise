@@ -69,6 +69,8 @@ description = "Run the backend server."
 depends = ["backend:deps", "db:migrate"]
 run = "cargo run --features cli,backend -- backend server"
 alias = "br"
+env.https_proxy = ""
+env.HTTPS_PROXY = ""
 
 [tasks."backend:run-container"]
 description = "Build and run the backend server in its container (host network). Useful to validate the containerized version works as intended."
@@ -215,4 +217,10 @@ run = "bash tests/e2e-build/run.sh"
 [tasks."k3s:down"]
 run = """
 sudo /usr/local/bin/k3s-uninstall.sh
+"""
+
+[tasks."dev:oidc-issuer"]
+run = """
+( sleep 2 && curl http://localhost:9229/token -d '{"sub": "test", "aud": "http://rise.local:3000"}' ) &
+npx @oidc.pub/cli dev issuer --url http://localhost:9229
 """

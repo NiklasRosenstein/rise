@@ -10,6 +10,8 @@ struct EnvVarResponse {
     value: String, // Will be masked ("••••••••") for protected secrets
     is_secret: bool,
     is_protected: bool,
+    #[serde(default)]
+    environment: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -26,14 +28,25 @@ struct SetEnvVarRequest {
     is_protected: bool,
 }
 
+/// Build a URL with an optional `?environment=` query parameter
+fn env_url(backend_url: &str, project: &str, suffix: &str, environment: Option<&str>) -> String {
+    let base = format!("{}/api/v1/projects/{}/env{}", backend_url, project, suffix);
+    if let Some(env_name) = environment {
+        format!("{}?environment={}", base, urlencoding::encode(env_name))
+    } else {
+        base
+    }
+}
+
 /// Fetch environment variables from a project (internal helper)
 async fn fetch_env_vars_response(
     http_client: &Client,
     backend_url: &str,
     token: &str,
     project: &str,
+    environment: Option<&str>,
 ) -> Result<EnvVarsResponse> {
-    let url = format!("{}/api/v1/projects/{}/env", backend_url, project);
+    let url = env_url(backend_url, project, "", environment);
 
     let response = http_client
         .get(&url)
@@ -130,8 +143,9 @@ pub async fn set_env(
     value: &str,
     is_secret: bool,
     is_protected: bool,
+    environment: Option<&str>,
 ) -> Result<()> {
-    let url = format!("{}/api/v1/projects/{}/env/{}", backend_url, project, key);
+    let url = env_url(backend_url, project, &format!("/{}", key), environment);
 
     let payload = SetEnvVarRequest {
         value: value.to_string(),
@@ -169,10 +183,17 @@ pub async fn set_env(
     } else {
         "plain text"
     };
-    println!(
-        "✓ Set {} variable '{}' for project '{}'",
-        var_type, key, project
-    );
+    if let Some(env_name) = environment {
+        println!(
+            "✓ Set {} variable '{}' for project '{}' (environment: {})",
+            var_type, key, project, env_name
+        );
+    } else {
+        println!(
+            "✓ Set {} variable '{}' for project '{}'",
+            var_type, key, project
+        );
+    }
 
     Ok(())
 }
@@ -183,9 +204,10 @@ pub async fn list_env(
     backend_url: &str,
     token: &str,
     project: &str,
+    environment: Option<&str>,
 ) -> Result<()> {
     let env_vars_response =
-        fetch_env_vars_response(http_client, backend_url, token, project).await?;
+        fetch_env_vars_response(http_client, backend_url, token, project, environment).await?;
 
     if env_vars_response.env_vars.is_empty() {
         println!(
@@ -195,16 +217,34 @@ pub async fn list_env(
         return Ok(());
     }
 
+    // Check if any var has an environment label (only when showing all environments)
+    let show_env_col = environment.is_none()
+        && env_vars_response
+            .env_vars
+            .iter()
+            .any(|v| v.environment.is_some());
+
     let mut table = Table::new();
     table
         .load_preset(UTF8_FULL)
-        .apply_modifier(UTF8_ROUND_CORNERS)
-        .set_header(vec![
+        .apply_modifier(UTF8_ROUND_CORNERS);
+
+    if show_env_col {
+        table.set_header(vec![
+            Cell::new("KEY").add_attribute(Attribute::Bold),
+            Cell::new("VALUE").add_attribute(Attribute::Bold),
+            Cell::new("TYPE").add_attribute(Attribute::Bold),
+            Cell::new("PROTECTED").add_attribute(Attribute::Bold),
+            Cell::new("ENVIRONMENT").add_attribute(Attribute::Bold),
+        ]);
+    } else {
+        table.set_header(vec![
             Cell::new("KEY").add_attribute(Attribute::Bold),
             Cell::new("VALUE").add_attribute(Attribute::Bold),
             Cell::new("TYPE").add_attribute(Attribute::Bold),
             Cell::new("PROTECTED").add_attribute(Attribute::Bold),
         ]);
+    }
 
     for var in env_vars_response.env_vars {
         let var_type = if var.is_secret { "secret" } else { "plain" };
@@ -217,12 +257,16 @@ pub async fn list_env(
         } else {
             "-"
         };
-        table.add_row(vec![
+        let mut row = vec![
             Cell::new(&var.key),
             Cell::new(&var.value),
             Cell::new(var_type),
             Cell::new(protected),
-        ]);
+        ];
+        if show_env_col {
+            row.push(Cell::new(var.environment.as_deref().unwrap_or("(global)")));
+        }
+        table.add_row(row);
     }
 
     println!("{}", table);
@@ -239,10 +283,11 @@ pub async fn get_env(
     token: &str,
     project: &str,
     key: &str,
+    environment: Option<&str>,
 ) -> Result<()> {
     // First, fetch the variable to check if it exists and get its metadata
     let env_vars_response =
-        fetch_env_vars_response(http_client, backend_url, token, project).await?;
+        fetch_env_vars_response(http_client, backend_url, token, project, environment).await?;
 
     let env_var = env_vars_response
         .env_vars
@@ -261,9 +306,11 @@ pub async fn get_env(
 
     // If it's an unprotected secret, fetch the decrypted value
     if env_var.is_secret && !env_var.is_protected {
-        let url = format!(
-            "{}/api/v1/projects/{}/env/{}/value",
-            backend_url, project, key
+        let url = env_url(
+            backend_url,
+            project,
+            &format!("/{}/value", key),
+            environment,
         );
 
         let response = http_client
@@ -313,8 +360,9 @@ pub async fn unset_env(
     token: &str,
     project: &str,
     key: &str,
+    environment: Option<&str>,
 ) -> Result<()> {
-    let url = format!("{}/api/v1/projects/{}/env/{}", backend_url, project, key);
+    let url = env_url(backend_url, project, &format!("/{}", key), environment);
 
     let response = http_client
         .delete(&url)
@@ -430,6 +478,7 @@ pub async fn import_env(
     token: &str,
     project: &str,
     file_path: &PathBuf,
+    environment: Option<&str>,
 ) -> Result<()> {
     let contents = std::fs::read_to_string(file_path)
         .with_context(|| format!("Failed to read file: {}", file_path.display()))?;
@@ -459,6 +508,7 @@ pub async fn import_env(
             &parsed.value,
             parsed.is_secret,
             is_protected,
+            environment,
         )
         .await
         {

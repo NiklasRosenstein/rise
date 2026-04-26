@@ -46,14 +46,10 @@ pub async fn create_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check project ownership/access (SA access already validated)
-    if !is_sa {
-        let has_access = check_project_access(&state, &user, project.id).await?;
-        if !has_access {
-            return Err(ServerError::forbidden("Access denied"));
-        }
+    let user = auth.user()?;
+    let has_access = check_project_access(&state, user, project.id).await?;
+    if !has_access {
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     // Get extension handler by type
@@ -140,14 +136,10 @@ pub async fn update_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check project ownership/access (SA access already validated)
-    if !is_sa {
-        let has_access = check_project_access(&state, &user, project.id).await?;
-        if !has_access {
-            return Err(ServerError::forbidden("Access denied"));
-        }
+    let user = auth.user()?;
+    let has_access = check_project_access(&state, user, project.id).await?;
+    if !has_access {
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     // Get existing extension to determine its type
@@ -233,14 +225,10 @@ pub async fn patch_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    // Check project ownership/access (SA access already validated)
-    if !is_sa {
-        let has_access = check_project_access(&state, &user, project.id).await?;
-        if !has_access {
-            return Err(ServerError::forbidden("Access denied"));
-        }
+    let user = auth.user()?;
+    let has_access = check_project_access(&state, user, project.id).await?;
+    if !has_access {
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     // Get existing extension
@@ -327,13 +315,10 @@ pub async fn list_extensions(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    if !is_sa {
-        let has_access = check_project_access(&state, &user, project.id).await?;
-        if !has_access {
-            return Err(ServerError::forbidden("Access denied"));
-        }
+    let user = auth.user()?;
+    let has_access = check_project_access(&state, user, project.id).await?;
+    if !has_access {
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     let extensions = db_extensions::list_by_project(&state.db_pool, project.id)
@@ -376,13 +361,10 @@ pub async fn get_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    if !is_sa {
-        let has_access = check_project_access(&state, &user, project.id).await?;
-        if !has_access {
-            return Err(ServerError::forbidden("Access denied"));
-        }
+    let user = auth.user()?;
+    let has_access = check_project_access(&state, user, project.id).await?;
+    if !has_access {
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     let ext = db_extensions::find_by_project_and_name(&state.db_pool, project.id, &extension_name)
@@ -419,13 +401,10 @@ pub async fn delete_extension(
         .internal_err("Failed to look up project")?
         .ok_or_else(|| ServerError::not_found("Project not found"))?;
 
-    // Resolve auth for project scope
-    let (user, is_sa) = auth.resolve_for_project(&state.db_pool, &project).await?;
-    if !is_sa {
-        let has_access = check_project_access(&state, &user, project.id).await?;
-        if !has_access {
-            return Err(ServerError::forbidden("Access denied"));
-        }
+    let user = auth.user()?;
+    let has_access = check_project_access(&state, user, project.id).await?;
+    if !has_access {
+        return Err(ServerError::forbidden("Access denied"));
     }
 
     db_extensions::mark_deleted(&state.db_pool, project.id, &extension_name)

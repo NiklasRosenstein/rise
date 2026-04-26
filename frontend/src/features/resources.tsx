@@ -5,7 +5,7 @@ import { CONFIG } from '../lib/config';
 import { navigate } from '../lib/navigation';
 import { copyToClipboard, formatDate } from '../lib/utils';
 import { useToast } from '../components/toast';
-import { Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, ModalTabs, MonoStatusPill, MonoTabButton, SegmentedRadioGroup } from '../components/ui';
+import { Button, ConfirmDialog, EnvironmentColorDot, EnvironmentColorPicker, EnvironmentCombobox, EnvironmentDropdown, FormField, Modal, ModalActions, ModalSection, ModalTabs, MonoStatusPill, MonoTabButton, MonoTag, SegmentedRadioGroup } from '../components/ui';
 import { MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
 import {
   AwsRdsDetailView,
@@ -148,6 +148,267 @@ function sortObjectKeys(obj) {
         }, {});
 }
 
+// Environments Component
+export function EnvironmentsList({ projectName }) {
+    const [environments, setEnvironments] = useState([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [isModalOpen, setIsModalOpen] = useState(false);
+    const [editingEnv, setEditingEnv] = useState(null);
+    const [formData, setFormData] = useState({ name: '', primary_deployment_group: '', is_default: false, is_production: false, color: 'green' });
+    const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+    const [envToDelete, setEnvToDelete] = useState(null);
+    const [deleting, setDeleting] = useState(false);
+    const [saving, setSaving] = useState(false);
+    const { showToast } = useToast();
+
+    const loadEnvironments = useCallback(async () => {
+        try {
+            const data = await api.getProjectEnvironments(projectName);
+            setEnvironments(data || []);
+            setLoading(false);
+        } catch (err) {
+            setError(err.message);
+            setLoading(false);
+        }
+    }, [projectName]);
+
+    useEffect(() => {
+        loadEnvironments();
+    }, [loadEnvironments]);
+
+    const handleAddClick = () => {
+        setEditingEnv(null);
+        setFormData({ name: '', primary_deployment_group: '', is_default: false, is_production: false, color: 'green' });
+        setIsModalOpen(true);
+    };
+
+    const handleEditClick = (env) => {
+        setEditingEnv(env);
+        setFormData({
+            name: env.name,
+            primary_deployment_group: env.primary_deployment_group || '',
+            is_default: env.is_default,
+            is_production: env.is_production,
+            color: env.color || 'green',
+        });
+        setIsModalOpen(true);
+    };
+
+    const handleDeleteClick = (env) => {
+        setEnvToDelete(env);
+        setConfirmDialogOpen(true);
+    };
+
+    const handleSave = async () => {
+        if (!formData.name) {
+            showToast('Environment name is required', 'error');
+            return;
+        }
+
+        setSaving(true);
+        try {
+            if (editingEnv) {
+                await api.updateEnvironment(projectName, editingEnv.name, {
+                    primary_deployment_group: formData.primary_deployment_group || null,
+                    is_default: formData.is_default,
+                    is_production: formData.is_production,
+                    color: formData.color,
+                });
+                showToast(`Environment ${editingEnv.name} updated`, 'success');
+            } else {
+                await api.createEnvironment(projectName, {
+                    name: formData.name,
+                    primary_deployment_group: formData.primary_deployment_group || null,
+                    is_default: formData.is_default,
+                    is_production: formData.is_production,
+                    color: formData.color,
+                });
+                showToast(`Environment ${formData.name} created`, 'success');
+            }
+            setIsModalOpen(false);
+            loadEnvironments();
+        } catch (err) {
+            showToast(`Failed to ${editingEnv ? 'update' : 'create'} environment: ${err.message}`, 'error');
+        } finally {
+            setSaving(false);
+        }
+    };
+
+    const handleDeleteConfirm = async () => {
+        if (!envToDelete) return;
+
+        setDeleting(true);
+        try {
+            await api.deleteEnvironment(projectName, envToDelete.name);
+            showToast(`Environment ${envToDelete.name} deleted`, 'success');
+            setConfirmDialogOpen(false);
+            setEnvToDelete(null);
+            loadEnvironments();
+        } catch (err) {
+            showToast(`Failed to delete environment: ${err.message}`, 'error');
+        } finally {
+            setDeleting(false);
+        }
+    };
+
+    if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
+    if (error) return <p className="text-red-600 dark:text-red-400">Error loading environments: {error}</p>;
+
+    return (
+        <div>
+            <div className="mb-4 flex justify-end">
+                <Button variant="primary" size="sm" onClick={handleAddClick}>
+                    Create Environment
+                </Button>
+            </div>
+            <MonoTableFrame>
+                <MonoTable>
+                    <MonoTableHead>
+                        <tr>
+                            <MonoTh className="px-6 py-3 text-left">Name</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Primary Group</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Created</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Actions</MonoTh>
+                        </tr>
+                    </MonoTableHead>
+                    <MonoTableBody>
+                        {environments.length === 0 ? (
+                            <MonoTableEmptyRow colSpan={4}>No environments configured.</MonoTableEmptyRow>
+                        ) : (
+                            environments.map(env => (
+                                <MonoTableRow
+                                    key={env.name}
+                                    interactive
+                                    className="transition-colors"
+                                    onClick={() => navigate(`/project/${projectName}/environment/${env.name}`)}
+                                    style={{ cursor: 'pointer' }}
+                                >
+                                    <MonoTd className="px-6 py-4 text-sm">
+                                        <div className="flex items-center gap-2">
+                                            <EnvironmentColorDot color={env.color} />
+                                            <span>{env.name}</span>
+                                            {env.is_default && <MonoTag>default</MonoTag>}
+                                            {env.is_production && <MonoTag>production</MonoTag>}
+                                        </div>
+                                    </MonoTd>
+                                    <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">{env.primary_deployment_group || '-'}</MonoTd>
+                                    <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(env.created_at)}</MonoTd>
+                                    <MonoTd className="px-6 py-4 text-sm">
+                                        <div className="flex gap-2">
+                                            <Button
+                                                variant="secondary"
+                                                size="sm"
+                                                onClick={(e) => { e.stopPropagation(); handleEditClick(env); }}
+                                            >
+                                                Edit
+                                            </Button>
+                                            <Button
+                                                variant="danger"
+                                                size="sm"
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteClick(env); }}
+                                                disabled={env.is_default || env.is_production}
+                                            >
+                                                Delete
+                                            </Button>
+                                        </div>
+                                    </MonoTd>
+                                </MonoTableRow>
+                            ))
+                        )}
+                    </MonoTableBody>
+                </MonoTable>
+            </MonoTableFrame>
+
+            <Modal
+                isOpen={isModalOpen}
+                onClose={() => setIsModalOpen(false)}
+                title={editingEnv ? 'Edit Environment' : 'Create Environment'}
+            >
+                <ModalSection>
+                    <FormField
+                        label="Name"
+                        id="env-name"
+                        value={formData.name}
+                        onChange={(e) => setFormData({ ...formData, name: e.target.value.toLowerCase() })}
+                        placeholder="staging"
+                        disabled={editingEnv !== null}
+                        required
+                    />
+                    <FormField
+                        label="Primary Deployment Group"
+                        id="env-primary-group"
+                        value={formData.primary_deployment_group}
+                        onChange={(e) => setFormData({ ...formData, primary_deployment_group: e.target.value })}
+                        placeholder="default"
+                    />
+                    <p className="text-xs text-gray-500 dark:text-gray-400 -mt-2">
+                        The deployment group that maps to this environment. Leave empty if not applicable.
+                    </p>
+                    <div className="flex gap-6 mt-2">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={formData.is_default}
+                                onChange={(e) => setFormData({ ...formData, is_default: e.target.checked })}
+                                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                            />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">Default</span>
+                        </label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                            <input
+                                type="checkbox"
+                                checked={formData.is_production}
+                                onChange={(e) => setFormData({ ...formData, is_production: e.target.checked })}
+                                className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                            />
+                            <span className="text-sm text-gray-700 dark:text-gray-300">Production</span>
+                        </label>
+                    </div>
+                    <div className="mt-2">
+                        <span className="mono-label">Color</span>
+                        <EnvironmentColorPicker
+                            value={formData.color}
+                            onChange={(c) => setFormData({ ...formData, color: c })}
+                        />
+                    </div>
+
+                    <ModalActions>
+                        <Button
+                            variant="secondary"
+                            onClick={() => setIsModalOpen(false)}
+                            disabled={saving}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            variant="primary"
+                            onClick={handleSave}
+                            loading={saving}
+                        >
+                            {editingEnv ? 'Update' : 'Create'}
+                        </Button>
+                    </ModalActions>
+                </ModalSection>
+            </Modal>
+
+            <ConfirmDialog
+                isOpen={confirmDialogOpen}
+                onClose={() => {
+                    setConfirmDialogOpen(false);
+                    setEnvToDelete(null);
+                }}
+                onConfirm={handleDeleteConfirm}
+                title="Delete Environment"
+                message={`Are you sure you want to delete the environment "${envToDelete?.name}"? This action cannot be undone.`}
+                confirmText="Delete Environment"
+                variant="danger"
+                loading={deleting}
+            />
+        </div>
+    );
+}
+
 // Service Accounts Component
 export function ServiceAccountsList({ projectName }) {
     const [serviceAccounts, setServiceAccounts] = useState([]);
@@ -161,6 +422,8 @@ export function ServiceAccountsList({ projectName }) {
     const [saToDelete, setSAToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [environments, setEnvironments] = useState([]);
+    const [selectedEnvs, setSelectedEnvs] = useState([]);
     const { showToast } = useToast();
 
     const loadServiceAccounts = useCallback(async () => {
@@ -178,12 +441,19 @@ export function ServiceAccountsList({ projectName }) {
         loadServiceAccounts();
     }, [loadServiceAccounts]);
 
+    useEffect(() => {
+        api.getProjectEnvironments(projectName)
+            .then(data => setEnvironments(data || []))
+            .catch(() => {});
+    }, [projectName]);
+
     const handleAddClick = () => {
         setEditingSA(null);
         // Default aud to Rise backend URL (where the API is hosted)
         const defaultAud = CONFIG.backendUrl;
         setFormData({ issuer_url: '', aud: defaultAud, claims: {} });
         setClaimsText('');
+        setSelectedEnvs([]);
         setIsModalOpen(true);
     };
 
@@ -196,6 +466,7 @@ export function ServiceAccountsList({ projectName }) {
         const claimsObj = { ...sa.claims };
         delete claimsObj.aud; // aud is handled separately
         setClaimsText(JSON.stringify(claimsObj, null, 2));
+        setSelectedEnvs(sa.allowed_environments || []);
         setIsModalOpen(true);
     };
 
@@ -229,13 +500,15 @@ export function ServiceAccountsList({ projectName }) {
         // Add aud claim from form data
         claims.aud = formData.aud;
 
+        const allowedEnvs = selectedEnvs.length === 0 ? [] : selectedEnvs;
+
         setSaving(true);
         try {
             if (editingSA) {
-                await api.updateServiceAccount(projectName, editingSA.id, formData.issuer_url, claims);
+                await api.updateServiceAccount(projectName, editingSA.id, formData.issuer_url, claims, allowedEnvs);
                 showToast('Service account updated successfully', 'success');
             } else {
-                await api.createServiceAccount(projectName, formData.issuer_url, claims);
+                await api.createServiceAccount(projectName, formData.issuer_url, claims, allowedEnvs);
                 showToast('Service account created successfully', 'success');
             }
             setIsModalOpen(false);
@@ -281,13 +554,14 @@ export function ServiceAccountsList({ projectName }) {
                             <MonoTh className="px-6 py-3 text-left">Email</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Issuer URL</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Claims</MonoTh>
+                            <MonoTh className="px-6 py-3 text-left">Environments</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Created</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Actions</MonoTh>
                         </tr>
                     </MonoTableHead>
                     <MonoTableBody>
                         {serviceAccounts.length === 0 ? (
-                            <MonoTableEmptyRow colSpan={5}>No service accounts found.</MonoTableEmptyRow>
+                            <MonoTableEmptyRow colSpan={6}>No service accounts found.</MonoTableEmptyRow>
                         ) : (
                             serviceAccounts.map(sa => (
                             <MonoTableRow key={sa.id} interactive className="transition-colors">
@@ -297,6 +571,9 @@ export function ServiceAccountsList({ projectName }) {
                                     {Object.entries(sa.claims || {})
                                         .map(([key, value]) => `${key}=${value}`)
                                         .join(', ')}
+                                </MonoTd>
+                                <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                                    {sa.allowed_environments ? sa.allowed_environments.join(', ') : 'All'}
                                 </MonoTd>
                                 <MonoTd className="px-6 py-4 whitespace-nowrap text-sm text-gray-700 dark:text-gray-300">{formatDate(sa.created_at)}</MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm">
@@ -330,6 +607,17 @@ export function ServiceAccountsList({ projectName }) {
                 title={editingSA ? 'Edit Service Account' : 'Create Service Account'}
             >
                 <ModalSection>
+                    {environments.length > 0 && (
+                        <div>
+                            <span className="mono-label">Allowed Environments</span>
+                            <EnvironmentCombobox
+                                environments={environments}
+                                selected={selectedEnvs}
+                                onChange={setSelectedEnvs}
+                                placeholder="All environments"
+                            />
+                        </div>
+                    )}
                     <FormField
                         label="Issuer URL"
                         id="sa-issuer-url"
@@ -337,6 +625,7 @@ export function ServiceAccountsList({ projectName }) {
                         onChange={(e) => setFormData({ ...formData, issuer_url: e.target.value })}
                         placeholder="https://token.actions.githubusercontent.com"
                         required
+                        autoFocus
                     />
                     <FormField
                         label="Audience (aud)"
@@ -536,13 +825,9 @@ export function DomainsList({ projectName, defaultUrl = null }) {
                                     <a href={defaultUrl} target="_blank" rel="noopener noreferrer" className="underline">
                                         {(() => { try { return new URL(defaultUrl).hostname; } catch { return defaultUrl; } })()}
                                     </a>
-                                    <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-400">
-                                        Default
-                                    </span>
+                                    <MonoTag className="ml-2">default</MonoTag>
                                     {isDefaultPrimary && (
-                                        <span className="ml-1 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                                            Primary
-                                        </span>
+                                        <MonoTag color="yellow" className="ml-1">primary</MonoTag>
                                     )}
                                 </MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm">
@@ -577,9 +862,7 @@ export function DomainsList({ projectName, defaultUrl = null }) {
                                 <MonoTd className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
                                     {domain.domain}
                                     {domain.is_primary && (
-                                        <span className="ml-2 inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200">
-                                            Primary
-                                        </span>
+                                        <MonoTag color="yellow" className="ml-2">primary</MonoTag>
                                     )}
                                 </MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm">
@@ -686,11 +969,13 @@ export function EnvVarsList({ projectName, deploymentId }) {
     const [error, setError] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingEnvVar, setEditingEnvVar] = useState(null);
-    const [formData, setFormData] = useState({ key: '', value: '', type: 'plain' });
+    const [formData, setFormData] = useState({ key: '', value: '', type: 'plain', environment: null });
     const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
     const [envVarToDelete, setEnvVarToDelete] = useState(null);
     const [deleting, setDeleting] = useState(false);
     const [saving, setSaving] = useState(false);
+    const [environments, setEnvironments] = useState([]);
+    const [envFilter, setEnvFilter] = useState('');
     const { showToast } = useToast();
 
     // Convert API representation to UI type
@@ -705,18 +990,26 @@ export function EnvVarsList({ projectName, deploymentId }) {
         is_protected: type === 'protected',
     });
 
+    // Load environments for filter dropdown (project-level only)
+    useEffect(() => {
+        if (deploymentId) return;
+        api.getProjectEnvironments(projectName)
+            .then(data => setEnvironments(data || []))
+            .catch(() => {});
+    }, [projectName, deploymentId]);
+
     const loadEnvVars = useCallback(async () => {
         try {
             const response = deploymentId
                 ? await api.getDeploymentEnvVars(projectName, deploymentId)
-                : await api.getProjectEnvVars(projectName);
+                : await api.getProjectEnvVars(projectName, envFilter || null);
             setEnvVars(response.env_vars || []);
             setLoading(false);
         } catch (err) {
             setError(err.message);
             setLoading(false);
         }
-    }, [projectName, deploymentId]);
+    }, [projectName, deploymentId, envFilter]);
 
     useEffect(() => {
         loadEnvVars();
@@ -724,7 +1017,7 @@ export function EnvVarsList({ projectName, deploymentId }) {
 
     const handleAddClick = () => {
         setEditingEnvVar(null);
-        setFormData({ key: '', value: '', type: 'plain' });
+        setFormData({ key: '', value: '', type: 'plain', environment: envFilter || null });
         setIsModalOpen(true);
     };
 
@@ -733,7 +1026,8 @@ export function EnvVarsList({ projectName, deploymentId }) {
         setFormData({
             key: envVar.key,
             value: envVar.is_secret ? '' : envVar.value,
-            type: apiToType(envVar.is_secret, envVar.is_protected)
+            type: apiToType(envVar.is_secret, envVar.is_protected),
+            environment: envVar.environment || null,
         });
         setIsModalOpen(true);
     };
@@ -744,15 +1038,28 @@ export function EnvVarsList({ projectName, deploymentId }) {
     };
 
     const handleSave = async () => {
-        if (!formData.key || !formData.value) {
+        if (!formData.key || (!editingEnvVar && !formData.value)) {
             showToast('Key and value are required', 'error');
             return;
         }
 
         setSaving(true);
         try {
-            const { is_secret, is_protected } = typeToApi(formData.type);
-            await api.setEnvVar(projectName, formData.key, formData.value, is_secret, is_protected);
+            const originalEnv = editingEnvVar?.environment || null;
+            const targetEnv = formData.environment || null;
+            const envChanged = editingEnvVar && originalEnv !== targetEnv;
+
+            // Move to different environment if needed
+            if (envChanged) {
+                await api.moveEnvVar(projectName, formData.key, originalEnv, targetEnv);
+            }
+
+            // Update value/type (skip for secrets with no new value provided)
+            if (formData.value) {
+                const { is_secret, is_protected } = typeToApi(formData.type);
+                await api.setEnvVar(projectName, formData.key, formData.value, is_secret, is_protected, targetEnv);
+            }
+
             showToast(`Environment variable ${formData.key} ${editingEnvVar ? 'updated' : 'created'} successfully`, 'success');
             setIsModalOpen(false);
             loadEnvVars();
@@ -768,7 +1075,7 @@ export function EnvVarsList({ projectName, deploymentId }) {
 
         setDeleting(true);
         try {
-            await api.deleteEnvVar(projectName, envVarToDelete.key);
+            await api.deleteEnvVar(projectName, envVarToDelete.key, envVarToDelete.environment || null);
             showToast(`Environment variable ${envVarToDelete.key} deleted successfully`, 'success');
             setConfirmDialogOpen(false);
             setEnvVarToDelete(null);
@@ -783,10 +1090,26 @@ export function EnvVarsList({ projectName, deploymentId }) {
     if (loading) return <div className="text-center py-8"><div className="inline-block w-8 h-8 border-4 border-indigo-600 border-t-transparent rounded-full animate-spin"></div></div>;
     if (error) return <p className="text-red-600 dark:text-red-400">Error loading environment variables: {error}</p>;
 
+    const showEnvColumn = !deploymentId && envFilter === '' && environments.length > 0;
+
     return (
         <div>
             {!deploymentId && (
-                <div className="mb-4 flex justify-end">
+                <div className="mb-4 flex justify-between items-center">
+                    <div className="flex items-center gap-2">
+                        {environments.length > 0 && (
+                            <select
+                                value={envFilter}
+                                onChange={(e) => { setEnvFilter(e.target.value); setLoading(true); }}
+                                className="mono-select text-sm"
+                            >
+                                <option value="">All environments</option>
+                                {environments.map(env => (
+                                    <option key={env.name} value={env.name}>{env.name}</option>
+                                ))}
+                            </select>
+                        )}
+                    </div>
                     <Button variant="primary" size="sm" onClick={handleAddClick}>
                         Add Variable
                     </Button>
@@ -799,6 +1122,9 @@ export function EnvVarsList({ projectName, deploymentId }) {
                             <MonoTh className="px-6 py-3 text-left">Key</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Value</MonoTh>
                             <MonoTh className="px-6 py-3 text-left">Type</MonoTh>
+                            {showEnvColumn && (
+                                <MonoTh className="px-6 py-3 text-left">Environment</MonoTh>
+                            )}
                             {!deploymentId && (
                                 <MonoTh className="px-6 py-3 text-left">Actions</MonoTh>
                             )}
@@ -806,10 +1132,10 @@ export function EnvVarsList({ projectName, deploymentId }) {
                     </MonoTableHead>
                     <MonoTableBody>
                         {envVars.length === 0 ? (
-                            <MonoTableEmptyRow colSpan={deploymentId ? 3 : 4}>No environment variables configured.</MonoTableEmptyRow>
+                            <MonoTableEmptyRow colSpan={deploymentId ? 3 : (showEnvColumn ? 5 : 4)}>No environment variables configured.</MonoTableEmptyRow>
                         ) : (
                             envVars.map(env => (
-                            <MonoTableRow key={env.key} interactive className="transition-colors">
+                            <MonoTableRow key={`${env.key}-${env.environment || ''}`} interactive className="transition-colors">
                                 <MonoTd className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">{env.key}</MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm font-mono text-gray-900 dark:text-gray-200">
                                     <div className="flex items-center gap-2">
@@ -820,7 +1146,7 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                                     try {
                                                         const response = deploymentId
                                                             ? await api.getDeploymentEnvVarValue(projectName, deploymentId, env.key)
-                                                            : await api.getEnvVarValue(projectName, env.key);
+                                                            : await api.getEnvVarValue(projectName, env.key, env.environment || null);
                                                         await copyToClipboard(response.value);
                                                         showToast('Secret copied to clipboard!', 'success');
                                                     } catch (err) {
@@ -851,18 +1177,28 @@ export function EnvVarsList({ projectName, deploymentId }) {
                                 </MonoTd>
                                 <MonoTd className="px-6 py-4 text-sm">
                                     {env.is_protected ? (
-                                        <span className="bg-purple-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase inline-flex items-center gap-1">
+                                        <MonoTag color="purple">
                                             <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
                                                 <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
                                             </svg>
                                             protected
-                                        </span>
+                                        </MonoTag>
                                     ) : env.is_secret ? (
-                                        <span className="bg-yellow-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">secret</span>
+                                        <MonoTag color="yellow">secret</MonoTag>
                                     ) : (
-                                        <span className="bg-gray-600 text-white text-xs font-semibold px-3 py-1 rounded-full uppercase">plain</span>
+                                        <MonoTag color="gray">plain</MonoTag>
                                     )}
                                 </MonoTd>
+                                {showEnvColumn && (
+                                    <MonoTd className="px-6 py-4 text-sm text-gray-700 dark:text-gray-300">
+                                        {env.environment ? (
+                                            <span className="inline-flex items-center gap-2">
+                                                <EnvironmentColorDot color={environments.find(e => e.name === env.environment)?.color} />
+                                                {env.environment}
+                                            </span>
+                                        ) : '(global)'}
+                                    </MonoTd>
+                                )}
                                 {!deploymentId && (
                                     <MonoTd className="px-6 py-4 text-sm">
                                         <div className="flex gap-2">
@@ -908,6 +1244,16 @@ export function EnvVarsList({ projectName, deploymentId }) {
                 title={editingEnvVar ? 'Edit Environment Variable' : 'Add Environment Variable'}
             >
                 <ModalSection>
+                    {!deploymentId && environments.length > 0 && (
+                        <div>
+                            <span className="mono-label">Environment</span>
+                            <EnvironmentDropdown
+                                environments={environments}
+                                value={formData.environment}
+                                onChange={(env) => setFormData({ ...formData, environment: env })}
+                            />
+                        </div>
+                    )}
                     <FormField
                         label="Key"
                         id="env-key"
