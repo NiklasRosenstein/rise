@@ -1190,6 +1190,19 @@ async fn perform_status_update(
         deployment_id, status_copy
     );
 
+    // Trigger Metacontroller resync so the webhook picks up the status change
+    #[cfg(feature = "backend")]
+    if let Some(ref kube_client) = state.kube_client {
+        if let Err(e) =
+            crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+        {
+            tracing::warn!(
+                project = %project.name,
+                "Failed to trigger CRD resync: {:?}", e
+            );
+        }
+    }
+
     // Only calculate URLs for non-terminal deployments that could receive traffic
     let (primary_url, custom_domain_urls) =
         if state_machine::is_terminal(&updated_deployment.status) {
@@ -1561,6 +1574,21 @@ pub async fn stop_deployments_by_group(
         .await
         .internal_err("Failed to update project status")?;
 
+    // Trigger Metacontroller resync
+    #[cfg(feature = "backend")]
+    if !stopped_ids.is_empty() {
+        if let Some(ref kube_client) = state.kube_client {
+            if let Err(e) =
+                crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+            {
+                tracing::warn!(
+                    project = %project.name,
+                    "Failed to trigger CRD resync: {:?}", e
+                );
+            }
+        }
+    }
+
     info!(
         "Stopped {} deployments in group '{}' for project '{}'",
         stopped_ids.len(),
@@ -1642,6 +1670,19 @@ pub async fn stop_deployment(
     projects::update_calculated_status(&state.db_pool, project.id)
         .await
         .internal_err("Failed to update project status")?;
+
+    // Trigger Metacontroller resync
+    #[cfg(feature = "backend")]
+    if let Some(ref kube_client) = state.kube_client {
+        if let Err(e) =
+            crate::server::deployment::crd::trigger_resync(kube_client, &project.name).await
+        {
+            tracing::warn!(
+                project = %project.name,
+                "Failed to trigger CRD resync: {:?}", e
+            );
+        }
+    }
 
     // Calculate deployment URLs dynamically
     let (primary_url, custom_domain_urls) = match state
@@ -1895,6 +1936,7 @@ pub async fn stream_deployment_logs(
         .deployment_backend
         .stream_logs(
             &deployment,
+            &project,
             params.follow,
             tail,
             params.timestamps,

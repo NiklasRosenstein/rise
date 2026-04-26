@@ -1,0 +1,31 @@
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: riseprojects.rise.dev
+spec:
+  group: rise.dev
+  names:
+    kind: RiseProject
+    plural: riseprojects
+    singular: riseproject
+    shortNames:
+      - rp
+  scope: Cluster
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      schema:
+        openAPIV3Schema:
+          type: object
+          properties:
+            spec:
+              type: object
+              description: "Empty spec — the database is the source of truth."
+            status:
+              type: object
+              properties:
+                lastSyncTime:
+                  type: string
+      subresources:
+        status: {}

@@ -40,3 +40,15 @@ pub fn deployment_routes() -> Router<AppState> {
             get(super::handlers::stream_deployment_logs),
         )
 }
+
+/// Metacontroller webhook routes (no authentication required).
+/// These are called by Metacontroller within the cluster.
+#[cfg(feature = "backend")]
+pub fn metacontroller_routes() -> Router<AppState> {
+    Router::new()
+        .route("/metacontroller/sync", post(super::webhook::handle_sync))
+        .route(
+            "/metacontroller/finalize",
+            post(super::webhook::handle_finalize),
+        )
+}

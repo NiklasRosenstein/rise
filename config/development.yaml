@@ -39,8 +39,6 @@ auth:
       - "admin@example.com"
       - "dev@example.com"
 
-controller: {}
-
 registry:
   type: "oci-client-auth"
   registry_url: "rise-registry:5000" # Internal URL for deployment controllers

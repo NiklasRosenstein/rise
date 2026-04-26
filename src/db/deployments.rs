@@ -363,6 +363,7 @@ pub async fn mark_failed(pool: &PgPool, id: Uuid, error_message: &str) -> Result
 /// Find deployments in non-terminal states for reconciliation
 /// Excludes terminal states using is_terminal() PostgreSQL function
 #[cfg(feature = "backend")]
+#[allow(dead_code)]
 pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(
         Deployment,
@@ -395,6 +396,7 @@ pub async fn find_non_terminal(pool: &PgPool, limit: i64) -> Result<Vec<Deployme
 
 /// Find all deployments with a specific status
 #[cfg(feature = "backend")]
+#[allow(dead_code)]
 pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<Vec<Deployment>> {
     let status_str = status.to_string();
 
@@ -428,6 +430,7 @@ pub async fn find_by_status(pool: &PgPool, status: DeploymentStatus) -> Result<V
 
 /// Update controller metadata
 #[cfg(feature = "backend")]
+#[allow(dead_code)]
 pub async fn update_controller_metadata(
     pool: &PgPool,
     id: Uuid,
@@ -787,6 +790,7 @@ pub async fn clear_needs_reconcile(pool: &PgPool, id: Uuid) -> Result<()> {
 /// Find deployments that need reconciliation
 ///
 /// Returns deployments in Healthy or Unhealthy states that have needs_reconcile=TRUE
+#[allow(dead_code)]
 pub async fn find_needing_reconcile(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(
         Deployment,
@@ -973,6 +977,7 @@ pub async fn find_last_for_project_and_group(
 
 /// Find expired deployments that need cleanup
 #[cfg(feature = "backend")]
+#[allow(dead_code)]
 pub async fn find_expired(pool: &PgPool, limit: i64) -> Result<Vec<Deployment>> {
     let deployments = sqlx::query_as!(
         Deployment,
@@ -1231,6 +1236,7 @@ pub async fn get_active_deployments_for_project(
 /// Find deployments stuck in pre-Pushed states (Pending, Building, Pushing)
 /// that were created before the given threshold timestamp
 #[cfg(feature = "backend")]
+#[allow(dead_code)]
 pub async fn find_stuck_pre_pushed_before(
     pool: &PgPool,
     threshold: DateTime<Utc>,

@@ -8,76 +8,27 @@ metadata:
     description: |
       ClusterRole for Rise backend when Kubernetes deployment is enabled.
 
-      SECURITY NOTE: This grants cluster-wide permissions to manage namespaces and
-      deploy applications. Kubernetes RBAC does not support namespace wildcard patterns.
-
-      To limit scope:
-      1. Configure namespace_format with a consistent prefix (e.g., "rise-{project_name}")
-      2. Use admission controllers (OPA/Gatekeeper) to enforce namespace naming policies
-      3. Monitor namespace creation via audit logs
-      4. Consider network policies to isolate Rise-managed namespaces
+      With Metacontroller, Rise only needs full permissions for RiseProject CRDs.
+      Most resource management (namespaces, deployments, services, etc.) is handled
+      by Metacontroller. Rise needs read-only access to pods for health checks and
+      log streaming.
 rules:
-# Namespace management
-- apiGroups: [""]
-  resources: ["namespaces"]
+# RiseProject CRD management (create/delete/patch for lifecycle management)
+- apiGroups: ["rise.dev"]
+  resources: ["riseprojects"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
-# Deployment management (creates and manages application workloads)
-- apiGroups: ["apps"]
-  resources: ["deployments"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-# ReplicaSet management (Deployments create ReplicaSets internally; kept for visibility)
-- apiGroups: ["apps"]
-  resources: ["replicasets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-# Service management
-- apiGroups: [""]
-  resources: ["services"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-# Endpoints management (for ClusterIP services pointing to IP addresses)
-- apiGroups: [""]
-  resources: ["endpoints"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-# Ingress management
-- apiGroups: ["networking.k8s.io"]
-  resources: ["ingresses"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-# NetworkPolicy management (for network isolation)
-- apiGroups: ["networking.k8s.io"]
-  resources: ["networkpolicies"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-# ConfigMap management (for application configs)
-- apiGroups: [""]
-  resources: ["configmaps"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-# Secret management (for application secrets)
-- apiGroups: [""]
-  resources: ["secrets"]
-  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
-
-# ServiceAccount management (per-environment workload identity)
-- apiGroups: [""]
-  resources: ["serviceaccounts"]
-  verbs: ["get", "list", "create", "update", "patch", "delete"]
-
-# Pod management (for status checking and logs)
+# Pod read access (for health checks in sync webhook and log streaming)
 - apiGroups: [""]
   resources: ["pods"]
   verbs: ["get", "list", "watch"]
 
-# Pod logs (for debugging)
+# Pod logs (for log streaming endpoint)
 - apiGroups: [""]
   resources: ["pods/log"]
   verbs: ["get"]
 
-# Events (for monitoring and debugging)
+# Events (for monitoring pod errors in sync webhook)
 - apiGroups: [""]
   resources: ["events"]
   verbs: ["get", "list", "watch"]

@@ -1,6 +1,12 @@
 pub mod controller;
+#[cfg(feature = "backend")]
+pub mod crd;
 pub mod handlers;
 pub mod models;
+#[cfg(feature = "backend")]
+pub mod resource_builder;
 pub mod routes;
 pub mod state_machine;
 pub mod utils;
+#[cfg(feature = "backend")]
+pub mod webhook;

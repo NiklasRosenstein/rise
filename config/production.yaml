@@ -27,8 +27,6 @@ auth:
   # active_sync_source: Entra
   # active_sync_interval_secs: 300
 
-controller: {}
-
 registry:
   type: "ecr"
   region: "${AWS_REGION:-us-east-1}"

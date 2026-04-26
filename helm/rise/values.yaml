@@ -90,6 +90,16 @@ tolerations: []
 
 affinity: {}
 
+# Metacontroller integration
+# Requires Metacontroller to be installed in the cluster.
+# See: https://metacontroller.github.io/metacontroller/
+metacontroller:
+  enabled: false
+  # Resync interval in seconds (default: 5)
+  resyncPeriodSeconds: 5
+  # Override the webhook base URL (defaults to the Rise service URL within the cluster)
+  # webhookBaseUrl: "http://rise-backend.rise-system.svc:3000"
+
 # Rise backend configuration overrides
 # Converted to YAML and mounted as /etc/rise/local.yaml
 # The backend supports both TOML and YAML - this chart outputs YAML by default

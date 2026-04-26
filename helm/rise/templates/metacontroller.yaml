@@ -1,0 +1,55 @@
+{{- if .Values.metacontroller.enabled }}
+{{- $baseUrl := .Values.metacontroller.webhookBaseUrl | default (printf "http://%s.%s.svc:%s" (include "rise.fullname" .) .Release.Namespace (toString (.Values.service.port | default 3000))) }}
+apiVersion: metacontroller.k8s.io/v1alpha1
+kind: CompositeController
+metadata:
+  name: rise-project-controller
+  labels:
+    {{- include "rise.labels" . | nindent 4 }}
+spec:
+  generateSelector: true
+  resyncPeriodSeconds: {{ .Values.metacontroller.resyncPeriodSeconds | default 5 }}
+  parentResource:
+    apiVersion: rise.dev/v1alpha1
+    resource: riseprojects
+  childResources:
+    - apiVersion: v1
+      resource: namespaces
+      updateStrategy:
+        method: InPlace
+    - apiVersion: v1
+      resource: secrets
+      updateStrategy:
+        method: InPlace
+    - apiVersion: v1
+      resource: serviceaccounts
+      updateStrategy:
+        method: InPlace
+    - apiVersion: apps/v1
+      resource: deployments
+      updateStrategy:
+        method: InPlace
+    - apiVersion: v1
+      resource: services
+      updateStrategy:
+        method: InPlace
+    - apiVersion: v1
+      resource: endpoints
+      updateStrategy:
+        method: InPlace
+    - apiVersion: networking.k8s.io/v1
+      resource: ingresses
+      updateStrategy:
+        method: InPlace
+    - apiVersion: networking.k8s.io/v1
+      resource: networkpolicies
+      updateStrategy:
+        method: InPlace
+  hooks:
+    sync:
+      webhook:
+        url: {{ $baseUrl }}/api/v1/metacontroller/sync
+    finalize:
+      webhook:
+        url: {{ $baseUrl }}/api/v1/metacontroller/finalize
+{{- end }}

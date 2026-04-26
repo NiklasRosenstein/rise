@@ -24,8 +24,6 @@ use anyhow::Result;
 use axum::{extract::Request, middleware as axum_middleware, response::Response, Router};
 use state::{AppState, ControllerState};
 use std::sync::Arc;
-#[cfg(feature = "backend")]
-use std::time::Duration;
 use tower::ServiceBuilder;
 use tower_http::{classify::ServerErrorsFailureClass, trace::TraceLayer};
 use tracing::{info, Span};
@@ -42,35 +40,6 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
 
     // Spawn enabled controllers as background tasks
     let mut controller_handles = vec![];
-
-    // Start Kubernetes deployment controller
-    info!("Starting Kubernetes deployment controller");
-
-    let settings_clone = settings.clone();
-    let controller_state_clone = controller_state.clone();
-    let registry_provider = state.registry_provider.clone();
-    let handle = tokio::spawn(async move {
-        #[cfg(feature = "backend")]
-        {
-            if let Err(e) = run_kubernetes_controller_loop(
-                controller_state_clone,
-                registry_provider,
-                settings_clone,
-            )
-            .await
-            {
-                tracing::error!("Deployment controller error: {:#}", e);
-            }
-        }
-        #[cfg(not(feature = "backend"))]
-        {
-            tracing::error!(
-                "Kubernetes deployment controller is required but the 'backend' feature is not enabled. \
-                 Please rebuild with --features backend"
-            );
-        }
-    });
-    controller_handles.push(handle);
 
     // Start project controller (always enabled)
     info!("Starting project controller");
@@ -109,10 +78,16 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     }
 
     // Public routes (no authentication)
-    let public_routes = Router::new()
+    let mut public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
         .route("/version", axum::routing::get(version_info))
         .merge(auth::routes::public_routes());
+
+    // Metacontroller webhook routes (called by Metacontroller within cluster, no auth)
+    #[cfg(feature = "backend")]
+    {
+        public_routes = public_routes.merge(deployment::routes::metacontroller_routes());
+    }
 
     // Auth-only routes (require authentication but NOT platform access)
     let auth_only_routes = Router::new()
@@ -315,191 +290,6 @@ async fn run_ecr_controller_loop(
     // Wait for shutdown signal
     shutdown_signal().await;
     info!("ECR controller shutdown complete");
-    Ok(())
-}
-
-/// Run the Kubernetes deployment controller loop (for embedding in server process)
-#[cfg(feature = "backend")]
-async fn run_kubernetes_controller_loop(
-    controller_state: ControllerState,
-    registry_provider: Arc<dyn crate::server::registry::RegistryProvider>,
-    settings: settings::Settings,
-) -> Result<()> {
-    // Install default CryptoProvider for rustls (required for kube-rs HTTPS connections)
-    rustls::crypto::ring::default_provider()
-        .install_default()
-        .ok();
-
-    // Extract Kubernetes controller settings
-    let (
-        kubeconfig,
-        production_ingress_url_template,
-        staging_ingress_url_template,
-        environment_ingress_url_template,
-        ingress_port,
-        ingress_schema,
-        auth_backend_url,
-        auth_signin_url,
-        _namespace_format,
-        namespace_labels,
-        namespace_annotations,
-        ingress_annotations,
-        ingress_tls_secret_name,
-        custom_domain_tls_mode,
-        custom_domain_ingress_annotations,
-        node_selector,
-        image_pull_secret_name,
-        access_classes,
-        host_aliases,
-        extra_service_token_audiences,
-        use_default_service_account_for_production,
-        network_policy,
-        pod_security_enabled,
-        pod_resources,
-        health_probes,
-    ) = match settings.deployment_controller.clone() {
-        Some(settings::DeploymentControllerSettings::Kubernetes {
-            kubeconfig,
-            production_ingress_url_template,
-            staging_ingress_url_template,
-            environment_ingress_url_template,
-            ingress_port,
-            ingress_schema,
-            auth_backend_url,
-            auth_signin_url,
-            namespace_format,
-            namespace_labels,
-            namespace_annotations,
-            ingress_annotations,
-            ingress_tls_secret_name,
-            custom_domain_tls_mode,
-            custom_domain_ingress_annotations,
-            node_selector,
-            image_pull_secret_name,
-            access_classes,
-            host_aliases,
-            extra_service_token_audiences,
-            use_default_service_account_for_production,
-            network_policy,
-            pod_security_enabled,
-            pod_resources,
-            health_probes,
-        }) => (
-            kubeconfig,
-            production_ingress_url_template,
-            staging_ingress_url_template,
-            environment_ingress_url_template,
-            ingress_port,
-            ingress_schema,
-            auth_backend_url,
-            auth_signin_url,
-            namespace_format,
-            namespace_labels,
-            namespace_annotations,
-            ingress_annotations,
-            ingress_tls_secret_name,
-            custom_domain_tls_mode,
-            custom_domain_ingress_annotations,
-            node_selector,
-            image_pull_secret_name,
-            access_classes,
-            host_aliases,
-            extra_service_token_audiences,
-            use_default_service_account_for_production,
-            network_policy,
-            pod_security_enabled,
-            pod_resources,
-            health_probes,
-        ),
-        None => {
-            anyhow::bail!("Deployment controller not configured. Please add deployment_controller configuration with type: kubernetes")
-        }
-    };
-
-    // Use components passed from main server (no initialization needed)
-
-    // Create kube client
-    let kube_config = if kubeconfig.is_some() {
-        // Use explicit kubeconfig if provided
-        kube::Config::from_kubeconfig(&kube::config::KubeConfigOptions {
-            context: None,
-            cluster: None,
-            user: None,
-        })
-        .await?
-    } else {
-        kube::Config::infer().await? // In-cluster or ~/.kube/config
-    };
-    let kube_client = kube::Client::try_from(kube_config)?;
-
-    // Extract backend_address from auth_backend_url
-    let parsed_backend_address = settings::BackendAddress::from_url(&auth_backend_url)?;
-
-    // Filter out null access classes (used to remove inherited entries)
-    let access_classes: std::collections::HashMap<_, _> = access_classes
-        .into_iter()
-        .filter_map(|(k, v)| v.map(|ac| (k, ac)))
-        .collect();
-
-    let backend = Arc::new(deployment::controller::KubernetesController::new(
-        controller_state.clone(),
-        kube_client,
-        deployment::controller::KubernetesControllerConfig {
-            production_ingress_url_template,
-            staging_ingress_url_template,
-            environment_ingress_url_template,
-            ingress_port,
-            ingress_schema,
-            registry_provider,
-            auth_backend_url,
-            auth_signin_url,
-            backend_address: Some(parsed_backend_address),
-            namespace_labels,
-            namespace_annotations,
-            ingress_annotations,
-            ingress_tls_secret_name,
-            custom_domain_tls_mode,
-            custom_domain_ingress_annotations,
-            node_selector,
-            image_pull_secret_name,
-            access_classes,
-            host_aliases,
-            extra_service_token_audiences,
-            use_default_service_account_for_production,
-            network_policy,
-            pod_security_enabled,
-            pod_resources,
-            health_probes,
-        },
-    )?);
-
-    // Test Kubernetes API connection before proceeding
-    backend.test_connection().await?;
-
-    let controller = Arc::new(deployment::controller::DeploymentController::new(
-        Arc::new(controller_state),
-        backend.clone(),
-        Duration::from_secs(settings.controller.reconcile_interval_secs),
-        Duration::from_secs(settings.controller.health_check_interval_secs),
-        Duration::from_secs(settings.controller.termination_interval_secs),
-        Duration::from_secs(settings.controller.cancellation_interval_secs),
-        Duration::from_secs(settings.controller.expiration_interval_secs),
-    )?);
-    controller.start();
-    info!("Kubernetes deployment controller started");
-
-    // Start Kubernetes-specific background loops
-    Arc::clone(&backend).start(); // Namespace cleanup loop
-    info!("Kubernetes namespace cleanup loop started");
-
-    backend.start_secret_refresh_loop(Duration::from_secs(
-        settings.controller.secret_refresh_interval_secs,
-    ));
-    info!("Kubernetes secret refresh loop started");
-
-    // Wait for shutdown signal
-    shutdown_signal().await;
-    info!("Kubernetes deployment controller shutdown complete");
     Ok(())
 }
 
