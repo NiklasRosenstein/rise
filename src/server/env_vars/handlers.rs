@@ -312,6 +312,19 @@ pub async fn move_project_env_var(
         None
     };
 
+    // Check source env var exists
+    let existing_source =
+        db_env_vars::get_project_env_var(&state.db_pool, project.id, &key, from_env_id)
+            .await
+            .internal_err("Failed to check source environment")?;
+    if existing_source.is_none() {
+        let source_label = payload.from_environment.as_deref().unwrap_or("global");
+        return Err(ServerError::not_found(format!(
+            "Environment variable '{}' not found in environment '{}'",
+            key, source_label
+        )));
+    }
+
     // Check for conflict at the target environment
     let existing_at_target =
         db_env_vars::get_project_env_var(&state.db_pool, project.id, &key, to_env_id)
