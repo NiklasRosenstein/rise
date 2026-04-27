@@ -62,6 +62,11 @@ rules:
   resources: ["secrets"]
   verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
 
+# ServiceAccount management (per-environment workload identity)
+- apiGroups: [""]
+  resources: ["serviceaccounts"]
+  verbs: ["get", "list", "create", "update", "patch", "delete"]
+
 # Pod management (for status checking and logs)
 - apiGroups: [""]
   resources: ["pods"]

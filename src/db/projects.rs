@@ -324,6 +324,19 @@ pub async fn delete(pool: &PgPool, id: Uuid) -> Result<()> {
     Ok(())
 }
 
+/// Count projects owned by a team
+pub async fn count_owned_by_team(pool: &PgPool, team_id: Uuid) -> Result<i64> {
+    let result = sqlx::query!(
+        r#"SELECT COUNT(*) as "count!" FROM projects WHERE owner_team_id = $1"#,
+        team_id
+    )
+    .fetch_one(pool)
+    .await
+    .context("Failed to count projects owned by team")?;
+
+    Ok(result.count)
+}
+
 /// Check if user can access project (directly or via team)
 pub async fn user_can_access(pool: &PgPool, project_id: Uuid, user_id: Uuid) -> Result<bool> {
     let result = sqlx::query!(

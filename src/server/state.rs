@@ -61,6 +61,8 @@ pub struct AppState {
     >,
     /// Rate limiter for encrypt endpoint (key: "encrypt:{user_id}", value: request count)
     pub encrypt_rate_limiter: Arc<moka::future::Cache<String, u32>>,
+    /// Rate limiter for OAuth endpoints (token, authorize, callback)
+    pub oauth_rate_limiter: Arc<crate::server::rate_limit::OAuthRateLimiter>,
     pub access_classes:
         Arc<std::collections::HashMap<String, crate::server::settings::AccessClass>>,
     /// Production ingress URL template (for custom domain validation)
@@ -185,6 +187,7 @@ async fn init_kubernetes_backend(
         access_classes,
         host_aliases,
         extra_service_token_audiences,
+        use_default_service_account_for_production,
         network_policy,
         pod_security_enabled,
         pod_resources,
@@ -245,6 +248,8 @@ async fn init_kubernetes_backend(
                 access_classes: filtered_access_classes,
                 host_aliases: host_aliases.clone(),
                 extra_service_token_audiences: extra_service_token_audiences.clone(),
+                use_default_service_account_for_production:
+                    *use_default_service_account_for_production,
                 network_policy: network_policy.clone(),
                 pod_security_enabled: *pod_security_enabled,
                 pod_resources: pod_resources.clone(),
@@ -730,6 +735,10 @@ impl AppState {
         );
         tracing::info!("Initialized encrypt endpoint rate limiter (100 req/hour per user)");
 
+        // Initialize OAuth endpoint rate limiter
+        let oauth_rate_limiter = Arc::new(crate::server::rate_limit::OAuthRateLimiter::new());
+        tracing::info!("Initialized OAuth endpoint rate limiter (10 req/5min per IP, 5 req/5min per session, 1000 req/min global)");
+
         // Extract access_classes from deployment controller settings
         // Filter out null values (used to remove inherited access classes)
         let (access_classes, production_ingress_url_template, staging_ingress_url_template) =
@@ -772,6 +781,7 @@ impl AppState {
             oauth_state_store,
             oauth_code_store,
             encrypt_rate_limiter,
+            oauth_rate_limiter,
             access_classes,
             production_ingress_url_template,
             staging_ingress_url_template,

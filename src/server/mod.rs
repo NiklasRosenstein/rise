@@ -12,6 +12,7 @@ pub mod frontend;
 pub mod middleware;
 pub mod oci;
 pub mod project;
+pub mod rate_limit;
 pub mod registry;
 pub mod settings;
 pub mod ssrf;
@@ -351,6 +352,7 @@ async fn run_kubernetes_controller_loop(
         access_classes,
         host_aliases,
         extra_service_token_audiences,
+        use_default_service_account_for_production,
         network_policy,
         pod_security_enabled,
         pod_resources,
@@ -377,6 +379,7 @@ async fn run_kubernetes_controller_loop(
             access_classes,
             host_aliases,
             extra_service_token_audiences,
+            use_default_service_account_for_production,
             network_policy,
             pod_security_enabled,
             pod_resources,
@@ -402,6 +405,7 @@ async fn run_kubernetes_controller_loop(
             access_classes,
             host_aliases,
             extra_service_token_audiences,
+            use_default_service_account_for_production,
             network_policy,
             pod_security_enabled,
             pod_resources,
@@ -461,6 +465,7 @@ async fn run_kubernetes_controller_loop(
             access_classes,
             host_aliases,
             extra_service_token_audiences,
+            use_default_service_account_for_production,
             network_policy,
             pod_security_enabled,
             pod_resources,

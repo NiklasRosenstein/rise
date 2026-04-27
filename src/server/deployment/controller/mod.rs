@@ -151,6 +151,22 @@ pub trait DeploymentBackend: Send + Sync {
         deployment_group: &str,
     ) -> anyhow::Result<DeploymentUrls>;
 
+    /// Clean up resources associated with a deleted environment
+    ///
+    /// Called when an environment is deleted via the API. Backends that create
+    /// per-environment resources (e.g. Kubernetes ServiceAccounts) should override
+    /// this to clean them up.
+    ///
+    /// The default implementation is a no-op.
+    async fn cleanup_environment(
+        &self,
+        project: &Project,
+        environment_name: &str,
+    ) -> anyhow::Result<()> {
+        let _ = (project, environment_name);
+        Ok(())
+    }
+
     /// Stream logs from a deployment
     ///
     /// Returns a stream of log bytes from the deployment's runtime (pod/container).

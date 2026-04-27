@@ -4,7 +4,7 @@ use super::models::{
     UpdateTeamResponse, UserInfo,
 };
 use crate::db::models::TeamRole;
-use crate::db::{service_accounts, teams as db_teams};
+use crate::db::{projects as db_projects, service_accounts, teams as db_teams};
 use crate::server::auth::context::AuthContext;
 use crate::server::error::{ServerError, ServerErrorExt};
 use crate::server::state::AppState;
@@ -337,6 +337,17 @@ pub async fn delete_team(
         return Err(ServerError::forbidden(
             "This team is managed by your Identity Provider. Only administrators can delete IdP-managed teams.",
         ));
+    }
+
+    // Check if team owns any projects
+    let owned_project_count = db_projects::count_owned_by_team(&state.db_pool, team.id)
+        .await
+        .internal_err("Failed to check projects owned by team")?;
+    if owned_project_count > 0 {
+        return Err(ServerError::conflict(format!(
+            "Team '{}' owns {} project(s). Reassign or delete those projects before deleting the team.",
+            team.name, owned_project_count
+        )));
     }
 
     db_teams::delete(&state.db_pool, team.id)
