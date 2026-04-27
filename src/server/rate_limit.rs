@@ -4,6 +4,7 @@ use axum::{
 };
 use moka::future::Cache;
 use sha2::{Digest, Sha256};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -12,9 +13,9 @@ use std::time::Duration;
 /// - Per-session: 5 requests per 5 minutes (keyed by `rise_jwt` cookie fingerprint)
 /// - Global: 1000 requests per minute
 pub struct OAuthRateLimiter {
-    ip_limiter: Arc<Cache<String, u32>>,
-    session_limiter: Arc<Cache<String, u32>>,
-    global_limiter: Arc<Cache<String, u32>>,
+    ip_limiter: Arc<Cache<String, Arc<AtomicU32>>>,
+    session_limiter: Arc<Cache<String, Arc<AtomicU32>>>,
+    global_limiter: Arc<Cache<String, Arc<AtomicU32>>>,
 }
 
 impl OAuthRateLimiter {
@@ -56,59 +57,12 @@ impl OAuthRateLimiter {
         }
     }
 
-    /// Check all applicable rate limits without incrementing counters.
+    /// Atomically increment counters and check limits.
     ///
-    /// Returns `Ok(())` if within all limits, `Err(retry_after_secs)` if any limit is exceeded.
-    pub async fn check(&self, ip: &str, session_key: Option<&str>) -> Result<(), u64> {
-        // Check global limit first
-        let global_count = self.global_limiter.get("global").await.unwrap_or(0);
-        if global_count >= Self::GLOBAL_MAX {
-            return Err(Self::GLOBAL_WINDOW_SECS);
-        }
-
-        // Check per-IP limit
-        let ip_count = self.ip_limiter.get(ip).await.unwrap_or(0);
-        if ip_count >= Self::IP_MAX {
-            return Err(Self::IP_WINDOW_SECS);
-        }
-
-        // Check per-session limit if a session key is present
-        if let Some(key) = session_key {
-            let session_count = self.session_limiter.get(key).await.unwrap_or(0);
-            if session_count >= Self::SESSION_MAX {
-                return Err(Self::SESSION_WINDOW_SECS);
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Increment all applicable counters.
-    pub async fn increment(&self, ip: &str, session_key: Option<&str>) {
-        let global_count = self.global_limiter.get("global").await.unwrap_or(0);
-        self.global_limiter
-            .insert("global".to_string(), global_count + 1)
-            .await;
-
-        let ip_count = self.ip_limiter.get(ip).await.unwrap_or(0);
-        self.ip_limiter.insert(ip.to_string(), ip_count + 1).await;
-
-        if let Some(key) = session_key {
-            let session_count = self.session_limiter.get(key).await.unwrap_or(0);
-            self.session_limiter
-                .insert(key.to_string(), session_count + 1)
-                .await;
-        }
-    }
-
-    /// Increment counters then check limits. All attempts are counted even if they exceed
-    /// the limit, preventing the counter from resetting during an attack.
-    ///
-    /// Note: The increment and check are two separate cache operations and are not atomic.
-    /// Under high concurrency a few extra requests may slip through just as a window expires,
-    /// but this is acceptable for in-memory rate limiting where strict atomicity would require
-    /// a distributed lock. The increment-first order ensures that even simultaneous requests
-    /// are counted, making it harder to bypass the limit by parallelising requests.
+    /// Uses `AtomicU32` counters stored in the cache so concurrent increments are never lost.
+    /// The cache's `time_to_live` acts as a fixed window: a counter entry is created (with TTL)
+    /// on first access and expires naturally, resetting the count. Subsequent increments within
+    /// the window use the existing entry without refreshing its TTL.
     ///
     /// Returns `Ok(())` if within limits after incrementing, `Err(retry_after_secs)` if exceeded.
     pub async fn increment_and_check(
@@ -116,8 +70,45 @@ impl OAuthRateLimiter {
         ip: &str,
         session_key: Option<&str>,
     ) -> Result<(), u64> {
-        self.increment(ip, session_key).await;
-        self.check(ip, session_key).await
+        // Global
+        let global_counter = self
+            .global_limiter
+            .entry_by_ref("global")
+            .or_insert_with(std::future::ready(Arc::new(AtomicU32::new(0))))
+            .await
+            .into_value();
+        let global_count = global_counter.fetch_add(1, Ordering::Relaxed) + 1;
+        if global_count > Self::GLOBAL_MAX {
+            return Err(Self::GLOBAL_WINDOW_SECS);
+        }
+
+        // Per-IP
+        let ip_counter = self
+            .ip_limiter
+            .entry_by_ref(ip)
+            .or_insert_with(std::future::ready(Arc::new(AtomicU32::new(0))))
+            .await
+            .into_value();
+        let ip_count = ip_counter.fetch_add(1, Ordering::Relaxed) + 1;
+        if ip_count > Self::IP_MAX {
+            return Err(Self::IP_WINDOW_SECS);
+        }
+
+        // Per-session
+        if let Some(key) = session_key {
+            let session_counter = self
+                .session_limiter
+                .entry_by_ref(key)
+                .or_insert_with(std::future::ready(Arc::new(AtomicU32::new(0))))
+                .await
+                .into_value();
+            let session_count = session_counter.fetch_add(1, Ordering::Relaxed) + 1;
+            if session_count > Self::SESSION_MAX {
+                return Err(Self::SESSION_WINDOW_SECS);
+            }
+        }
+
+        Ok(())
     }
 }
 

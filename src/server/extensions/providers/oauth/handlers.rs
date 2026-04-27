@@ -1075,6 +1075,12 @@ pub async fn token_endpoint(
         project_name, extension_name
     );
 
+    // Extract Origin header early so it's available for CORS on all response paths
+    let origin = headers
+        .get(header::ORIGIN)
+        .and_then(|h| h.to_str().ok())
+        .map(|s| s.to_string());
+
     // Rate limiting: count all attempts (including invalid ones) to thwart brute-force
     let client_ip = crate::server::rate_limit::extract_client_ip(&headers);
     let session_key = crate::server::rate_limit::extract_session_key(&headers);
@@ -1089,14 +1095,25 @@ pub async fn token_endpoint(
             extension = %extension_name,
             "OAuth token endpoint rate limited"
         );
-        return crate::server::rate_limit::rate_limit_response(retry_after);
+        // Return a JSON error with CORS headers, consistent with other error responses
+        let mut response = (
+            StatusCode::TOO_MANY_REQUESTS,
+            Json(OAuth2ErrorResponse {
+                error: "rate_limit_exceeded".to_string(),
+                error_description: Some("Rate limit exceeded. Please try again later.".to_string()),
+            }),
+        )
+            .into_response();
+        if let Ok(value) = HeaderValue::from_str(&retry_after.to_string()) {
+            response
+                .headers_mut()
+                .insert(axum::http::header::RETRY_AFTER, value);
+        }
+        if let Some(ref origin_str) = origin {
+            response.headers_mut().extend(cors_headers(origin_str));
+        }
+        return response;
     }
-
-    // Extract Origin header for CORS validation (will be validated after we get the project)
-    let origin = headers
-        .get(header::ORIGIN)
-        .and_then(|h| h.to_str().ok())
-        .map(|s| s.to_string());
 
     // Inner function to handle the actual token logic
     let result = token_endpoint_inner(&state, &project_name, &extension_name, &headers, body).await;
