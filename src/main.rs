@@ -95,11 +95,11 @@ struct DeployArgs {
     #[arg(long)]
     env_file: Option<String>,
     /// URL to the CI pipeline/job that created this deployment.
-    /// Auto-detected from CI environment variables (CI_JOB_URL, GITHUB_RUN_ID) if not provided.
+    /// Auto-detected from: CI_JOB_URL (GitLab), GITHUB_SERVER_URL + GITHUB_REPOSITORY + GITHUB_RUN_ID (GitHub Actions).
     #[arg(long)]
     job_url: Option<String>,
     /// URL to the pull request/merge request associated with this deployment.
-    /// Auto-detected from CI environment variables if not provided.
+    /// Auto-detected from: CI_MERGE_REQUEST_URL (GitLab), GITHUB_SERVER_URL + GITHUB_REPOSITORY + GITHUB_REF + GITHUB_EVENT_NAME (GitHub Actions).
     #[arg(long)]
     pull_request_url: Option<String>,
     #[command(flatten)]

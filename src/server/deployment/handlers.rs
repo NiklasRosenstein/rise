@@ -582,6 +582,16 @@ pub async fn create_deployment(
         }
     }
 
+    // Validate URL fields if provided
+    if let Some(ref url) = payload.job_url {
+        crate::server::project::handlers::validate_http_url(url)
+            .map_err(|e| ServerError::bad_request(format!("job_url: {e}")))?;
+    }
+    if let Some(ref url) = payload.pull_request_url {
+        crate::server::project::handlers::validate_http_url(url)
+            .map_err(|e| ServerError::bad_request(format!("pull_request_url: {e}")))?;
+    }
+
     validate_env_overrides(&payload.env_overrides)?;
 
     // Parse expiration duration if provided

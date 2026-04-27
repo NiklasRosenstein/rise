@@ -16,6 +16,19 @@ use axum::{
 };
 use uuid::Uuid;
 
+/// Validate that a URL uses only http or https schemes.
+/// Returns an error message if the URL is invalid or uses a disallowed scheme.
+pub fn validate_http_url(url: &str) -> Result<(), String> {
+    let parsed = url::Url::parse(url.trim()).map_err(|e| format!("Invalid URL: {e}"))?;
+    match parsed.scheme() {
+        "http" | "https" => Ok(()),
+        scheme => Err(format!(
+            "URL scheme '{}' is not allowed; only http and https are permitted",
+            scheme
+        )),
+    }
+}
+
 /// List available access classes for the deployment controller
 pub async fn list_access_classes(
     State(state): State<AppState>,
@@ -104,6 +117,11 @@ pub async fn create_project(
             "Invalid access class '{}'. Available: {}",
             payload.access_class, available
         )));
+    }
+
+    // Validate source_url if provided
+    if let Some(ref url) = payload.source_url {
+        validate_http_url(url).map_err(|e| ServerError::bad_request(format!("source_url: {e}")))?;
     }
 
     // Validate owner - exactly one of owner_user or owner_team must be set
@@ -634,9 +652,13 @@ pub async fn update_project(
     }
 
     // Update source_url if provided (Some(None) clears, Some(Some(url)) sets)
-    if let Some(source_url) = payload.source_url {
+    if let Some(ref source_url) = payload.source_url {
+        if let Some(ref url) = source_url {
+            validate_http_url(url)
+                .map_err(|e| ServerError::bad_request(format!("source_url: {e}")))?;
+        }
         updated_project =
-            projects::update_source_url(&state.db_pool, updated_project.id, source_url)
+            projects::update_source_url(&state.db_pool, updated_project.id, source_url.clone())
                 .await
                 .internal_err("Failed to update project source URL")?;
     }

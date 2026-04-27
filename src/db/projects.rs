@@ -781,6 +781,53 @@ mod tests {
         );
     }
 
+    /// Test setting and clearing source_url on a project
+    #[sqlx::test]
+    async fn test_update_source_url(pool: PgPool) {
+        let user = crate::db::users::create(&pool, "test@example.com")
+            .await
+            .expect("Failed to create test user");
+
+        let project = create(
+            &pool,
+            "source-url-test",
+            ProjectStatus::Stopped,
+            "default".to_string(),
+            Some(user.id),
+            None,
+            None,
+        )
+        .await
+        .expect("Failed to create test project");
+
+        assert!(
+            project.source_url.is_none(),
+            "source_url should be None initially"
+        );
+
+        // Set source_url
+        let project = update_source_url(
+            &pool,
+            project.id,
+            Some("https://github.com/example/repo".to_string()),
+        )
+        .await
+        .expect("Failed to set source_url");
+
+        assert_eq!(
+            project.source_url.as_deref(),
+            Some("https://github.com/example/repo"),
+            "source_url should be set"
+        );
+
+        // Clear source_url
+        let project = update_source_url(&pool, project.id, None)
+            .await
+            .expect("Failed to clear source_url");
+
+        assert!(project.source_url.is_none(), "source_url should be cleared");
+    }
+
     /// Test that project status is Stopped when no active deployment but has failed deployment
     #[sqlx::test]
     async fn test_project_status_with_only_failed_deployment(pool: PgPool) {

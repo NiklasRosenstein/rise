@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
-import { copyToClipboard, formatISO8601, formatRelativeTimeRounded } from '../lib/utils';
+import { copyToClipboard, formatISO8601, formatRelativeTimeRounded, isSafeUrl } from '../lib/utils';
 import { useToast } from '../components/toast';
 import { AutocompleteInput, Button, ConfirmDialog, FormField, Modal, ModalActions, ModalSection, SegmentedRadioGroup } from '../components/ui';
 import { ProjectTable } from '../components/project-table';
@@ -612,9 +612,13 @@ export function ProjectDetail({ projectName, initialTab }) {
                     <div>
                         <span>source</span>
                         <strong className="mono-copyable-value">
-                            <a href={project.source_url} target="_blank" rel="noopener noreferrer" className="underline">
-                                {project.source_url}
-                            </a>
+                            {isSafeUrl(project.source_url) ? (
+                                <a href={project.source_url} target="_blank" rel="noopener noreferrer" className="underline">
+                                    {project.source_url}
+                                </a>
+                            ) : (
+                                <span>{project.source_url}</span>
+                            )}
                             <button
                                 type="button"
                                 className="mono-copy-button"

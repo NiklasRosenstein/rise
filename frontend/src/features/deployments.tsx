@@ -2,7 +2,7 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from 'react';
 import { api } from '../lib/api';
 import { navigate } from '../lib/navigation';
-import { copyToClipboard, formatDate, formatISO8601, formatRelativeTimeRounded, formatTimeRemaining } from '../lib/utils';
+import { copyToClipboard, formatDate, formatISO8601, formatRelativeTimeRounded, formatTimeRemaining, isSafeUrl } from '../lib/utils';
 import { useToast } from '../components/toast';
 import { Button, ConfirmDialog, ENV_COLOR_STYLES, EnvironmentColorDot, Modal, ModalActions, ModalSection, StatusBadge } from '../components/ui';
 import { MonoSortButton, MonoTable, MonoTableBody, MonoTableEmptyRow, MonoTableFrame, MonoTableHead, MonoTableRow, MonoTd, MonoTh } from '../components/table';
@@ -1595,9 +1595,13 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                     <div>
                         <span>ci_job</span>
                         <strong className="mono-copyable-value">
-                            <a href={deployment.job_url} target="_blank" rel="noopener noreferrer" className="underline">
-                                {deployment.job_url}
-                            </a>
+                            {isSafeUrl(deployment.job_url) ? (
+                                <a href={deployment.job_url} target="_blank" rel="noopener noreferrer" className="underline">
+                                    {deployment.job_url}
+                                </a>
+                            ) : (
+                                <span>{deployment.job_url}</span>
+                            )}
                             <button
                                 type="button"
                                 className="mono-copy-button"
@@ -1617,9 +1621,13 @@ export function DeploymentDetail({ projectName, deploymentId }) {
                     <div>
                         <span>pull_request</span>
                         <strong className="mono-copyable-value">
-                            <a href={deployment.pull_request_url} target="_blank" rel="noopener noreferrer" className="underline">
-                                {deployment.pull_request_url}
-                            </a>
+                            {isSafeUrl(deployment.pull_request_url) ? (
+                                <a href={deployment.pull_request_url} target="_blank" rel="noopener noreferrer" className="underline">
+                                    {deployment.pull_request_url}
+                                </a>
+                            ) : (
+                                <span>{deployment.pull_request_url}</span>
+                            )}
                             <button
                                 type="button"
                                 className="mono-copy-button"
