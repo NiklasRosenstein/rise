@@ -543,8 +543,8 @@ impl AppState {
 
                 // Reject the well-known development token in non-development environments
                 const DEV_WEBHOOK_TOKEN: &str = "dev-webhook-token-not-for-production";
-                let run_mode = std::env::var("RISE_CONFIG_RUN_MODE")
-                    .unwrap_or_else(|_| "development".into());
+                let run_mode =
+                    std::env::var("RISE_CONFIG_RUN_MODE").unwrap_or_else(|_| "development".into());
                 if metacontroller_webhook_token == DEV_WEBHOOK_TOKEN && run_mode != "development" {
                     anyhow::bail!(
                         "Refusing to start: metacontroller_webhook_token is set to the \
