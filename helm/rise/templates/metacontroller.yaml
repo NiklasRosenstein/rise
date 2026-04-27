@@ -1,5 +1,10 @@
 {{- if .Values.metacontroller.enabled }}
-{{- $baseUrl := .Values.metacontroller.webhookBaseUrl | default (printf "http://%s.%s.svc:%s" (include "rise.fullname" .) .Release.Namespace (toString (.Values.service.port | default 3000))) }}
+{{- $webhookPort := .Values.metacontroller.webhookPort | default 3001 }}
+{{- $baseUrl := .Values.metacontroller.webhookBaseUrl | default (printf "http://%s-webhook.%s.svc:%s" (include "rise.fullname" .) .Release.Namespace (toString $webhookPort)) }}
+{{- $tokenParam := "" }}
+{{- if .Values.metacontroller.webhookToken }}
+{{- $tokenParam = printf "?token=%s" .Values.metacontroller.webhookToken }}
+{{- end }}
 apiVersion: metacontroller.k8s.io/v1alpha1
 kind: CompositeController
 metadata:
@@ -8,11 +13,11 @@ metadata:
     {{- include "rise.labels" . | nindent 4 }}
 spec:
   generateSelector: true
-  ignoreStatusChanges: true
   resyncPeriodSeconds: {{ .Values.metacontroller.resyncPeriodSeconds | default 30 }}
   parentResource:
     apiVersion: rise.dev/v1alpha1
     resource: riseprojects
+    ignoreStatusChanges: true
   childResources:
     - apiVersion: v1
       resource: namespaces
@@ -49,8 +54,8 @@ spec:
   hooks:
     sync:
       webhook:
-        url: {{ $baseUrl }}/api/v1/metacontroller/sync
+        url: {{ $baseUrl }}/api/v1/metacontroller/sync{{ $tokenParam }}
     finalize:
       webhook:
-        url: {{ $baseUrl }}/api/v1/metacontroller/finalize
+        url: {{ $baseUrl }}/api/v1/metacontroller/finalize{{ $tokenParam }}
 {{- end }}

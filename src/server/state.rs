@@ -74,6 +74,12 @@ pub struct AppState {
     /// Kubernetes client for direct API calls (pod health checks, log streaming)
     #[cfg(feature = "backend")]
     pub kube_client: Option<kube::Client>,
+    /// Shared secret token for authenticating Metacontroller webhook requests
+    #[cfg(feature = "backend")]
+    pub metacontroller_webhook_token: Option<String>,
+    /// Port for the internal metacontroller webhook listener
+    #[cfg(feature = "backend")]
+    pub metacontroller_webhook_port: Option<u16>,
 }
 
 /// Initialize encryption provider from settings
@@ -446,7 +452,7 @@ impl AppState {
 
         // Initialize ResourceBuilder and kube_client for Metacontroller webhook and deployment backend
         #[cfg(feature = "backend")]
-        let (resource_builder, webhook_kube_client) = {
+        let (resource_builder, webhook_kube_client, webhook_token, webhook_port) = {
             use crate::server::deployment::resource_builder::ResourceBuilder;
             use crate::server::settings::DeploymentControllerSettings;
 
@@ -475,6 +481,8 @@ impl AppState {
                 pod_security_enabled,
                 pod_resources,
                 health_probes,
+                metacontroller_webhook_port,
+                metacontroller_webhook_token,
                 ..
             }) = &settings.deployment_controller
             {
@@ -533,10 +541,27 @@ impl AppState {
                     health_probes: health_probes.clone(),
                 };
 
+                // Reject the well-known development token in non-development environments
+                const DEV_WEBHOOK_TOKEN: &str = "dev-webhook-token-not-for-production";
+                let run_mode = std::env::var("RISE_CONFIG_RUN_MODE")
+                    .unwrap_or_else(|_| "development".into());
+                if metacontroller_webhook_token == DEV_WEBHOOK_TOKEN && run_mode != "development" {
+                    anyhow::bail!(
+                        "Refusing to start: metacontroller_webhook_token is set to the \
+                         well-known development token. Generate a secure token with: \
+                         openssl rand -base64 32"
+                    );
+                }
+
                 tracing::info!("Initialized ResourceBuilder for Metacontroller webhook");
-                (Some(Arc::new(rb)), Some(kube_client))
+                (
+                    Some(Arc::new(rb)),
+                    Some(kube_client),
+                    Some(metacontroller_webhook_token.clone()),
+                    Some(*metacontroller_webhook_port),
+                )
             } else {
-                (None, None)
+                (None, None, None, None)
             }
         };
 
@@ -806,6 +831,10 @@ impl AppState {
             resource_builder,
             #[cfg(feature = "backend")]
             kube_client: webhook_kube_client,
+            #[cfg(feature = "backend")]
+            metacontroller_webhook_token: webhook_token,
+            #[cfg(feature = "backend")]
+            metacontroller_webhook_port: webhook_port,
         })
     }
 }

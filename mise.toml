@@ -219,7 +219,7 @@ HOST_IP=$(kubectl get node $(hostname) -o jsonpath='{.metadata.annotations.k3s\\
 helm dependency build helm/rise
 helm upgrade --install rise-dev ./helm/rise \
   -f helm/rise/values-dev.yaml \
-  --set "metacontroller.webhookBaseUrl=http://${HOST_IP}:3000" \
+  --set "metacontroller.webhookBaseUrl=http://${HOST_IP}:3001" \
   --namespace rise \
   --create-namespace
 

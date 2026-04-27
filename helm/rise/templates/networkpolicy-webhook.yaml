@@ -1,0 +1,23 @@
+{{- if .Values.metacontroller.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "rise.fullname" . }}-webhook
+  labels:
+    {{- include "rise.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "rise.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: server
+  policyTypes:
+  - Ingress
+  ingress:
+  - ports:
+    - port: {{ .Values.metacontroller.webhookPort | default 3001 }}
+      protocol: TCP
+    from:
+    - namespaceSelector:
+        matchLabels:
+          kubernetes.io/metadata.name: {{ .Values.metacontroller.namespace | default "metacontroller" }}
+{{- end }}

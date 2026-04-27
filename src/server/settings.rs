@@ -240,6 +240,10 @@ pub enum CustomDomainTlsMode {
     PerDomain,
 }
 
+fn default_metacontroller_webhook_port() -> u16 {
+    3001
+}
+
 fn default_custom_domain_tls_mode() -> CustomDomainTlsMode {
     CustomDomainTlsMode::PerDomain
 }
@@ -577,6 +581,17 @@ pub enum DeploymentControllerSettings {
         /// If not set, uses defaults (HTTP probes on app port at "/" path)
         #[serde(default)]
         health_probes: Option<HealthProbeConfig>,
+
+        /// Port for the internal metacontroller webhook listener.
+        /// Webhook endpoints are served on this separate port instead of the main HTTP port.
+        /// Defaults to 3001.
+        #[serde(default = "default_metacontroller_webhook_port")]
+        metacontroller_webhook_port: u16,
+
+        /// Shared secret token for authenticating Metacontroller webhook requests.
+        /// Required when deployment controller is configured.
+        /// Generate with: openssl rand -base64 32
+        metacontroller_webhook_token: String,
     },
 }
 
@@ -1058,6 +1073,7 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
+  metacontroller_webhook_token: "test-token"
   network_policy:
     ingress:
       - from:
@@ -1142,6 +1158,7 @@ deployment_controller:
   namespace_format: "rise-{project_name}"
   auth_backend_url: "http://localhost:3000"
   auth_signin_url: "http://localhost:3000"
+  metacontroller_webhook_token: "test-token"
   extra_service_token_audiences:
     vault: "https://vault.example.com"
   network_policy:

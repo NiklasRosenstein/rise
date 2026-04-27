@@ -78,16 +78,10 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     }
 
     // Public routes (no authentication)
-    let mut public_routes = Router::new()
+    let public_routes = Router::new()
         .route("/health", axum::routing::get(health_check))
         .route("/version", axum::routing::get(version_info))
         .merge(auth::routes::public_routes());
-
-    // Metacontroller webhook routes (called by Metacontroller within cluster, no auth)
-    #[cfg(feature = "backend")]
-    {
-        public_routes = public_routes.merge(deployment::routes::metacontroller_routes());
-    }
 
     // Auth-only routes (require authentication but NOT platform access)
     let auth_only_routes = Router::new()
@@ -215,10 +209,38 @@ pub async fn run_server(settings: settings::Settings) -> Result<()> {
     info!("HTTP server listening on http://{}", addr);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
 
+    // Spawn internal webhook listener for Metacontroller (separate port, token-authenticated)
+    #[cfg(feature = "backend")]
+    let webhook_handle = if let (Some(port), Some(_token)) = (
+        state.metacontroller_webhook_port,
+        state.metacontroller_webhook_token.as_ref(),
+    ) {
+        let webhook_app = Router::new()
+            .nest("/api/v1", deployment::routes::metacontroller_routes())
+            .with_state(state.clone());
+
+        let webhook_addr = format!("{}:{}", settings.server.host, port);
+        info!("Metacontroller webhook listener on http://{}", webhook_addr);
+        let webhook_listener = tokio::net::TcpListener::bind(&webhook_addr).await?;
+
+        Some(tokio::spawn(async move {
+            axum::serve(webhook_listener, webhook_app)
+                .with_graceful_shutdown(shutdown_signal())
+                .await
+        }))
+    } else {
+        None
+    };
+
     // Graceful shutdown support
     axum::serve(listener, app)
         .with_graceful_shutdown(shutdown_signal())
         .await?;
+
+    #[cfg(feature = "backend")]
+    if let Some(handle) = webhook_handle {
+        let _ = handle.await;
+    }
 
     info!("HTTP server shutdown complete");
 

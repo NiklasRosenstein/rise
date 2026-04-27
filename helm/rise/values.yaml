@@ -96,8 +96,16 @@ metacontroller:
   enabled: true
   # Resync interval in seconds (default: 5)
   resyncPeriodSeconds: 5
-  # Override the webhook base URL (defaults to the Rise service URL within the cluster)
-  # webhookBaseUrl: "http://rise-backend.rise-system.svc:3000"
+  # Override the webhook base URL (defaults to the internal webhook service URL)
+  # webhookBaseUrl: "http://rise-webhook.rise-system.svc:3001"
+  # Port for the internal webhook listener (default: 3001)
+  # webhookPort: 3001
+  # Shared secret for webhook authentication (required for production).
+  # Generate with: openssl rand -base64 32
+  # Must match deployment_controller.metacontroller_webhook_token in backend config.
+  # webhookToken: ""
+  # Namespace where metacontroller operator runs (for NetworkPolicy)
+  # namespace: "metacontroller"
   # Install the Metacontroller operator itself as a subchart dependency.
   # Disable this if Metacontroller is already installed in the cluster.
   install: true
@@ -152,7 +160,7 @@ config:
 
   # Optional: Kubernetes deployment controller configuration
   # IMPORTANT: namespace_format should use a consistent prefix for security.
-  # Rise requires ClusterRole permissions (Kubernetes RBAC doesn't support namespace wildcards).
+  # Metacontroller manages namespaces (and other child resources) on Rise's behalf.
   # Use a consistent prefix (e.g., "rise-") and enforce it with admission controllers or policies.
   # kubernetes:
   #   kubeconfig: ""  # Optional: Path to kubeconfig (defaults to in-cluster config)

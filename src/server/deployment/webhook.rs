@@ -10,14 +10,15 @@
 
 use std::collections::HashMap;
 
-use axum::extract::State;
+use axum::extract::{Query, State};
 use axum::http::StatusCode;
-use axum::response::IntoResponse;
+use axum::response::{IntoResponse, Response};
 use axum::Json;
 use chrono::Utc;
 use k8s_openapi::api::apps::v1::Deployment as K8sDeployment;
 use k8s_openapi::api::core::v1::Secret;
 use serde::{Deserialize, Serialize};
+use subtle::ConstantTimeEq;
 use tracing::{debug, error, info, warn};
 
 use crate::db::models::{Deployment, DeploymentStatus, Project, TerminationReason};
@@ -99,12 +100,40 @@ const PRE_PUSHED_TIMEOUT_MINUTES: i64 = 10;
 /// Duration after which image pull secret is refreshed (6 hours)
 const SECRET_REFRESH_HOURS: i64 = 6;
 
+// ── Webhook authentication ─────────────────────────────────────────────
+
+#[derive(Debug, Deserialize)]
+pub struct WebhookQuery {
+    token: Option<String>,
+}
+
+fn validate_webhook_token(
+    state: &AppState,
+    provided: &Option<String>,
+) -> Result<(), (StatusCode, &'static str)> {
+    let Some(expected) = &state.metacontroller_webhook_token else {
+        return Ok(());
+    };
+    let Some(provided) = provided else {
+        return Err((StatusCode::FORBIDDEN, "Missing webhook token"));
+    };
+    if expected.as_bytes().ct_eq(provided.as_bytes()).into() {
+        Ok(())
+    } else {
+        Err((StatusCode::FORBIDDEN, "Invalid webhook token"))
+    }
+}
+
 // ── Sync webhook handler ───────────────────────────────────────────────
 
 pub async fn handle_sync(
     State(state): State<AppState>,
+    Query(query): Query<WebhookQuery>,
     Json(request): Json<SyncRequest>,
-) -> impl IntoResponse {
+) -> Response {
+    if let Err((status, msg)) = validate_webhook_token(&state, &query.token) {
+        return (status, msg).into_response();
+    }
     let project_name = match request
         .parent
         .get("metadata")
@@ -121,12 +150,13 @@ pub async fn handle_sync(
                     children: vec![],
                     resync_after_seconds: Some(300.0),
                 }),
-            );
+            )
+                .into_response();
         }
     };
 
     match process_sync(&state, &project_name, &request.children).await {
-        Ok(response) => (StatusCode::OK, Json(response)),
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(e) => {
             error!(project = %project_name, "Sync webhook error: {:?}", e);
             (
@@ -140,6 +170,7 @@ pub async fn handle_sync(
                     resync_after_seconds: Some(300.0),
                 }),
             )
+                .into_response()
         }
     }
 }
@@ -1167,8 +1198,13 @@ async fn load_env_vars(
 
 pub async fn handle_finalize(
     State(state): State<AppState>,
+    Query(query): Query<WebhookQuery>,
     Json(request): Json<FinalizeRequest>,
-) -> impl IntoResponse {
+) -> Response {
+    if let Err((status, msg)) = validate_webhook_token(&state, &query.token) {
+        return (status, msg).into_response();
+    }
+
     let project_name = match request
         .parent
         .get("metadata")
@@ -1185,12 +1221,13 @@ pub async fn handle_finalize(
                     children: vec![],
                     finalized: true,
                 }),
-            );
+            )
+                .into_response();
         }
     };
 
     match process_finalize(&state, &project_name).await {
-        Ok(response) => (StatusCode::OK, Json(response)),
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
         Err(e) => {
             error!(project = %project_name, "Finalize webhook error: {:?}", e);
             // On error, still finalize to avoid blocking deletion
@@ -1204,6 +1241,7 @@ pub async fn handle_finalize(
                     finalized: true,
                 }),
             )
+                .into_response()
         }
     }
 }
